@@ -190,9 +190,8 @@ func configureAgentFixtureFlowLifecycle(
 	case *PostgresStore:
 		source := semanticview.Wrap(bundle)
 		module := sqliteFlowActivationWorkflowModule{
-			source:  source,
-			guards:  runtimepipeline.NewContractGuardRegistry(source),
-			actions: runtimepipeline.NewContractActionRegistry(source),
+			source: source,
+			guards: runtimepipeline.NewContractGuardRegistry(source),
 		}
 		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 			ExecutionPosture:        executionposture.Live,

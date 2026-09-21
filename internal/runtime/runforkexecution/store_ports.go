@@ -87,7 +87,6 @@ type selectedContractExecutionPorts struct {
 	managedCapabilities     managedcapabilities.Persistence
 	budget                  runtimebudgetspend.Store
 	logs                    rootruntime.RuntimeLogPersistence
-	mailbox                 runtimepipeline.MailboxWriteMaterializationStore
 	decisionCards           decisioncard.Store
 	proposedEffects         decisioncard.ProposedEffectStore
 	humanTasks              decisioncard.HumanTaskStore
@@ -112,7 +111,6 @@ func NewSelectedContractExecutionOwner(
 	managedCapabilities managedcapabilities.Persistence,
 	budget runtimebudgetspend.Store,
 	logs rootruntime.RuntimeLogPersistence,
-	mailbox runtimepipeline.MailboxWriteMaterializationStore,
 	decisionCards decisioncard.Store,
 	proposedEffects decisioncard.ProposedEffectStore,
 	humanTasks decisioncard.HumanTaskStore,
@@ -141,7 +139,7 @@ func NewSelectedContractExecutionOwner(
 		{"effects", effects}, {"completion", completion},
 		{"completion heartbeat", completionHeartbeat}, {"live sessions", liveSessions},
 		{"managed capabilities", managedCapabilities}, {"budget", budget}, {"runtime logs", logs},
-		{"mailbox materialization", mailbox}, {"decision cards", decisionCards}, {"proposed effects", proposedEffects},
+		{"decision cards", decisionCards}, {"proposed effects", proposedEffects},
 		{"human tasks", humanTasks}, {"decision-card draft expiry", decisionCardDraftExpiry}, {"human-task expiry", humanTaskExpiry},
 	}
 	for _, role := range required {
@@ -158,7 +156,7 @@ func NewSelectedContractExecutionOwner(
 		events: events, busDurable: busDurable, pipelineObligations: pipelineObligations,
 		manager: manager, managerRoles: managerRoles, effects: effects, completion: completion,
 		completionHeartbeat: completionHeartbeat, liveSessions: liveSessions, managedCapabilities: managedCapabilities,
-		budget: budget, logs: logs, mailbox: mailbox, decisionCards: decisionCards,
+		budget: budget, logs: logs, decisionCards: decisionCards,
 		proposedEffects: proposedEffects, humanTasks: humanTasks,
 		decisionCardDraftExpiry: decisionCardDraftExpiry, humanTaskExpiry: humanTaskExpiry,
 	}}, nil

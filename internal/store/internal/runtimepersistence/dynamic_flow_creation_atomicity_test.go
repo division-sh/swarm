@@ -68,9 +68,8 @@ type dynamicFlowCreationWorkflowModule struct{ source semanticview.Source }
 
 func (m dynamicFlowCreationWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 
-func (dynamicFlowCreationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
-func (dynamicFlowCreationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
-func (dynamicFlowCreationWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
+func (dynamicFlowCreationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
+func (dynamicFlowCreationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend

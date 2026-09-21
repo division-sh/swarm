@@ -41,12 +41,6 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
-		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				t.Fatal("agent manager not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if manager == nil {
 				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager not initialized")
@@ -189,10 +183,10 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
 				Durable:        runtimebus.DurableDependencies{ActiveFlows: store},
-				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
-					t.Fatal("fail-closed route must not activate a template instance")
-					return nil
-				},
+				TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+					t.Fatal("fail-closed route must not plan a template instance")
+					return runtimepipeline.FlowInstanceActivationPlan{}, nil
+				}),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)

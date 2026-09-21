@@ -203,13 +203,28 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
 	var manager *runtimemanager.AgentManager
 	activationCalls := 0
 	var activationErr error
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager is required")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
+			activationCalls++
+			activationErr = manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+			return activationErr
+		}),
+		ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
@@ -219,14 +234,6 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
 		FlowRoutes:          bus,
-		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return errors.New("agent manager is required")
-			}
-			activationCalls++
-			activationErr = manager.ActivateFlowInstance(ctx, req)
-			return activationErr
-		},
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -257,9 +264,6 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
-	}
-	if activationCalls != 1 || activationErr != nil {
-		t.Fatalf("flow activation calls = %d, error = %v; want one successful activation", activationCalls, activationErr)
 	}
 	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
 	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
@@ -299,6 +303,10 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/component_scaffold.spawn_requested'
 	`, nil)
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
+	if activationCalls != 1 || activationErr != nil {
+		t.Fatalf("flow activation calls = %d, error = %v; want one successful activation", activationCalls, activationErr)
+	}
+
 }
 
 func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows(t *testing.T) {
@@ -312,21 +320,28 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	durable := externalRuntimeTestDurableDependencies(pg)
 	durable.FlowRoutes = proofStore
 	durable.FlowRouteSets = proofStore
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source, Durable: durable})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
 	var manager *runtimemanager.AgentManager
-	module := newRuntimeTestWorkflowModule(t, source)
-	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
-		Module:    module,
-		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager is required")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
 			if manager == nil {
 				return errors.New("agent manager is required")
 			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
+		ContractBundle: source, Durable: durable})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
@@ -345,6 +360,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		LifecycleStore:     storetest.AgentLifecycleFixture(t, pg),
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
+	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 	bus.SetInterceptors(pc)
 
@@ -408,12 +424,18 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
-		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager is required")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
 			if manager == nil {
 				return errors.New("agent manager is required")
 			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -483,7 +505,21 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
+	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager is required")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
+
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -495,17 +531,10 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	var manager *runtimemanager.AgentManager
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
-		Module:    module,
-		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return errors.New("agent manager is required")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
@@ -606,7 +635,21 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
+	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager is required")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
+
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -618,17 +661,10 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	var manager *runtimemanager.AgentManager
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
-		Module:    module,
-		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return errors.New("agent manager is required")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
@@ -712,7 +748,6 @@ type runtimeTestWorkflowModule struct {
 	source       semanticview.Source
 	workflowNode []runtimepipeline.WorkflowNode
 	guards       runtimepipeline.GuardRegistry
-	actions      runtimepipeline.ActionRegistry
 }
 
 func newRuntimeTestWorkflowModule(t *testing.T, source semanticview.Source) runtimepipeline.WorkflowModule {
@@ -732,7 +767,6 @@ func newRuntimeTestWorkflowModule(t *testing.T, source semanticview.Source) runt
 		source:       source,
 		workflowNode: nodes,
 		guards:       runtimepipeline.NewContractGuardRegistry(source),
-		actions:      runtimepipeline.NewContractActionRegistry(source),
 	}
 }
 
@@ -744,10 +778,6 @@ func (m *runtimeTestWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNo
 func (m *runtimeTestWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guards
 }
-func (m *runtimeTestWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actions
-}
-
 func loadRuntimeTempBundle(t *testing.T, files map[string]string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
@@ -820,33 +850,55 @@ opco.ceo_ready:
 
 func templateInstanceEmpireStyleFixtureFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": "name: test\n",
+		"schema.yaml": `name: test
+pins:
+  outputs:
+    events: [opco.spinup_created]
+connect:
+  - event: opco.spinup_created
+    from: .
+    to: operating
+`,
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
+  instance_id: string
+  product_id: string
+opco.spinup_created:
   instance_id: string
   product_id: string
 `,
 		"nodes.yaml": `portfolio-node:
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
+  produces: [opco.spinup_created]
   event_handlers:
     opco.spinup_requested:
-      action: create_flow_instance
-      template: operating
-      instance_id_from: payload.instance_id
-      config_from:
-        product_id: payload.product_id
+      emit:
+        event: opco.spinup_created
+        fields:
+          instance_id: payload.instance_id
+          product_id: payload.product_id
 `,
 		"operating/schema.yaml": `name: operating
 mode: template
 instance: instance_id
+instance_variables:
+  variables:
+    product_id: string
+pins:
+  inputs:
+    events:
+      - event: opco.spinup_created
+        resolution: {mode: create}
+        initialize:
+          product_id: payload.product_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   product_id: string
 component_scaffold.spawn_requested:
@@ -869,33 +921,55 @@ component_scaffold.spawn_requested:
 
 func templateInstanceActivationConfigSubscriberFixtureFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": "name: test\n",
+		"schema.yaml": `name: test
+pins:
+  outputs:
+    events: [opco.spinup_created]
+connect:
+  - event: opco.spinup_created
+    from: .
+    to: operating
+`,
 		"events.yaml": `opco.spinup_requested:
   entity_id: string?
+  instance_id: string
+  product_id: string
+opco.spinup_created:
   instance_id: string
   product_id: string
 `,
 		"nodes.yaml": `portfolio-node:
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
+  produces: [opco.spinup_created]
   event_handlers:
     opco.spinup_requested:
-      action: create_flow_instance
-      template: operating
-      instance_id_from: payload.instance_id
-      config_from:
-        product_id: payload.product_id
+      emit:
+        event: opco.spinup_created
+        fields:
+          instance_id: payload.instance_id
+          product_id: payload.product_id
 `,
 		"operating/schema.yaml": `name: operating
 mode: template
 instance: instance_id
+instance_variables:
+  variables:
+    product_id: string
+pins:
+  inputs:
+    events:
+      - event: opco.spinup_created
+        resolution: {mode: create}
+        initialize:
+          product_id: payload.product_id
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string?
   template_id: string?

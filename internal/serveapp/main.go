@@ -550,11 +550,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
 	}
-	if runtimepipeline.SourceUsesArtifactRepoCommit(loaded.source) {
-		if _, err := runtimepipeline.EnsureArtifactRepoRootWritable(""); err != nil {
-			return serveRuntimeBundleContext{}, fmt.Errorf("artifact repo root startup validation failed: %w", err)
-		}
-	}
 	runtimeDeps := req.Stores.runtimeDeps()
 	runtimeDeps.Config = req.Config
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)

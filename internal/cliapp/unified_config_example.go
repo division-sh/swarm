@@ -97,7 +97,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		dynamic("channels.bindings.hitl.pack", "provider.telegram.hitl_channel", "Channel pack selected for the HITL outbound binding.", unifiedConfigExampleTierElevated),
 		dynamic("channels.bindings.hitl.destination", `"-1001234567890"`, "Deployment-owned opaque destination for the HITL outbound binding.", unifiedConfigExampleTierElevated),
 		e("paths.swarm_dir", ".swarm", "Swarm state directory.", unifiedConfigExampleTierElevated),
-		e("paths.artifact_root", ".swarm/artifacts", "Runtime artifact root.", unifiedConfigExampleTierElevated),
 		e("paths.monitor_dir", ".swarm/monitor", "Runtime monitor artifact directory.", unifiedConfigExampleTierElevated),
 
 		e("database.password_secret_key", "postgres_password", "Database password key in the Swarm secrets store.", unifiedConfigExampleTierSecretReference),

@@ -48,9 +48,6 @@ func validateHandlerActivitySurface(source semanticview.Source, node runtimeiden
 		if len(handler.Rules) > 0 {
 			errs = append(errs, fmt.Errorf("%s activity: handler-level activity is only allowed on handlers without rules; move activity ownership to the selected rule", context))
 		}
-		if strings.TrimSpace(handler.Action.ID) != "" {
-			errs = append(errs, fmt.Errorf("%s activity: activity and action are mutually exclusive", context))
-		}
 		if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
 			errs = append(errs, fmt.Errorf("%s activity: activity and authored emit/on_success emit are mutually exclusive in Stage 1; use generated activity result events", context))
 		}
@@ -70,9 +67,6 @@ func validateHandlerActivitySurface(source semanticview.Source, node runtimeiden
 			}
 			if rule.Activity.Empty() {
 				continue
-			}
-			if strings.TrimSpace(rule.Action.ID) != "" {
-				errs = append(errs, fmt.Errorf("%s activity: activity and action are mutually exclusive", ruleContext))
 			}
 			if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
 				errs = append(errs, fmt.Errorf("%s activity: activity and authored emit/fan_out emit are mutually exclusive in Stage 1; use generated activity result events", ruleContext))

@@ -47,7 +47,7 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 	owner, err := NewSelectedContractExecutionOwner(
 		runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, roles,
-		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 	)
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
@@ -83,7 +83,7 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 	owner, err := NewSelectedContractExecutionOwner(
 		runtimepipeline.NewWorkflowPersistence(selected), selected, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, roles,
-		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 	)
 	if err != nil {
 		t.Fatal(err)

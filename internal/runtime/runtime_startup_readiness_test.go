@@ -72,10 +72,6 @@ func (startupReadinessWorkflowModule) GuardRegistry() runtimepipeline.GuardRegis
 	return nil
 }
 
-func (startupReadinessWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return nil
-}
-
 func newStartupReadinessTestRuntime(t testing.TB, nodes ...runtimepipeline.BackgroundNode) *Runtime {
 	t.Helper()
 	fact := testSourceArtifactFact(t, runtimeTestBundleHash)

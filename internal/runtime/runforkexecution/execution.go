@@ -263,10 +263,9 @@ func newSelectedContractPipeline(
 	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
-	instanceActivator runtimepipeline.FlowInstanceActivator,
 	instanceDeactivationPreparer runtimepipeline.FlowInstanceDeactivationPreparer,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceActivator, instanceDeactivationPreparer))
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceDeactivationPreparer))
 }
 
 func selectedContractPipelineCoordinatorOptions(
@@ -274,7 +273,6 @@ func selectedContractPipelineCoordinatorOptions(
 	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
-	instanceActivator runtimepipeline.FlowInstanceActivator,
 	instanceDeactivationPreparer runtimepipeline.FlowInstanceDeactivationPreparer,
 ) runtimepipeline.PipelineCoordinatorOptions {
 	var scenarioProfiles runtimepipeline.ScenarioExecutionProfileReader
@@ -291,9 +289,7 @@ func selectedContractPipelineCoordinatorOptions(
 		DeliveryStore:                ports.busDurable.DeliveryLifecycle,
 		DeadLetters:                  ports.busDurable.TargetFailureRecorder,
 		PipelineObligations:          ports.pipelineObligations,
-		InstanceActivator:            instanceActivator,
 		InstanceDeactivationPreparer: instanceDeactivationPreparer,
-		MailboxMaterializer:          ports.mailbox,
 		DecisionCards:                ports.decisionCards,
 		ProposedEffects:              ports.proposedEffects,
 		HumanTasks:                   ports.humanTasks,

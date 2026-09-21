@@ -62,12 +62,6 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 			}
 			return []runtimebus.EventInterceptor{pc}
 		},
-		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return errors.New("agent manager not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if manager == nil {
 				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("agent manager not initialized")
@@ -86,14 +80,8 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
-		Module:    module,
-		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return errors.New("agent manager not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              module,
 		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),

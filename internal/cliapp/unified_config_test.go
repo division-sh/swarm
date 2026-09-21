@@ -233,6 +233,7 @@ func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
 		body string
 		want string
 	}{
+		{name: "retired artifact root", body: "paths:\n  artifact_root: /tmp/artifacts\n", want: "unknown config key \"paths.artifact_root\""},
 		{name: "old flat", body: "api_server: http://127.0.0.1:8081\n", want: "old flat config key \"api_server\""},
 		{name: "split unsupported", body: "runtime:\n  max_concurrent_agents: 4\n", want: "recognized but not yet supported"},
 		{name: "claude cli retries split unsupported", body: "llm:\n  claude_cli:\n    retries: 2\n", want: "llm.claude_cli.retries"},

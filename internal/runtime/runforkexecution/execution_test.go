@@ -1045,7 +1045,6 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 		},
 		SelectedContractAgentRuntimeOptions{},
 		nil,
-		nil,
 	)
 	if opts.MockConnectorResponses != plan {
 		t.Fatal("selected-contract pipeline did not retain exact mock connector response owner")
@@ -1106,12 +1105,18 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		InterceptorProvider: func() []bus.EventInterceptor {
 			return nil
 		},
-		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, errors.New("source lifecycle manager is not initialized")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
 			if manager == nil {
 				return errors.New("source lifecycle manager is not initialized")
 			}
-			return manager.ActivateFlowInstance(ctx, req)
-		}, ReceiverExecution: eventreceiver.NormalExecution(),
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1122,8 +1127,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	}
 	workflowOwner := selectedContractTestWorkflowModule{
 		source: loaded.Source, nodes: nodes,
-		guards:  runtimepipeline.NewContractGuardRegistry(loaded.Source),
-		actions: runtimepipeline.NewContractActionRegistry(loaded.Source),
+		guards: runtimepipeline.NewContractGuardRegistry(loaded.Source),
 	}
 	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(sourceBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  workflowOwner,
@@ -1212,10 +1216,9 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 }
 
 type selectedContractTestWorkflowModule struct {
-	source  semanticview.Source
-	nodes   []runtimepipeline.WorkflowNode
-	guards  runtimepipeline.GuardRegistry
-	actions runtimepipeline.ActionRegistry
+	source semanticview.Source
+	nodes  []runtimepipeline.WorkflowNode
+	guards runtimepipeline.GuardRegistry
 }
 
 func (m selectedContractTestWorkflowModule) SemanticSource() semanticview.Source {
@@ -1228,10 +1231,6 @@ func (m selectedContractTestWorkflowModule) WorkflowNodes() []runtimepipeline.Wo
 
 func (m selectedContractTestWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guards
-}
-
-func (m selectedContractTestWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actions
 }
 
 func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity(t *testing.T) {

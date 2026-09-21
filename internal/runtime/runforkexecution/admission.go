@@ -71,10 +71,9 @@ func loadOriginalLoopCarriage(ctx context.Context, loader SelectedContractSource
 }
 
 type selectedContractWorkflowModule struct {
-	source         semanticview.Source
-	nodes          []runtimepipeline.WorkflowNode
-	guardRegistry  runtimepipeline.GuardRegistry
-	actionRegistry runtimepipeline.ActionRegistry
+	source        semanticview.Source
+	nodes         []runtimepipeline.WorkflowNode
+	guardRegistry runtimepipeline.GuardRegistry
 }
 
 func (m selectedContractWorkflowModule) SemanticSource() semanticview.Source {
@@ -87,10 +86,6 @@ func (m selectedContractWorkflowModule) WorkflowNodes() []runtimepipeline.Workfl
 
 func (m selectedContractWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guardRegistry
-}
-
-func (m selectedContractWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actionRegistry
 }
 
 type SourceArtifactSelectedContractSourceStore interface {
@@ -200,10 +195,9 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 		RuntimeProjection:       runtimeProjection,
 		Cleanup:                 runtimeProjection.Release,
 		Module: selectedContractWorkflowModule{
-			source:         source,
-			nodes:          nodes,
-			guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
-			actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+			source:        source,
+			nodes:         nodes,
+			guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 		},
 	}, nil
 }

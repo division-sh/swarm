@@ -26,28 +26,27 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, sourceArtifactFact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadAdmitter runtimebus.PayloadAdmitter, templateInstanceActivator runtimepipeline.FlowInstanceActivator, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, sourceArtifactFact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadAdmitter runtimebus.PayloadAdmitter, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
 	}
 	opts := runtimebus.EventBusOptions{
-		ExecutionPosture:          posture,
-		Logger:                    hook,
-		InterceptorProvider:       interceptorProvider,
-		ContractBundle:            source,
-		TemplateInstanceActivator: templateInstanceActivator,
-		TemplateInstancePlanner:   templateInstancePlanner,
-		FlowActivationFinalizer:   flowActivationFinalizer,
-		PayloadAdmitter:           payloadAdmitter,
-		SourceArtifactFact:        sourceArtifactFact,
-		RuntimeInstanceID:         strings.TrimSpace(runtimeInstanceID),
-		WorkOwner:                 workOwner,
-		ReceiverExecution:         eventreceiver.NormalExecution(),
-		TestLifecycleProbe:        testLifecycleProbe,
-		ProviderOutputVerifier:    providerOutputVerifier,
-		PipelineObligations:       pipelineObligations,
-		Durable:                   durable,
+		ExecutionPosture:        posture,
+		Logger:                  hook,
+		InterceptorProvider:     interceptorProvider,
+		ContractBundle:          source,
+		TemplateInstancePlanner: templateInstancePlanner,
+		FlowActivationFinalizer: flowActivationFinalizer,
+		PayloadAdmitter:         payloadAdmitter,
+		SourceArtifactFact:      sourceArtifactFact,
+		RuntimeInstanceID:       strings.TrimSpace(runtimeInstanceID),
+		WorkOwner:               workOwner,
+		ReceiverExecution:       eventreceiver.NormalExecution(),
+		TestLifecycleProbe:      testLifecycleProbe,
+		ProviderOutputVerifier:  providerOutputVerifier,
+		PipelineObligations:     pipelineObligations,
+		Durable:                 durable,
 	}
 	if pipelineObligations == nil {
 		return runtimebus.NewEphemeralEventBusWithOptions(store, opts)
