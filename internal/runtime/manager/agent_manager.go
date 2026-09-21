@@ -632,6 +632,9 @@ func (am *AgentManager) validateNativeToolAdmission(ctx context.Context, cfg mod
 }
 
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
+	if err := cfg.ValidateReceiverConfig(); err != nil {
+		return nil, err
+	}
 	if err := models.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
 		return nil, err
 	}

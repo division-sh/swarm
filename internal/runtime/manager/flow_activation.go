@@ -1274,9 +1274,6 @@ func buildFlowAgentBlueprint(
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, err
 	}
-	if err := models.ValidateNoAuthoredSystemPrompt(rawConfig); err != nil {
-		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s config: %w", key, err)
-	}
 	prompt, err := assembleResolvedAgentPrompt(source, templateID, entry)
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s intent: %w", key, err)
@@ -1315,7 +1312,8 @@ func buildFlowAgentBlueprint(
 		FlowPath:        strings.Trim(flowPath, "/"),
 		EntityID:        entityID,
 		ParentAgent:     strings.TrimSpace(entry.ManagerFallback),
-		Config:          rawConfig,
+		Config:          json.RawMessage(`{}`),
+		ReceiverConfig:  rawConfig,
 	}
 	cfg.NormalizeRuntimeDescriptor()
 	if _, err := admitAgentConfigSubscriptions(source, &cfg, localEvents); err != nil {
