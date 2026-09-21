@@ -3,11 +3,52 @@ package contracts
 import (
 	"math"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestReceiverVariableProjectionPreservesPresenceAndRefinements(t *testing.T) {
+	for _, raw := range []string{"integer", "{type: json, default: null}", "text?", "{type: text, pattern: '^ok', length: {min: 2}}", "{type: integer, range: {max: 4}, default: 3}", "{type: integer, equal_to: sibling}"} {
+		var before, after FlowVariable
+		if err := yaml.Unmarshal([]byte(raw), &before); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := yaml.Marshal(before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(encoded, &after); err != nil {
+			t.Fatalf("%s: %v", encoded, err)
+		}
+		if !reflect.DeepEqual(before, after) {
+			t.Fatalf("%s changed: %#v => %#v", raw, before, after)
+		}
+	}
+}
+
+func TestReceiverConfigurationConsumesSharedSiblingRefinements(t *testing.T) {
+	var variables FlowInstanceVariables
+	if err := yaml.Unmarshal([]byte("variables:\n  left: integer\n  right: {type: integer, equal_to: left}\n"), &variables); err != nil {
+		t.Fatal(err)
+	}
+	config, err := CompileReceiverConfiguration(variables, TypeCatalogDocument{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Admit(map[string]any{"left": 3, "right": 3}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Admit(map[string]any{"left": 3, "right": 4}); err == nil {
+		t.Fatal("sibling refinement bypassed")
+	}
+	variables.Variables["right"] = FlowVariable{Type: "integer", Refinements: SchemaRefinements{EqualTo: "missing"}}
+	if _, err := CompileReceiverConfiguration(variables, TypeCatalogDocument{}); err == nil {
+		t.Fatal("undeclared equal_to accepted")
+	}
+}
 
 func TestReceiverVariableTypeAndDefaultAdmission(t *testing.T) {
 	for _, tc := range []struct {
@@ -41,6 +82,29 @@ func TestReceiverVariableTypeAndDefaultAdmission(t *testing.T) {
 	}
 	if absent.HasDefault || !null.HasDefault {
 		t.Fatal("lost default presence")
+	}
+}
+
+func TestReceiverConfigurationValidatesTypedMapKeys(t *testing.T) {
+	catalog := TypeCatalogDocument{Enums: map[string]EnumTypeDecl{"Region": {Values: []string{"east", "west"}, Default: "east"}}}
+	for _, tc := range []struct {
+		typeRef, valid, invalid string
+	}{
+		{"map[Region]integer", "east", "north"},
+		{"map[uuid]integer", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "not-a-uuid"},
+	} {
+		t.Run(tc.typeRef, func(t *testing.T) {
+			config, err := CompileReceiverConfiguration(FlowInstanceVariables{Variables: map[string]FlowVariable{"values": {Type: tc.typeRef}}}, catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := config.Admit(map[string]any{"values": map[string]any{tc.valid: 7}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := config.Admit(map[string]any{"values": map[string]any{tc.invalid: 7}}); err == nil {
+				t.Fatal("invalid map key accepted")
+			}
+		})
 	}
 }
 

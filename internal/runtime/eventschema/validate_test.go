@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+func TestCanonicalMapKeySchemaPreservesAcceptance(t *testing.T) {
+	schema := map[string]any{
+		"type":                 "object",
+		"propertyNames":        map[string]any{"type": "string", "enum": []string{"east", "west"}},
+		"additionalProperties": map[string]any{"type": "integer"},
+	}
+	for _, projected := range []map[string]any{schema, CanonicalAcceptanceSchema(schema)} {
+		if err := ValidateValueAgainstSchema(projected, map[string]any{"east": int64(7)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := ValidateValueAgainstSchema(projected, map[string]any{"north": int64(7)}); err == nil {
+			t.Fatal("key restriction erased")
+		}
+		if err := ValidateValueAgainstSchema(projected, map[string]any{"east": "7"}); err == nil {
+			t.Fatal("value restriction erased")
+		}
+	}
+}
+
 func TestNormalizeOptionalFieldNullsRecursivelyLowersOnlyOptionalObjectFields(t *testing.T) {
 	schema := map[string]any{
 		"type": "object", "required": []any{"record", "items", "empty_text", "empty_list", "empty_object"},

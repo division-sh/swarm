@@ -249,6 +249,9 @@ func CanonicalAcceptanceSchema(schema map[string]any) map[string]any {
 	if items, ok := schema["items"].(map[string]any); ok {
 		out["items"] = CanonicalAcceptanceSchema(items)
 	}
+	if names, ok := schema["propertyNames"].(map[string]any); ok {
+		out["propertyNames"] = CanonicalAcceptanceSchema(names)
+	}
 	_, hasAdditionalProperties := schema["additionalProperties"]
 	if strings.TrimSpace(asString(schema["type"])) == "object" || len(properties) > 0 || len(required) > 0 || hasAdditionalProperties {
 		switch additional := schema["additionalProperties"].(type) {
@@ -319,7 +322,13 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 	}
 	props := schemaProperties(schema["properties"])
 	allowAdditional, additionalSchema := schemaAdditionalProperties(schema["additionalProperties"])
+	keySchema, _ := schema["propertyNames"].(map[string]any)
 	for _, k := range sortedMapKeys(payload) {
+		if keySchema != nil {
+			if err := validateValue(path+"[key="+k+"]", keySchema, k); err != nil {
+				return err
+			}
+		}
 		v := payload[k]
 		propSchema, known := props[k]
 		if !known {

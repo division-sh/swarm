@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -25,10 +26,57 @@ type receiverVariable struct {
 // path. Its schema and defaults cannot be mutated by callers.
 type ReceiverConfiguration struct{ variables []receiverVariable }
 
+// MarshalYAML preserves authored presence when source projections are rendered.
+func (v FlowVariable) MarshalYAML() (any, error) {
+	typeRef := v.Type
+	if v.IsOptional {
+		typeRef += "?"
+	}
+	out := map[string]any{"type": typeRef}
+	if v.HasDefault {
+		out["default"] = v.Default
+	}
+	if v.Description != "" {
+		out["description"] = v.Description
+	}
+	if v.Refinements.Pattern != "" {
+		out["pattern"] = v.Refinements.Pattern
+	}
+	if v.Refinements.EqualTo != "" {
+		out["equal_to"] = v.Refinements.EqualTo
+	}
+	if !v.Refinements.Length.Empty() {
+		bounds := map[string]any{}
+		if v.Refinements.Length.Min != nil {
+			bounds["min"] = *v.Refinements.Length.Min
+		}
+		if v.Refinements.Length.Max != nil {
+			bounds["max"] = *v.Refinements.Length.Max
+		}
+		out["length"] = bounds
+	}
+	if !v.Refinements.Range.Empty() {
+		bounds := map[string]any{}
+		if v.Refinements.Range.Min != nil {
+			bounds["min"] = *v.Refinements.Range.Min
+		}
+		if v.Refinements.Range.Max != nil {
+			bounds["max"] = *v.Refinements.Range.Max
+		}
+		out["range"] = bounds
+	}
+	return out, nil
+}
+
 func CompileReceiverConfiguration(declaration FlowInstanceVariables, catalog TypeCatalogDocument) (ReceiverConfiguration, error) {
 	names := make([]string, 0, len(declaration.Variables))
-	for name := range declaration.Variables {
+	refinements := make(map[string]schemaRefinementField, len(declaration.Variables))
+	for name, variable := range declaration.Variables {
 		names = append(names, name)
+		refinements[name] = schemaRefinementField{Name: name, TypeRef: variable.Type, Refinements: variable.Refinements}
+	}
+	if err := errors.Join(validateSchemaRefinementFields("receiver variables", catalog, refinements)...); err != nil {
+		return ReceiverConfiguration{}, err
 	}
 	sort.Strings(names)
 	out := ReceiverConfiguration{}
@@ -102,6 +150,13 @@ func (c ReceiverConfiguration) Admit(supplied map[string]any) (map[string]any, e
 			return nil, fmt.Errorf("receiver variable %s: %w", field.name, err)
 		}
 		out[field.name] = admitted
+	}
+	properties := make(map[string]any, len(c.variables))
+	for _, field := range c.variables {
+		properties[field.name] = field.schema
+	}
+	if err := eventschema.ValidateValueAgainstSchema(map[string]any{"type": "object", "properties": properties, "additionalProperties": false}, out); err != nil {
+		return nil, fmt.Errorf("receiver configuration: %w", err)
 	}
 	return out, nil
 }
