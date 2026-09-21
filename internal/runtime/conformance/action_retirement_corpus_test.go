@@ -49,6 +49,16 @@ type actionRetirementCorpusFile struct {
 }
 
 func TestActionRetirementCorpusLedgerIsComplete(t *testing.T) {
+	t.Run("unresolved_disposition_rejection", func(t *testing.T) {
+		for _, disposition := range []string{"", " ", "pending_owner_assertion_review", "migrated_receipt_pending", "PENDING"} {
+			if actionRetirementDispositionResolved(disposition) {
+				t.Fatalf("unresolved disposition accepted: %q", disposition)
+			}
+		}
+		if !actionRetirementDispositionResolved("Removed action adapter; surviving guard assertions retained. Execution receipts are separate.") {
+			t.Fatal("source disposition incorrectly requires an execution receipt")
+		}
+	})
 	root := conformanceRepoRoot(t)
 	if os.Getenv("SWARM_GENERATE_ACTION_RETIREMENT_LEDGER") == "1" {
 		generateActionRetirementCorpusLedger(t, root)
@@ -66,7 +76,7 @@ func TestActionRetirementCorpusLedgerIsComplete(t *testing.T) {
 	}
 	classified := map[string]bool{}
 	for _, row := range ledger.HistoricalFiles {
-		if row.Path == "" || classified[row.Path] || len(row.SHA256) != 64 || len(row.Markers) == 0 || row.Disposition == "" || len(row.Proofs) == 0 {
+		if row.Path == "" || classified[row.Path] || len(row.SHA256) != 64 || len(row.Markers) == 0 || !actionRetirementDispositionResolved(row.Disposition) || len(row.Proofs) == 0 {
 			t.Fatalf("incomplete/duplicate historical row: %#v", row)
 		}
 		if _, err := hex.DecodeString(row.SHA256); err != nil {
@@ -75,7 +85,7 @@ func TestActionRetirementCorpusLedgerIsComplete(t *testing.T) {
 		classified[row.Path] = true
 	}
 	for path, disposition := range ledger.NewReferenceFiles {
-		if classified[path] || disposition == "" {
+		if classified[path] || !actionRetirementDispositionResolved(disposition) {
 			t.Fatalf("duplicate or unclassified current reference %s", path)
 		}
 		classified[path] = true
@@ -92,6 +102,10 @@ func TestActionRetirementCorpusLedgerIsComplete(t *testing.T) {
 		}
 	}
 	t.Logf("historical files=%d; current lexical reference files=%d; current-only files=%d; completeness is NOT migration/qualification", len(ledger.HistoricalFiles), len(current), len(ledger.NewReferenceFiles))
+}
+
+func actionRetirementDispositionResolved(disposition string) bool {
+	return strings.TrimSpace(disposition) != "" && !strings.Contains(strings.ToLower(disposition), "pending")
 }
 
 func TestActionRetirementCorpusHasNoLiveAuthoredActions(t *testing.T) {
@@ -373,7 +387,8 @@ func requireRetiredActionHistoricalFixture(t *testing.T, root string) {
 }
 
 // Generation reads the pinned pre-retirement tree, never the new head as the
-// denominator. Default pending dispositions are intentional, not pass claims.
+// denominator. Generated pending dispositions require manual source review and
+// cannot pass the checked ledger guard; they are never execution claims.
 func generateActionRetirementCorpusLedger(t *testing.T, root string) {
 	t.Helper()
 	// Rebuilding the historical denominator must not erase reviewed dispositions.

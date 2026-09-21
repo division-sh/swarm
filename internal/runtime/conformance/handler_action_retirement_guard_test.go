@@ -244,6 +244,7 @@ func TestCanonicalFormsRegistryPinsHandlerActionRetirement(t *testing.T) {
 	var record struct {
 		Retirement struct {
 			Issue     int      `yaml:"issue"`
+			Status    string   `yaml:"status"`
 			Ruling    string   `yaml:"ruling"`
 			Rows      []string `yaml:"rows"`
 			Fields    []string `yaml:"retired_fields"`
@@ -255,7 +256,7 @@ func TestCanonicalFormsRegistryPinsHandlerActionRetirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := record.Retirement
-	if r.Issue != 2307 || r.Ruling != "5754202888" || !reflect.DeepEqual(r.Fields, []string{"action", "evidence_target", "template", "instance_id_from", "config_from"}) || !reflect.DeepEqual(r.Decoders, []string{"ActionSpec", "MailboxWriteSpec", "ArtifactRepoSpec", "ArtifactRepoFileSpec", "ArtifactRepoSchemaSpec", "ArtifactRepoOutputSpec", "ArtifactRepoLimitsSpec"}) {
+	if r.Issue != 2307 || r.Status != "grammar_retired_source_dispositions_reviewed" || r.Ruling != "5754202888" || !reflect.DeepEqual(r.Fields, []string{"action", "evidence_target", "template", "instance_id_from", "config_from"}) || !reflect.DeepEqual(r.Decoders, []string{"ActionSpec", "MailboxWriteSpec", "ArtifactRepoSpec", "ArtifactRepoFileSpec", "ArtifactRepoSchemaSpec", "ArtifactRepoOutputSpec", "ArtifactRepoLimitsSpec"}) {
 		t.Fatalf("action retirement registry drift: %#v", r)
 	}
 	if !reflect.DeepEqual(r.Rows, []string{"handler.container", "handler.rules_shape", "handler.emit_action_activity", "handler.expression", "handler.collection_compute", "handler.join", "handler.mailbox_artifact_repo"}) || !reflect.DeepEqual(r.Preserved, []string{"emit_template_specialization", "timer_action", "guard_failure_action", "activity_tool", "provider_event_template", "data_accumulation_source_event"}) {

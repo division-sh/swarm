@@ -1,7 +1,7 @@
 {
   "version": "handler-action-retirement/v1",
   "historical_base": "34c558b660bf8d7986209dd1dbfebd819da64f18",
-  "scope": "All checked .go/.yaml/.yml/.json/.md files containing the listed retired spellings or dedicated action symbols at the pinned baseline. Lexical historical/reference census, not executable-row counts or qualification. historical_functions preserve original assertion/source names; proofs are named proof obligations or owner-ledger references, NOT pass receipts. Pending rows remain pending.",
+  "scope": "All checked .go/.yaml/.yml/.json/.md files containing the listed retired spellings or dedicated action symbols at the pinned baseline. Source implementation dispositions distinguish removal, migration, preserved homonyms and explicitly identified stale test-only classification. historical_functions and historical_markers preserve original names, including removed tests. proofs identify current proof roots or separate owner obligations, NOT pass receipts or business equivalence. The final PR audit owns ephemeral execution receipts; this ledger does not certify whole-suite qualification.",
   "historical_files": [
     {
       "path": "README.md",
@@ -57,10 +57,10 @@
       "historical_functions": [
         "TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed authored mailbox materializer/idempotency test; shared SQLite store and event-read helpers remain for supported mailbox API consumers. No equivalent node action is claimed.",
       "proofs": [
-        "R37",
-        "TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite"
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores",
+        "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
       ]
     },
     {
@@ -72,9 +72,8 @@
       "historical_functions": [
         "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Unchanged supported proposed-effect HTTP decision/provider test; loadMailboxWritePersistedEvent is an event-read helper name, not an authored mailbox action producer.",
       "proofs": [
-        "R37",
         "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
       ]
     },
@@ -141,9 +140,9 @@
         "newRunCompletionSystemNodeModule",
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed ActionRegistry field, constructor and accessor from the test workflow module; existing system-node completion and supported-surface assertions remain.",
       "proofs": [
-        "R37"
+        "TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces"
       ]
     },
     {
@@ -192,9 +191,9 @@
         "NewSwarmWorkflowModuleForBundle",
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action registry construction and accessor; compiled source, workflow nodes and guard registry remain the CLI runtime module inputs.",
       "proofs": [
-        "R37"
+        "TestNoRetiredHandlerActionInterpreters"
       ]
     },
     {
@@ -208,9 +207,10 @@
         "configuredWorkspaceLifecycle",
         "configuredHostWorkspaceLifecycle"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Unchanged workspace lifecycle consumes Docker/host runtime configuration. ConfigFromRuntimeConfig is an unrelated deployment conversion name, not handler config_from.",
       "proofs": [
-        "R37"
+        "TestConfiguredWorkspaceLifecycleNeedsNoAmbientDataSource",
+        "TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker"
       ]
     },
     {
@@ -224,9 +224,10 @@
         "dockerWorkspaceConfigFromRuntimeConfig",
         "hostWorkspaceConfigFromRuntimeConfig"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Unchanged Docker/host configuration conversion; lexical ConfigFrom name is a deployment helper homonym, not receiver initialization or an action reader.",
       "proofs": [
-        "R37"
+        "TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker",
+        "TestConfiguredWorkspaceLifecycleForBackendRejectsHostVolumesFrom"
       ]
     },
     {
@@ -240,11 +241,10 @@
         "TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery",
         "TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Renamed to RuleResult callback delivery roots; fixture now emits ordinary rule results and retains durable/static callback scope, replay and delivery assertions. Does not prove Git commits or YAML validation.",
       "proofs": [
-        "R37",
-        "TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery",
-        "TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery"
+        "TestRuleResultEventsFlowThroughDurableCallbackDelivery",
+        "TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery"
       ]
     },
     {
@@ -260,12 +260,10 @@
       "historical_functions": [
         "TestArtifactWriterEvidenceCoversOnlySupportedActionSites"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Deleted action-only artifact output writer evidence test with the retired writer family; no replacement artifact capability or writer equivalence claimed.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34",
-        "TestArtifactWriterEvidenceCoversOnlySupportedActionSites"
+        "TestCanonicalFormsRegistryPinsHandlerActionRetirement",
+        "TestNoRetiredHandlerActionInterpreters"
       ]
     },
     {
@@ -295,11 +293,8 @@
       "historical_functions": [
         "TestEntityNestedPresenceAcrossBootConsumers"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed only mailbox/artifact action consumer cells; guard, rule, write, emit, filter and activity nested-presence safe/unsafe assertions remain.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34",
         "TestEntityNestedPresenceAcrossBootConsumers"
       ]
     },
@@ -366,34 +361,13 @@
         "TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult",
         "bootverifyTransitionRuntimeOwnershipBundle"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed action-only validation cases; retired keys now fail at strict decoder admission. Retained guard/handler validation, declarative timer producer and accumulation source mismatch diagnostics; renamed obsolete ConfigFrom teaching to the actual source-alignment condition.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34",
-        "TestRun_ReportsRecordEvidenceMissingEvidenceTarget",
-        "TestRun_ReportsRecordEvidenceMissingTargetNamesDeclaredFlowTargetsSorted",
-        "TestRun_ReportsRuleRecordEvidenceMissingTargetNamesDeclaredFlowTargets",
-        "TestRun_RecordEvidenceMissingTargetDoesNotLeakOtherFlowTargets",
-        "TestRun_ReportsMailboxWriteMissingMailboxSpec",
-        "TestRun_ReportsRuleMailboxWriteMissingMailboxSpec",
-        "TestRun_ReportsMailboxWriteMissingRequiredFields",
-        "TestRun_ReportsRuleMailboxWriteMissingRequiredFields",
-        "TestRun_ReportsHandlerLevelActionWithRules",
-        "TestRun_ReportsUnsupportedRuleActionContexts",
-        "TestRun_ReportsMailboxDeclarationOnNonMailboxAction",
-        "TestRun_ReportsArtifactRepoCommitMissingSpec",
-        "TestRun_ReportsArtifactRepoCommitInvalidShape",
-        "TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch",
-        "TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch",
-        "TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema",
-        "TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction",
-        "TestRun_MapsDataAccumulationSourceMismatchToNamedError",
-        "TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom",
-        "TestRun_ReportsCreateFlowInstanceMissingConfigFrom",
+        "TestLoadWorkflowContractBundleRejectsRetiredHandlerActions",
         "TestRun_MapsHandlerFieldComplianceToNamedError",
-        "TestArtifactRepoResultEventEntryDoesNotUseAnotherFlowDeclaration",
-        "TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult"
+        "TestRun_MapsDataAccumulationSourceMismatchToNamedError",
+        "TestRun_AllowsFanOutDerivedAccumulationSourceEvent",
+        "TestRun_AllowsTimerStartEventProducedByDeclarativeEmit"
       ]
     },
     {
@@ -407,11 +381,10 @@
       "historical_functions": [
         "wave1HandlerWriteTargets"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed artifact action output targets from writer coverage; supported data writes and declarative state writers remain.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestEntityNestedPresenceAcrossBootConsumers"
       ]
     },
     {
@@ -428,11 +401,10 @@
       "historical_functions": [
         "appendActionExecutableReaders"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed appendActionExecutableReaders and action reflection family; supported activity, guard, emit and state expression readers remain.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34"
+        "TestExecutableReaderCensusCoversEveryReaderFamily",
+        "TestExecutableReaderCensusExcludesUnevaluatedFields"
       ]
     },
     {
@@ -446,11 +418,8 @@
         "TestExecutableReaderCensusCoversEveryReaderFamily",
         "TestExecutableReaderCensusExcludesUnevaluatedFields"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed retired action reader expectations; exact surviving evaluated-reader census and unevaluated-field exclusions remain.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34",
         "TestExecutableReaderCensusCoversEveryReaderFamily",
         "TestExecutableReaderCensusExcludesUnevaluatedFields"
       ]
@@ -469,11 +438,10 @@
         "bootverifyHandlerActionMaterializesEntity",
         "bootverifyActionMaterializesEntity"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed action-based entity materialization inference; create_entity and other supported typed handler ownership remain.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestCompiledTransitionHandlerReferenceGuards"
       ]
     },
     {
@@ -521,11 +489,10 @@
         "validateArtifactRepoDisplaySlug",
         "validateArtifactRepoDeclaredPath"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed action ID, evidence/mailbox/Git shape and result validation implementations; strict handler key admission now refuses these surfaces before bootverify. Supported guard checks remain.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34"
+        "TestLoadWorkflowContractBundleRejectsRetiredHandlerActions",
+        "TestCompiledTransitionHandlerReferenceGuards"
       ]
     },
     {
@@ -556,11 +523,10 @@
         "validateLoopEmitCarriage",
         "loopHandlerActions"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed loop action enumeration and mailbox-action expression carriage; existing emit/loop carriage validation remains.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
       ]
     },
     {
@@ -573,13 +539,11 @@
         "TestCompiledTransitionHandlerReferenceGuards",
         "TestCompiledTransitionAllRuleContextActionReferences"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed action reference cells and all-action rule-context test; retained guard and transition reference assertions. Nested retired action refusal belongs to strict decoder matrices.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34",
         "TestCompiledTransitionHandlerReferenceGuards",
-        "TestCompiledTransitionAllRuleContextActionReferences"
+        "TestCompiledTransitionStrictCarrierReferences",
+        "TestRetiredHandlerActionOptionsRejected"
       ]
     },
     {
@@ -593,11 +557,10 @@
       "historical_functions": [
         "transitionReferences"
       ],
-      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "disposition": "Removed action ID reference resolution; guard, state and other transition reference checks remain.",
       "proofs": [
-        "R04",
-        "R31",
-        "R34"
+        "TestCompiledTransitionHandlerReferenceGuards",
+        "TestCompiledTransitionStrictCarrierReferences"
       ]
     },
     {
@@ -609,9 +572,11 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed nil ActionRegistry test adapter only; complete event snapshot and recovery/manager/continuation owner assertions remain.",
       "proofs": [
-        "R37"
+        "TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres",
+        "TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres",
+        "TestNormalDeliveryContinuationAcceptCommittedIsAtomicOnSQLiteAndPostgres"
       ]
     },
     {
@@ -626,9 +591,10 @@
         "newFixtureWorkflowModule",
         "mixedNodeRouteWorkflowModule"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed ActionRegistry fixture fields, construction and accessor; real nodes/guards and publication/terminal refusal assertions remain.",
       "proofs": [
-        "R37"
+        "TestCommittedPublishDispatchDropsTransactionConnectionCapability",
+        "TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres"
       ]
     },
     {
@@ -642,9 +608,9 @@
         "newFixtureWorkflowModule",
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed fixture module action registry constructor/carrier/accessor; catalog startup source, nodes and guards remain. Catalog execution is separately qualified.",
       "proofs": [
-        "R37"
+        "TestCatalogScenarioRunFixturesPrecedeRuntimeConstruction"
       ]
     },
     {
@@ -673,10 +639,10 @@
       "historical_functions": [
         "newFanInBarrierRuntime"
       ],
-      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "disposition": "Removed action registry and redundant imperative activator wiring; existing planner/finalizer and fan-in barrier/restart assertions remain.",
       "proofs": [
-        "R04",
-        "R38"
+        "TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends",
+        "TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends"
       ]
     },
     {
@@ -688,10 +654,10 @@
       "historical_functions": [
         "newNotifyAllChildrenRuntime"
       ],
-      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "disposition": "Removed action registry and imperative activation callbacks; existing prepared activation, committed finalization and full fanout/barrier workloads remain unchanged in scope.",
       "proofs": [
-        "R04",
-        "R38"
+        "TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends",
+        "TestIssue2394ReporterFiveHundredDelayedCommitsBothStores"
       ]
     },
     {
@@ -706,10 +672,10 @@
         "ActionRegistry",
         "loadConformanceWorkflowFixtureModule"
       ],
-      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "disposition": "Removed nil/action-bearing module adapter methods and fields; source/node/guard modules and persisted surface assertions remain.",
       "proofs": [
-        "R04",
-        "R38"
+        "TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader",
+        "TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader"
       ]
     },
     {
@@ -736,10 +702,9 @@
       "historical_functions": [
         "newDurableReplyHumanTaskRuntime"
       ],
-      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "disposition": "Removed action registry from durable reply human-task module; persisted reply context and concurrent-origin assertions remain.",
       "proofs": [
-        "R04",
-        "R38"
+        "TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPersistedContext"
       ]
     },
     {
@@ -1332,9 +1297,11 @@
         "buildFlowAgentBlueprint",
         "buildStaticFlowAgentBlueprint"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Replaced loose receiver variable/config inference with shared typed initial admission and committed validation before agent/auto-event consumers; exact config clone and preserving numeric-kind projection retain business values.",
       "proofs": [
-        "R37"
+        "TestActivateFlowInstanceAdmitsReceiverConfigBeforeAllConsumers",
+        "TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults",
+        "TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation"
       ]
     },
     {
@@ -1346,9 +1313,10 @@
       "historical_functions": [
         "nativeToolConfigFromMap"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Unchanged nativeToolConfigFromMap helper converts native tool flags; lexical ConfigFrom is unrelated to handler config_from or receiver defaults.",
       "proofs": [
-        "R37"
+        "TestAgentManagerSpawnAgentConsumesNativeToolAdmissionValidator",
+        "TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator"
       ]
     },
     {
@@ -2249,9 +2217,10 @@
         "ActionRegistry",
         "LoadRunForkSelectedContractSourceForRequest"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed selected workflow action registry accessor and construction; admitted source, node and guard ownership remain.",
       "proofs": [
-        "R37"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity"
       ]
     },
     {
@@ -2263,9 +2232,9 @@
       "historical_functions": [
         "LoadRunForkSelectedContractSourceForRequest"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action registry from selected-contract fixture module; source admission and guard construction remain.",
       "proofs": [
-        "R37"
+        "TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity"
       ]
     },
     {
@@ -2279,9 +2248,11 @@
       "historical_functions": [
         "selectedContractHandlerCreatesDynamicFlow"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed dynamic-flow capability inference from authored handler actions; compiled input resolution remains the sole creation capability source.",
       "proofs": [
-        "R37"
+        "TestSelectedContractDeferredWorkAdmissionCapabilityMatrix",
+        "TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix",
+        "TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic"
       ]
     },
     {
@@ -2295,10 +2266,11 @@
         "TestSelectedContractHandlerDynamicFlowCreationCapabilityMatrix",
         "selectedDeferredWorkDynamicFlowActionTestSource"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed ActionSpec capability matrix/helper; real connected declarative creation fixture now exercises the same unavailable-owner refusal. Static guard requires planner/finalizer and forbids imperative activation calls.",
       "proofs": [
-        "R37",
-        "TestSelectedContractHandlerDynamicFlowCreationCapabilityMatrix"
+        "TestSelectedContractDeferredWorkAdmissionCapabilityMatrix",
+        "TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix",
+        "TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic"
       ]
     },
     {
@@ -2312,10 +2284,10 @@
         "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action module/port wiring; synthetic-carry refusal now uses prepared activation and committed finalizer, retaining before-mutation refusal assertions.",
       "proofs": [
-        "R37",
-        "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation"
+        "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
+        "TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIdentity"
       ]
     },
     {
@@ -2327,9 +2299,10 @@
       "historical_functions": [
         "NewSelectedContractExecutionOwner"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed MailboxWriteMaterializationStore dependency and constructor validation; supported decision-card, human-task and proposed-effect ports remain.",
       "proofs": [
-        "R37"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation"
       ]
     },
     {
@@ -2342,9 +2315,10 @@
       "historical_functions": [
         "newRuntime"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed MailboxMaterializer dependency, artifact-root startup validation and action activator wiring; existing prepared activation/finalizer, supported HITL and normal pipeline ownership remain.",
       "proofs": [
-        "R37"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness"
       ]
     },
     {
@@ -2356,9 +2330,10 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed nil ActionRegistry adapter; startup readiness, blocked candidate and cancellation assertions remain.",
       "proofs": [
-        "R37"
+        "TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness",
+        "TestPreparedRuntimeStartupRejectsCancellationBeforeExecutionRelease"
       ]
     },
     {
@@ -2370,9 +2345,9 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed nil ActionRegistry adapter from semantic-only workflow helper; supported runtime consumers remain.",
       "proofs": [
-        "R37"
+        "TestRuntimeStartWaitsForSystemNodeSubscriptionReadiness"
       ]
     },
     {
@@ -2416,9 +2391,9 @@
         "ActionRegistry",
         "startSlackManagedConnectorBusAndCoordinator"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action registry fixture wiring; supported managed-credential activity-journal Slack test remains, not an authored action replacement.",
       "proofs": [
-        "R37"
+        "TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal"
       ]
     },
     {
@@ -2432,9 +2407,9 @@
         "ActionRegistry",
         "startTelegramConnectorSupportedSurfaceCoordinator"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action registry fixture wiring; supported inbound Telegram connector test remains. Added workflow-load failure diagnostics do not add an action owner.",
       "proofs": [
-        "R37"
+        "TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway"
       ]
     },
     {
@@ -2469,9 +2444,8 @@
       "historical_functions": [
         "TestGenericBundle_AgentLifecyclePatterns"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Unchanged generic agent lifecycle assertions; agentConfigFromEntry is a fixture conversion helper, not an authored handler config_from reader.",
       "proofs": [
-        "R37",
         "TestGenericBundle_AgentLifecyclePatterns"
       ]
     },
@@ -2484,9 +2458,9 @@
       "historical_functions": [
         "agentConfigFromEntry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Unchanged agentConfigFromEntry fixture mapping; no authored action interpretation or receiver default authority.",
       "proofs": [
-        "R37"
+        "TestGenericBundle_AgentLifecyclePatterns"
       ]
     },
     {
@@ -2498,14 +2472,10 @@
       "historical_functions": [
         "artifactActionResultDeliveryFixtureFiles"
       ],
-      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "disposition": "Historical callback fixture coordinates retained but Git/YAML validation and artifact fields removed. Two fixed business-document branches emit ordinary rule results; no artifact functionality equivalence claimed.",
       "proofs": [
-        "R34",
-        "R35",
-        "R37",
-        "TestServedCreationFixturesVerificationConsumersAgree",
-        "TestStateResultPublicationVerificationConsumersAgree",
-        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+        "TestRuleResultEventsFlowThroughDurableCallbackDelivery",
+        "TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery"
       ]
     },
     {
@@ -2517,10 +2487,11 @@
       "historical_functions": [
         "yamlNodeContainsAuthoredRoutingAt"
       ],
-      "disposition": "pending_Euler_fixture_migration_or_explicit_capability_retirement",
+      "disposition": "Unchanged closed-fixture detector recognizes historical create_flow_instance text as authored routing and rejects generic overlays; exact detector homonym allowance is not a live decoder or producer.",
       "proofs": [
+        "TestCanonicalRoutingOverlaysRejectRoutingAuthority",
         "TestActionRetirementCorpusHasNoLiveAuthoredActions",
-        "yamlNodeContainsAuthoredRoutingAt"
+        "TestNoRetiredHandlerActionInterpreters"
       ]
     },
     {
@@ -2568,14 +2539,9 @@
       "historical_functions": [
         "CopyLifecycleEmitterHandlerFamilies"
       ],
-      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "disposition": "Removed artifact committer node and its two result-event definitions; all other handler emitter families remain in exact lifecycle emitter census.",
       "proofs": [
-        "R34",
-        "R35",
-        "R37",
-        "TestServedCreationFixturesVerificationConsumersAgree",
-        "TestStateResultPublicationVerificationConsumersAgree",
-        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+        "TestCompiledLifecycleEmitterExistingFamilies"
       ]
     },
     {
@@ -2587,12 +2553,8 @@
       "historical_functions": [
         "CopyPublicationArtifact"
       ],
-      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "disposition": "Deleted Git-specific CopyPublicationArtifact fixture; supported state result publication is separately owned and is not proof of Git success/failure equivalence.",
       "proofs": [
-        "R34",
-        "R35",
-        "R37",
-        "TestServedCreationFixturesVerificationConsumersAgree",
         "TestStateResultPublicationVerificationConsumersAgree",
         "TestActionRetirementCorpusHasNoLiveAuthoredActions"
       ]
@@ -2608,14 +2570,11 @@
       "historical_functions": [
         "CopyTemplateInstanceEmpireOutbox"
       ],
-      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "disposition": "CopyTemplateInstanceEmpireOutbox now emits connected creation input, declares typed product_id and binds initialize on create; automatic event/config and outbox consumers remain.",
       "proofs": [
-        "R34",
-        "R35",
-        "R37",
         "TestServedCreationFixturesVerificationConsumersAgree",
-        "TestStateResultPublicationVerificationConsumersAgree",
-        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+        "TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect",
+        "TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect"
       ]
     },
     {
@@ -2627,14 +2586,11 @@
       "historical_functions": [
         "CopyLegacyStaticCreate"
       ],
-      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "disposition": "Removed mailbox action from CopyLegacyStaticCreate; retained create_entity, typed writes, gate, state, emit and timer fixture controls. No retained node mailbox effect claimed.",
       "proofs": [
-        "R34",
-        "R35",
-        "R37",
-        "TestServedCreationFixturesVerificationConsumersAgree",
-        "TestStateResultPublicationVerificationConsumersAgree",
-        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+        "TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations",
+        "TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler",
+        "TestCatalogRejectsStaticCreateEntityHandlerFixture"
       ]
     },
     {
@@ -2648,14 +2604,9 @@
       "historical_functions": [
         "addLegacyTemplateRoot"
       ],
-      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "disposition": "Legacy served creation fixtures now emit connected input and bind typed product_id through receiver initialize; instance_id remains identity and automatic creation consumers retain business config.",
       "proofs": [
-        "R34",
-        "R35",
-        "R37",
-        "TestServedCreationFixturesVerificationConsumersAgree",
-        "TestStateResultPublicationVerificationConsumersAgree",
-        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+        "TestServedCreationFixturesVerificationConsumersAgree"
       ]
     },
     {
@@ -2766,9 +2717,10 @@
       "historical_functions": [
         "buildServeRuntimeBundleContext"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed artifact Git-root writable preflight with retired built-in capability; normal serve source loading and runtime admission remain.",
       "proofs": [
-        "R37"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication"
       ]
     },
     {
@@ -2785,11 +2737,10 @@
         "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStorageBase",
         "writeArtifactRepoCommitServeFixture"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed only Git-root readiness failure tests/fixture; supported creation journey assertions now use typed receiver route identity and exact automatic event config. No replacement Git readiness capability claimed.",
       "proofs": [
-        "R37",
-        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot",
-        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStorageBase"
+        "TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication",
+        "TestServedCreationFixturesVerificationConsumersAgree"
       ]
     },
     {
@@ -2801,9 +2752,9 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed nil ActionRegistry from process lifecycle stub module; normal source/node/guard test owner remains.",
       "proofs": [
-        "R37"
+        "TestNoRetiredHandlerActionInterpreters"
       ]
     },
     {
@@ -2816,11 +2767,10 @@
         "TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore",
         "TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed MailboxMaterializer census expectations only; supported mailbox read owner and diagnostics/state owner checks remain. Renamed SQLite owner test to actual retained capabilities.",
       "proofs": [
-        "R37",
         "TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore",
-        "TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner"
+        "TestBuildStoresSQLiteRuntimeProvidesDiagnosticsAndStateOwners"
       ]
     },
     {
@@ -2857,9 +2807,10 @@
       "historical_functions": [
         "configureAgentFixtureFlowLifecycle"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action registry from flow lifecycle fixture module; exact/sealed agent authority backend parity assertions remain.",
       "proofs": [
-        "R37"
+        "TestAgentFixtureExactFlowAuthorityParity",
+        "TestAgentFixtureSealedAuthorityRejectionParity"
       ]
     },
     {
@@ -2871,9 +2822,10 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed nil ActionRegistry adapter only; creation occurrence/terminalization and appended-event rollback both-store assertions remain.",
       "proofs": [
-        "R37"
+        "TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores",
+        "TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores"
       ]
     },
     {
@@ -2887,9 +2839,10 @@
         "MaterializeMailboxWrite",
         "MaterializeMailboxWrite"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed both Postgres/SQLite MaterializeMailboxWrite forwarders with retired writer; ordinary supported mailbox persistence remains separate.",
       "proofs": [
-        "R37"
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores",
+        "TestActionRetirementCorpusLedgerIsComplete"
       ]
     },
     {
@@ -2906,11 +2859,10 @@
         "TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner",
         "assertV1MailboxMaterializationRead"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Deleted action-specific native materializer transaction/readback tests with the owner. Supported notice/reply persistence tests are separate proofs, not equivalent action materialization coverage.",
       "proofs": [
-        "R37",
-        "TestPostgresStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner",
-        "TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner"
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores",
+        "TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext"
       ]
     },
     {
@@ -2923,9 +2875,8 @@
       "historical_functions": [
         "TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed system-node MaterializeMailboxWrite block and its readback assertion; retained agent mailbox notice and schedule reply-context restoration assertions on both stores.",
       "proofs": [
-        "R37",
         "TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext"
       ]
     },
@@ -2939,9 +2890,10 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action registry accessor from fork fanout consumer module; downstream emission/barrier settlement helper remains unchanged.",
       "proofs": [
-        "R37"
+        "TestNoRetiredHandlerActionInterpreters",
+        "TestActionRetirementCorpusLedgerIsComplete"
       ]
     },
     {
@@ -2953,9 +2905,10 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed nil ActionRegistry adapter only; gate/root/card fork authority backend assertions remain.",
       "proofs": [
-        "R37"
+        "TestMaterializeRunForkGateAuthoritiesSelectedStoreParity",
+        "TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStoreParity"
       ]
     },
     {
@@ -2969,9 +2922,10 @@
         "configureSQLiteFlowActivationLifecycle",
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed action registry fixture carrier, constructor and accessor; exact SQLite selected-core and supported notice/reopen assertions remain.",
       "proofs": [
-        "R37"
+        "TestSQLiteRuntimeStoreSelectedCoreContracts",
+        "TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment"
       ]
     },
     {
@@ -2983,9 +2937,9 @@
       "historical_functions": [
         "ActionRegistry"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Removed nil ActionRegistry adapter only; immutable workflow store constructor-owner assertions remain.",
       "proofs": [
-        "R37"
+        "TestWorkflowStoreRolesAreImmutableConstructorInputs"
       ]
     },
     {
@@ -3001,9 +2955,11 @@
         "assertCanonicalCreateFlowInstanceHandler",
         "assertCanonicalConfigFromBindings"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "Inspected unchanged test-only legacy shape checker still calls create_flow_instance canonical and examines retired options; not a production interpreter or evidence of current grammar validity. Live authored-action rejection is owned by strict decoder/conformance guards, not this stale historical check.",
       "proofs": [
-        "R37"
+        "TestCatalogFixturesUseCanonicalCreateFlowInstanceAuthoring",
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions",
+        "TestLoadWorkflowContractBundleRejectsRetiredHandlerActions"
       ]
     },
     {
