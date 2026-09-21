@@ -121,9 +121,19 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Prepared/raw native fault parity adds one general conformance root;
-	// no prior root, backend, or command envelope moves between partitions.
-	want := []int{113, 14, 5, 1}
+	// #2307 adds these eight general roots to the reviewed 113-root census.
+	// No prior root, backend, or command envelope moves between partitions.
+	actionRetirementRoots := []string{
+		"TestActionRetirementCorpusLedgerIsComplete",
+		"TestActionRetirementCorpusHasNoLiveAuthoredActions",
+		"TestActionRetirementCorpusScannerPreservesHomonymsAndRejectsAliases",
+		"TestActionRetirementCorpusScannerRejectsTruncatedFragments",
+		"TestRetiredActionHistoricalFixtureFailsClosed",
+		"TestNoRetiredHandlerActionInterpreters",
+		"TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration",
+		"TestCanonicalFormsRegistryPinsHandlerActionRetirement",
+	}
+	want := []int{121, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -136,7 +146,12 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[0], preparedFaultProof); i == len(groups[0]) || groups[0][i] != preparedFaultProof {
 		t.Fatalf("general conformance partition omitted %s", preparedFaultProof)
 	}
-	t.Log("complete disjoint census:133 =113 general +14 core +5 pressure +1 reporter")
+	for _, name := range actionRetirementRoots {
+		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
+			t.Fatalf("general conformance partition omitted reviewed #2307 root %s", name)
+		}
+	}
+	t.Log("complete disjoint census:141 =121 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
