@@ -80,6 +80,7 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.EntityType":   {1, "validated unique fixed-revision metadata type"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Slug":         {1, "fixed-revision presentation metadata, not event payload"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.Name":         {1, "fixed-revision presentation metadata, not event payload"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.FlowConfig":   {1, "defensive copy of the exact config envelope captured with entity metadata at the selected revision; no live read or route-derived business key"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.FlowInstance":      {1, "validated unique plan metadata into SQL materialization adapter"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.EntityType":        {1, "validated unique plan metadata into SQL materialization adapter"},
 		backend + "loadRunForkEntityMetadata/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.Slug":              {1, "copy presentation metadata into SQL adapter"},

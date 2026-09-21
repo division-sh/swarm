@@ -411,6 +411,13 @@ func selectedContractReadinessState(source semanticview.Source, eventID, flowID 
 		SourceEventID: eventID, EntityID: entity.EntityID, EntityType: metadata.EntityType, FlowID: flowID,
 		WorkflowVersion: strings.TrimSpace(source.WorkflowVersion()), Mode: "static",
 	}
+	if len(metadata.FlowConfig) != 0 && strings.TrimSpace(string(metadata.FlowConfig)) != "null" {
+		var err error
+		state.Config, err = runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+		if err != nil {
+			return runfork.RunForkSelectedContractWorkflowState{}, fmt.Errorf("selected-contract fixed-revision receiver configuration for entity %s: %w", entity.EntityID, err)
+		}
+	}
 	if flowID == semanticview.RootExecutionFlowID(source) {
 		state.AddressKind = runfork.RunForkSelectedContractWorkflowStateRunScope
 		return state, nil

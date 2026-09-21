@@ -302,13 +302,30 @@ func validateBinding(binding Binding) (string, string, error) {
 		}
 	}
 	// Current source status and post-R advancement are not historical authority.
+	// Bind config runtime number kinds separately from the plan's semantic hash.
+	configs := make(map[string]string)
+	for _, entity := range plan.Entities {
+		if entity.MaterializationMetadata == nil || len(entity.MaterializationMetadata.FlowConfig) == 0 {
+			continue
+		}
+		var payload any
+		if err := canonicaljson.DecodePreservingNumberLexemes(entity.MaterializationMetadata.FlowConfig, &payload); err != nil {
+			return "", "", fmt.Errorf("bind historical receiver config: %w", err)
+		}
+		wire, err := canonicaljson.MarshalPreservingNumberKinds(payload)
+		if err != nil {
+			return "", "", err
+		}
+		configs[entity.EntityID] = string(wire)
+	}
 	key, err := canonicaljson.Hash(struct {
-		RunID      string
-		ForkPoint  runfork.RunForkPoint
-		Entities   []runfork.RunForkEntityState
-		Pending    []runfork.RunForkPendingWork
-		Historical []string
-		Inputs     []runfork.InputPublicationCoordinates
-	}{plan.SourceRunID, plan.ForkPoint, plan.Entities, plan.PendingWork, historical, plan.HistoricalInputCoordinates()})
+		RunID           string
+		ForkPoint       runfork.RunForkPoint
+		Entities        []runfork.RunForkEntityState
+		Pending         []runfork.RunForkPendingWork
+		Historical      []string
+		Inputs          []runfork.InputPublicationCoordinates
+		ReceiverConfigs map[string]string
+	}{plan.SourceRunID, plan.ForkPoint, plan.Entities, plan.PendingWork, historical, plan.HistoricalInputCoordinates(), configs})
 	return key, frontier, err
 }

@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -151,7 +153,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 					if err != nil {
 						t.Fatal(err)
 					}
-					if len(prepared.States) != 1 || prepared.States[0].Config[key] != "instance-1" || len(prepared.States[0].Agents) != declarations {
+					if len(prepared.States) != 1 || prepared.States[0].Config[key] != "recorded-business-key" || len(prepared.States[0].Agents) != declarations {
 						t.Fatalf("flow-owned readiness = %#v", prepared.States)
 					}
 					factoryCalls := 0
@@ -337,8 +339,16 @@ func selectedContractTestFlowOwnedSource(t *testing.T, flowID, flowInstance, ent
 }
 
 func selectedContractReadinessTestEntity(id, path, entityType string) runfork.RunForkEntityState {
+	config, err := json.Marshal(map[string]any{
+		"instance_id": flowidentity.LogicalInstanceID(path), "storage_ref": path, "flow_path": path,
+		"config": map[string]any{"worker_id": "recorded-business-key"},
+	})
+	if err != nil {
+		panic(err)
+	}
 	return runfork.RunForkEntityState{EntityID: id, CurrentState: "idle",
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+			FlowConfig:   config,
 			Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 			Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
 			FlowInstance: path, EntityType: entityType,

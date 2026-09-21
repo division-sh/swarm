@@ -23,7 +23,7 @@ func TestRunForkSnapshotOwnershipMetadataAuthority(t *testing.T) {
 				Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
 				FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType, Slug: metadata.Slug, Name: metadata.Name,
 			}
-			if !ok || got != want {
+			if !ok || !reflect.DeepEqual(got, want) {
 				t.Fatalf("metadata = %#v, admitted=%t message=%q; want %#v", got, ok, message, want)
 			}
 		})
