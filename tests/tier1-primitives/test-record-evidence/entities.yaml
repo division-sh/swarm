@@ -1,1 +1,4 @@
-evidence_case: {}
+evidence_case:
+  findings:
+    type: '[Finding]'
+    initial: []
