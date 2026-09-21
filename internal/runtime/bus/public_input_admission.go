@@ -13,6 +13,28 @@ import (
 type publicInputAdmissionContextKey struct{}
 type apiEventPublicationAdmissionContextKey struct{}
 
+// Committed followups retain runtime authority, but must admit their own event
+// and route rather than inherit the ingress event's endpoint grant.
+func withoutEventPublicationAdmission(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return eventPublicationFollowupContext{Context: ctx}
+}
+
+type eventPublicationFollowupContext struct {
+	context.Context
+}
+
+func (ctx eventPublicationFollowupContext) Value(key any) any {
+	switch key.(type) {
+	case publicInputAdmissionContextKey, apiEventPublicationAdmissionContextKey:
+		return nil
+	default:
+		return ctx.Context.Value(key)
+	}
+}
+
 type apiEventPublicationEndpointKind uint8
 
 const (
