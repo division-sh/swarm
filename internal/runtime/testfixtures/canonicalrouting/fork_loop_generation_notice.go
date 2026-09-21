@@ -9,7 +9,7 @@ import (
 // handlers. Explicit clear is a separate authored choice, not fork cleanup.
 func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
 	t.Helper()
-	root := CopyForkLoopGenerationNotice(t)
+	root := CopyForkLoopGenerationState(t)
 	nodes := filepath.Join(root, "review", "nodes.yaml")
 	applyClosedReplacement(t, nodes, "    review.requested:\n      loop:", "    review.requested:\n      accumulate:\n        into: reviews\n        from: payload\n        dedup_by: payload.token\n      loop:")
 	applyClosedReplacement(t, nodes, "  execution_type: system_node\n", "  execution_type: system_node\n  state_schema:\n    fields:\n      reviews: list<Review>\n")
@@ -20,13 +20,13 @@ func CopyForkLoopAccumulator(t testing.TB, clearOnAdmit bool) string {
 	return root
 }
 
-// CopyForkLoopGenerationNotice keeps the fork frontier inside a static loop.
-// Its final consumer writes a business notice without creating post-R work.
-func CopyForkLoopGenerationNotice(t testing.TB) string {
+// CopyForkLoopGenerationState keeps the fork frontier inside a static loop.
+// Its final consumer writes business fields without creating post-R work.
+func CopyForkLoopGenerationState(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml": `name: fork-loop-generation-notice
+		"schema.yaml": `name: fork-loop-generation-state
 stages:
   waiting: {initial: true}
   active: {}
@@ -74,7 +74,7 @@ pins:
       - {event: review.retry, source: external}
       - {event: review.closed, source: external}
 `,
-		"review/entities.yaml": "work: {}\n",
+		"review/entities.yaml": "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n",
 		"review/events.yaml": `review.requested:
   revision_id: text
   token: text
@@ -99,15 +99,10 @@ review.closed:
     review.requested:
       loop: {admit: revision, from: working}
       advances_to: reviewing
-      action:
-        id: mailbox_write
-        mailbox:
-          item_type: {literal: fork_loop_review}
-          severity: {literal: normal}
-          summary: {literal: review processed}
-          payload:
-            revision_id: {ref: loop.revision_id}
-            token: {ref: payload.token}
+      data_accumulation:
+        writes:
+          - {target_field: observed_revision, expression: loop.revision_id}
+          - {target_field: observed_token, expression: payload.token}
     review.retry:
       loop: {repeat: revision, from: reviewing}
       advances_to: working
