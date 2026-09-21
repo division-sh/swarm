@@ -1,4 +1,4 @@
 name: test-dynamic-flow-instance
 version: 1.0.0
-description: Dynamic child flow instance via create_flow_instance action.
+description: Dynamic child creation and selection through receiver-owned input resolution.
 platform_version: ">=0.7.0 <0.8.0"
