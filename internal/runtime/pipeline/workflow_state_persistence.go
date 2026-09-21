@@ -8,7 +8,6 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID) (WorkflowState, error) {
@@ -45,73 +44,6 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, owner r
 		state.Metadata = map[string]any{}
 	}
 	return state, nil
-}
-
-func (pc *PipelineCoordinator) projectWorkflowEvidence(execCtx runtimeengine.ExecutionContext, bucketID string, payload map[string]any) (*runtimeengine.StateMutation, error) {
-	if pc == nil {
-		return nil, fmt.Errorf("record_evidence requires pipeline coordinator")
-	}
-	route := execCtx.Request.StateAddress().FlowInstance.Route
-	entityID := strings.TrimSpace(execCtx.Request.EntityID.String())
-	flowID := execCtx.Request.Node.FlowPath()
-	bucketID = strings.TrimSpace(bucketID)
-	if entityID == "" || bucketID == "" {
-		return nil, fmt.Errorf("record_evidence requires exact entity and evidence target")
-	}
-	if !route.Valid() {
-		return nil, fmt.Errorf("record workflow evidence requires an exact workflow instance route")
-	}
-	event := execCtx.Request.Event
-	if strings.TrimSpace(event.ID()) == "" || event.CreatedAt().IsZero() {
-		return nil, fmt.Errorf("record_evidence requires exact accepted event identity")
-	}
-	metadata := workflowMaterializeEntityFields(pc.SemanticSource(), flowID, execCtx.Request.State.StateCarrier.Fields)
-	buckets := make(map[string]map[string]any, len(execCtx.Request.State.StateCarrier.StateBuckets)+1)
-	for key, bucket := range execCtx.Request.State.StateCarrier.StateBuckets {
-		buckets[key] = cloneStringAnyMap(bucket)
-	}
-	evidence := cloneStringAnyMap(buckets["evidence"])
-	if evidence == nil {
-		evidence = map[string]any{}
-	}
-	workflowAppendEvidence(evidence, bucketID, payload)
-	buckets["evidence"] = evidence
-	mutation := &runtimeengine.StateMutation{
-		StateCarrier: runtimeengine.NewStateCarrierWithOwners(
-			metadata,
-			execCtx.Request.State.StateCarrier.Bookkeeping,
-			execCtx.Request.State.StateCarrier.Control,
-			execCtx.Request.State.StateCarrier.Gates,
-			buckets,
-		),
-		TriggerEventID:   strings.TrimSpace(event.ID()),
-		TriggerEventType: strings.TrimSpace(string(event.Type())),
-		TriggeredAt:      event.CreatedAt(),
-	}
-	return mutation, nil
-}
-
-func workflowAppendEvidence(bucket map[string]any, bucketID string, payload map[string]any) {
-	if bucket == nil {
-		return
-	}
-	bucketID = strings.TrimSpace(bucketID)
-	if bucketID == "" {
-		return
-	}
-	entry := cloneMap(payload)
-	switch typed := bucket[bucketID].(type) {
-	case nil:
-		bucket[bucketID] = []any{entry}
-	case []any:
-		next := append([]any{}, typed...)
-		next = append(next, entry)
-		bucket[bucketID] = next
-	case map[string]any:
-		bucket[bucketID] = []any{cloneMap(typed), entry}
-	default:
-		bucket[bucketID] = []any{typed, entry}
-	}
 }
 
 func (pc *PipelineCoordinator) lockWorkflowEntity(entityID string) func() {

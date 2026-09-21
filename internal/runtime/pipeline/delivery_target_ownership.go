@@ -567,17 +567,13 @@ type handlerEntityFieldClassifier func(semanticview.Source, string, SystemNodeEv
 // Every executable handler field has one explicit execution-semantic
 // disposition. The result owns both routing admission and engine preparation.
 var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClassifier{
-	"Action": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return actionEntityRequirement(handler.Action)
-	},
 	"Activity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return activityEntityRequirement(handler.Activity)
 	},
 	"CreateEntity": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return materializingWhen(handler.CreateEntity)
 	},
-	"Description":    noHandlerEntityRequirement,
-	"EvidenceTarget": noHandlerEntityRequirement,
+	"Description": noHandlerEntityRequirement,
 	"Emit": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return materializingWhen(emitSpecReferencesEntity(handler.Emit))
 	},
@@ -665,9 +661,6 @@ var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassif
 	"Emit": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
 		return materializingWhen(emitSpecReferencesEntity(rule.Emit))
 	},
-	"Action": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		return actionEntityRequirement(rule.Action)
-	},
 	"Activity": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
 		return activityEntityRequirement(rule.Activity)
 	},
@@ -722,7 +715,7 @@ func rulesEntityRequirement(source semanticview.Source, flowID string, rules []r
 	requirement := DeliveryTargetEntityOptional
 	for _, rule := range rules {
 		for field, classify := range handlerRuleEntryEntityClassifiers {
-			if !effectsSelectable && (field == "Action" || field == "Activity") {
+			if !effectsSelectable && field == "Activity" {
 				continue
 			}
 			requirement = requirement.merge(classify(source, flowID, rule))
@@ -743,13 +736,6 @@ func materializingWhen(required bool) DeliveryTargetEntityDependency {
 		return DeliveryTargetEntityMaterializing
 	}
 	return DeliveryTargetEntityOptional
-}
-
-func actionEntityRequirement(action runtimecontracts.ActionSpec) DeliveryTargetEntityDependency {
-	if actionMaterializesEntity(action) {
-		return DeliveryTargetEntityMaterializing
-	}
-	return existingWhen(actionReferencesEntity(action))
 }
 
 func activityEntityRequirement(activity runtimecontracts.ActivitySpec) DeliveryTargetEntityDependency {
@@ -802,63 +788,6 @@ func queryReferencesEntity(query *runtimecontracts.QuerySpec) bool {
 		expressionReferencesEntity(query.Filter) ||
 		typedPathReferencesEntity(query.GroupBy, query.GroupByPath) {
 		return true
-	}
-	return false
-}
-
-func actionReferencesEntity(action runtimecontracts.ActionSpec) bool {
-	if typedPathReferencesEntity(action.InstanceIDFrom, action.InstanceIDPath) {
-		return true
-	}
-	if action.ConfigFrom != nil {
-		for _, binding := range action.ConfigFrom.Entries {
-			if typedPathReferencesEntity(binding.Ref, binding.RefPath) {
-				return true
-			}
-		}
-		for _, ref := range action.ConfigFrom.Bindings {
-			if pathReferencesEntity(ref) {
-				return true
-			}
-		}
-	}
-	if mailboxReferencesEntity(action.Mailbox) || artifactRepoReferencesEntity(action.ArtifactRepo) {
-		return true
-	}
-	return false
-}
-
-func mailboxReferencesEntity(mailbox *runtimecontracts.MailboxWriteSpec) bool {
-	if mailbox == nil {
-		return false
-	}
-	return expressionValueReferencesEntity(mailbox.ItemType) ||
-		expressionValueReferencesEntity(mailbox.Severity) ||
-		expressionValueReferencesEntity(mailbox.Summary) ||
-		expressionValueReferencesEntity(mailbox.EntityID) ||
-		expressionValueReferencesEntity(mailbox.FlowInstance) ||
-		expressionValueMapReferencesEntity(mailbox.Payload)
-}
-
-func artifactRepoReferencesEntity(spec *runtimecontracts.ArtifactRepoSpec) bool {
-	if spec == nil {
-		return false
-	}
-	if expressionValueReferencesEntity(spec.RepoID) ||
-		expressionValueReferencesEntity(spec.Namespace) ||
-		expressionValueReferencesEntity(spec.PartitionKey) ||
-		expressionValueReferencesEntity(spec.DisplaySlug) ||
-		expressionValueReferencesEntity(spec.RequestID) ||
-		expressionValueReferencesEntity(spec.Author) ||
-		expressionValueMapReferencesEntity(spec.Provenance) ||
-		expressionValueMapReferencesEntity(spec.SuccessPayload) ||
-		expressionValueMapReferencesEntity(spec.FailurePayload) {
-		return true
-	}
-	for _, file := range spec.Files {
-		if expressionValueReferencesEntity(file.Path) || expressionValueReferencesEntity(file.Content) {
-			return true
-		}
 	}
 	return false
 }

@@ -609,12 +609,6 @@ type recordingPublicationCommitter struct {
 	err     error
 }
 type stubDispatcher struct{}
-type stubActionRegistry struct {
-	entries map[identity.ActionKey]runtimeregistry.ActionInstruction
-}
-type stubActionRunner struct {
-	called []string
-}
 type lockOrderStateRepo struct {
 	order *[]string
 }
@@ -746,19 +740,6 @@ func (r stubGuardRegistry) IsExecutable(id identity.GuardKey) bool { _, ok := r.
 func (r stubGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
 	entry, ok := r.entries[id]
 	return entry, ok
-}
-func (r stubActionRegistry) HasAction(id identity.ActionKey) bool { _, ok := r.entries[id]; return ok }
-func (r stubActionRegistry) IsExecutable(id identity.ActionKey) bool {
-	entry, ok := r.entries[id]
-	return ok && entry.Executable()
-}
-func (r stubActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
-	entry, ok := r.entries[id]
-	return entry, ok
-}
-func (r *stubActionRunner) ExecuteAction(_ context.Context, action runtimecontracts.ActionSpec, _ runtimeregistry.ActionInstruction, _ ExecutionContext) (ActionExecution, error) {
-	r.called = append(r.called, action.ID)
-	return ActionExecution{Handled: true}, nil
 }
 func (stubPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
 	out := cloneStringAnyMap(payload)
@@ -1276,8 +1257,8 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 23 {
-		t.Fatalf("step count = %d, want 23", len(steps))
+	if len(steps) != 22 {
+		t.Fatalf("step count = %d, want 22", len(steps))
 	}
 	if steps[0] != StepLoop || steps[1] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
@@ -1288,8 +1269,8 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 	if steps[17] != StepProjection {
 		t.Fatalf("expected projection after data_writes at index 17, got order %v", steps)
 	}
-	if steps[21] != StepActivity {
-		t.Fatalf("expected activity after action at index 21, got order %v", steps)
+	if steps[20] != StepActivity {
+		t.Fatalf("expected activity after emits at index 20, got order %v", steps)
 	}
 }
 
@@ -3372,7 +3353,6 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 			AdvancesTo: "done",
 			ClearGates: []string{"gate_a"},
 			Emit:       runtimecontracts.EmitSpec{Event: "task.recorded"},
-			Action:     runtimecontracts.ActionSpec{ID: "record"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -3399,7 +3379,6 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		"update_stage",
 		"cancel_stage_timers",
 		"start_stage_timers",
-		"record",
 	}) {
 		t.Fatalf("actions executed = %#v", got)
 	}
@@ -5116,7 +5095,6 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
 			},
 			AdvancesTo: "processing",
-			Action:     runtimecontracts.ActionSpec{ID: "should_not_run"},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 	})
@@ -5142,13 +5120,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		t.Fatalf("capsule chain depth = %d, want trigger depth 1", result.FanOutIntent.Capsule.ChainDepth)
 	}
 	if got := result.ActionsExecuted; len(got) != 4 {
-		t.Fatalf("fan-out transition actions = %#v, want four lifecycle actions and no authored action", got)
-	} else {
-		for _, action := range got {
-			if action == "should_not_run" {
-				t.Fatalf("post-fan-out authored action executed: %#v", got)
-			}
-		}
+		t.Fatalf("fan-out transition actions = %#v, want four lifecycle actions", got)
 	}
 }
 
@@ -7504,70 +7476,13 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 	}
 }
 
-func TestExecutor_ActionRegistryDoesNotInventEmitsAndRunsActionRunner(t *testing.T) {
-	runner := &stubActionRunner{}
-	shaper := &recordingPayloadShaper{}
+func TestExecutor_RuleEmitRunsOnlyForSelectedRule(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},
-		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
-			identity.NormalizeActionKey("notify"): {
-				Key:     identity.NormalizeActionKey("notify"),
-				Builtin: "notify",
-			},
-		}},
-		ActionRunner:  runner,
-		PayloadShaper: shaper,
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Action: runtimecontracts.ActionSpec{ID: "notify"},
-		},
-		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
-	}
-	if got := runner.called; !reflect.DeepEqual(got, []string{"notify"}) {
-		t.Fatalf("action runner calls = %#v", got)
-	}
-	if got := result.ActionsExecuted; !reflect.DeepEqual(got, []string{"notify"}) {
-		t.Fatalf("ActionsExecuted = %#v", got)
-	}
-	if len(result.EmitIntents) != 0 {
-		t.Fatalf("unexpected action emit intents: %#v", result.EmitIntents)
-	}
-	if shaper.lastPayload != nil {
-		t.Fatal("action registry invoked implicit emit payload shaping")
-	}
-}
-
-func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
-	runner := &stubActionRunner{}
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
-		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
-			identity.NormalizeActionKey("auto_action"): {
-				Key: identity.NormalizeActionKey("auto_action"), Builtin: "auto_action",
-			},
-			identity.NormalizeActionKey("human_action"): {
-				Key: identity.NormalizeActionKey("human_action"), Builtin: "human_action",
-			},
-		}},
-		ActionRunner: runner,
 	}, stubEvaluator{bools: map[string]bool{
 		"payload.amount < 100":  false,
 		"payload.amount >= 100": true,
@@ -7584,12 +7499,12 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 				{
 					ID:        "auto",
 					Condition: "payload.amount < 100",
-					Action:    runtimecontracts.ActionSpec{ID: "auto_action"},
+					Emit:      runtimecontracts.EmitSpec{Event: "refund.auto"},
 				},
 				{
 					ID:        "needs-human",
 					Condition: "payload.amount >= 100",
-					Action:    runtimecontracts.ActionSpec{ID: "human_action"},
+					Emit:      runtimecontracts.EmitSpec{Event: "refund.human"},
 				},
 			},
 		},
@@ -7601,231 +7516,8 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 	if got := requireResolvedSelection(t, result.HandlerRuleSelection).DisplayLabel(); got != "needs-human" {
 		t.Fatalf("RuleID = %q, want needs-human", got)
 	}
-	if got := runner.called; !reflect.DeepEqual(got, []string{"human_action"}) {
-		t.Fatalf("action runner calls = %#v, want only selected rule action", got)
-	}
-	if got := result.ActionsExecuted; !reflect.DeepEqual(got, []string{"human_action"}) {
-		t.Fatalf("ActionsExecuted = %#v, want only selected rule action", got)
-	}
-}
-
-func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSource(),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
-		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
-			identity.NormalizeActionKey("handler_action"): {
-				Key: identity.NormalizeActionKey("handler_action"),
-			},
-		}},
-		ActionRunner: &stubActionRunner{},
-	}, stubEvaluator{bools: map[string]bool{"payload.amount >= 100": true}})
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "refund.requested", "", "", json.RawMessage(`{"amount":250}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Action: runtimecontracts.ActionSpec{ID: "handler_action"},
-			Rules: []runtimecontracts.HandlerRuleEntry{{
-				ID:        "needs-human",
-				Condition: "payload.amount >= 100",
-			}},
-		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err == nil {
-		t.Fatalf("expected ambiguous handler-level action config to be rejected, got %+v", result)
-	}
-	if !strings.Contains(err.Error(), "handler-top-level action is only allowed on handlers without rules") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing.T) {
-	cases := []struct {
-		name    string
-		handler runtimecontracts.SystemNodeEventHandler
-		want    string
-	}{
-		{
-			name: "on_complete",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				OnComplete: []runtimecontracts.HandlerRuleEntry{{
-					ID:        "complete",
-					Condition: "else",
-					Action:    runtimecontracts.ActionSpec{ID: "notify"},
-				}},
-			},
-			want: "handler.on_complete[complete] action is unsupported",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			runner := &stubActionRunner{}
-			exec, err := NewExecutor(RuntimeDependencies{
-				Source:        stubSource(),
-				StateRepo:     stubStateRepo{},
-				MutationOwner: stubMutationOwner{},
-				Locker:        stubLocker{},
-				Dispatcher:    stubDispatcher{},
-				ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
-					identity.NormalizeActionKey("notify"): {
-						Key: identity.NormalizeActionKey("notify"),
-					},
-				}},
-				ActionRunner: runner,
-			}, stubEvaluator{bools: map[string]bool{"payload.ok": true}})
-			if err != nil {
-				t.Fatalf("NewExecutor error: %v", err)
-			}
-			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-				EntityID: "entity-1",
-				Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-				Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-				Handler:  tc.handler,
-				State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
-			})
-			if err == nil {
-				t.Fatalf("expected unsupported action context rejection, got result %+v", result)
-			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error = %v, want %q", err, tc.want)
-			}
-			if len(runner.called) != 0 {
-				t.Fatalf("action runner calls = %#v, want none", runner.called)
-			}
-			if len(result.ActionsExecuted) != 0 {
-				t.Fatalf("ActionsExecuted = %#v, want none", result.ActionsExecuted)
-			}
-		})
-	}
-}
-
-func TestSelectedActionSpecConsumesRuleActionOnlyFromHandlerRules(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{Action: runtimecontracts.ActionSpec{ID: "handler_action"}}
-	rule := &runtimecontracts.HandlerRuleEntry{Action: runtimecontracts.ActionSpec{ID: "rule_action"}}
-	cases := []struct {
-		name   string
-		source handlerRuleSource
-		want   string
-	}{
-		{name: "handler rules", source: handlerRuleSourceRules, want: "rule_action"},
-		{name: "on complete", source: handlerRuleSourceOnComplete, want: "handler_action"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := selectedActionSpec(handler, rule, tc.source).ID; got != tc.want {
-				t.Fatalf("selectedActionSpec = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
-	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
-	baseline := testStateSnapshot("ready", map[string]any{
-		"same":           "unchanged",
-		"in_memory_only": "frame-write",
-	}, map[string]bool{
-		"g_frame": true,
-	}, map[string]map[string]any{
-		"bucket": {"in_memory_only": "frame-write"},
-	})
-	baseline.StateCarrier.Bookkeeping = map[string]any{
-		"in_memory_only": "frame-write",
-	}
-	projected := testStateSnapshot("ready", map[string]any{
-		"same":          "unchanged",
-		"action_output": "persisted-output",
-	}, nil, map[string]map[string]any{
-		"bucket": {"action_output": "persisted-output"},
-	})
-	projected.StateCarrier.Bookkeeping = map[string]any{
-		"action_output": "persisted-output",
-	}
-	exec := &Executor{}
-	frame := &executionFrame{
-		ctx: context.Background(),
-		req: ExecutionRequest{EntityID: entityID},
-		state: ExecutionState{
-			State: baseline,
-		},
-	}
-
-	mutation := StateMutation{StateCarrier: projected.StateCarrier}
-	if err := exec.mergeActionState(frame, baseline, &mutation); err != nil {
-		t.Fatalf("mergeActionState: %v", err)
-	}
-
-	if got := frame.state.State.StateCarrier.Fields["in_memory_only"]; got != "frame-write" {
-		t.Fatalf("in_memory_only = %#v, want preserved frame-write", got)
-	}
-	if got := frame.state.State.StateCarrier.Fields["action_output"]; got != "persisted-output" {
-		t.Fatalf("action_output = %#v, want persisted-output", got)
-	}
-	if got := frame.state.State.StateCarrier.Bookkeeping["in_memory_only"]; got != "frame-write" {
-		t.Fatalf("bookkeeping in_memory_only = %#v, want preserved frame-write", got)
-	}
-	if got := frame.state.State.StateCarrier.Bookkeeping["action_output"]; got != "persisted-output" {
-		t.Fatalf("bookkeeping action_output = %#v, want persisted-output", got)
-	}
-	if got := frame.state.State.StateCarrier.StateBuckets["bucket"]["in_memory_only"]; got != "frame-write" {
-		t.Fatalf("bucket in_memory_only = %#v, want preserved frame-write", got)
-	}
-	if got := frame.state.State.StateCarrier.StateBuckets["bucket"]["action_output"]; got != "persisted-output" {
-		t.Fatalf("bucket action_output = %#v, want persisted-output", got)
-	}
-}
-
-func TestExecutor_ActionRegistryWithoutImplementationRejectsHandler(t *testing.T) {
-	runner := &stubActionRunner{}
-	shaper := &recordingPayloadShaper{}
-	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
-		MutationOwner: stubMutationOwner{},
-		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
-		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
-			identity.NormalizeActionKey("notify"): {
-				Key: identity.NormalizeActionKey("notify"),
-			},
-		}},
-		ActionRunner:  runner,
-		PayloadShaper: shaper,
-	}, nil)
-	if err != nil {
-		t.Fatalf("NewExecutor error: %v", err)
-	}
-	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		Handler: runtimecontracts.SystemNodeEventHandler{
-			Action: runtimecontracts.ActionSpec{ID: "notify"},
-		},
-		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
-	})
-	if err == nil || !strings.Contains(err.Error(), "not executable") {
-		t.Fatalf("Execute error = %v, want not executable", err)
-	}
-	if len(result.EmitIntents) != 0 {
-		t.Fatalf("EmitIntents = %#v, want none", result.EmitIntents)
-	}
-	if len(result.ActionsExecuted) != 0 {
-		t.Fatalf("ActionsExecuted = %#v, want none", result.ActionsExecuted)
-	}
-	if len(runner.called) != 0 {
-		t.Fatalf("action runner calls = %#v, want none", runner.called)
-	}
-	if shaper.lastPayload != nil {
-		t.Fatal("non-executable action invoked implicit emit payload shaping")
+	if len(result.EmitIntents) != 1 || result.EmitIntents[0].Event.Type() != "flow-1/refund.human" {
+		t.Fatalf("emit intents = %#v, want only selected rule emission", result.EmitIntents)
 	}
 }
 

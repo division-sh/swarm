@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -29,7 +28,6 @@ type replyContextStoreTestSurface interface {
 type replyContinuationStoreTestSurface interface {
 	replyContextStoreTestSurface
 	runtimetools.MailboxPersistence
-	MaterializeMailboxWrite(context.Context, runtimepipeline.MailboxWriteMaterialization) error
 	runtimegenericschedule.Store
 }
 
@@ -74,25 +72,6 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 			}
 			deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}
 
-			systemMailboxID := uuid.NewString()
-			if err := store.MaterializeMailboxWrite(ctx, runtimepipeline.MailboxWriteMaterialization{
-				ItemID:         systemMailboxID,
-				Scope:          "global",
-				ItemType:       "approval",
-				SourceEventID:  requestEventID,
-				FromAgent:      "system_node:provider-node",
-				Severity:       "normal",
-				Summary:        "approve provider result",
-				Payload:        []byte(`{"kind":"system"}`),
-				ReplyContextID: record.ID,
-			}); err != nil {
-				t.Fatalf("MaterializeMailboxWrite: %v", err)
-			}
-			item, err := store.GetMailboxItem(ctx, systemMailboxID)
-			if err != nil || item.ReplyContextID != record.ID {
-				t.Fatalf("system mailbox readback = %#v err=%v", item, err)
-			}
-
 			agentMailboxID, err := store.InsertMailboxItem(events.WithDeliveryContext(ctx, deliveryContext), runtimetools.MailboxItem{
 				EventID:   requestEventID,
 				FromAgent: "provider-agent",
@@ -105,7 +84,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 			if err != nil {
 				t.Fatalf("InsertMailboxItem: %v", err)
 			}
-			item, err = store.GetMailboxItem(ctx, agentMailboxID)
+			item, err := store.GetMailboxItem(ctx, agentMailboxID)
 			if err != nil || item.ReplyContextID != record.ID {
 				t.Fatalf("agent mailbox readback = %#v err=%v", item, err)
 			}

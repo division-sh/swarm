@@ -442,7 +442,7 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 		if !ok {
 			continue
 		}
-		executor := NewNode(node.Node, record.Entry, pc.SemanticSource(), newCoordinatorHandlerExecutionEngine(pc, node.Node), nil)
+		executor := NewNode(node.Node, record.Entry, pc.SemanticSource(), newCoordinatorHandlerExecutionEngine(pc, node.Node))
 		if executor == nil {
 			continue
 		}

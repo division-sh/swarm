@@ -139,7 +139,6 @@ type RuntimeDeps struct {
 	PipelineObligations           runtimepipelineobligation.Store
 	GenericScheduleStore          runtimegenericschedule.Store
 	TimerObligationReader         runtimetimerobligation.Reader
-	MailboxMaterializer           runtimepipeline.MailboxWriteMaterializationStore
 	DecisionCards                 decisioncard.Store
 	ProposedEffects               decisioncard.ProposedEffectStore
 	DecisionCardHumanTasks        decisioncard.HumanTaskStore
@@ -1257,10 +1256,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
 	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
-		artifactRoot, err := runtimepipeline.ResolveArtifactRepoRoot("")
-		if err != nil {
-			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
-		}
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
 			ExecutionPosture:      boot.ExecutionPosture,
 			ReceiverExecution:     eventreceiver.NormalExecution(),
@@ -1270,12 +1265,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			DeadLetters:           runtimeDeps.EventBusDurable.TargetFailureRecorder,
 			PipelineObligations:   runtimeDeps.PipelineObligations,
 			RunBundleAvailability: runtimeDeps.RunBundleAvailability,
-			InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-				if managerRef == nil {
-					return fmt.Errorf("flow instance activator is required")
-				}
-				return managerRef.ActivateFlowInstance(ctx, req)
-			},
 			InstanceDeactivationPreparer: func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
 				if managerRef == nil {
 					return nil, fmt.Errorf("flow instance deactivator is required")
@@ -1285,7 +1274,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			TimerScheduler:            rt.Scheduler,
 			GenericSchedules:          rt.GenericSchedules,
 			TimerObligationReader:     runtimeDeps.TimerObligationReader,
-			MailboxMaterializer:       runtimeDeps.MailboxMaterializer,
 			DecisionCards:             runtimeDeps.DecisionCards,
 			ProposedEffects:           runtimeDeps.ProposedEffects,
 			HumanTasks:                runtimeDeps.DecisionCardHumanTasks,
@@ -1300,7 +1288,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,
 			EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
 			ChannelActivations:        rt.ChannelActivations,
-			ArtifactRoot:              artifactRoot,
 			SourceArtifactFact:        opts.SourceArtifactFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,

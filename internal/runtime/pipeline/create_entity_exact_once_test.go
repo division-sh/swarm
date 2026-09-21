@@ -22,30 +22,29 @@ import (
 func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingGenericScheduleWakeupOwner, *recordingMailboxWriteMaterializer)
+		setup func(t *testing.T) (*PipelineCoordinator, context.Context)
 	}{
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingGenericScheduleWakeupOwner, *recordingMailboxWriteMaterializer) {
+			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
 				ctx := sqliteExactOnceRunContext(t, db)
-				return newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db)), ctx, nil, nil, nil
+				return newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db)), ctx
 			},
 		},
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingGenericScheduleWakeupOwner, *recordingMailboxWriteMaterializer) {
+			setup: func(t *testing.T) (*PipelineCoordinator, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pc := newExactOnceCoordinator(t, db, newPostgresWorkflowInstanceStoreForTest(db))
-				return pc, testPipelineCoordinatorRunContext(t, pc), nil, nil, nil
+				return pc, testPipelineCoordinatorRunContext(t, pc)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pc, ctx, _, _, _ := tc.setup(t)
+			pc, ctx := tc.setup(t)
 			bus := pc.bus.(*recordingPipelineBus)
-			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
@@ -72,12 +71,6 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			}
 			if got := bus.outboxCount(); got != 1 {
 				t.Fatalf("outbox intent count = %d, want 1", got)
-			}
-			if got := mailbox.calls; got != 1 {
-				t.Fatalf("mailbox materialization calls = %d, want 1", got)
-			}
-			if got := len(mailbox.rows()); got != 1 {
-				t.Fatalf("mailbox rows = %d, want 1", got)
 			}
 			entityID := bus.publishedEvent(0).EntityID()
 			if entityID == "" {
@@ -143,7 +136,6 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 		t.Run(tc.name, func(t *testing.T) {
 			pc, ctx := tc.setup(t)
 			bus := pc.bus.(*recordingPipelineBus)
-			mailbox := pc.mailboxMaterializer.(*recordingMailboxWriteMaterializer)
 			eventID := uuid.NewString()
 			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
@@ -169,9 +161,6 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 
 			if got := bus.publishedCount(); got != 1 {
 				t.Fatalf("published event count after duplicate dispatch = %d, want 1", got)
-			}
-			if got := mailbox.calls; got != 1 {
-				t.Fatalf("mailbox materialization calls after duplicate dispatch = %d, want 1", got)
 			}
 			assertDeliveryOutcomeCount(t, pc.workflowStore, ctx, eventID, node.Key(), 1)
 			assertDeliveryStatusCount(t, pc.workflowStore, ctx, eventID, node.Key(), "delivered", 1)
@@ -206,7 +195,6 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 		DeliveryRuntime:     bus,
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
 		GenericSchedules:    &recordingGenericScheduleWakeupOwner{},
-		MailboxMaterializer: &recordingMailboxWriteMaterializer{},
 		Module: &previewWorkflowModule{
 			bundle:        bundle,
 			workflowNodes: nodes,
@@ -234,17 +222,6 @@ func exactOnceCreateEntityHandler() runtimecontracts.SystemNodeEventHandler {
 			Fields: map[string]runtimecontracts.ExpressionValue{
 				"amount": runtimecontracts.CELExpression("entity.amount"),
 				"who":    runtimecontracts.CELExpression("entity.who"),
-			},
-		},
-		Action: runtimecontracts.ActionSpec{
-			ID: "mailbox_write",
-			Mailbox: &runtimecontracts.MailboxWriteSpec{
-				ItemType: runtimecontracts.LiteralExpression("approval"),
-				Severity: runtimecontracts.LiteralExpression("normal"),
-				Summary:  runtimecontracts.LiteralExpression("created"),
-				Payload: map[string]runtimecontracts.ExpressionValue{
-					"amount": runtimecontracts.RefExpression("payload.amount"),
-				},
 			},
 		},
 	}

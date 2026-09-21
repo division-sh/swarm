@@ -265,7 +265,7 @@ func TestWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshots(t *testing
 	go func() {
 		errCh <- store.mutate(ctx, testRunScopedWorkflowInstance("mutation-flow"), func(instance *WorkflowInstance) {
 			setWorkflowGate(instance, "g_first")
-			appendWorkflowEvidence(instance, "audit", map[string]any{"writer": "first"})
+			appendWorkflowJournal(instance, "audit", map[string]any{"writer": "first"})
 			close(firstEntered)
 			<-releaseFirst
 		})
@@ -276,7 +276,7 @@ func TestWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshots(t *testing
 		errCh <- store.mutate(ctx, testRunScopedWorkflowInstance("mutation-flow"), func(instance *WorkflowInstance) {
 			close(secondEntered)
 			setWorkflowGate(instance, "g_second")
-			appendWorkflowEvidence(instance, "audit", map[string]any{"writer": "second"})
+			appendWorkflowJournal(instance, "audit", map[string]any{"writer": "second"})
 			instance.CurrentState = "done"
 		})
 	}()
@@ -304,7 +304,7 @@ func TestWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshots(t *testing
 	if gates["g_first"] || !gates["g_second"] {
 		t.Fatalf("gates = %#v, want only the committed snapshot", gates)
 	}
-	evidence := workflowEvidenceEntries(t, instance, "audit")
+	evidence := workflowJournalEntries(t, instance, "audit")
 	if len(evidence) != 1 {
 		t.Fatalf("evidence entries = %d, want 1 (%#v)", len(evidence), evidence)
 	}
@@ -381,7 +381,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 
 	if err := store.mutate(testWorkflowStoreRunContext(t, store), testRunScopedWorkflowInstance("mutation-flow"), func(instance *WorkflowInstance) {
 		setWorkflowGate(instance, "g_single")
-		appendWorkflowEvidence(instance, "audit", map[string]any{"writer": "single"})
+		appendWorkflowJournal(instance, "audit", map[string]any{"writer": "single"})
 		instance.CurrentState = "processing"
 	}); err != nil {
 		t.Fatalf("mutate: %v", err)
@@ -401,7 +401,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 	if !gates["g_single"] {
 		t.Fatalf("gates = %#v, want g_single=true", gates)
 	}
-	evidence := workflowEvidenceEntries(t, instance, "audit")
+	evidence := workflowJournalEntries(t, instance, "audit")
 	if len(evidence) != 1 {
 		t.Fatalf("evidence entries = %d, want 1 (%#v)", len(evidence), evidence)
 	}
@@ -496,15 +496,16 @@ func setWorkflowGate(instance *WorkflowInstance, gate string) {
 	instance.Gates[gate] = true
 }
 
-func appendWorkflowEvidence(instance *WorkflowInstance, bucketID string, payload map[string]any) {
-	bucket := workflowMutableStateBucket(instance, "evidence")
-	workflowAppendEvidence(bucket, bucketID, payload)
-	workflowSetStateBucket(instance, "evidence", bucket)
+func appendWorkflowJournal(instance *WorkflowInstance, bucketID string, payload map[string]any) {
+	bucket := workflowMutableStateBucket(instance, "journal")
+	entries, _ := bucket[bucketID].([]any)
+	bucket[bucketID] = append(entries, cloneStringAnyMap(payload))
+	workflowSetStateBucket(instance, "journal", bucket)
 }
 
-func workflowEvidenceEntries(t *testing.T, instance WorkflowInstance, bucketID string) []map[string]any {
+func workflowJournalEntries(t *testing.T, instance WorkflowInstance, bucketID string) []map[string]any {
 	t.Helper()
-	evidence, ok := workflowStateBucketObject(instance, "evidence")
+	evidence, ok := workflowStateBucketObject(instance, "journal")
 	if !ok {
 		return nil
 	}

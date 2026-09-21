@@ -7,7 +7,6 @@ import (
 
 var (
 	ErrContractBundleNil              = errors.New("pipeline: workflow contract bundle is nil")
-	ErrUnknownHandlerAction           = errors.New("pipeline: handler action is not executable")
 	ErrGuardEscalateRequiresEventType = errors.New("pipeline: guard on_fail escalate requires event type")
 	ErrMissingRequiredAgent           = errors.New("pipeline: required agent missing from merged agents")
 	ErrWorkflowValidation             = errors.New("pipeline: workflow contract validation failed")

@@ -260,3 +260,92 @@ func handlerEntityRequirementExecutionSource() semanticview.Source {
 	}
 	return semanticview.Wrap(bundle)
 }
+
+func TestEntitylessPayloadGuardDoesNotPublishOrMaterializeOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			bus := &recordingPipelineBus{}
+			pc := newDurablePipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
+				Module: staticSemanticWorkflowModule{source: loadWorkflowTempSource(t, map[string]string{
+					"schema.yaml": "initial_state: active\nstates: [active]\n",
+					"events.yaml": "work.ready:\n  item_id: text\n",
+					"nodes.yaml": `node-a:
+  execution_type: system_node
+  subscribes_to: [work.ready]
+  event_handlers:
+    work.ready:
+      guard:
+        check: payload.item_id == "a"
+`,
+				})},
+				Persistence:         workflowPersistenceForTest(store),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+			})
+			runID := runtimecorrelation.RunIDFromContext(ctx)
+			instancePath := runID
+			evt := handlerTestRootIngress(
+				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0, runID, "",
+				handlerTestWorkflowEnvelope(".", instancePath, ""), time.Now().UTC(),
+			)
+			dialect := authoractivityfixture.DialectPostgres
+			if store.isSQLite() {
+				dialect = authoractivityfixture.DialectSQLite
+			}
+			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
+			node := pipelineNode(t, ".", "node-a")
+			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(node),
+				Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
+					FlowID: ".", FlowInstance: instancePath,
+				}),
+			})
+
+			outcome, err := newCoordinatorHandlerExecutionEngine(pc, node).ExecuteHandlerSteps(
+				deliveryCtx,
+				runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `payload.item_id == "a"`}},
+				evt,
+				"work.ready",
+			)
+			if err != nil {
+				t.Fatalf("execute entityless payload guard handler: %v", err)
+			}
+			if outcome == nil || !outcome.Handled {
+				t.Fatalf("entityless payload guard outcome = %#v, want handled", outcome)
+			}
+			rejected := handlerTestRootIngress(
+				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"b"}`), 0, runID, "",
+				handlerTestWorkflowEnvelope(".", instancePath, ""), time.Now().UTC(),
+			)
+			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, rejected)
+			outcome, err = newCoordinatorHandlerExecutionEngine(pc, node).ExecuteHandlerSteps(
+				deliveryCtx,
+				runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `payload.item_id == "a"`}},
+				rejected, "work.ready",
+			)
+			if err != nil || outcome == nil || len(outcome.ActionsExecuted) != 1 || outcome.ActionsExecuted[0] != "reject" {
+				t.Fatalf("payload guard rejection = %#v, %v", outcome, err)
+			}
+			if bus.outboxCount() != 0 || bus.publishedCount() != 0 {
+				t.Fatalf("entityless durable publications = %#v, want no publication", bus.outboxIntents)
+			}
+
+			assertCount := func(label, sqliteQuery, postgresQuery string, args ...any) {
+				t.Helper()
+				query := postgresQuery
+				if store.isSQLite() {
+					query = sqliteQuery
+				}
+				var count int
+				if err := store.testDB().QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+					t.Fatalf("count %s: %v", label, err)
+				}
+				if count != 0 {
+					t.Fatalf("%s rows = %d, want 0 after entityless payload guard execution", label, count)
+				}
+			}
+			assertCount("entity_state", "SELECT COUNT(*) FROM entity_state WHERE run_id = ?", "SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid", runID)
+			assertCount("flow_instances", "SELECT COUNT(*) FROM flow_instances WHERE run_id = ? AND instance_path = ?", "SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2", runID, instancePath)
+		})
+	}
+}

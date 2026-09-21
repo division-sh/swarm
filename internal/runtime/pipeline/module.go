@@ -6,5 +6,4 @@ type WorkflowModule interface {
 	SemanticSource() semanticview.Source
 	WorkflowNodes() []WorkflowNode
 	GuardRegistry() GuardRegistry
-	ActionRegistry() ActionRegistry
 }

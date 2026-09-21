@@ -31,23 +31,20 @@ func newPipelineFixtureWorkflowModule(bundle *runtimecontracts.WorkflowContractB
 		return nil, err
 	}
 	return &pipelineFixtureWorkflowModule{
-		source:         source,
-		workflowNodes:  workflowNodes,
-		guardRegistry:  NewContractGuardRegistry(source),
-		actionRegistry: NewContractActionRegistry(source),
+		source:        source,
+		workflowNodes: workflowNodes,
+		guardRegistry: NewContractGuardRegistry(source),
 	}, nil
 }
 
 type pipelineFixtureWorkflowModule struct {
-	source         semanticview.Source
-	workflowNodes  []WorkflowNode
-	guardRegistry  GuardRegistry
-	actionRegistry ActionRegistry
+	source        semanticview.Source
+	workflowNodes []WorkflowNode
+	guardRegistry GuardRegistry
 }
 
 func (m *pipelineFixtureWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 func (m *pipelineFixtureWorkflowModule) WorkflowNodes() []WorkflowNode {
 	return append([]WorkflowNode(nil), m.workflowNodes...)
 }
-func (m *pipelineFixtureWorkflowModule) GuardRegistry() GuardRegistry   { return m.guardRegistry }
-func (m *pipelineFixtureWorkflowModule) ActionRegistry() ActionRegistry { return m.actionRegistry }
+func (m *pipelineFixtureWorkflowModule) GuardRegistry() GuardRegistry { return m.guardRegistry }

@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -32,10 +31,6 @@ func (r contractIDRegistry) sortedIDs() []string {
 	return out
 }
 
-func isSupportedWorkflowHandlerActionID(id string) bool {
-	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
-}
-
 type contractGuardRegistry struct {
 	registry     contractIDRegistry
 	instructions map[string]runtimeregistry.GuardInstruction
@@ -60,27 +55,6 @@ func (r contractGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.Guar
 	return instruction, ok
 }
 
-type contractActionRegistry struct {
-	registry     contractIDRegistry
-	instructions map[string]runtimeregistry.ActionInstruction
-}
-
-func (r contractActionRegistry) HasAction(id identity.ActionKey) bool {
-	return r.registry.has(id.String())
-}
-func (r contractActionRegistry) IsExecutable(id identity.ActionKey) bool {
-	instruction, ok := r.instructions[id.String()]
-	if !ok {
-		return false
-	}
-	return isSupportedWorkflowHandlerActionID(firstNonEmptyString(instruction.Builtin, instruction.Key.String()))
-}
-func (r contractActionRegistry) ActionIDs() []string { return r.registry.sortedIDs() }
-func (r contractActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
-	instruction, ok := r.instructions[id.String()]
-	return instruction, ok
-}
-
 func NewContractGuardRegistry(source semanticview.Source) GuardRegistry {
 	if source == nil {
 		return contractGuardRegistry{}
@@ -101,31 +75,7 @@ func NewContractGuardRegistry(source semanticview.Source) GuardRegistry {
 	}
 }
 
-func NewContractActionRegistry(source semanticview.Source) ActionRegistry {
-	if source == nil {
-		return contractActionRegistry{}
-	}
-	instructions := source.ActionInstructions()
-	actions := make(map[string]struct{}, len(instructions))
-	actionInstructions := make(map[string]runtimeregistry.ActionInstruction, len(instructions))
-	for _, instruction := range instructions {
-		id := instruction.Key.String()
-		if id != "" {
-			actions[id] = struct{}{}
-			actionInstructions[id] = instruction
-		}
-	}
-	return contractActionRegistry{
-		registry:     contractIDRegistry{ids: actions},
-		instructions: actionInstructions,
-	}
-}
-
 func normalizeWorkflowBuiltinGuardID(id string) string {
-	return strings.TrimSpace(strings.ToLower(id))
-}
-
-func normalizeWorkflowBuiltinActionID(id string) string {
 	return strings.TrimSpace(strings.ToLower(id))
 }
 

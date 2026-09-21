@@ -6,7 +6,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
 type workflowTriggerContext struct {
@@ -20,12 +19,6 @@ type handlerExecutionPlan struct {
 	EventType        string
 	Guard            string
 	GuardSpec        *runtimecontracts.GuardSpec
-	Action           string
-	EvidenceTarget   string
-	Template         string
-	InstanceIDFrom   string
-	InstanceIDPath   paths.Path
-	ConfigFrom       *runtimecontracts.ConfigFromSpec
 	Accumulate       *runtimecontracts.AccumulateSpec
 	Compute          *runtimecontracts.ComputeSpec
 	FanOutPlans      []runtimecontracts.FanOutCompiledPlan
@@ -78,12 +71,6 @@ func handlerExecutionPlanFromNodeHandler(source interface {
 		EventType:        strings.TrimSpace(eventType),
 		Guard:            handlerGuardID(handler.Guard),
 		GuardSpec:        handler.Guard,
-		Action:           strings.TrimSpace(handler.Action.ID),
-		EvidenceTarget:   strings.TrimSpace(handler.EvidenceTarget),
-		Template:         strings.TrimSpace(handler.Action.Template),
-		InstanceIDFrom:   strings.TrimSpace(handler.Action.InstanceIDFrom),
-		InstanceIDPath:   handler.Action.InstanceIDPath,
-		ConfigFrom:       handler.Action.ConfigFrom,
 		Accumulate:       handler.Accumulate,
 		Compute:          handler.Compute,
 		FanOutPlans:      fanOutPlans,
@@ -139,19 +126,7 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	if len(plan.EmitEvents) > 0 {
 		steps = append(steps, "emits")
 	}
-	if plan.Action != "" || handlerPlanHasRuleActions(plan) {
-		steps = append(steps, "action")
-	}
 	return steps
-}
-
-func handlerPlanHasRuleActions(plan handlerExecutionPlan) bool {
-	for _, rule := range plan.Rules {
-		if strings.TrimSpace(rule.Action.ID) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {

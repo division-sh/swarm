@@ -27,7 +27,7 @@ func TestActivityPublicationProjectsBeforeIdentityAndPreservesJournal(t *testing
 			if row.template {
 				mode = "template"
 			}
-			intent.RoutingSource = mustActionResultRoutingSource(t, mode, events.RouteIdentity{
+			intent.RoutingSource = mustPublicationRoutingSource(t, mode, events.RouteIdentity{
 				FlowID: row.flow, FlowInstance: row.instance, EntityID: intent.EntityID.String(),
 			})
 			intent.SuccessEvent = row.declaration
