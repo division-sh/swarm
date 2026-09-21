@@ -20,7 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
+func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 	tests := []struct {
 		name            string
 		requestEventID  string
@@ -149,7 +149,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 	}
 }
 
-func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) {
+func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) {
 	tests := []struct {
 		name            string
 		requestEventID  string
