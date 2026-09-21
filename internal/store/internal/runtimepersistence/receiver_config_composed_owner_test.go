@@ -6,8 +6,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -31,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -50,59 +49,7 @@ type receiverComposedFixture struct {
 func newReceiverComposedFixture(t *testing.T, backend string) *receiverComposedFixture {
 	t.Helper()
 	raw, db, connector := newP16RaceStore(t, backend)
-	root := t.TempDir()
-	for name, content := range map[string]string{
-		"schema.yaml":   "name: typed-owner-matrix\nstages:\n  pending: {initial: true}\n  review: {}\n  done: {}\npins:\n  outputs:\n    events: [items.child]\nconnect:\n  - {event: items.child, from: ., to: review}\n",
-		"entities.yaml": "root:\n  account_id: string\n  handled: boolean\n",
-		"events.yaml":   "request: {}\nitems.ready:\n  items: '[string]'\nitems.child:\n  request_id: string\n  label: string\n  nested: json\n",
-		"nodes.yaml": `fan-out-source:
-  execution_type: system_node
-  subscribes_to: [items.ready, request]
-  produces: [items.child]
-  event_handlers:
-    request:
-      guard: {check: "true"}
-    items.ready:
-      fan_out:
-        items_from: payload.items
-        as: entry
-        identity: entry
-        emit:
-          event: items.child
-          fields:
-            request_id: {cel: entry}
-            label: {cel: "'label-' + entry"}
-            nested: {cel: "[7, 7.0]"}
-`,
-		"review/schema.yaml": `name: review
-mode: template
-instance: request_id
-instance_variables:
-  variables:
-    label: string
-    nested: json
-    enabled: {type: boolean, default: true}
-stages:
-  pending: {initial: true}
-pins:
-  inputs:
-    events:
-      - event: items.child
-        resolution: {mode: select-or-create}
-        initialize: {label: payload.label, nested: payload.nested}
-`,
-		"review/entities.yaml": "review_item:\n  request_id: string\n",
-		"review/events.yaml":   "task.started: {}\n",
-		"review/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [items.child]\n  event_handlers:\n    items.child:\n      guard: {check: \"true\"}\n",
-	} {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	root := canonicalrouting.CopyReceiverConfigComposedOwner(t)
 	ctx, seed, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, authorActivityReceiptFixture{store: raw.(authorActivityReceiptStore), db: db}, 3, time.Now().UTC().Truncate(time.Microsecond), false, false, root, nil, nil)
 	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, ctx), 30*time.Second)
 	t.Cleanup(cancel)

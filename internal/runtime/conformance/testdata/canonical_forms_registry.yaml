@@ -778,8 +778,8 @@ wave_1:
   issue: 2320
   rows: [schema.connect, schema.imports, schema.ingress]
   go_connect_corpus:
-    total_files: 19
-    canonicalrouting_occurrences: 38
+    total_files: 20
+    canonicalrouting_occurrences: 39
     files:
       internal/cliapp/describe.go: non_authoring_text
       internal/cliapp/describe_test.go: non_authoring_text
@@ -792,6 +792,7 @@ wave_1:
       internal/runtime/testfixtures/canonicalrouting/parser_snippets.go: positive_producer_and_explicit_retired_negative
       internal/runtime/testfixtures/canonicalrouting/remaining_variants.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/receiver_config_history.go: positive_producer
+      internal/runtime/testfixtures/canonicalrouting/receiver_config_composed_owner.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/resolution_variants.go: mutation_base
