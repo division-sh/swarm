@@ -269,10 +269,9 @@ swarm secrets set sendgrid_api_key --stdin
 swarm secrets check
 ```
 
-If a flow uses `artifact_repo_commit`, the runtime artifact root must resolve to
-a writable runtime-private host path. The authoritative storage rules are in
-`platform-spec.yaml#runtime_storage.artifact_root`; do not put runtime storage
-settings in repo `.env` files.
+Handler actions are retired. Create template receivers through input-pin
+resolution and typed `initialize` bindings. Built-in local Git commits are not
+currently available; there is no replacement action or compatibility alias.
 
 ```bash
 go build ./cmd/swarm
