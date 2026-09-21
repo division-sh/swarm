@@ -21,17 +21,6 @@ func TestCompiledTransitionHandlerReferenceGuards(t *testing.T) {
 		want   string
 	}{
 		{name: "valid"},
-		{name: "unknown_action", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			h.Action.ID = "missing_action"
-		}, check: "transition_reference_validation", want: "references unknown action missing_action"},
-		{name: "unknown_rule_action_without_advance", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			h.Action = runtimecontracts.ActionSpec{}
-			h.AdvancesTo = ""
-			h.Rules = []runtimecontracts.HandlerRuleEntry{{Condition: "true", Action: runtimecontracts.ActionSpec{ID: "missing_rule_action"}}}
-		}, check: "transition_reference_validation", want: "references unknown action missing_rule_action"},
-		{name: "nonexecutable_action", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
-			b.Semantics.ActionByID["emit_opened"] = runtimecontracts.GuardActionEntry{ID: "emit_opened"}
-		}, check: "handler_field_compliance", want: "action emit_opened is not executable"},
 		{name: "unknown_guard", mutate: func(b *runtimecontracts.WorkflowContractBundle, h *runtimecontracts.SystemNodeEventHandler) {
 			h.Guard.ID = "missing_guard"
 		}, check: "transition_reference_validation", want: "references unknown guard missing_guard"},
@@ -70,51 +59,6 @@ func TestCompiledTransitionHandlerReferenceGuards(t *testing.T) {
 				t.Fatalf("missing %s %q: %#v", tc.check, tc.want, findings)
 			}
 		})
-	}
-}
-
-func TestCompiledTransitionAllRuleContextActionReferences(t *testing.T) {
-	for _, site := range []string{"rules", "on_complete", "join.on_complete", "join.timeout"} {
-		for _, action := range []string{"unknown", "valid"} {
-			t.Run(site+"/"+action, func(t *testing.T) {
-				bundle := bootverifyTransitionRuntimeOwnershipBundle()
-				node := identitytest.RootNode(t, "dispatcher")
-				handler := runtimecontracts.SystemNodeEventHandler{}
-				rule := runtimecontracts.HandlerRuleEntry{Action: runtimecontracts.ActionSpec{ID: "emit_opened"}}
-				switch action {
-				case "unknown":
-					rule.Action.ID = "missing_action"
-				}
-				switch site {
-				case "rules":
-					handler.Rules = []runtimecontracts.HandlerRuleEntry{rule}
-				case "on_complete":
-					handler.OnComplete = []runtimecontracts.HandlerRuleEntry{rule}
-				case "join.on_complete":
-					handler.Join = &runtimecontracts.JoinSpec{OnCompleteFound: true, OnComplete: rule}
-				case "join.timeout":
-					handler.Join = &runtimecontracts.JoinSpec{TimeoutFound: true}
-					handler.Join.Timeout.Outcome = rule
-				}
-				bundle.Semantics.NodeHandlers[node.Key()]["ticket.created"] = handler
-				c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
-				findings := c.transitionReferences()
-				switch action {
-				case "unknown":
-					if !reportContains(findings, "transition_reference_validation", "references unknown action missing_action") {
-						t.Fatalf("rule context escaped reference validation: %#v", findings)
-					}
-				case "valid":
-					if len(findings) != 0 {
-						t.Fatalf("valid reference rejected: %#v", findings)
-					}
-				}
-				// Reference validity never authorizes actions in unsupported contexts.
-				if site != "rules" && !reportContains(c.handlerFieldCompliance(), "handler_field_compliance", "action is unsupported") {
-					t.Fatal("unsupported action context was authorized")
-				}
-			})
-		}
 	}
 }
 

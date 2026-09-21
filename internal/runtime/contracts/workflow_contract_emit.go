@@ -9,18 +9,13 @@ import (
 )
 
 type HandlerDeclarativeEmitSite struct {
-	Source               string
-	SiteKey              string
-	RuleID               string
-	RuleRef              runtimeidentity.DeclarationIdentity
-	RuleIndex            int
-	Spec                 EmitSpec
-	ItemAlias            string
-	runtimePayloadFields []string
-}
-
-func (s HandlerDeclarativeEmitSite) RuntimePayloadFields() []string {
-	return append([]string(nil), s.runtimePayloadFields...)
+	Source    string
+	SiteKey   string
+	RuleID    string
+	RuleRef   runtimeidentity.DeclarationIdentity
+	RuleIndex int
+	Spec      EmitSpec
+	ItemAlias string
 }
 
 func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
@@ -37,13 +32,11 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 			}
 		}
 	}
-	out = append(out, actionResultEvents(handler.Action)...)
 	for _, rule := range handler.Rules {
 		if len(templateSites) == 0 {
 			out = append(out, ruleEmitEvents(rule)...)
 			continue
 		}
-		out = append(out, actionResultEvents(rule.Action)...)
 		if rule.FanOut != nil {
 			if eventType := rule.FanOut.Emit.EventType(); eventType != "" {
 				out = append(out, eventType)
@@ -88,36 +81,18 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 			ItemAlias: alias,
 		})
 	}
-	addAction := func(source, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, ruleIndex int, action ActionSpec) {
-		if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
-			return
-		}
-		for _, result := range action.ArtifactRepo.ResultPublications() {
-			before := len(out)
-			add(source+"."+result.Label(), siteKey+"."+result.Label(), ruleID, ruleRef, ruleIndex, result.EmitSpec())
-			if len(out) != before {
-				out[len(out)-1].runtimePayloadFields = result.RuntimePayloadFields()
-			}
-		}
-	}
-	addAction("handler.action", "handler.action", "", runtimeidentity.DeclarationIdentity{}, -1, handler.Action)
 	templateSites := HandlerRuleEmitTemplateSites(handler)
 	if len(templateSites) == 0 {
 		add("handler.emit", "handler.emit", "", runtimeidentity.DeclarationIdentity{}, -1, handler.Emit)
 		for idx, rule := range handler.Rules {
 			ruleRef, _ := rule.DeclarationIdentity()
 			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, ruleRef, idx, rule.Emit)
-			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, ruleRef, idx, rule.Action)
 			if rule.FanOut != nil {
 				add("handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, ruleRef, idx, rule.FanOut.Emit, rule.FanOut.As)
 			}
 		}
 	} else {
 		out = append(out, templateSites...)
-		for idx, rule := range handler.Rules {
-			ruleRef, _ := rule.DeclarationIdentity()
-			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, ruleRef, idx, rule.Action)
-		}
 	}
 	add("handler.on_success.emit", "handler.on_success.emit", "", runtimeidentity.DeclarationIdentity{}, -1, handler.OnSuccess.Emit)
 	for idx, rule := range handler.OnComplete {
@@ -208,7 +183,6 @@ func ruleEmitEvents(rule HandlerRuleEntry) []string {
 	if eventType := rule.Emit.EventType(); eventType != "" {
 		out = append(out, eventType)
 	}
-	out = append(out, actionResultEvents(rule.Action)...)
 	if rule.FanOut != nil {
 		if eventType := rule.FanOut.Emit.EventType(); eventType != "" {
 			out = append(out, eventType)
@@ -228,16 +202,6 @@ func completionRuleEmitEvents(rule HandlerRuleEntry) []string {
 		}
 	}
 	return uniqueOrderedStrings(out)
-}
-
-func actionResultEvents(action ActionSpec) []string {
-	if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
-		return nil
-	}
-	return []string{
-		action.ArtifactRepo.SuccessEvent,
-		action.ArtifactRepo.FailureEvent,
-	}
 }
 
 func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
@@ -442,20 +406,6 @@ func requireEmitEvent(label string, spec EmitSpec) error {
 
 func indexedHandlerEmitSiteKey(prefix string, index int, suffix string) string {
 	return prefix + "[" + strconv.Itoa(index) + "]." + suffix
-}
-
-func HandlerHasAmbiguousTopLevelAction(handler SystemNodeEventHandler) bool {
-	return strings.TrimSpace(handler.Action.ID) != "" && len(handler.Rules) > 0
-}
-
-func HandlerRuleActionIDs(handler SystemNodeEventHandler) []string {
-	out := make([]string, 0, len(handler.Rules))
-	for _, rule := range handler.Rules {
-		if id := strings.TrimSpace(rule.Action.ID); id != "" {
-			out = append(out, id)
-		}
-	}
-	return uniqueOrderedStrings(out)
 }
 
 func uniqueOrderedStrings(values []string) []string {

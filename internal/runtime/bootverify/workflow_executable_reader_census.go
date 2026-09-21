@@ -27,15 +27,11 @@ type executableReaderContext struct {
 // Every executable handler field has one explicit reader disposition. This is
 // deliberately a closed census rather than a generic reflection interpreter.
 var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableReaderCollector{
-	"Action": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendActionExecutableReaders(out, "action", handler.Action)
-	},
 	"Activity": func(out *[]expressionReference, ctx executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendActivityExecutableReaders(out, ctx, "activity", handler.Activity)
 	},
-	"CreateEntity":   noHandlerExecutableReaders,
-	"Description":    noHandlerExecutableReaders,
-	"EvidenceTarget": noHandlerExecutableReaders,
+	"CreateEntity": noHandlerExecutableReaders,
+	"Description":  noHandlerExecutableReaders,
 	// Emit readers are lowered once by HandlerDeclarativeEmitSites below so
 	// namespace sugar, fan-out aliases, and join-result visibility stay exact.
 	"Emit":      noHandlerExecutableReaders,
@@ -105,9 +101,6 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	"PolicyRow":  noHandlerRuleExecutableReaders,
 	"AdvancesTo": noHandlerRuleExecutableReaders,
 	"Emit":       noHandlerRuleExecutableReaders,
-	"Action": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
-		appendActionExecutableReaders(out, prefix+".action", rule.Action)
-	},
 	"Activity": func(out *[]expressionReference, ctx executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		appendActivityExecutableReaders(out, ctx, prefix+".activity", rule.Activity)
 	},
@@ -206,48 +199,6 @@ func appendExpressionValueMapExecutableReaders(out *[]expressionReference, kind 
 	sort.Strings(keys)
 	for _, key := range keys {
 		appendExpressionValueExecutableReaders(out, kind+"."+strings.TrimSpace(key), values[key], phase)
-	}
-}
-
-func appendActionExecutableReaders(out *[]expressionReference, kind string, action runtimecontracts.ActionSpec) {
-	phase := runtimepipeline.WorkflowEntityFieldLifecycleRule
-	appendExecutableReader(out, kind+".instance_id_from", action.InstanceIDFrom, phase)
-	if action.ConfigFrom != nil {
-		for _, entry := range action.ConfigFrom.Entries {
-			appendExecutableReader(out, kind+".config_from."+strings.TrimSpace(entry.Key), entry.Ref, phase)
-		}
-		keys := make([]string, 0, len(action.ConfigFrom.Bindings))
-		for key := range action.ConfigFrom.Bindings {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			appendExecutableReader(out, kind+".config_from."+strings.TrimSpace(key), action.ConfigFrom.Bindings[key], phase)
-		}
-	}
-	if mailbox := action.Mailbox; mailbox != nil {
-		appendExpressionValueExecutableReaders(out, kind+".mailbox.item_type", mailbox.ItemType, phase)
-		appendExpressionValueExecutableReaders(out, kind+".mailbox.severity", mailbox.Severity, phase)
-		appendExpressionValueExecutableReaders(out, kind+".mailbox.summary", mailbox.Summary, phase)
-		appendExpressionValueExecutableReaders(out, kind+".mailbox.entity_id", mailbox.EntityID, phase)
-		appendExpressionValueExecutableReaders(out, kind+".mailbox.flow_instance", mailbox.FlowInstance, phase)
-		appendExpressionValueMapExecutableReaders(out, kind+".mailbox.payload", mailbox.Payload, phase)
-	}
-	if artifact := action.ArtifactRepo; artifact != nil {
-		appendExpressionValueExecutableReaders(out, kind+".artifact_repo.repo_id", artifact.RepoID, phase)
-		appendExpressionValueExecutableReaders(out, kind+".artifact_repo.namespace", artifact.Namespace, phase)
-		appendExpressionValueExecutableReaders(out, kind+".artifact_repo.partition_key", artifact.PartitionKey, phase)
-		appendExpressionValueExecutableReaders(out, kind+".artifact_repo.display_slug", artifact.DisplaySlug, phase)
-		appendExpressionValueExecutableReaders(out, kind+".artifact_repo.request_id", artifact.RequestID, phase)
-		appendExpressionValueExecutableReaders(out, kind+".artifact_repo.author", artifact.Author, phase)
-		appendExpressionValueMapExecutableReaders(out, kind+".artifact_repo.provenance", artifact.Provenance, phase)
-		for i, file := range artifact.Files {
-			prefix := fmt.Sprintf("%s.artifact_repo.files[%d]", kind, i)
-			appendExpressionValueExecutableReaders(out, prefix+".path", file.Path, phase)
-			appendExpressionValueExecutableReaders(out, prefix+".content", file.Content, phase)
-		}
-		// Success/failure payloads are declarative emit sites and are lowered by
-		// the canonical emit pass in handlerExecutableReaderExpressionsForSource.
 	}
 }
 
@@ -378,7 +329,7 @@ func handlerRuleExecutableReaderFieldIsActive(collection, field string) bool {
 		return true
 	}
 	switch field {
-	case "Action", "Activity":
+	case "Activity":
 		return false
 	default:
 		return true

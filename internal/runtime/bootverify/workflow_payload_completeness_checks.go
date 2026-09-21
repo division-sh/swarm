@@ -179,7 +179,7 @@ func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidenti
 		})
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
-		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec, site.RuntimePayloadFields())
+		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec, nil)
 	}
 	if handler.Guard != nil {
 		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {

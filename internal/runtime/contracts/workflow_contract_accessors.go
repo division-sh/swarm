@@ -672,26 +672,12 @@ func (b *WorkflowContractBundle) GuardEntries() []GuardActionEntry {
 	}
 	return b.Semantics.Guards
 }
-func (b *WorkflowContractBundle) ActionEntries() []GuardActionEntry {
-	if b == nil {
-		return nil
-	}
-	return b.Semantics.Actions
-}
 func (b *WorkflowContractBundle) GuardEntryByID(id string) (GuardActionEntry, bool) {
 	id = strings.TrimSpace(id)
 	if b == nil || id == "" {
 		return GuardActionEntry{}, false
 	}
 	entry, ok := b.Semantics.GuardByID[id]
-	return entry, ok
-}
-func (b *WorkflowContractBundle) ActionEntryByID(id string) (GuardActionEntry, bool) {
-	id = strings.TrimSpace(id)
-	if b == nil || id == "" {
-		return GuardActionEntry{}, false
-	}
-	entry, ok := b.Semantics.ActionByID[id]
 	return entry, ok
 }
 func (b *WorkflowContractBundle) FlowInitialStage(flowID string) string {

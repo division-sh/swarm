@@ -17,10 +17,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1253,671 +1251,6 @@ func TestNonInputEventMetadataProducerSource_AllowsAnnotatedSourceText(t *testin
 	}
 }
 
-func TestRun_ReportsRecordEvidenceMissingEvidenceTarget(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.completed": {
-						Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: none") {
-		t.Fatalf("expected handler_field_compliance error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsRecordEvidenceMissingTargetNamesDeclaredFlowTargetsSorted(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.completed": {
-						Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
-					},
-				},
-			},
-			"node-b": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.approved": {
-						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
-						EvidenceTarget: "zeta_evidence",
-					},
-				},
-			},
-			"node-c": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.rejected": {
-						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
-						EvidenceTarget: "alpha_evidence",
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: alpha_evidence, zeta_evidence") {
-		t.Fatalf("expected sorted declared-targets teaching error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsRuleRecordEvidenceMissingTargetNamesDeclaredFlowTargets(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"node-a": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.completed": {
-						Rules: []runtimecontracts.HandlerRuleEntry{{
-							ID:     "approve",
-							Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
-						}},
-					},
-				},
-			},
-			"node-b": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.approved": {
-						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
-						EvidenceTarget: "build_evidence",
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: build_evidence") {
-		t.Fatalf("expected rule-branch teaching error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_RecordEvidenceMissingTargetDoesNotLeakOtherFlowTargets(t *testing.T) {
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), writeEvidenceLeakProofFixture(t), runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: none") {
-		t.Fatalf("expected flow-scoped teaching error without sibling-flow leakage, got %#v", report.Errors())
-	}
-}
-
-// writeEvidenceLeakProofFixture writes a real two-flow bundle: a root node
-// whose record_evidence omits evidence_target and a child-flow node whose
-// record_evidence declares one. The fixture loads through the production
-// loader so nodeSources attribution is real and the flow-scoping filter is
-// load-bearing (deleting it must fail the leak test).
-func writeEvidenceLeakProofFixture(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-name: evidence-leak-proof
-initial_state: collecting
-terminal_states: [done]
-states: [collecting, done]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
-evidence.requested:
-  finding: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-root-node:
-  execution_type: system_node
-  subscribes_to: [evidence.requested]
-  event_handlers:
-    evidence.requested:
-      action: record_evidence
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), `
-name: child
-mode: static
-states: [ready]
-initial_state: ready
-terminal_states: [ready]
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
-child.evidence:
-  finding: string
-`)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
-child-node:
-  execution_type: system_node
-  subscribes_to: [child.evidence]
-  event_handlers:
-    child.evidence:
-      action: record_evidence
-      evidence_target: child_evidence
-`)
-	return root
-}
-
-func TestRun_ReportsMailboxWriteMissingMailboxSpec(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"mailbox-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.review_requested": {
-						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox_write is missing mailbox") {
-		t.Fatalf("expected handler_field_compliance missing mailbox error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsRuleMailboxWriteMissingMailboxSpec(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"mailbox-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.review_requested": {
-						Rules: []runtimecontracts.HandlerRuleEntry{{
-							ID:     "needs-human",
-							Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
-						}},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "handler mailbox.review_requested rule needs-human mailbox_write is missing mailbox") {
-		t.Fatalf("expected rule handler_field_compliance missing mailbox error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsMailboxWriteMissingRequiredFields(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"mailbox-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.review_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID:      "mailbox_write",
-							Mailbox: &runtimecontracts.MailboxWriteSpec{},
-						},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox_write is missing mailbox.item_type") {
-		t.Fatalf("expected handler_field_compliance missing mailbox.item_type error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox_write is missing mailbox.summary") {
-		t.Fatalf("expected handler_field_compliance missing mailbox.summary error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsRuleMailboxWriteMissingRequiredFields(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"mailbox-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.review_requested": {
-						Rules: []runtimecontracts.HandlerRuleEntry{{
-							ID: "needs-human",
-							Action: runtimecontracts.ActionSpec{
-								ID:      "mailbox_write",
-								Mailbox: &runtimecontracts.MailboxWriteSpec{},
-							},
-						}},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "handler mailbox.review_requested rule needs-human mailbox_write is missing mailbox.item_type") {
-		t.Fatalf("expected rule handler_field_compliance missing mailbox.item_type error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "handler mailbox.review_requested rule needs-human mailbox_write is missing mailbox.summary") {
-		t.Fatalf("expected rule handler_field_compliance missing mailbox.summary error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsHandlerLevelActionWithRules(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"mailbox-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.review_requested": {
-						Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
-						Rules: []runtimecontracts.HandlerRuleEntry{{
-							ID:        "needs-human",
-							Condition: "else",
-						}},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "handler-level action is invalid when rules are present") {
-		t.Fatalf("expected ambiguous handler-level action error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsUnsupportedRuleActionContexts(t *testing.T) {
-	cases := []struct {
-		name    string
-		handler runtimecontracts.SystemNodeEventHandler
-		want    string
-	}{
-		{
-			name: "on_complete",
-			handler: runtimecontracts.SystemNodeEventHandler{
-				OnComplete: []runtimecontracts.HandlerRuleEntry{{
-					ID:     "complete",
-					Action: runtimecontracts.ActionSpec{ID: "mailbox_write"},
-				}},
-			},
-			want: "handler.on_complete[complete] action is unsupported",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				Nodes: map[string]runtimecontracts.SystemNodeContract{
-					"mailbox-node": {
-						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-							"mailbox.review_requested": tc.handler,
-						},
-					},
-				},
-			})
-
-			report := Run(context.Background(), source, Options{})
-
-			if !reportContains(report.Errors(), "handler_field_compliance", tc.want) {
-				t.Fatalf("expected unsupported rule action context error %q, got %#v", tc.want, report.Errors())
-			}
-		})
-	}
-}
-
-func TestRun_ReportsMailboxDeclarationOnNonMailboxAction(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"mailbox-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"mailbox.review_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID: "record_evidence",
-							Mailbox: &runtimecontracts.MailboxWriteSpec{
-								ItemType: runtimecontracts.LiteralExpression("review_request"),
-								Summary:  runtimecontracts.LiteralExpression("review"),
-							},
-						},
-						EvidenceTarget: "evidence",
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "mailbox declaration requires action mailbox_write") {
-		t.Fatalf("expected handler_field_compliance mailbox/action mismatch error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsArtifactRepoCommitMissingSpec(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"artifact-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"artifact.commit_requested": {
-						Action: runtimecontracts.ActionSpec{ID: "artifact_repo_commit"},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo_commit is missing artifact_repo") {
-		t.Fatalf("expected handler_field_compliance missing artifact_repo error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsArtifactRepoCommitInvalidShape(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"artifact-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"artifact.commit_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID: "artifact_repo_commit",
-							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-								Provider:    "s3",
-								RepoID:      runtimecontracts.RefExpression("entity.repo_id"),
-								RequestID:   runtimecontracts.RefExpression("payload.request_id"),
-								Namespace:   runtimecontracts.LiteralExpression("../escape"),
-								DisplaySlug: runtimecontracts.LiteralExpression("../escape"),
-								Provenance: map[string]runtimecontracts.ExpressionValue{
-									"bad/key": {},
-								},
-								AllowedPaths: []string{"../escape.yaml"},
-								Files: []runtimecontracts.ArtifactRepoFileSpec{{
-									Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
-									Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
-									ContentType: "json",
-								}},
-								Output: runtimecontracts.ArtifactRepoOutputSpec{
-									RepoURL: "repo_url",
-									Status:  "status",
-								},
-								SuccessEvent: "artifact_repo.commit_completed",
-								SuccessPayload: map[string]runtimecontracts.ExpressionValue{
-									"repo_id": runtimecontracts.RefExpression("entity.repo_id"),
-								},
-								FailurePayload: map[string]runtimecontracts.ExpressionValue{
-									"producer": {},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "provider s3 is unsupported") {
-		t.Fatalf("expected unsupported provider error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.namespace") {
-		t.Fatalf("expected invalid namespace error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.display_slug") {
-		t.Fatalf("expected invalid display_slug error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.provenance key") {
-		t.Fatalf("expected invalid provenance key error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo.provenance.bad/key is missing value") {
-		t.Fatalf("expected missing provenance value error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "path traversal is not allowed") {
-		t.Fatalf("expected traversal allowlist error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "content_type \"json\" is unsupported") {
-		t.Fatalf("expected unsupported content_type error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "missing artifact_repo.output.current_ref") {
-		t.Fatalf("expected missing current_ref output error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "success_event artifact_repo.commit_completed does not resolve") {
-		t.Fatalf("expected unresolved success_event error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "success_payload must not override runtime-owned field repo_id") {
-		t.Fatalf("expected reserved success_payload field error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "failure_payload requires artifact_repo.failure_event") {
-		t.Fatalf("expected failure_payload without failure_event error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "failure_payload.producer is missing value") {
-		t.Fatalf("expected missing failure_payload value error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
-	source := compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"artifact-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"artifact.commit_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID: "artifact_repo_commit",
-							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-								Provider:     "local_git",
-								RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
-								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
-								Namespace:    runtimecontracts.RefExpression("payload.namespace"),
-								AllowedPaths: []string{"readme.md"},
-								Files: []runtimecontracts.ArtifactRepoFileSpec{{
-									Path:        runtimecontracts.LiteralExpression("readme.md"),
-									Content:     runtimecontracts.RefExpression("payload.readme"),
-									ContentType: "markdown",
-								}},
-								Output: runtimecontracts.ArtifactRepoOutputSpec{
-									RepoURL:           "repo_url",
-									CurrentRef:        "current_ref",
-									FileManifest:      "file_manifest",
-									Status:            "status",
-									Failure:           "failure",
-									LastRequestID:     "last_request_id",
-									LastSourceEventID: "last_source_event_id",
-								},
-								SuccessEvent: "artifact_repo.commit_completed",
-								FailureEvent: "artifact_repo.commit_failed",
-							},
-						},
-					},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"artifact.commit_requested": {},
-			"artifact_repo.commit_completed": {
-				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-					"repo_id":         {Type: "string"},
-					"namespace":       {Type: "string"},
-					"request_id":      {Type: "string"},
-					"source_event_id": {Type: "string"},
-					"repo_url":        {Type: "string"},
-					"current_ref":     {Type: "string"},
-					"file_manifest":   {Type: "object"},
-					"provenance":      {Type: "object"},
-					"result_kind":     {Type: "string"},
-				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"}},
-			},
-			"artifact_repo.commit_failed": {
-				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-					"repo_id":         {Type: "string"},
-					"namespace":       {Type: "string"},
-					"request_id":      {Type: "string"},
-					"source_event_id": {Type: "string"},
-					"failure":         {Type: runtimefailures.EnvelopeSchemaVersion + " envelope"},
-					"provenance":      {Type: "object"},
-					"request_copy":    {Type: "string"},
-				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"}},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "success_event artifact_repo.commit_completed requires payload field result_kind") {
-		t.Fatalf("expected missing success result required payload field error, got %#v", report.Errors())
-	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "failure_event artifact_repo.commit_failed requires payload field request_copy") {
-		t.Fatalf("expected missing failure result required payload field error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *testing.T) {
-	source := compileBootverifyRootSource(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"artifact-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"artifact.commit_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID: "artifact_repo_commit",
-							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-								Provider:     "local_git",
-								RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
-								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
-								Namespace:    runtimecontracts.RefExpression("payload.namespace"),
-								AllowedPaths: []string{"readme.md"},
-								Files: []runtimecontracts.ArtifactRepoFileSpec{{
-									Path:        runtimecontracts.LiteralExpression("readme.md"),
-									Content:     runtimecontracts.RefExpression("payload.readme"),
-									ContentType: "markdown",
-								}},
-								Output: runtimecontracts.ArtifactRepoOutputSpec{
-									RepoURL:           "repo_url",
-									CurrentRef:        "current_ref",
-									FileManifest:      "file_manifest",
-									Status:            "status",
-									Failure:           "failure",
-									LastRequestID:     "last_request_id",
-									LastSourceEventID: "last_source_event_id",
-								},
-								SuccessEvent: "artifact_repo.commit_completed",
-								SuccessPayload: map[string]runtimecontracts.ExpressionValue{
-									"result_kind": runtimecontracts.LiteralExpression("success"),
-								},
-								FailureEvent: "artifact_repo.commit_failed",
-								FailurePayload: map[string]runtimecontracts.ExpressionValue{
-									"request_copy": runtimecontracts.RefExpression("payload.request_id"),
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"artifact.commit_requested": {},
-			"artifact_repo.commit_completed": {
-				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-					"repo_id":         {Type: "string"},
-					"namespace":       {Type: "string"},
-					"request_id":      {Type: "string"},
-					"source_event_id": {Type: "string"},
-					"repo_url":        {Type: "string"},
-					"current_ref":     {Type: "object"},
-					"file_manifest":   {Type: "string"},
-					"provenance":      {Type: "object"},
-					"result_kind":     {Type: "string"},
-				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"}},
-			},
-			"artifact_repo.commit_failed": {
-				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-					"repo_id":         {Type: "string"},
-					"namespace":       {Type: "string"},
-					"request_id":      {Type: "string"},
-					"source_event_id": {Type: "string"},
-					"failure":         {Type: "string"},
-					"provenance":      {Type: "string"},
-					"request_copy":    {Type: "string"},
-				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"}},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	for _, want := range []string{
-		"success_event artifact_repo.commit_completed runtime-owned field current_ref must be string-compatible, got object",
-		"success_event artifact_repo.commit_completed runtime-owned field file_manifest must be object-compatible, got string",
-		"failure_event artifact_repo.commit_failed runtime-owned field failure must be platform.failure/v1 envelope",
-		"failure_event artifact_repo.commit_failed runtime-owned field provenance must be object-compatible, got string",
-	} {
-		if !reportContains(report.Errors(), "handler_field_compliance", want) {
-			t.Fatalf("expected handler_field_compliance error containing %q, got %#v", want, report.Errors())
-		}
-	}
-}
-
-func TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"artifact-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"artifact.commit_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID: "artifact_repo_commit",
-							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-								Provider:     "local_git",
-								RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
-								Namespace:    runtimecontracts.LiteralExpression("tenant.alpha"),
-								RequestID:    runtimecontracts.RefExpression("payload.request_id"),
-								AllowedPaths: []string{"specs/mvp.yaml"},
-								Files: []runtimecontracts.ArtifactRepoFileSpec{{
-									Path:        runtimecontracts.LiteralExpression("specs/mvp.yaml"),
-									Content:     runtimecontracts.RefExpression("payload.mvp_yaml"),
-									ContentType: "yaml",
-								}},
-								Output: runtimecontracts.ArtifactRepoOutputSpec{
-									RepoURL:           "repo_url",
-									CurrentRef:        "current_ref",
-									FileManifest:      "file_manifest",
-									Status:            "status",
-									Failure:           "failure",
-									LastRequestID:     "last_request_id",
-									LastSourceEventID: "last_source_event_id",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "schema.type is required for yaml content") {
-		t.Fatalf("expected yaml schema requirement error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"artifact-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"artifact.commit_requested": {
-						Action: runtimecontracts.ActionSpec{
-							ID: "record_evidence",
-							ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-								Provider: "local_git",
-							},
-						},
-						EvidenceTarget: "evidence",
-					},
-				},
-			},
-		},
-	})
-
-	report := Run(context.Background(), source, Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "artifact_repo declaration requires action artifact_repo_commit") {
-		t.Fatalf("expected handler_field_compliance artifact/action mismatch error, got %#v", report.Errors())
-	}
-}
-
 func TestRun_MapsIntentStubToIntentResolutionWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-stub")
 
@@ -2658,43 +1991,6 @@ func TestRun_AllowsFanOutDerivedAccumulationSourceEvent(t *testing.T) {
 	}
 }
 
-func TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom(t *testing.T) {
-	repoRoot := repoRootForBootverifyTest(t)
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier9-composition-patterns", "test-compose-create-instance-config")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle := loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
-	node := bundle.Nodes["spawner"]
-	handler := node.EventHandlers["spawn.requested"]
-	handler.Action.InstanceIDFrom = ""
-	handler.Action.InstanceIDPath = paths.Path{}
-	node.EventHandlers["spawn.requested"] = handler
-	bundle.Nodes["spawner"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "create_flow_instance is missing instance_id_from") {
-		t.Fatalf("expected handler_field_compliance missing instance_id_from error, got %#v", report.Errors())
-	}
-}
-
-func TestRun_ReportsCreateFlowInstanceMissingConfigFrom(t *testing.T) {
-	repoRoot := repoRootForBootverifyTest(t)
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier9-composition-patterns", "test-compose-create-instance-config")
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle := loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
-	node := bundle.Nodes["spawner"]
-	handler := node.EventHandlers["spawn.requested"]
-	handler.Action.ConfigFrom = &runtimecontracts.ConfigFromSpec{Bindings: map[string]string{}}
-	node.EventHandlers["spawn.requested"] = handler
-	bundle.Nodes["spawner"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "handler_field_compliance", "create_flow_instance is missing config_from") {
-		t.Fatalf("expected handler_field_compliance missing config_from error, got %#v", report.Errors())
-	}
-}
-
 func TestRun_MapsStateMachineMismatchToNamedError(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-state-machine-invalid")
 
@@ -3053,7 +2349,8 @@ func TestRun_MapsHandlerFieldComplianceToNamedError(t *testing.T) {
 	if !ok {
 		t.Fatal("expected at least one handler")
 	}
-	handler.Action = runtimecontracts.ActionSpec{ID: "missing.handler.action"}
+	handler.Guard = &runtimecontracts.GuardSpec{ID: "empty.guard"}
+	bundle.Semantics.GuardByID["empty.guard"] = runtimecontracts.GuardActionEntry{ID: "empty.guard"}
 	writeBundleHandler(t, bundle, node, eventType, handler)
 	source := semanticview.Wrap(bundle)
 
@@ -3062,7 +2359,7 @@ func TestRun_MapsHandlerFieldComplianceToNamedError(t *testing.T) {
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "handler_field_compliance", "action missing.handler.action is not executable") {
+	if !reportContains(report.Errors(), "handler_field_compliance", "guard empty.guard has no executable runtime implementation") {
 		t.Fatalf("expected handler_field_compliance error, got %#v", report.Errors())
 	}
 }
@@ -6728,34 +6025,6 @@ func TestFlowEventExistsDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 	}
 }
 
-func TestArtifactRepoResultEventEntryDoesNotUseAnotherFlowDeclaration(t *testing.T) {
-	root := runtimecontracts.FlowContractView{
-		Path:  ".",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"artifact.completed": {},
-		},
-		Children: []runtimecontracts.FlowContractView{{
-			Path:  "child",
-			Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		}},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Events: root.Events,
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".":     &root,
-				"child": &root.Children[0],
-			},
-		},
-	}
-
-	if _, ok := artifactRepoResultEventEntry(semanticview.Wrap(bundle), "child", "artifact.completed"); ok {
-		t.Fatal("another flow's event declaration satisfied artifact result validation")
-	}
-}
-
 func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
 	topology := bundle.Semantics.StageTopologies["."]
@@ -7078,76 +6347,48 @@ func TestRun_HarnessInputSatisfiesAccumulatorProducerPathFromPin(t *testing.T) {
 	}
 }
 
-func TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult(t *testing.T) {
-	artifactHandler := runtimecontracts.SystemNodeEventHandler{
-		Action: runtimecontracts.ActionSpec{
-			ID: "artifact_repo_commit",
-			ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
-				Provider:     "local_git",
-				RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
-				Namespace:    runtimecontracts.RefExpression("event.run_id"),
-				RequestID:    runtimecontracts.RefExpression("payload.request_id"),
-				AllowedPaths: []string{"readme.md"},
-				Files: []runtimecontracts.ArtifactRepoFileSpec{{
-					Path:        runtimecontracts.LiteralExpression("readme.md"),
-					Content:     runtimecontracts.RefExpression("payload.readme"),
-					ContentType: "markdown",
-				}},
-				Output: runtimecontracts.ArtifactRepoOutputSpec{
-					RepoURL:           "repo_url",
-					CurrentRef:        "current_ref",
-					FileManifest:      "file_manifest",
-					Status:            "status",
-					Failure:           "failure",
-					LastRequestID:     "last_request_id",
-					LastSourceEventID: "last_source_event_id",
-				},
-				SuccessEvent: "artifact_repo.commit_completed",
-				FailureEvent: "artifact_repo.commit_failed",
-			},
-		},
-	}
+func TestRun_AllowsTimerStartEventProducedByDeclarativeEmit(t *testing.T) {
+	producerHandler := runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "work.completed"}}
 	timerHandler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"artifact.commit_requested":      {},
-			"artifact_repo.commit_completed": artifactRepoTimerResultEventEntry(true),
-			"artifact_repo.commit_failed":    artifactRepoTimerResultEventEntry(false),
-			"timer.reminder":                 {},
+			"work.requested": {},
+			"work.completed": {},
+			"timer.reminder": {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"artifact-node": {
+			"producer-node": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"artifact.commit_requested": artifactHandler,
-					"timer.reminder":            timerHandler,
+					"work.requested": producerHandler,
+					"timer.reminder": timerHandler,
 				},
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Timers: []runtimecontracts.WorkflowTimerContract{{
 				ID:      "reminder",
-				Owner:   "artifact-node",
+				Owner:   "producer-node",
 				Event:   "timer.reminder",
 				Delay:   "1m",
-				StartOn: "event:artifact_repo.commit_completed",
+				StartOn: "event:work.completed",
 			}},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"artifact-node": {
-					"artifact.commit_requested": artifactHandler,
-					"timer.reminder":            timerHandler,
+				"producer-node": {
+					"work.requested": producerHandler,
+					"timer.reminder": timerHandler,
 				},
 			},
 			EventOwners: map[string][]string{
-				"artifact.commit_requested": {"artifact-node"},
-				"timer.reminder":            {"artifact-node"},
+				"work.requested": {"producer-node"},
+				"timer.reminder": {"producer-node"},
 			},
 		},
 	})
 
 	report := Run(context.Background(), source, Options{})
 
-	if reportContains(report.Errors(), "timer_validation", "start_on event artifact_repo.commit_completed has no producer path") {
-		t.Fatalf("unexpected timer_validation producer error for artifact result event, got %#v", report.Errors())
+	if reportContains(report.Errors(), "timer_validation", "start_on event work.completed has no producer path") {
+		t.Fatalf("unexpected timer_validation producer error for declarative emit, got %#v", report.Errors())
 	}
 }
 
@@ -7543,29 +6784,6 @@ func writeTimerStateCancelReachabilityFixture(t *testing.T, opts timerStateCance
 	return canonicalrouting.CopyTimerStateCancelReachability(t, variant)
 }
 
-func artifactRepoTimerResultEventEntry(success bool) runtimecontracts.EventCatalogEntry {
-	properties := map[string]runtimecontracts.EventFieldSpec{
-		"repo_id":         {Type: "string"},
-		"namespace":       {Type: "string"},
-		"request_id":      {Type: "string"},
-		"source_event_id": {Type: "string"},
-		"provenance":      {Type: "object"},
-	}
-	required := []string{"repo_id", "namespace", "request_id", "source_event_id", "provenance"}
-	if success {
-		properties["repo_url"] = runtimecontracts.EventFieldSpec{Type: "string"}
-		properties["current_ref"] = runtimecontracts.EventFieldSpec{Type: "string"}
-		properties["file_manifest"] = runtimecontracts.EventFieldSpec{Type: "object"}
-		required = append(required, "repo_url", "current_ref", "file_manifest")
-	} else {
-		properties["failure"] = runtimecontracts.EventFieldSpec{Type: "string"}
-		required = append(required, "failure")
-	}
-	return runtimecontracts.EventCatalogEntry{
-		Payload: runtimecontracts.EventPayloadSpec{Properties: properties, Required: required},
-	}
-}
-
 func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
 	t.Helper()
 	root := t.TempDir()
@@ -7931,7 +7149,6 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"ticket.created": {
 					AdvancesTo: "opened",
-					Action:     runtimecontracts.ActionSpec{ID: "emit_opened"},
 					Emit:       runtimecontracts.EmitSpec{Event: "ticket.opened"},
 					Guard:      &runtimecontracts.GuardSpec{ID: "allow_ticket"},
 				},
@@ -7970,12 +7187,6 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
 				".": runtimecontracts.BuildWorkflowStageTopology(".", "created", []string{"created", "opened"}, []string{"opened"},
 					[]runtimecontracts.HandlerTransitionSemantic{{Node: dispatcher, EventType: "ticket.created", AdvancesTo: "opened"}}, nil, nil),
-			},
-			ActionByID: map[string]runtimecontracts.GuardActionEntry{
-				"emit_opened": {
-					ID:              "emit_opened",
-					PlatformBuiltin: "record_evidence",
-				},
 			},
 			GuardByID: map[string]runtimecontracts.GuardActionEntry{
 				"allow_ticket": {

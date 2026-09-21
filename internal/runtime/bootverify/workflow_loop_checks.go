@@ -198,31 +198,7 @@ func validateLoopEmitCarriage(source semanticview.Source, plan runtimecontracts.
 			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("%s from %s:%s must carry %s from loop.revision_id", site.Source, operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
 		}
 	}
-	for _, action := range loopHandlerActions(handler) {
-		if action.Mailbox == nil {
-			continue
-		}
-		value, ok := action.Mailbox.Payload[plan.RevisionField]
-		if !ok || !runtimecontracts.CarriesLoopRevision(value) {
-			findings = append(findings, loopFinding(loopLocation(plan), fmt.Sprintf("mailbox_write from %s:%s must carry %s from loop.revision_id in mailbox.payload", operation.Node.Key(), operation.HandlerEvent, plan.RevisionField)))
-		}
-	}
 	return findings
-}
-
-func loopHandlerActions(handler runtimecontracts.SystemNodeEventHandler) []runtimecontracts.ActionSpec {
-	out := []runtimecontracts.ActionSpec{handler.Action}
-	appendRules := func(rules []runtimecontracts.HandlerRuleEntry) {
-		for _, rule := range rules {
-			out = append(out, rule.Action)
-		}
-	}
-	appendRules(handler.Rules)
-	appendRules(handler.OnComplete)
-	if handler.Join != nil {
-		out = append(out, handler.Join.OnComplete.Action, handler.Join.Timeout.Outcome.Action)
-	}
-	return out
 }
 
 func validateLoopRegionHandlers(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan, topology runtimecontracts.WorkflowStageTopology, region map[string]struct{}) []Finding {

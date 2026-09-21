@@ -105,24 +105,6 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsRenderedNodeIDTempl
 	}
 }
 
-func TestValidateWorkflowContractBundleLoadConstraintsRejectsUnsupportedHandlerAction(t *testing.T) {
-	bundle := loadCurrentWorkflowBundleForTest(t)
-
-	nodeID, eventType, handler, ok := firstLoadedWorkflowHandler(bundle)
-	if !ok {
-		t.Fatal("expected workflow handler")
-	}
-	handler.Action = ActionSpec{ID: "increment_revision_count"}
-	node := bundle.Nodes[nodeID]
-	node.EventHandlers[eventType] = handler
-	setLoadedWorkflowNode(t, bundle, nodeID, node)
-
-	err := validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !contractErrorContains(err, "action increment_revision_count is not in platform spec") {
-		t.Fatalf("unexpected load validation error: %v", err)
-	}
-}
-
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefinements(t *testing.T) {
 	minLength := 1
 	bundle := &WorkflowContractBundle{
@@ -317,22 +299,6 @@ value:
 	if err == nil || !strings.Contains(err.Error(), "pattern") {
 		t.Fatalf("event catalog admission error = %v, want pattern failure", err)
 	}
-}
-
-func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
-	bundle := loadCurrentWorkflowBundleForTest(t)
-	for _, node := range bundle.Nodes {
-		for _, handler := range node.EventHandlers {
-			if strings.TrimSpace(handler.Action.ID) != "record_evidence" {
-				continue
-			}
-			if strings.TrimSpace(handler.EvidenceTarget) == "" {
-				t.Fatal("expected record_evidence handler to preserve evidence_target")
-			}
-			return
-		}
-	}
-	t.Fatal("expected at least one record_evidence handler")
 }
 
 func TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields(t *testing.T) {

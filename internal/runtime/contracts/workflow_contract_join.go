@@ -250,6 +250,9 @@ func decodeJoinTimeout(node *yaml.Node, out *JoinTimeoutSpec) error {
 }
 
 func validateJoinMapping(context string, node *yaml.Node, allowed map[string]struct{}) error {
+	if err := validateRetiredHandlerActionFields(node, context); err != nil {
+		return err
+	}
 	if node == nil || node.Kind == 0 || yamlNodeIsNull(node) {
 		return nil
 	}
@@ -369,7 +372,6 @@ func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
 	add("data_accumulation", handler.DataAccumulation.HasWrites())
 	add("emit", !handler.Emit.Empty())
 	add("on_success", !handler.OnSuccess.Empty())
-	add("action", strings.TrimSpace(handler.Action.ID) != "")
 	add("activity", !handler.Activity.Empty())
 	add("compute", handler.Compute != nil)
 	add("query", handler.Query != nil)

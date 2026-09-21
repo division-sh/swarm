@@ -108,7 +108,7 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	options := sortedLoaderFieldOptions(allowed)
 	remediation := fmt.Sprintf("Use one of the supported %s fields.", context)
 	if context == "handler" && key == "mailbox_write" {
-		remediation = "Use the supported action field, for example `action: {id: mailbox_write, mailbox: {...}}`."
+		remediation = "Authored handler actions are retired; use supported notify_human/ask_human operations for mailbox notices or decisions."
 	}
 	return &LoaderDiagnostic{
 		Code:         "contract_loader.undefined_field",
@@ -357,8 +357,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return systemNodeContractFields
 	case "handler":
 		return handlerFieldOptions
-	case "action":
-		return actionFieldOptions
 	case "input event pin":
 		return inputEventPinFieldOptions
 	case "output event pin":
@@ -385,18 +383,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return activityFieldOptions
 	case "activity.approval":
 		return activityApprovalFieldOptions
-	case "mailbox":
-		return mailboxFieldOptions
-	case "artifact_repo":
-		return artifactRepoFieldOptions
-	case "artifact_repo.files":
-		return artifactRepoFilesFieldOptions
-	case "artifact_repo.files.schema":
-		return artifactRepoFilesSchemaFieldOptions
-	case "artifact_repo.output":
-		return artifactRepoOutputFieldOptions
-	case "artifact_repo.limits":
-		return artifactRepoLimitsFieldOptions
 	case "agent":
 		return agentRegistryEntryFieldOptions
 	case "connector_packs":

@@ -57,7 +57,7 @@ func TestW2RejectsInvalidCompiledPinAndPermissionInputs(t *testing.T) {
 	}
 }
 
-func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) {
+func TestWorkflowSemanticsRuleEmitUsesHandlerAdvancesToFallback(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{
 			"review_node": {
@@ -68,7 +68,7 @@ func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) 
 							{
 								ID:        "needs-human",
 								Condition: "payload.amount > 100",
-								Action:    ActionSpec{ID: "request_review"},
+								Emit:      EmitSpec{Event: "review.requested"},
 							},
 							{
 								ID:        "auto-approve",
@@ -92,8 +92,8 @@ func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) 
 		t.Fatalf("inherited target must remain handler-owned, not a fabricated rule advance: %#v", carriers)
 	}
 	rules := transitions[0].Rules
-	if len(rules) != 2 || rules[0].Action.ID != "request_review" || rules[1].Action.ID != "" {
-		t.Fatalf("handler owner lost rule actions: %#v", rules)
+	if len(rules) != 2 || rules[0].Emit.EventType() != "review.requested" || !rules[1].Emit.Empty() {
+		t.Fatalf("handler owner lost rule emits: %#v", rules)
 	}
 }
 

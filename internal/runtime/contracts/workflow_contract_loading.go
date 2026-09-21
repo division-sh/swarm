@@ -274,9 +274,6 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			if usesDeprecatedGuardFallback(handler.Guard) {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s uses deprecated id-only guard; migrate to check:", ErrDeprecatedGuardFallback, nodeID, eventType))
 			}
-			if strings.TrimSpace(handler.Action.ID) != "" && !IsSupportedHandlerActionID(handler.Action.ID) {
-				errs = append(errs, fmt.Errorf("%w: node %s handler %s action %s is not in platform spec", ErrInvalidField, nodeID, eventType, strings.TrimSpace(handler.Action.ID)))
-			}
 		}
 	}
 	for _, failure := range bundle.PrepareFanOutPlans() {

@@ -572,14 +572,6 @@ func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType str
 		out = append(out, write)
 	}
 	add := func(kind, target string) { addIndexed(kind, target, 0, false) }
-	addAction := func(scope string, action runtimecontracts.ActionSpec) {
-		if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
-			return
-		}
-		for _, field := range action.ArtifactRepo.Output.Fields() {
-			add(scope+".action.artifact_repo.output."+field.Name, field.Target)
-		}
-	}
 	addRuleTargets := func(scope string, rule runtimecontracts.HandlerRuleEntry) {
 		for writeIndex, write := range rule.DataAccumulation.Writes {
 			if write.IsContainedOperation() {
@@ -594,7 +586,6 @@ func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType str
 	if handler.Query != nil {
 		add("handler.query", handler.Query.StoreAs)
 	}
-	addAction("handler", handler.Action)
 	for writeIndex, write := range handler.DataAccumulation.Writes {
 		if write.IsContainedOperation() {
 			continue
@@ -627,7 +618,6 @@ func wave1HandlerWriteTargets(node runtimeidentity.ExecutableNode, eventType str
 			scope = "handler.rules[" + id + "]"
 		}
 		addRuleTargets(scope, rule)
-		addAction(scope, rule.Action)
 	}
 	for idx, rule := range handler.OnComplete {
 		scope := fmt.Sprintf("handler.on_complete[%d]", idx)
