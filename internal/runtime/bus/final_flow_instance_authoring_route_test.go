@@ -60,8 +60,8 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	source := finalflowinstanceauthoring.LoadSource(t, finalflowinstanceauthoring.Options{})
 	store := &finalFlowInstanceAuthoringLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -210,10 +210,10 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source,
-				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
+				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 					t.Fatal("fail-closed route must not activate a template instance")
 					return nil
-				},
+				}),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)

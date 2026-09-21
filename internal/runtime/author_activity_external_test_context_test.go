@@ -536,11 +536,6 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	}); ok {
 		binder.SetEventPayloadAdmitter(opts.PayloadAdmitter)
 	}
-	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
-		owner := newExternalTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
-		opts.TemplateInstancePlanner = owner
-		opts.FlowActivationFinalizer = owner
-	}
 	if opts.FlowActivationFinalizer == nil {
 		opts.FlowActivationFinalizer, _ = opts.TemplateInstancePlanner.(runtimepipeline.CommittedFlowInstanceActivationFinalizer)
 	}

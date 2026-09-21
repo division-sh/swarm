@@ -884,10 +884,16 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 		if err != nil {
 			t.Fatalf("query flow instance config: %v", err)
 		}
-		var got map[string]any
-		if err := json.Unmarshal(raw, &got); err != nil {
+		var record struct {
+			Config map[string]any `json:"config"`
+		}
+		if err := json.Unmarshal(raw, &record); err != nil {
 			t.Fatalf("decode flow instance config: %v", err)
 		}
+		if record.Config == nil {
+			t.Fatal("flow instance record has no business config object")
+		}
+		got := record.Config
 		for key, wantValue := range config {
 			key = strings.TrimSpace(key)
 			if key == "" {

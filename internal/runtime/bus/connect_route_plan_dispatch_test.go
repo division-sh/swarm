@@ -2354,8 +2354,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2472,8 +2472,8 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 		mutations: 1,
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2508,8 +2508,8 @@ func TestCompiledConnectEvaluationStaleSnapshotFailureLeavesLifecycleUnchanged(t
 		mutations: 10,
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2555,8 +2555,8 @@ func TestEventBusPublish_ConnectRoutePlanPreviewCreateFeedsLaterSelect(t *testin
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            semanticview.Wrap(bundle),
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          semanticview.Wrap(bundle),
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2626,8 +2626,8 @@ func TestCommittedReplayReusesPersistedSyntheticInstanceSourceWithoutReminting(t
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2727,8 +2727,8 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanCreateResolutionAdmit
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2764,8 +2764,8 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2916,7 +2916,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 					},
 				},
 			}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstanceActivator: store.Activate})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -2959,7 +2959,7 @@ func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesA
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
 				},
 			}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstanceActivator: store.Activate})
+			eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -3018,8 +3018,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3066,8 +3066,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		AddressFields: map[string]string{"entity.account_id": "acct-1"},
 	}}
 	restarted, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("restart EventBus against replacement topology: %v", err)
@@ -3147,8 +3147,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 				},
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle:            source,
-				TemplateInstanceActivator: store.Activate,
+				ContractBundle:          source,
+				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3220,8 +3220,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3351,8 +3351,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 		failAfterDescriptorWithoutRoute: errors.New("route installation failed"),
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3395,8 +3395,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3444,8 +3444,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	}
 	store := &connectRoutePlanConcurrentLifecycleStore{connectRoutePlanLifecycleStore: base}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3541,8 +3541,8 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 				},
 			}
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle:            source,
-				TemplateInstanceActivator: store.Activate,
+				ContractBundle:          source,
+				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3602,9 +3602,9 @@ func TestEventBusPublish_ConnectRoutePlanPersistsCreatedAgentBeforeLiveCarrier(t
 	}
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
-		Interceptors:              []EventInterceptor{interceptor},
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
+		Interceptors:            []EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3685,8 +3685,8 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleAdmissionPreservesDuplicateEdg
 			}
 			interceptor := &connectRoutePlanNodeInterceptor{}
 			opts := EventBusOptions{
-				ContractBundle:            source,
-				TemplateInstanceActivator: store.Activate,
+				ContractBundle:          source,
+				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			}
 			if !tc.wantAgent {
 				opts.Interceptors = []EventInterceptor{interceptor}
@@ -3762,8 +3762,8 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryIsNoOpAndExpl
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3810,8 +3810,8 @@ func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3859,8 +3859,8 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 		},
 	}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle:            source,
-		TemplateInstanceActivator: store.Activate,
+		ContractBundle:          source,
+		TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -4555,8 +4555,8 @@ func TestPublicInputAdmissionUsesCanonicalTemplateLifecycleModes(t *testing.T) {
 				}}
 			}
 			eventBus, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle:            source,
-				TemplateInstanceActivator: store.Activate,
+				ContractBundle:          source,
+				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -4628,10 +4628,9 @@ func TestAPIEventPublicationCommittedCompletionSurvivesPostCommitLocalFailures(t
 				})
 			}
 			eventBus, err := newScopedTestEventBus(selected, EventBusOptions{
-				ContractBundle:            source,
-				TemplateInstanceActivator: lifecycleStore.Activate,
-				TemplateInstancePlanner:   activationOwner,
-				FlowActivationFinalizer:   finalizer,
+				ContractBundle:          source,
+				TemplateInstancePlanner: activationOwner,
+				FlowActivationFinalizer: finalizer,
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -4711,7 +4710,7 @@ func TestPublicInputAdmissionFailsClosedNegativeMatrix(t *testing.T) {
 			run: func(t *testing.T) error {
 				source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 				store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
-				eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstanceActivator: store.Activate})
+				eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
 				if err != nil {
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
