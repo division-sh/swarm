@@ -319,6 +319,7 @@ func decodeFlowOutputPinEventsNode(node *yaml.Node) ([]FlowOutputEventPin, error
 }
 
 var inputEventPinFieldOptions = map[string]struct{}{
+	"initialize": {},
 	"event":      {},
 	"source":     {},
 	"address":    {},
@@ -394,6 +395,12 @@ func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 			if err := value.Decode(&out.Resolution); err != nil {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin resolution: %w", err)
 			}
+		case "initialize":
+			bindings, err := decodeReceiverInitialize(value)
+			if err != nil {
+				return FlowInputEventPin{}, err
+			}
+			out.Initialize = bindings
 		case "carries":
 			return FlowInputEventPin{}, fmt.Errorf("RETIRED: input event pin carries are unsupported; use instance plus resolution.from/window/dedup_by")
 		default:
@@ -700,15 +707,5 @@ func validateTieredWeightedAverageSpec(spec ComputeSpec) error {
 }
 
 func (v *FlowVariable) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.ScalarNode {
-		v.Description = strings.TrimSpace(node.Value)
-		return nil
-	}
-	type alias FlowVariable
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*v = FlowVariable(aux)
-	return nil
+	return decodeReceiverVariable(node, v)
 }

@@ -256,6 +256,13 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 			"items": eventSchemaForTypeRefSchema(eventListItemType(typeRef), types, seen),
 		}
 	}
+	if key, value, ok := parseWave1MapTypeRef(typeRef); ok {
+		keySchema := eventSchemaForTypeRefSchema(key, types, seen)
+		if keySchema["type"] != "string" {
+			return map[string]any{"type": typeRef}
+		}
+		return map[string]any{"type": "object", "additionalProperties": eventSchemaForTypeRefSchema(value, types, seen)}
+	}
 	if enumName, ok := eventEnumTypeName(types, typeRef); ok {
 		values := make([]any, 0, len(types.Enums[enumName].Values))
 		for _, value := range types.Enums[enumName].Values {
