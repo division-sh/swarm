@@ -15,8 +15,8 @@ func checkConditionPolicyAlignment(c *checkerContext) []Finding { return c.condi
 func checkConditionPayloadAlignment(c *checkerContext) []Finding {
 	return c.conditionPayloadAlignment()
 }
-func checkConfigFromPayloadAlignment(c *checkerContext) []Finding {
-	return c.configFromPayloadAlignment()
+func checkDataAccumulationSourceAlignment(c *checkerContext) []Finding {
+	return c.dataAccumulationSourceAlignment()
 }
 
 type payloadFieldCoverageSite struct {
@@ -94,11 +94,11 @@ func (c *checkerContext) conditionPayloadAlignment() []Finding {
 	return c.conditionPayloadFindings
 }
 
-func (c *checkerContext) configFromPayloadAlignment() []Finding {
-	if c.configPayloadLoaded {
-		return c.configPayloadFindings
+func (c *checkerContext) dataAccumulationSourceAlignment() []Finding {
+	if c.dataAccumulationSourceLoaded {
+		return c.dataAccumulationSourceFindings
 	}
-	c.configPayloadLoaded = true
+	c.dataAccumulationSourceLoaded = true
 	for _, transition := range c.source.DerivedHandlerTransitions() {
 		sourceEvent := strings.TrimSpace(transition.DataAccumulation.SourceEvent)
 		if sourceEvent == "" {
@@ -107,14 +107,14 @@ func (c *checkerContext) configFromPayloadAlignment() []Finding {
 		if sourceEvent == strings.TrimSpace(transition.EventType) || derivedAccumulationSource(sourceEvent) {
 			continue
 		}
-		c.configPayloadFindings = append(c.configPayloadFindings, Finding{
-			CheckID:  "config_from_payload_alignment",
+		c.dataAccumulationSourceFindings = append(c.dataAccumulationSourceFindings, Finding{
+			CheckID:  "data_accumulation_source_alignment",
 			Severity: "error",
 			Message:  fmt.Sprintf("handler transition %s data_accumulation.source_event %s does not match handler event %s", transition.ID, sourceEvent, transition.EventType),
 			Location: strings.TrimSpace(transition.ID),
 		})
 	}
-	return c.configPayloadFindings
+	return c.dataAccumulationSourceFindings
 }
 
 func (c *checkerContext) payloadFieldCoverage() []Finding {

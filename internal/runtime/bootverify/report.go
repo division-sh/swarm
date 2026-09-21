@@ -46,7 +46,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"compute_module_value_rows":               "Fix the compute module value rows so each referenced module and value shape is declared consistently.",
 	"condition_expression_validation":         "Fix the condition expression so it references declared fields and uses supported CEL syntax.",
 	"condition_payload_alignment":             "Fix condition input references so they read declared payload fields for the triggering event.",
-	"config_from_payload_alignment":           "Fix config_from_payload references so they read declared payload fields for the triggering event.",
+	"data_accumulation_source_alignment":      "Set data_accumulation.source_event to the handler event, omit it to use that event, or use a derived fan_out source.",
 	"contained_state_operation_compliance":    "Fix contained state operations so they target declared contained-state fields through supported syntax.",
 	"credential_key_exists":                   "Configure the required credential or fix access to the credential store used by verifier credential checks.",
 	"data_accumulation_expression_validation": "Fix the data_accumulation expression so it references declared fields and uses supported CEL syntax.",

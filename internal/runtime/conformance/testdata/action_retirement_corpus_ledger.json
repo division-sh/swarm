@@ -274,10 +274,10 @@
       "historical_markers": [
         "checkConfigFromPayloadAlignment"
       ],
-      "disposition": "preserved_data_accumulation_source_event_alignment_despite_ConfigFrom_name",
+      "disposition": "preserved_data_accumulation_source_event_alignment_renamed_diagnostic_not_payload_field_coverage",
       "proofs": [
         "R03",
-        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_MapsDataAccumulationSourceMismatchToNamedError",
         "TestRun_AllowsFanOutDerivedAccumulationSourceEvent"
       ]
     },
@@ -388,7 +388,7 @@
         "TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch",
         "TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema",
         "TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction",
-        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_MapsDataAccumulationSourceMismatchToNamedError",
         "TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom",
         "TestRun_ReportsCreateFlowInstanceMissingConfigFrom",
         "TestRun_MapsHandlerFieldComplianceToNamedError",
@@ -537,10 +537,10 @@
       "historical_functions": [
         "checkConfigFromPayloadAlignment"
       ],
-      "disposition": "preserved_data_accumulation_source_event_alignment_despite_ConfigFrom_name",
+      "disposition": "preserved_data_accumulation_source_event_alignment_renamed_diagnostic_not_payload_field_coverage",
       "proofs": [
         "R03",
-        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_MapsDataAccumulationSourceMismatchToNamedError",
         "TestRun_AllowsFanOutDerivedAccumulationSourceEvent"
       ]
     },

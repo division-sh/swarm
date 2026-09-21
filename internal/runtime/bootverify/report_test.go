@@ -1953,7 +1953,7 @@ func TestRun_MapsUndeclaredNestedEntityWriteTargetToEntityWriteTargetComplianceE
 	}
 }
 
-func TestRun_MapsConfigFromPayloadMismatchToNamedError(t *testing.T) {
+func TestRun_MapsDataAccumulationSourceMismatchToNamedError(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-success")
 	bundle.Semantics.HandlerTransitions = []runtimecontracts.HandlerTransitionSemantic{{
 		ID:        "transition-1",
@@ -1969,8 +1969,13 @@ func TestRun_MapsConfigFromPayloadMismatchToNamedError(t *testing.T) {
 	if !report.HasErrors() {
 		t.Fatalf("expected error report, got %#v", report.Findings)
 	}
-	if !reportContains(report.Errors(), "config_from_payload_alignment", "source_event other.event does not match handler event task.requested") {
-		t.Fatalf("expected config_from_payload_alignment error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "data_accumulation_source_alignment", "source_event other.event does not match handler event task.requested") {
+		t.Fatalf("expected data_accumulation_source_alignment error, got %#v", report.Errors())
+	}
+	for _, finding := range report.Errors() {
+		if finding.CheckID == "data_accumulation_source_alignment" && finding.Remediation != "Set data_accumulation.source_event to the handler event, omit it to use that event, or use a derived fan_out source." {
+			t.Fatalf("unexpected source alignment teaching: %#v", finding)
+		}
 	}
 }
 
@@ -1986,8 +1991,46 @@ func TestRun_AllowsFanOutDerivedAccumulationSourceEvent(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "config_from_payload_alignment", "fan_out.child_completed") {
+	if reportContains(report.Errors(), "data_accumulation_source_alignment", "fan_out.child_completed") {
 		t.Fatalf("expected fan_out source_event to be accepted, got %#v", report.Errors())
+	}
+}
+
+func TestDataAccumulationSourceAlignmentPreservesSourceRules(t *testing.T) {
+	for _, tc := range []struct {
+		source    string
+		wantError bool
+	}{
+		{"", false},
+		{"task.requested", false},
+		{" task.requested ", false},
+		{"fan_out.child_completed", false},
+		{" fan_out.custom ", false},
+		{"fan_out.", false},
+		{"fan_out", true},
+		{"other.event", true},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			bundle := loadTier8FixtureBundle(t, "test-boot-success")
+			bundle.Semantics.HandlerTransitions = []runtimecontracts.HandlerTransitionSemantic{{
+				ID: "transition-1", EventType: "task.requested",
+				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{SourceEvent: tc.source},
+			}}
+			checker := &checkerContext{source: semanticview.Wrap(bundle)}
+			for attempt := 0; attempt < 2; attempt++ {
+				findings := checkDataAccumulationSourceAlignment(checker)
+				wantCount := 0
+				if tc.wantError {
+					wantCount = 1
+				}
+				if len(findings) != wantCount {
+					t.Fatalf("attempt %d: findings=%#v, want count=%d", attempt, findings, wantCount)
+				}
+				if tc.wantError && (findings[0].CheckID != "data_accumulation_source_alignment" || findings[0].Location != "transition-1" || findings[0].Severity != "error") {
+					t.Fatalf("unexpected alignment finding: %#v", findings[0])
+				}
+			}
+		})
 	}
 }
 

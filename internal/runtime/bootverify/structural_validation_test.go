@@ -105,7 +105,7 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"event_cycle_detection":                   "structural",
 		"dialect_compliance":                      "structural",
 		"single_node_per_event":                   "structural",
-		"config_from_payload_alignment":           "structural",
+		"data_accumulation_source_alignment":      "structural",
 		"phantom_produces":                        "structural",
 		"native_tools_valid":                      "structural",
 		"mcp_server_reachable":                    "execution",

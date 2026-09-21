@@ -70,8 +70,8 @@ type checkerContext struct {
 	conditionPayloadLoaded   bool
 	conditionPayloadFindings []Finding
 
-	configPayloadLoaded   bool
-	configPayloadFindings []Finding
+	dataAccumulationSourceLoaded   bool
+	dataAccumulationSourceFindings []Finding
 
 	payloadCoverageLoaded   bool
 	payloadCoverageFindings []Finding
@@ -241,7 +241,7 @@ var bootCheckRegistry = []Check{
 	{ID: "event_cycle_detection", Severity: "error", Run: checkEventCycleDetection},
 	{ID: "dialect_compliance", Severity: "error", Run: checkDialectCompliance},
 	{ID: "single_node_per_event", Severity: "error", Run: checkSingleNodePerEvent},
-	{ID: "config_from_payload_alignment", Severity: "error", Run: checkConfigFromPayloadAlignment},
+	{ID: "data_accumulation_source_alignment", Severity: "error", Run: checkDataAccumulationSourceAlignment},
 	{ID: "phantom_produces", Severity: "warning", Run: checkPhantomProduces},
 	{ID: "native_tools_valid", Severity: "error", Run: checkNativeToolsValid},
 	{ID: "mcp_server_reachable", Severity: "warning", Run: checkMCPServerReachable},
