@@ -271,7 +271,7 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 			return nil, fmt.Errorf("dynamic flow runtime readiness batch contains duplicate identity %s/%s", key.RunID, key.InstancePath)
 		}
 		seen[key] = struct{}{}
-		expectedJSON, err := runtimecanonicaljson.Bytes(normalized)
+		expectedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(normalized)
 		if err != nil {
 			return nil, fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", instancePath, err)
 		}
@@ -318,17 +318,17 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 			if loaded.Plan.ExecutionMode != request.expected.ExecutionMode {
 				return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
 			}
-			actualJSON, err := runtimecanonicaljson.Bytes(loaded.Plan)
+			actualJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan)
 			if err != nil {
 				return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
 			}
 			changed := string(actualJSON) != string(request.expectedJSON)
 			if changed && !loaded.CreationEventEmittedAt.IsZero() {
-				actualCreationJSON, err := runtimecanonicaljson.Bytes(loaded.Plan.CreationEvent)
+				actualCreationJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan.CreationEvent)
 				if err != nil {
 					return fmt.Errorf("encode emitted dynamic flow creation plan %s: %w", instancePath, err)
 				}
-				expectedCreationJSON, err := runtimecanonicaljson.Bytes(request.expected.CreationEvent)
+				expectedCreationJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(request.expected.CreationEvent)
 				if err != nil {
 					return fmt.Errorf("encode revised dynamic flow creation plan %s: %w", instancePath, err)
 				}
@@ -378,11 +378,11 @@ func changedDynamicFlowRuntimeReadinessObservationCoordinate(observed, current r
 	if err != nil {
 		return "", fmt.Errorf("normalize current dynamic flow readiness plan: %w", err)
 	}
-	observedJSON, err := runtimecanonicaljson.Bytes(observedPlan)
+	observedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(observedPlan)
 	if err != nil {
 		return "", fmt.Errorf("encode observed dynamic flow readiness plan: %w", err)
 	}
-	currentJSON, err := runtimecanonicaljson.Bytes(currentPlan)
+	currentJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(currentPlan)
 	if err != nil {
 		return "", fmt.Errorf("encode current dynamic flow readiness plan: %w", err)
 	}
@@ -515,7 +515,7 @@ func markDynamicFlowRuntimeTopologyReady(
 	if err != nil {
 		return fmt.Errorf("normalize dynamic flow runtime topology readiness plan: %w", err)
 	}
-	expectedJSON, err := runtimecanonicaljson.Bytes(normalized)
+	expectedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(normalized)
 	if err != nil {
 		return fmt.Errorf("encode dynamic flow runtime topology readiness plan: %w", err)
 	}
@@ -524,6 +524,22 @@ func markDynamicFlowRuntimeTopologyReady(
 		return fmt.Errorf("dynamic flow runtime topology readiness requires an exact occurrence time")
 	}
 	return run(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+		// PostgreSQL JSONB equality erases integer/double kinds. Verify the
+		// exact runtime plan under the same write lock before its CAS.
+		current, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, normalized.RunID, normalized.Identity.Route(), true)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("dynamic flow runtime readiness %s transition topology_ready_at requires one active record", normalized.Identity.InstancePath)
+		}
+		currentJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(current.Plan)
+		if err != nil {
+			return err
+		}
+		if string(currentJSON) != string(expectedJSON) {
+			return fmt.Errorf("dynamic flow runtime readiness %s plan changed before topology completion", normalized.Identity.InstancePath)
+		}
 		query := `
 			UPDATE flow_instance_runtime_readiness AS readiness
 			SET topology_ready_at = COALESCE(readiness.topology_ready_at, $1), updated_at = $1

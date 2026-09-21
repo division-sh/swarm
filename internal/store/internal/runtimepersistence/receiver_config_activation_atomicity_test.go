@@ -39,9 +39,14 @@ func newReceiverConfigActivationFixture(t *testing.T, backend string) receiverCo
 
 func newReceiverConfigActivationFixtureWithAgents(t *testing.T, backend string, withAgents bool) receiverConfigActivationFixture {
 	t.Helper()
+	return newReceiverConfigActivationFixtureWithOptions(t, backend, withAgents, false)
+}
+
+func newReceiverConfigActivationFixtureWithOptions(t *testing.T, backend string, withAgents, autoEmit bool) receiverConfigActivationFixture {
+	t.Helper()
 	_, selected := newAgentFixtureAuthorityStore(t, backend)
 	actors := sqliteFlowActivationBundle(t)
-	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
+	files := map[string]string{
 		"schema.yaml": "name: receiver-config-atomicity\n",
 		"review/schema.yaml": `name: review
 mode: template
@@ -59,7 +64,13 @@ pins:
 `,
 		"review/entities.yaml": "review_item:\n  request_id: string\n",
 		"review/events.yaml":   "task.started: {}\n",
-	})
+	}
+	if autoEmit {
+		files["events.yaml"] = "request.started: {}\n"
+		files["review/schema.yaml"] += "auto_emit_on_create: {event: task.started}\n"
+		files["review/events.yaml"] = "task.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
+	}
+	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	if withAgents {
 		bundle.FlowTree.ByID["review"].Agents = actors.FlowTree.ByID["review"].Agents
 		bundle.FlowTree.ByID["review"].AgentURIs = actors.FlowTree.ByID["review"].AgentURIs
