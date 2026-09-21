@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -57,12 +58,35 @@ func TestB22GroupMixedCandidateWakeAndRestartBothStores(t *testing.T) {
 					t.Fatalf("coalesced prefix candidate=%+v err=%v", before, err)
 				}
 				blocked, err := store.ExecuteCompletionCandidate(f.ctx, before.Candidates[0], catalog)
-				if err != nil || blocked.Outcome != runlifecycle.OutcomeAwaitMutation {
+				if err != nil || !blocked.Committed || blocked.Outcome != runlifecycle.OutcomeAwaitMutation {
 					t.Fatalf("pending suffix allowed premature exhaustion: %+v err=%v", blocked, err)
 				}
 				snapshot, err := store.LoadRunLifecycleSnapshot(f.ctx, f.runID)
 				if err != nil || snapshot.Status != string(runlifecycle.StateRunning) || snapshot.EndedAt != nil {
 					t.Fatalf("prefix terminalized run: %+v err=%v", snapshot, err)
+				}
+				blockedCandidates := map[runlifecycle.CandidateIdentity]struct{}{before.Candidates[0].Identity(): {}}
+				observeCandidate := func(result pipelineCrashCandidateResult) bool {
+					t.Helper()
+					t.Logf("actual candidate revision=%d outcome=%s err=%v", result.candidate.Revision, result.outcome.Outcome, result.err)
+					if result.err != nil || result.candidate.RunID != f.runID || !result.outcome.Committed {
+						t.Fatalf("candidate execution=%+v", result)
+					}
+					switch result.outcome.Outcome {
+					case runlifecycle.OutcomeAwaitMutation:
+						blockedCandidates[result.candidate.Identity()] = struct{}{}
+						return true
+					case runlifecycle.OutcomeExactNoop:
+						// A consumed exact identity may be delivered again. It
+						// cannot stand in for observing the final blocked revision.
+						if _, consumed := blockedCandidates[result.candidate.Identity()]; !consumed {
+							t.Fatalf("no-op without an observed blocked identity: %+v", result)
+						}
+						return false
+					default:
+						t.Fatalf("mixed failures cannot become successful completion: %+v", result)
+					}
+					return false
 				}
 				process := worklifetime.NewProcess()
 				work, err := process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: "b22-candidate", BundleHash: scope.BundleHash})
@@ -97,6 +121,27 @@ func TestB22GroupMixedCandidateWakeAndRestartBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					t.Cleanup(registration.Release)
+					// Re-deliver the exact prefix candidate after its native owner
+					// cleared due_at. Exercise a real executor/store duplicate,
+					// without relying on concurrent suffix notifications to race.
+					if err := executor.SubmitCompletionCandidate(f.ctx, before.Candidates[0]); err != nil {
+						t.Fatal(err)
+					}
+					select {
+					case duplicate := <-observed.results:
+						if !duplicate.candidate.SameIdentity(before.Candidates[0]) || duplicate.outcome.Outcome != runlifecycle.OutcomeExactNoop {
+							t.Fatalf("consumed prefix candidate duplicate=%+v", duplicate)
+						}
+						if observeCandidate(duplicate) {
+							t.Fatal("duplicate counted as a new blocked candidate")
+						}
+					case <-time.After(5 * time.Second):
+						t.Fatal("consumed prefix candidate duplicate was not executed")
+					}
+					unchanged, err := store.LoadRunLifecycleSnapshot(f.ctx, f.runID)
+					if err != nil || !reflect.DeepEqual(unchanged, snapshot) {
+						t.Fatalf("consumed candidate duplicate changed lifecycle: before=%+v after=%+v err=%v", snapshot, unchanged, err)
+					}
 				}
 				f.bus.SetRuntimeIngressDispatchGate(nil)
 				if result, err := f.bus.ReleaseRunQueue(f.ctx, f.runID, count); err != nil || result.Settled != count/2 {
@@ -119,14 +164,7 @@ func TestB22GroupMixedCandidateWakeAndRestartBothStores(t *testing.T) {
 				for !finalObserved {
 					select {
 					case result := <-observed.results:
-						t.Logf("actual candidate revision=%d outcome=%s err=%v", result.candidate.Revision, result.outcome.Outcome, result.err)
-						if result.err != nil || result.candidate.RunID != f.runID {
-							t.Fatalf("candidate execution=%+v", result)
-						}
-						if result.outcome.Outcome != runlifecycle.OutcomeAwaitMutation {
-							t.Fatalf("mixed failures cannot become successful completion: %+v", result)
-						}
-						finalObserved = result.candidate.Revision == finalRevision
+						finalObserved = observeCandidate(result) && result.candidate.Revision == finalRevision
 					case <-deadline.C:
 						summaries := readCompletionBlockerSummaries(t, runLifecycleCandidateParityFixture{store: store, db: f.db, postgres: f.postgres}, f.ctx, f.runID, time.Now().UTC())
 						t.Fatalf("final mixed-member candidate revision%d was lost: %+v", finalRevision, summaries)
