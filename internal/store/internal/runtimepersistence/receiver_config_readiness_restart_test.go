@@ -148,7 +148,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
-				requireReceiverConfigWire(t, agents[0].Config.Config, want)
+				requireReceiverConfigWire(t, agents[0].Config.ReceiverConfig, want)
 				for _, route := range restarted.bus.materializationRequests() {
 					if route.ActivationVariables["label"] != "committed" || route.ActivationVariables["request_id"] != "business-key" {
 						t.Fatalf("restart consumed incoming variables: %#v", route.ActivationVariables)
