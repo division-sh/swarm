@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -204,8 +206,8 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var manager *runtimemanager.AgentManager
-	activationCalls := 0
-	var activationErr error
+	var activationCalls atomic.Int32
+	activationResults := make(chan error, 4)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if manager == nil {
@@ -217,9 +219,10 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 			if manager == nil {
 				return errors.New("agent manager is required")
 			}
-			activationCalls++
-			activationErr = manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
-			return activationErr
+			activationCalls.Add(1)
+			err := manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+			activationResults <- err
+			return err
 		}),
 		ContractBundle: source})
 	if err != nil {
@@ -265,6 +268,14 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
 	}
+	select {
+	case err := <-activationResults:
+		if err != nil {
+			t.Fatalf("finalize committed activation: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for committed activation finalization")
+	}
 	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
 	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
 	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
@@ -283,11 +294,12 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
 	`, 0, spinup.ID(), workflowRuntimeNodeID)
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
-	`, nil)
-	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
+		WHERE event_name = $1
+	`, []any{instancePath + "/opco.product_initialization_requested"})
+	assertRuntimeEventPayloadInitializationConfig(t, ctx, db, autoEventID)
 	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
@@ -300,13 +312,12 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	`, 0, autoEventID, workflowRuntimeNodeID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/component_scaffold.spawn_requested'
-	`, nil)
+		WHERE event_name = $1
+	`, []any{instancePath + "/component_scaffold.spawn_requested"})
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
-	if activationCalls != 1 || activationErr != nil {
-		t.Fatalf("flow activation calls = %d, error = %v; want one successful activation", activationCalls, activationErr)
+	if got := activationCalls.Load(); got != 1 {
+		t.Fatalf("flow activation calls = %d, want one successful activation", got)
 	}
-
 }
 
 func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows(t *testing.T) {
@@ -379,24 +390,25 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
 	}
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
-	`, nil)
+		WHERE event_name = $1
+	`, []any{instancePath + "/opco.product_initialization_requested"})
 
 	renderedAgentID := "ceo"
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM routing_rules
-		WHERE flow_instance = 'operating/11111111-1111-4111-8111-111111111111'
+		WHERE flow_instance = $2
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $1
 		  AND status = 'active'
-	`, 1, renderedAgentID)
+	`, 1, renderedAgentID, instancePath)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM routing_rules
-		WHERE flow_instance = 'operating/11111111-1111-4111-8111-111111111111'
+		WHERE flow_instance = $1
 		  AND subscriber_id = 'ceo-{product_id}'
-	`, 0)
+	`, 0, instancePath)
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
 		WHERE event_id = $1::uuid
@@ -609,11 +621,12 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
 	`, 0, spinupEventID, workflowRuntimeNodeID)
 
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
-	`, nil)
-	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
+		WHERE event_name = $1
+	`, []any{instancePath + "/opco.product_initialization_requested"})
+	assertRuntimeEventPayloadInitializationConfig(t, ctx, db, autoEventID)
 	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
@@ -622,8 +635,8 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/component_scaffold.spawn_requested'
-	`, nil)
+		WHERE event_name = $1
+	`, []any{instancePath + "/component_scaffold.spawn_requested"})
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
 
@@ -726,11 +739,12 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
 	`, 0, spinupEventID, workflowRuntimeNodeID)
 
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
 	autoEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested'
-	`, nil)
-	assertRuntimeEventPayloadProductOnly(t, ctx, db, autoEventID)
+		WHERE event_name = $1
+	`, []any{instancePath + "/opco.product_initialization_requested"})
+	assertRuntimeEventPayloadInitializationConfig(t, ctx, db, autoEventID)
 	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM event_deliveries
@@ -739,8 +753,8 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
 	componentEventID := waitRuntimeEventID(t, ctx, db, `
 		SELECT event_id::text FROM events
-		WHERE event_name = 'operating/11111111-1111-4111-8111-111111111111/component_scaffold.spawn_requested'
-	`, nil)
+		WHERE event_name = $1
+	`, []any{instancePath + "/component_scaffold.spawn_requested"})
 	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
 }
 
@@ -831,7 +845,7 @@ states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string?
 opco.ceo_ready:
@@ -900,6 +914,7 @@ auto_emit_on_create:
 `,
 		"operating/entities.yaml": "operating_state:\n  instance_id: string\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
+  instance_id: string
   product_id: string
 component_scaffold.spawn_requested:
   product_id: string
@@ -1142,6 +1157,52 @@ func runtimeTestEventDiagnostics(ctx context.Context, db *sql.DB) string {
 		}
 	}
 	return out.String()
+}
+
+func requireRuntimeInitializedOperatingPath(t *testing.T, ctx context.Context, db *sql.DB, source semanticview.Source) string {
+	t.Helper()
+	waitRuntimeDBCount(t, ctx, db, `SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND flow_template = 'operating'`, 1, templateInstanceDeliveryRunID)
+	var path, raw string
+	if err := db.QueryRowContext(ctx, `SELECT instance_path, (config->'config')::text FROM flow_instances WHERE run_id = $1::uuid AND flow_template = 'operating'`, templateInstanceDeliveryRunID).Scan(&path, &raw); err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeInitializationConfig(t, raw)
+	plans := pinrouting.CompileConnectGraph(source).Plans()
+	if len(plans) != 1 || plans[0].InstanceKey() == nil {
+		t.Fatalf("fixture must declare exactly one keyed creation plan: %v", plans)
+	}
+	digest := plans[0].ReceiverKeyDigest([]runtimecontracts.TemplateInstanceKeyValue{{
+		Field: plans[0].InstanceKey().Field(), Value: "11111111-1111-4111-8111-111111111111",
+	}})
+	if len(digest) < 24 {
+		t.Fatalf("invalid receiver key digest %q", digest)
+	}
+	want := plans[0].DeriveReceiverIdentity(source, "ti-"+digest[:24]).InstancePath
+	if path != want {
+		t.Fatalf("created instance path = %q, want exact key-derived identity %q", path, want)
+	}
+	return path
+}
+
+func assertRuntimeEventPayloadInitializationConfig(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+	t.Helper()
+	var raw string
+	if err := db.QueryRowContext(ctx, `SELECT payload::text FROM events WHERE event_id = $1::uuid`, eventID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	assertRuntimeInitializationConfig(t, raw)
+}
+
+func assertRuntimeInitializationConfig(t *testing.T, raw string) {
+	t.Helper()
+	var config map[string]any
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		t.Fatal(err)
+	}
+	// The declared key is business config, not injected route metadata.
+	if len(config) != 2 || config["instance_id"] != "11111111-1111-4111-8111-111111111111" || config["product_id"] != "product-1" {
+		t.Fatalf("receiver config = %s, want exactly the authored instance_id and product_id", raw)
+	}
 }
 
 func assertRuntimeEventPayloadProductOnly(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
