@@ -197,13 +197,20 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `
 name: operating
 mode: template
-instance: product_id
+instance: instance_id
+instance_variables:
+  variables:
+    product_id: text
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, waiting, ready]
 pins:
   inputs:
     events:
+      - event: opco.create_requested
+        resolution: {mode: create}
+        initialize:
+          product_id: payload.product_id
       - opco.product_initialization_requested
       - event: opco.product_review_requested
         source: external
@@ -212,6 +219,7 @@ auto_emit_on_create:
 `)
 	writeClosedVariantFile(t, root, "operating/entities.yaml", `
 product:
+  instance_id: {type: text, _unused_reason: receiver instance identity}
   product_id: text
   note: text
 `)
@@ -228,8 +236,9 @@ opco.product_review_requested:
 	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
   execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested, opco.product_review_requested]
+  subscribes_to: [opco.create_requested, opco.product_initialization_requested, opco.product_review_requested]
   event_handlers:
+    opco.create_requested: {}
     opco.product_initialization_requested:
       data_accumulation:
         source_event: opco.product_initialization_requested
@@ -257,15 +266,26 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `
 name: operating
 mode: template
-instance: product_id
+instance: instance_id
+instance_variables:
+  variables:
+    product_id: text
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, spawning, ready]
+pins:
+  inputs:
+    events:
+      - event: opco.create_requested
+        resolution: {mode: create}
+        initialize:
+          product_id: payload.product_id
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
 	writeClosedVariantFile(t, root, "operating/entities.yaml", `
 product:
+  instance_id: {type: text, _unused_reason: receiver instance identity}
   product_id: text
 `)
 	writeClosedVariantFile(t, root, "operating/events.yaml", `
@@ -277,9 +297,10 @@ component_scaffold.spawn_requested:
 	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
   execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
+  subscribes_to: [opco.create_requested, opco.product_initialization_requested]
   produces: [component_scaffold.spawn_requested]
   event_handlers:
+    opco.create_requested: {}
     opco.product_initialization_requested:
       data_accumulation:
         source_event: opco.product_initialization_requested
@@ -326,6 +347,10 @@ pins:
         source: external
       - event: opco.spinup_requested
         source: external
+  outputs:
+    events: [opco.create_requested]
+connect:
+  - {event: opco.create_requested, from: ., to: operating}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
 	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), `item:
@@ -342,6 +367,10 @@ pins:
 opco.bootstrap_requested:
   owner: text
 opco.spinup_requested:
+  instance_id: text
+  product_id: text
+opco.create_requested:
+  key: instance_id
   instance_id: text
   product_id: text
 `)
@@ -361,13 +390,14 @@ portfolio-bootstrap:
 portfolio-node:
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
+  produces: [opco.create_requested]
   event_handlers:
     opco.spinup_requested:
-      action: create_flow_instance
-      template: operating
-      instance_id_from: payload.instance_id
-      config_from:
-        product_id: payload.product_id
+      emit:
+        event: opco.create_requested
+        fields:
+          instance_id: payload.instance_id
+          product_id: payload.product_id
       advances_to: done
 `)
 }
