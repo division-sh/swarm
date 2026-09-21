@@ -261,7 +261,7 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 		if keySchema["type"] != "string" {
 			return map[string]any{"type": typeRef}
 		}
-		return map[string]any{"type": "object", "additionalProperties": eventSchemaForTypeRefSchema(value, types, seen)}
+		return map[string]any{"type": "object", "propertyNames": keySchema, "additionalProperties": eventSchemaForTypeRefSchema(value, types, seen)}
 	}
 	if enumName, ok := eventEnumTypeName(types, typeRef); ok {
 		values := make([]any, 0, len(types.Enums[enumName].Values))

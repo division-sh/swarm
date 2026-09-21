@@ -563,6 +563,11 @@ func (c FlowConnect) normalized() FlowConnect {
 }
 
 func compileFlowInputPins(bundle *WorkflowContractBundle, flowID, flowPath, sourceFile string, in []FlowInputEventPin) ([]CompiledFlowInputPin, error) {
+	if bundle != nil {
+		if _, err := bundle.ReceiverConfigurationForFlow(flowID); err != nil {
+			return nil, err
+		}
+	}
 	out := make([]CompiledFlowInputPin, 0, len(in))
 	seen := make(map[string]struct{}, len(in))
 	for _, authored := range in {

@@ -3659,8 +3659,7 @@ handler_specification:
         fail_closed: Missing source namespace, invalid source namespace, missing source field, missing emitted event payload
           schema, missing required emitted payload field after lowering, undeclared target payload field, and envelope-owned
           payload keys are hard invalidity.
-        excluded_surfaces: This sugar is not valid for `config_from`, action mailbox payloads,
-          artifact-repo payload/provenance maps, connect maps, or data-handoff maps. Those remain separate mapping surfaces
+        excluded_surfaces: This sugar is not valid for receiver initialize, connect maps, or data-handoff maps. Those remain separate mapping surfaces
           and must not inherit `emit.from` or bare namespace field-value lowering.
       on_success:
         field: on_success
@@ -3669,7 +3668,7 @@ handler_specification:
         sub_fields:
           emit: emit spec — additive success/audit/lifecycle event emitted after the selected rules emit.
         rules_only: on_success.emit is supported only on handlers with rules in this slice. It is not supported with on_complete,
-          join outcomes, handler-level fan_out, rule-level fan_out, handler-level action, or bare handler-level emit.
+          join outcomes, handler-level fan_out, rule-level fan_out, or bare handler-level emit.
         ordering: When a rule matches and has emit, the rule emit is materialized first and on_success.emit second. Both events
           are emitted after rule selection, state/gate/data/projection side effects, and emit.fields evaluation for their own
           active emit site, before the handler transaction commits.
@@ -3807,7 +3806,7 @@ handler_specification:
           `emit.broadcast` fail strict loading on every emit surface before specialization.
           If both handler template and rule specialization declare `emit.from`, the values must match. Handler-level
           `on_success.emit` remains the separate additive two-event surface and is not part of template specialization.
-          on_complete, join outcomes, fan_out, and action-originated emits are out of this specialization slice.
+          on_complete, join outcomes, and fan_out are out of this specialization slice.
         proof_consumers: Bootverify, semantic view, produces derivation, route authority, runtime execution, and pipeline/outbox
           proof consume the same merged effective emit, not the raw handler template and raw rule specialization as separate
           events.
@@ -4371,9 +4370,7 @@ handler_specification:
           response_success are admitted as a provider response success predicate and fail the activity when the predicate
           is false or unresolved. HTTP tools using response_mapping, rate_limit, or rate_limit_max_wait are not admitted to
           activities in Stage 1; those subfeatures require later owner consumption before activity execution may claim them.
-        platform_builtin: Not callable from activity in Stage 1; fail closed. This includes `artifact_repo_commit`, which
-          remains action-owned under `handler_fields.action.valid_values.artifact_repo_commit` until a separately gated
-          write-effect activity migration preserves that action's artifact safety and idempotency guarantees.
+        platform_builtin: Not callable from activity in Stage 1; fail closed. Retired handler actions have no activity replacement.
         mcp: Not callable from activity in Stage 1. MCP-discovered/self-described effect classes are not authoritative; an
           authored registration-site override is required in a future slice before MCP tools can be activity-callable.
         native_or_generated_tools: Not callable from activity in Stage 1; fail closed.
@@ -4403,14 +4400,13 @@ handler_specification:
           fork_default: explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval
         long_running: Split to a later resume/cancel/journal slice; fail closed in Stage 1.
       interactions:
-        with_action: PROHIBITED. action and activity are mutually exclusive for the selected handler path.
         with_emit: PROHIBITED in Stage 1. Use generated activity result events instead. Immediate authored emit+activity ordering
           is intentionally not defined in this slice.
         with_rules: A top-level handler activity is allowed only when the handler has no rules. In a rules handler, activity
           must be declared on the selected handler.rules[*] branch. on_complete and join completion/timeout activity
           sites are not supported in Stage 1. Retired `handler.branch` syntax is unsupported for all handler semantics,
           including activity placement.
-      execution_position: After emit.event/action selection point and before clear. The intent is persisted inside the handler
+      execution_position: After emit.event selection point and before clear. The intent is persisted inside the handler
         transaction as either an immediate durable request or a held proposed-effect card plus continuation. Tool execution
         and generated result publication occur only after request release, commit, and entity-lock exit.
     retired_fields:
@@ -4611,8 +4607,7 @@ handler_specification:
   - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected rule writes on valid stream handlers'
   - 'projection → emit.fields: emit payload expressions observe projected entity fields'
   - 'emit.fields → emit.event: output payload constructed before event persisted'
-  - 'emit.event → action: events persisted before platform actions execute'
-  - 'action → clear: state cleanup runs last, after all side effects committed'
+  - 'emit.event → clear: state cleanup is staged last in the handler transaction'
   core_vs_extensions:
     description: Most handlers use a small core subset. Advanced features are extensions.
     core_fields:
@@ -4642,21 +4637,19 @@ handler_specification:
     per source order. A handler may list on_complete before accumulate in YAML — the engine still runs accumulate first. Authors
     SHOULD order fields to match the dependency graph for readability, but the engine does not require it.
   rules_handler_interaction:
-    description: When a handler has rules, the active rule owns conditional emit and action selection for that execution.
+    description: When a handler has rules, the active rule owns conditional emit selection for that execution.
     execution_order: |
       1. rules execute first — the matching rule determines the active condition-specific side effects (rule-level
-      emit, action, data_accumulation, advances_to). 2. Handler-level data_accumulation executes AFTER rules when present and
-      supplements rule-level writes in the same atomic transaction. 3. Bare handler-level emit and handler-level action do NOT
-      supplement rules. If rules are present, bare handler-level emit or handler-level action is invalid and boot fails as
+      emit, data_accumulation, advances_to). 2. Handler-level data_accumulation executes AFTER rules when present and
+      supplements rule-level writes in the same atomic transaction. 3. Bare handler-level emit does NOT
+      supplement rules. If rules are present, bare handler-level emit is invalid and boot fails as
       ambiguous, except for the explicit rules emit template specialization where handler-level emit supplies the event/shared
       field template and the matched rule contributes eventless fields to one effective emit. 4. Explicit on_success.emit
       supplements rules as a distinct additive success emit: the selected rule emit or template-specialized emit is queued first
-      and on_success.emit second; if no rule matches, only on_success.emit is queued. 5. The selected rule action
-      executes at the normal action step after active state/gate/data updates and selected emit queuing, and remains in the same
-      system-node handler transaction as those side effects.
+      and on_success.emit second; if no rule matches, only on_success.emit is queued.
     example: 'order.received may have handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
-      Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Event emission, however,
-      and action must be owned by the matching rule or by the explicit rules emit template specialization.'
+      Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Event emission must
+      be owned by the matching rule or by the explicit rules emit template specialization.'
     side_effect_resolution:
       advances_to: Handler-level advances_to is the default transition target. A matched rule with a non-empty advances_to
         overrides the handler-level target for that execution only.
@@ -4665,7 +4658,7 @@ handler_specification:
       data_accumulation: Handler-level data_accumulation supplements the selected rule/on_complete/join-outcome data_accumulation in
         the same atomic transaction. Selected entry writes run before handler-level writes. This is additive composition,
         not default/override precedence.
-      emit_and_action: Bare emit and action never fall through from a handler into a rules-based multi-emit/action handler.
+      emit: Bare emit never falls through from a handler into a rules-based multi-emit handler.
         The only handler-level emit exception is rules emit template specialization, where handler-level `emit.event` and
         shared `emit.fields` are inherited by the matched rule's eventless `emit.fields` and produce exactly one effective
         emit. Explicit on_success.emit is additive only as a second distinct success event.
@@ -4845,7 +4838,7 @@ engine:
           carrying an open reply context fail closed.
         child: FlowInstanceActivationRequest.Context preserves the ref through activation, child input/auto-emit, and completion;
           no instance-global metadata copy is permitted.
-        mailbox: mailbox.reply_context_id is populated by system mailbox_write and agent notify_human. Defer and terminal
+        mailbox: mailbox.reply_context_id is populated by supported HITL operations. Defer and terminal
           decision updates restore it into the transactional decision-event publication context and do not claim the reply.
         human_task: ask_human atomically stores a typed decision card and human_task_continuations row with source_event_id,
           typed scope, requester identity, and the opaque reply_context_id. Defer and terminal outcomes restore the ref from the
@@ -4915,7 +4908,7 @@ engine:
       multiple_parents: Per-child multi-parent structural routing is v2. Parent-authored multi-consumer fan-out uses connect
         topology and lowers to target_set route-plan facts.
     parent_route:
-      description: Full parent route identity recorded at create_flow_instance time.
+      description: Full parent route identity recorded at receiver creation.
       fields:
         parent_flow_instance: canonical parent flow instance path
         parent_entity_id: parent entity id
@@ -5292,10 +5285,10 @@ engine:
         action: Consume the immutable admitted FlowNode trie and compile declarations from artifact bytes.
       - step: 3
         name: construct_paths
-        action: 'For each flow, construct hierarchical paths for its nodes, agents, and events. Local names become absolute paths using the semantic contract path (flow_scope_key): {flow_scope_key}/{local_name}. This happens at boot before any template instances exist — concrete instance paths are materialized later at create_flow_instance time.'
+        action: 'For each flow, construct hierarchical paths for its nodes, agents, and events. Local names become absolute paths using the semantic contract path (flow_scope_key): {flow_scope_key}/{local_name}. Concrete instance paths are materialized later through receiver-owned creation.'
       - step: 4
         name: register_templates
-        action: 'For flows declared as mode: template, register the template but create no instances. The template is available for runtime create_flow_instance calls.'
+        action: 'For flows declared as mode: template, register the template but create no instances. Creating inputs own event-driven instance creation.'
       - step: 5
         name: build_registries
         action: 'Build runtime registries keyed by path: nodes, agents, events, tools, policy. Tools are flat (shared). Policy is hierarchical (child overrides parent).'
@@ -5697,7 +5690,7 @@ engine:
     runtime_backend_rule:
       - Unsupported backend ids fail closed with supported backend guidance.
       - |
-        SQLite is recognized as the active local/dev default backend id. It constructs the selected typed SQLite store owners without passing a raw runtime SQL handle into Postgres-only runtime consumers. runtime.NewRuntime must consume backend-neutral owners for runtime construction, including #1186 mailbox_write materialization and #1157 agent.usage reads.
+        SQLite is recognized as the active local/dev default backend id. It constructs the selected typed SQLite store owners without passing a raw runtime SQL handle into Postgres-only runtime consumers. runtime.NewRuntime must consume backend-neutral owners for runtime construction, including supported HITL persistence and agent.usage reads.
       - Explicit postgres selection must remain available through flag, runtime config, and deprecated environment fallback and must reach the existing Postgres runtime store path.
       - Local source-aware serve and run persist the admitted logical artifact before runtime publication on both SQLite and PostgreSQL.
     required_consumers:
@@ -5712,7 +5705,7 @@ engine:
     split_boundaries:
     - "SQLite dialect/schema/bootstrap is promoted by #1085."
     - "Backend-neutral core runtime persistence stores are promoted by #1086."
-    - "SQLite runtime construction semantics remain under #1087 parent closeout; mailbox_write materialization is promoted by #1186 and must consume its backend-neutral owner rather than the raw pipeline SQL database."
+    - "SQLite runtime construction semantics remain under #1087 parent closeout; supported HITL persistence consumes backend-neutral owners rather than the raw pipeline SQL database."
     - "Public local/dev default flip plus zero-service swarm run start proof is promoted by #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_store_schema_dialect_bootstrap:
@@ -5797,7 +5790,7 @@ engine:
         - >
           May expose typed SQLite store owners for the #1087 session, startup ownership, delivery/replay, conversation/turn,
           observability semantics, #1148 budget/spend rows, #1149 tool entity/human-task persistence rows, and #1150
-          runtime diagnostics/log rows, and #1186 mailbox_write materialization rows without passing raw SQLite SQL handles
+          runtime diagnostics/log rows without passing raw SQLite SQL handles
           to Postgres-only runtime consumers.
         - Must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
         - >
@@ -6185,19 +6178,6 @@ engine:
           - broader docs/CI/repo-wide closeout owned by #1089
           - repo-wide CI closeout owned by #1089
           - production multi-writer SQLite concurrency semantics
-      - name: mailbox_write_materialization_rows
-        owner: runtimepipeline.MailboxWriteMaterializationStore supplied explicitly through runtime.RuntimeDeps.MailboxMaterializer and consumed by PipelineCoordinator mailbox_write actions
-        promoted_by: '#1186'
-        sqlite_owner: internal/store.SQLiteRuntimeStore.MaterializeMailboxWrite
-        postgres_owner: internal/store.PostgresStore.MaterializeMailboxWrite
-        scope: |
-          PipelineCoordinator owns mailbox_write expression evaluation, deterministic item_id derivation from source_event_id and materializer node, source_event_id/from_agent/flow_instance/payload shaping, and typed handler commit-plan propagation. Backend-specific stores own idempotent persisted mailbox row materialization through the same typed owner for explicit SQLite local/dev runtime construction and Postgres production runtime construction. Runtime construction must supply only the typed materialization owner; raw SQL handles and mailbox_write compatibility seams are forbidden for both backends.
-        excludes:
-          - broad public mailbox decision API behavior owned by api_specification.method_catalog.mailbox.*
-          - dashboard and digest mailbox read closure
-          - broader docs/CI/repo-wide closeout owned by #1089
-          - repo-wide CI closeout owned by #1089
-          - production multi-writer SQLite concurrency semantics
       - name: mailbox_rows
         owner: runtimetools.MailboxPersistence plus apiv1.MailboxAPIStore for the v1 operator mailbox surface
         sqlite_owner: internal/store.SQLiteRuntimeStore mailbox and v1 mailbox API methods
@@ -6355,8 +6335,7 @@ engine:
       runtime_sql_handle: removed
       rule: >
         RuntimeDeps has no raw SQL field for either backend. Runtime diagnostics/logging consumes the promoted
-        backend-neutral RuntimeLogPersistence owner; mailbox_write materialization consumes the #1186
-        MailboxWriteMaterializationStore owner; selected-fork execution consumes exact typed ports. Any future persistence
+        backend-neutral RuntimeLogPersistence owner; supported mailbox and selected-fork execution consume exact typed ports. Any future persistence
         consumer must receive a separately gated semantic owner and closed named operation. Raw runtime handles, nil-handle
         capability tests, and backend-specific reconstruction are forbidden.
     split_boundaries:
@@ -6900,8 +6879,8 @@ engine:
           rule: >
             The central external-effect authorization owner rejects mock-mode attempts before launch. A mock performance may
             request visible internal tools and emit events, but it cannot call providers, HTTP tools, MCP, native commands,
-            workspace writes, relays, live LLM adapters, create a runtime-authored agent, or commit
-            action-owned artifacts. The sole pipeline activity exception is a statically admitted exact provider_connector
+            workspace writes, relays, live LLM adapters, or create a runtime-authored agent.
+            The sole pipeline activity exception is a statically admitted exact provider_connector
             response that uses the normal non-idempotent attempt journal; it performs no credential lookup or transport.
             The immutable process posture is admitted before every external-effect authorization and activity-attempt claim.
             mock_only rejects a live intent before credential, journal, or transport work even if durable recovery restores it.
@@ -8399,10 +8378,8 @@ engine:
     - id: handler_field_compliance
       severity: error
       scope: per-node
-      trigger: A handler or handler action declaration violates the platform handler contract. This includes unknown or retired
-        handler/action fields, unsupported platform action identifiers, missing required declaration fields for supported actions,
-        unresolved executable action or guard owners, runtime-handled events without a system-node executor, and invalid typed
-        action declarations or result payload shapes.
+      trigger: A handler declaration violates the platform handler contract. This includes unknown or retired handler fields,
+        unresolved guard owners, runtime-handled events without a system-node executor, and invalid typed declarations or result payload shapes.
       when: boot-only
     - id: tool_resolution
       severity: warning
@@ -8484,9 +8461,8 @@ engine:
     - id: config_from_payload_alignment
       severity: error
       scope: per-node
-      trigger: A create_flow_instance action's config_from payload.* refs name payload fields not present in the triggering
-        event's schema. Non-payload handler-context refs, including supported event-envelope refs through event.*, are not
-        payload schema fields and are governed by runtime config_from ref resolution.
+      trigger: A data_accumulation source_event payload field is absent from that event's admitted payload schema.
+        Receiver initialize bindings are validated separately by the compiled input-pin owner against the bound source schema.
       when: boot-only
     - id: phantom_produces
       severity: warning
@@ -8807,7 +8783,6 @@ permissions_model:
   permissions:
   - approve_spend
   - configure_routing
-  - create_flow_instance
   - ask_human
   - message_flow
   - message_peers
@@ -12311,8 +12286,8 @@ flow_model:
       - '3. Destination updates or canonically creates its own primary entity, contained state, usage-demanded singleton
         coordinator state, or child/template flow instance. Optional work without receiving state executes entityless.
         Static input-pin handlers do not create or select arbitrary receiving-flow rows.'
-      - '4. Data from the source entity is passed via the event payload or create_flow_instance
-        config_from bindings. Direct runtime entity reads do not cross flow ownership boundaries.'
+      - '4. Data from the source entity is passed via the event payload. Creating receivers map declared payload paths
+        into their typed configuration with initialize. Direct runtime entity reads do not cross flow ownership boundaries.'
       service_request_pattern:
       - '1. Source flow emits a typed request event containing declared business keys, not target entity_id,
         entity_type, or flow_instance.'
@@ -12332,12 +12307,12 @@ flow_model:
         semantic ownership scope as the calling agent''s actor flow. A different ownership scope is rejected.
         This is a platform enforcement, not a convention.'
       reads: 'Cross-flow entity reads through agent-facing entity tools are prohibited. Agents consume
-        declared event payload fields or create_flow_instance config_from bindings for business data,
+        declared event payload fields and receiver-owned initialization for business data,
         and use source_event_id causal chains for debugging proof.'
     business_correlation:
       description: 'The platform does not create a lineage primitive for a business object that spans
         flows. Products carry business correlation explicitly through declared event payload fields and
-        create_flow_instance config_from bindings. Causal debugging and proof use the source_event_id
+        receiver-owned initialization. Causal debugging and proof use the source_event_id
         event chain.'
     terminality:
       description: 'Terminal states are flow-local. If another flow must react to a terminal outcome, the
@@ -12426,11 +12401,13 @@ flow_model:
         receiver_initialization:
           syntax: 'initialize: {priority: payload.priority, timeout_ms: payload.settings.timeout_ms}'
           declarations: |
-            Configuration variables are declared under instance_variables.variables using the shared type vocabulary, with an optional default and description. Scalar declarations denote types, not descriptions. The instance key's type remains owned by its canonical entity declaration. No initialize.config wrapper, from wrapper, whole-payload copy, sender entity/event lookup or inferred payload leaf is supported.
+            Configuration variables are declared under instance_variables.variables using the shared type vocabulary and refinements, with an optional default and description. Scalar declarations denote types, not descriptions. Named records, lists and typed maps retain their recursive constraints, including enum/UUID map keys and sibling equal_to. Optional presence, explicit null and default presence survive source projection. The instance key's type remains owned by its canonical entity declaration. No initialize.config wrapper, from wrapper, whole-payload copy, sender entity/event lookup or inferred payload leaf is supported.
           admission: |
             Compile exact destination names and payload paths with the receiver-scoped type catalog and the admitted producer schema. Shared type and value admission validates every supplied value and every default before any instance creation, route installation, agent readiness or automatic creation event. Absence is different from explicit null; only absence can use a default. Invalid supplied data never becomes a default. Defaults and admitted nested values are isolated from authored maps and sibling instances. Integer/double execution kinds are preserved. Initialization facts, types and defaults participate in compiled pin identity and survive imported-schema binding.
           lifecycle: |
             Initialization applies only when a receiver is created. Select-or-create reuse, ordinary ensure, retry and recovery consume committed configuration and never update it from another incoming request or reapply current defaults. The existing activation/publication transaction owns atomic visibility; no separate action executor or follow-up initialization write exists. Automatic creation payloads and first node/agent consumers observe the same admitted configuration. Runtime coordinates and provenance are not business configuration and cannot overwrite same-named business fields.
+          persistence: |
+            flow_instances.config is a closed runtime-control record containing an explicit config object for business variables. Both stores, route recovery and historical readers consume that object without flattening its members into control fields. Absent, null or non-object config evidence and unknown runtime-control members fail closed; no old-store fallback is supported. Business variables named config, status, instance_id or flow_path remain business data inside that object. Rendering built-ins own their reserved presentation names only, not persisted business values.
           historical: |
             Restart, readback and supported fork preparation consume exact committed or lawfully admitted configuration evidence. They do not derive business identity/configuration from path leaves, hashed instance IDs, current source defaults or first-match maps. Missing required historical evidence fails closed under the existing fork policy; this rule adds no fork capability.
         instance_fields:
@@ -15605,7 +15582,7 @@ platform_tables:
     routing_rules:
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
-        may be true). On create_flow_instance: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from
+        may be true). On receiver creation: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from
         = parent rule_id). On flow instance termination: materialized rows set to inactive. Event dispatch: match concrete
         routes first (is_materialized = true, exact match), fall back to wildcard patterns.'
       ddl: |
@@ -15631,7 +15608,7 @@ platform_tables:
         );
       lifecycle:
         boot: Load contract subscriptions → INSERT pattern rows. Clear stale materialized rows from previous boot.
-        create_flow_instance: In one selected mutation, project active dynamic-instance descriptors from the exact matching
+        receiver_creation: In one selected mutation, project active dynamic-instance descriptors from the exact matching
           `{bundle_hash, workflow_version}`, derive the complete topology including cross-instance observers,
           and replace each affected flow_instance owner's active materialized set. Replacement inactivates rows absent from
           the derived set and upserts expected rows with concrete flow_instance and rendered subscriber_id.
@@ -17423,8 +17400,7 @@ run_model:
       selected-fork capability owner for work that would outlive the ephemeral selected-fork container. It classifies
       relevant timer history in the selected revision, selected semantic workflow-timer declarations, selected semantic
       timed-join declarations, connect-time template inputs whose resolution can create (`create` and
-      `select-or-create`), and authored
-      `create_flow_instance` actions. Direct selected execution consumes this admission before materialization. Activation of an
+      `select-or-create`). Direct selected execution consumes this admission before materialization. Activation of an
       already materialized selected fork consumes it before delivery replay, state-only activation, event publication,
       workflow mutation, or runtime-container issuance. The admitted capability is carried through the selected execution
       admission and consumed again by every fork-local runtime-container construction; a changed selected source fails
@@ -17852,8 +17828,7 @@ run_model:
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution,
         runtime.run_fork.selected_contract_deferred_work_admission classifies source timer history, workflow-timer
         declarations, timed-join and fan-out delivery-barrier declarations, connect-time resolution through the exhaustive six-mode matrix
-        (`create` and `select-or-create` can create; `select`, `fan-in`, `fan-out`, and `reply` cannot), and authored
-        create_flow_instance actions as
+        (`create` and `select-or-create` can create; `select`, `fan-in`, `fan-out`, and `reply` cannot) as
         unsupported while the ephemeral selected-fork container has no
         long-lived deferred-work owner. Direct execution rejects before materialization; staged activation rejects before
         delivery replay, state-only activation, publication, workflow mutation, or container issuance. The admission is
@@ -19003,8 +18978,7 @@ observation_model:
     - Events from handler on_complete emit
     - Events from handler join completion/timeout outcomes
     - Events from handler fan_out emit
-    - Events from action-originated emits produced by runtime action instructions
-    - Events from handler action side effects (e.g., auto_emit_on_create)
+    - Events from canonical lifecycle publication (e.g., auto_emit_on_create)
     excludes:
     - Agent fixture emissions (agents are independent, their emissions route through the event loop separately)
     - Dead-lettered events (intercepted before delivery, recorded in dead_letters table instead)
@@ -19035,29 +19009,13 @@ observation_model:
           rejection_rule: If any producer-authored field is absent from the target event schema, if any declared field violates
             the schema, or if emit.fields authors an envelope-owned key, handler execution fails. Runtime does not silently trim
             producer-authored business payload keys.
-      action_originated_emit_surface:
-        construction_order:
-        - 1. Start from the triggering event payload business carrier
-        - 2. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload
-        collision_priority: triggering event payload business fields are preserved unless a future action runtime revision introduces
-          an explicit payload-construction carrier
-        note: This surface currently inherits its business payload from the triggering event payload because the action runtime
-          instruction model has no separate emit.fields carrier. Runtime must still fail closed on the resulting payload. Consumers
-          read envelope fields through event.* rather than payload.*.
-        runtime_validation:
-          description: Runtime validates the emitted payload fail-closed on this surface before publish.
-          validation_view: Validate the emitted payload carrier that will actually be published after canonical Wave 1 type-aware
-            schema lowering. Runtime-owned envelope fields are not synthesized into payload for validation.
-          rejection_rule: If any inherited or producer-authored business field is undeclared or violates the schema, handler execution
-            fails. Runtime does not silently trim inherited trigger-payload keys and does not clear the failure by projecting
-            envelope-owned fields back into payload.
       auto_emit_on_create_surface:
         construction_order:
-        - 1. Start from the resolved create_flow_instance config entries as the authored/config business payload.
+        - 1. Start from the admitted receiver business configuration, not runtime control metadata.
         - '2. Keep activation lifecycle context, including instance_id, template_id, flow_path, and parent_entity_id, on runtime
           activation metadata and event envelope context; do not synthesize it into payload.'
         - 3. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload.
-        collision_priority: create_flow_instance config owns the business payload. Activation lifecycle context is separate
+        collision_priority: Admitted receiver configuration owns the business payload. Activation lifecycle context is separate
           from payload, so same-named config fields such as template_id remain business fields when the target schema declares
           them.
         note: This surface is authored only as `auto_emit_on_create.event`, so runtime owns the payload construction. It still
@@ -19106,26 +19064,6 @@ observation_model:
     Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
     An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The
     agent emission does not appear in the triggering handler's emitted_events list.
-runtime_storage:
-  description: Runtime-owned writable host storage for service state. These paths are not part of the agent workspace model,
-    are not mounted into agent sessions, and must never be exposed to agents as raw host paths. Agents and product contracts
-    consume runtime-owned artifacts only through typed platform surfaces such as `swarm-artifact://...` URLs and immutable refs.
-  artifact_root:
-    description: Root directory for local-git repositories materialized by `artifact_repo_commit`.
-    default: /var/lib/swarm/artifacts
-    env_override: SWARM_ARTIFACT_ROOT
-    resolution_order:
-    - Explicit runtime coordinator option, when supplied by an embedding runtime.
-    - SWARM_ARTIFACT_ROOT environment variable, when non-empty.
-    - Platform default `/var/lib/swarm/artifacts`.
-    requirements:
-      - The resolved path MUST be an absolute runtime-private host path.
-      - The resolved path MUST be writable by the runtime process when `artifact_repo_commit` executes.
-      - When a loaded bundle declares `artifact_repo_commit`, `swarm serve` and local foreground `swarm run start` MUST validate that the resolved artifact root and its local-git storage base at `<artifact_root>/repos` are writable before runtime readiness. Bundles that do not declare `artifact_repo_commit` MUST NOT fail solely because the default artifact root is currently unwritable.
-      - The resolved path MUST persist across runtime restarts.
-      - The resolved path MUST NOT be `/workspace`, `/data`, `/opt/swarm/source`, or any descendant of those agent-visible mounts.
-      - If the resolved path or its existing parent prefix resolves through symlinks under an agent-visible mount, startup/runtime validation MUST fail closed before git writes.
-      - Product contracts and agents MUST NOT rely on the raw host path. The stable product surface remains the opaque `swarm-artifact://repos/<repo_id>` URL plus immutable commit ref.
 environment_source_authority:
   repo_wide_swarm_env_accepted_set:
     promoted_by: '#1731'
@@ -19458,10 +19396,6 @@ environment_source_authority:
         category: seeded_legacy
         owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
         migration: '#1600 managed credentials file config'
-      - name: SWARM_ARTIFACT_ROOT
-        category: seeded_legacy
-        owner: platform-spec.yaml#runtime_storage.artifact_root
-        migration: '#1600 runtime.artifact_root'
       - name: SWARM_MONITOR_DIR
         category: seeded_legacy
         owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
@@ -19595,13 +19529,11 @@ environment_source_authority:
           agents.
       runtime_private_storage_and_observability:
         disposition: keep_env_first_slice_runtime_private_storage_or_observability
-        owner: runtime_storage.artifact_root and runtime monitor sink
+        owner: runtime monitor sink
         env_vars:
-        - SWARM_ARTIFACT_ROOT
         - SWARM_MONITOR_DIR
         rule: >
-          `SWARM_ARTIFACT_ROOT` remains the current spec-listed runtime-private artifact root override for local-git artifact
-          storage, but public docs MUST NOT teach repo `.env` or ambient shell exports as normal setup. `SWARM_MONITOR_DIR`
+          Public docs MUST NOT teach repo `.env` or ambient shell exports as normal setup. `SWARM_MONITOR_DIR`
           remains an observability/debug monitor log root until a later config/state-dir owner is promoted. Neither path may be
           agent-visible workspace data.
       internal_spec_helpers:
@@ -19880,12 +19812,11 @@ configuration_source_authority:
             swarm_dir: elevated
             platform_spec_path: project_contained_path_or_elevated
             prompts_dir: split_unsupported_retired
-            artifact_root: elevated
             monitor_dir: elevated
             agent_config_map_file: project_contained_path_or_elevated
             verification_gates_file: project_contained_path_or_elevated
             tooling_lock_file: project_contained_path_or_elevated
-          owner: contract/platform path owners, runtime_storage.artifact_root, agent_intent_model, and #1600 helper-path drains
+          owner: contract/platform path owners, agent_intent_model, and #1600 helper-path drains
     merge_semantics:
       rule: >
         Layers deep-merge key-by-key by section. Implementations MUST track presence separately from zero values so
@@ -19952,7 +19883,6 @@ configuration_source_authority:
         SWARM_WORKSPACE_HOST_ROOT: workspace.host_root
         SWARM_WORKSPACE_VOLUMES_FROM: retired with no replacement
         SWARM_WORKSPACE_NETWORK: workspace.network
-        SWARM_ARTIFACT_ROOT: paths.artifact_root
         SWARM_MONITOR_DIR: paths.monitor_dir
         SWARM_AGENT_CONFIG_MAP_FILE: paths.agent_config_map_file
         SWARM_VERIFICATION_GATES_FILE: paths.verification_gates_file
@@ -20306,7 +20236,7 @@ workspace_model:
       - per-flow-instance — shared by all agents in the same flow instance, isolated across instances
       lifecycle:
         per-agent: Created at agent registration and cleaned on agent termination. Workspace availability and lifecycle are owned by the workspace class and lifecycle owner; agent memory does not alter either.
-        per-flow-instance: Created on create_flow_instance. Preserved on instance termination (for post-mortem). Archival is
+        per-flow-instance: Created on receiver activation. Preserved on instance termination (for post-mortem). Archival is
           an operational concern.
         process_replacement: A process-local source projection or container generation never changes writable workspace identity. For the same admitted bundle and semantic workspace key, replacement processes attach fresh containers to the existing Docker volume or resolve the existing host workspace root.
     /data:
@@ -20603,7 +20533,7 @@ static_analyzer:
         rule: Parent connect plus receiver-owned scalar instance/source/resolution lowering provides concrete route-plan facts before runtime dispatch.
       structural_parent_route:
         rule: Child-to-parent structural binding is valid only when no lowered parent connect route applies and only for
-          child/template instances that will record full ParentRoute at create_flow_instance time.
+          child/template instances that will record full ParentRoute at receiver creation.
       static_child_delivery_entity:
         rule: Nested static child outputs may use an exact current receiver-owned entity-bearing delivery context as
           the implicit entity target route for pin-declared outputs. Entityless child execution does not qualify and
