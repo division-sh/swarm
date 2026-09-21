@@ -1173,6 +1173,7 @@ seam_families:
       - internal/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go
       - internal/serveapp/receiver_initialization_test.go
       - internal/serveapp/receiver_initialization_ingress_test.go
+      - internal/serveapp/receiver_initialization_release_test.go
       - internal/runtime/bus/receiver_initialization_test.go
       - internal/runtime/cataloge2e/receiver_initialization_geometry_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/tests/expected.yaml
@@ -1207,10 +1208,16 @@ seam_families:
       CopyServedReceiverInitialization (served_receiver_initialization.go) owns
       the ordinary producer/connect fixture consumed by
       TestServedTypedReceiverInitializationBothStores in
-      internal/serveapp/receiver_initialization_test.go.
+      internal/serveapp/receiver_initialization_test.go (in-process HTTP).
       R18 CopyProviderReceiverInitialization (receiver_initialization_ingress.go)
       is consumed by TestReceiverInitializationPublicProviderSchemaIngressBothStores
-      in internal/serveapp/receiver_initialization_ingress_test.go. It retains
+      in internal/serveapp/receiver_initialization_ingress_test.go (in-process
+      HTTP). TestReleaseReceiverInitializationBothStores in
+      internal/serveapp/receiver_initialization_release_test.go consumes both
+      closed fixtures through a race-instrumented built cmd/swarm executable,
+      public verify/serve and HTTP, with the same hard assertion bodies on
+      SQLite and PostgreSQL. Its complete root is selected by the existing
+      serveapp-runtime proof partition. The direct provider fixture retains
       the native public provider-schema import and directly creates a receiver
       in a new run without an authored producer/connect hop, concrete target,
       or run/entity/instance hint. The proof checks typed config and false
