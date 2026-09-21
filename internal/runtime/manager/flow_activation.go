@@ -204,6 +204,18 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if !ok || strings.TrimSpace(entityContract.EntityType) == "" {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s activation requires one canonical entity contract", templateID)
 	}
+	bundle, ok := semanticview.Bundle(req.ContractBundle)
+	if !ok {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s activation requires the admitted contract bundle", templateID)
+	}
+	configuration, err := bundle.ReceiverConfigurationForFlow(templateID)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s receiver configuration: %w", templateID, err)
+	}
+	req.Config, err = configuration.Admit(req.Config)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s receiver configuration: %w", templateID, err)
+	}
 	initialState := strings.TrimSpace(schema.LoweredInitialState())
 	if initialState == "" {
 		initialState = strings.TrimSpace(req.InitialState)
@@ -1241,7 +1253,7 @@ func buildFlowAgentBlueprint(
 			cfgPayload[k] = v
 		}
 	}
-	rawConfig, err := json.Marshal(cfgPayload)
+	rawConfig, err := canonicaljson.MarshalPreservingNumberKinds(cfgPayload)
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, err
 	}
@@ -1585,9 +1597,30 @@ func cloneFlowConfig(in map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(in))
 	for key, value := range in {
-		out[key] = value
+		out[key] = cloneFlowConfigValue(value)
 	}
 	return out
+}
+
+func cloneFlowConfigValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		if value == nil {
+			return map[string]any(nil)
+		}
+		return cloneFlowConfig(value)
+	case []any:
+		if value == nil {
+			return []any(nil)
+		}
+		out := make([]any, len(value))
+		for index, item := range value {
+			out[index] = cloneFlowConfigValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 func normalizedConfiguredToolList(raw []string) []string {

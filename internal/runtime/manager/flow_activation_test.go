@@ -908,6 +908,10 @@ func (s *flowActivationTestInstanceStore) LoadRouteRecoveryProjection(_ context.
 	instanceIdentity := runtimeflowidentity.Instance{
 		TemplateID: instance.WorkflowName, ScopeKey: route.ScopeKey, InstanceID: route.InstanceID,
 		InstancePath: route.InstancePath, EntityID: entityID.String(), HasStoredPath: true,
+		ParentEntityID: instance.ParentEntityID,
+		ParentRoute: runtimeflowidentity.ParentRoute{
+			FlowID: instance.ParentFlowID, FlowInstance: instance.ParentFlowInstance, EntityID: instance.ParentEntityID,
+		},
 	}
 	if instanceIdentity.Route() != route {
 		return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, fmt.Errorf("flow instance route recovery identity mismatch")
@@ -3511,6 +3515,7 @@ func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *tes
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"vertical_id": {Type: "string"}})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
@@ -3535,6 +3540,10 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{
+		"flow_instance_path": {Type: "string"}, "flow_scope_key": {Type: "string"},
+		"instance_id": {Type: "string"}, "template_id": {Type: "string"},
+	})
 	bundle.FlowTree.ByID["review"].Agents["reviewer"] = runtimecontracts.AgentRegistryEntry{
 		ID:             "reviewer-{flow_instance_path}",
 		Type:           "generic",
@@ -3655,6 +3664,10 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 			Required: []string{"component_id", "component_type", "integer_score", "double_score"},
 		},
 	})
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{
+		"component_id": {Type: "string"}, "component_type": {Type: "string"},
+		"integer_score": {Type: "integer"}, "double_score": {Type: "number"},
+	})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
 		"component_id":   "component-1",
@@ -3701,6 +3714,7 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 			Required: []string{"source_event_id"},
 		},
 	})
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"source_event_id": {Type: "string"}})
 	const triggerEventID = "44444444-4444-4444-4444-444444444444"
 	const payloadSourceEventID = "business-payload-source"
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -3734,6 +3748,7 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload(t *test
 			Required: []string{"component_id"},
 		},
 	})
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"component_id": {Type: "string"}})
 	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{"component_id": "component-1"}
@@ -3764,6 +3779,7 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 			Required: []string{"template_id"},
 		},
 	})
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"template_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{"template_id": "application-basic-v1"}
 
@@ -3878,6 +3894,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"unexpected": {Type: "string"}})
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -3914,6 +3931,7 @@ func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigFi
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{"entity_id": {Type: "string"}})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
 		"entity_id": "business-value",
@@ -4038,6 +4056,9 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 			},
 		},
 	})
+	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{
+		"name": {Type: "string"}, "priority": {Type: "integer"},
+	})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
@@ -4061,7 +4082,7 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	if got.Config["name"] != "alpha" {
 		t.Fatalf("config name = %#v, want alpha", got.Config["name"])
 	}
-	if got.Config["priority"] != 1 {
+	if got.Config["priority"] != int64(1) {
 		t.Fatalf("config priority = %#v, want 1", got.Config["priority"])
 	}
 }

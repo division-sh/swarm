@@ -433,6 +433,21 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	if err := am.requireRunExecutionOwnership(ctx, runID); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
 	}
+	flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, req.Instance.Route())
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
+	}
+	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, flowIdentity)
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("load ensured flow configuration: %w", err)
+	}
+	if projection.Identity.Route() != req.Instance.Route() || projection.Identity.TemplateID != req.Instance.TemplateID || projection.Identity.EntityID != req.Instance.EntityID {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("ensured flow persisted identity disagrees with request")
+	}
+	// Ensure adopts the committed receiver; creation-only caller inputs cannot
+	// replace its configuration, agent revisions, or pending creation payload.
+	req.Instance = projection.Identity
+	req.Config = cloneFlowConfig(projection.Config)
 	templateID := strings.TrimSpace(req.Instance.TemplateID)
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
 	if !ok {
@@ -485,16 +500,18 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 			Identity: identity, ConfigRevision: revision,
 		})
 	}
-	expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
-		current.Plan.CreationEvent,
-		!current.CreationEventEmittedAt.IsZero(),
-		req.ContractBundle,
-		schema,
-		req.Instance,
-		req.Config,
-	)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", req.Instance.InstancePath, err)
+	if expected.BundleHash != current.Plan.BundleHash || expected.WorkflowVersion != current.Plan.WorkflowVersion {
+		expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+			current.Plan.CreationEvent,
+			!current.CreationEventEmittedAt.IsZero(),
+			req.ContractBundle,
+			schema,
+			req.Instance,
+			req.Config,
+		)
+		if err != nil {
+			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", req.Instance.InstancePath, err)
+		}
 	}
 	if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
@@ -620,16 +637,18 @@ func (am *AgentManager) deriveCurrentDynamicFlowRuntimeReadinessPlan(
 			Identity: identity, ConfigRevision: revision,
 		})
 	}
-	expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
-		plan.CreationEvent,
-		!item.CreationEventEmittedAt.IsZero(),
-		source,
-		schema,
-		projection.Identity,
-		projection.Config,
-	)
-	if err != nil {
-		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
+	if expected.BundleHash != plan.BundleHash || expected.WorkflowVersion != plan.WorkflowVersion {
+		expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+			plan.CreationEvent,
+			!item.CreationEventEmittedAt.IsZero(),
+			source,
+			schema,
+			projection.Identity,
+			projection.Config,
+		)
+		if err != nil {
+			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
+		}
 	}
 	if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
