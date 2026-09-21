@@ -34,7 +34,7 @@ type forkReceiverJourneyOptions struct {
 	nested          bool
 	selectedMissing bool
 	repeated        bool
-	noticeEffect    bool
+	executionOnly   bool
 	// Shared with the exact store-refusal proof; invoked after the complete
 	// original source/sibling proof, before any success-only fork assertions.
 	afterSource func(*testing.T, servedControlProofRuntime, *selectedStoreOwner, string, string, string, []canonicalrouting.ForkReceiver)
@@ -190,11 +190,16 @@ func readForkReceiverRows(t *testing.T, rt servedControlProofRuntime, runID stri
 	return out
 }
 
-func readForkReceiverCompanions(t *testing.T, rt servedControlProofRuntime, runID string) map[string][]string {
+func readForkReceiverCompanions(t *testing.T, rt servedControlProofRuntime, runID string, paths ...string) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}
 	for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness"} {
-		rows, err := rt.DB.Query(`SELECT * FROM `+table+` WHERE run_id=$1`, runID)
+		query, args := `SELECT * FROM `+table+` WHERE run_id=$1`, []any{runID}
+		if len(paths) != 0 {
+			query += ` AND instance_path=$2`
+			args = append(args, paths[0])
+		}
+		rows, err := rt.DB.Query(query, args...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -264,6 +269,13 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {
 		logServedForkHandlerDiagnostics(t, rt)
 		t.Fatalf("%s/%s: final settlement status=%s outcome=%s claim=%d/%d count=%d failure=%s", runID, path, status, outcome, claim, outcomeClaim, outcomes, failure)
+	}
+	var selectionContext, disposition, selectionFlow, family, semanticPath, displayLabel string
+	if err := rt.DB.QueryRow(`SELECT selection_context,disposition,COALESCE(flow_path,''),COALESCE(declaration_family,''),COALESCE(semantic_path,''),COALESCE(display_label,'') FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&selectionContext, &disposition, &selectionFlow, &family, &semanticPath, &displayLabel); err != nil {
+		t.Fatal(err)
+	}
+	if selectionContext != "none" || disposition != "not_applicable" || selectionFlow != "" || family != "" || semanticPath != "" || displayLabel != "" {
+		t.Fatalf("direct handler settlement lost exact not-applicable rule selection: %s/%s/%s/%s/%s/%s", selectionContext, disposition, selectionFlow, family, semanticPath, displayLabel)
 	}
 	var public operatorread.OperatorEventFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": sourceEvent}, &public)
@@ -335,12 +347,20 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		root = canonicalrouting.CopyForkReceiverNestedOwnership(t, receivers)
 		prefix, seedName, requestName = "branch/", "outer.seeded", "outer.requested"
 	}
-	if option.noticeEffect {
-		root = canonicalrouting.CopyForkReceiverNoticeOwnership(t, receivers, entitylessProducer, option.nested, option.repeated)
+	if option.executionOnly {
+		root = canonicalrouting.CopyForkReceiverExecutionOwnership(t, receivers, entitylessProducer, option.nested, option.repeated)
 	}
 	requireEffect := requireForkReceiverEffect
-	if option.noticeEffect {
-		requireEffect = requireForkReceiverNoticeEffect
+	if option.executionOnly {
+		requireEffect = func(t *testing.T, rt servedControlProofRuntime, runID, eventID, path, label, kind, entityID string) events.DeliveryRoute {
+			for _, receiver := range receivers {
+				if prefix+receiver.Path == path {
+					return requireForkReceiverExecution(t, rt, runID, eventID, path, label, kind, entityID, receiver.Policy)
+				}
+			}
+			t.Fatalf("undeclared receiver %s", path)
+			return events.DeliveryRoute{}
+		}
 	}
 	rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -349,6 +369,14 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	})
 	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+	seedRows := readForkReceiverRows(t, rt, seed.RunID)
+	seedCompanions := map[string]map[string][]string{}
+	for _, receiver := range receivers {
+		if receiver.Policy == canonicalrouting.ForkReceiverOptionalAbsent || receiver.Policy == canonicalrouting.ForkReceiverOptionalExisting {
+			path := prefix + receiver.Path
+			seedCompanions[path] = readForkReceiverCompanions(t, rt, seed.RunID, path)
+		}
+	}
 	request := map[string]any{"event_name": requestName, "run_id": seed.RunID, "source_event_id": seed.EventID,
 		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
 	started := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
@@ -382,6 +410,16 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		}
 	}
 	sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+	if option.executionOnly {
+		for _, receiver := range receivers {
+			if receiver.Policy == canonicalrouting.ForkReceiverOptionalAbsent || receiver.Policy == canonicalrouting.ForkReceiverOptionalExisting {
+				path := prefix + receiver.Path
+				if !reflect.DeepEqual(seedRows[path], sourceRows[path]) || !reflect.DeepEqual(seedCompanions[path], readForkReceiverCompanions(t, rt, seed.RunID, path)) {
+					t.Fatalf("optional receiver changed seeded state/companions: %s", path)
+				}
+			}
+		}
+	}
 	producerEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
 	producer, producerExists := sourceRows[prefix+"producer"]
 	if producerExists == entitylessProducer || (producerExists && (producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
@@ -441,6 +479,11 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 					t.Fatalf("fixed snapshot event=%s receiver=%s associations=%d, want one", occurrence, receiver.Path, matches)
 				}
 			}
+		}
+	}
+	if option.executionOnly {
+		for _, occurrence := range frontiers {
+			requireForkReceiverMutationOwners(t, rt, seed.RunID, occurrence, prefix, receivers)
 		}
 	}
 	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
@@ -570,6 +613,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	if producerExists && !reflect.DeepEqual(childRows[prefix+"producer"], producer) {
 		t.Fatalf("producer state was rehomed: source=%+v child=%+v", producer, childRows)
 	}
+	if option.executionOnly {
+		requireForkReceiverMutationOwners(t, rt, fork.ForkRunID, childEvent, prefix, receivers)
+	}
 	if entitylessProducer {
 		if _, exists := childRows[prefix+"producer"]; exists {
 			t.Fatalf("entityless producer acquired state: %+v", childRows)
@@ -589,13 +635,13 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 
 // D3 supported business-effect counterparts. The unchanged post-R success
 // oracles are explicit future artifacts in testdata/future_capabilities.
-func TestSelectedForkCanonicalReceiverAcquisitionNoticeEffectBothStores(t *testing.T) {
+func TestSelectedForkCanonicalReceiverAcquisitionStateEffectBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend)+"/auto_materializing", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverAutoMaterializing}}, false, forkReceiverJourneyOptions{noticeEffect: true})
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverAutoMaterializing}}, false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 		t.Run(string(backend)+"/explicit_create", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverExplicitCreate}}, false, forkReceiverJourneyOptions{noticeEffect: true})
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverExplicitCreate}}, false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 	}
 }
@@ -648,7 +694,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 	}
 }
 
-func TestSelectedForkReceiverPolicyPermutationNoticeEffectBothStores(t *testing.T) {
+func TestSelectedForkReceiverPolicyPermutationExecutionBothStores(t *testing.T) {
 	receivers := []canonicalrouting.ForkReceiver{
 		{Path: "observer", Policy: canonicalrouting.ForkReceiverOptionalAbsent},
 		{Path: "optional", Policy: canonicalrouting.ForkReceiverOptionalExisting},
@@ -657,14 +703,14 @@ func TestSelectedForkReceiverPolicyPermutationNoticeEffectBothStores(t *testing.
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		for _, order := range [][3]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}} {
 			t.Run(fmt.Sprintf("%s/recipient_permutations/%d%d%d", backend, order[0], order[1], order[2]), func(t *testing.T) {
-				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{receivers[order[0]], receivers[order[1]], receivers[order[2]]}, false, forkReceiverJourneyOptions{noticeEffect: true})
+				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{receivers[order[0]], receivers[order[1]], receivers[order[2]]}, false, forkReceiverJourneyOptions{executionOnly: true})
 			})
 		}
 		t.Run(string(backend)+"/materializing_mixed", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, append(append([]canonicalrouting.ForkReceiver{}, receivers...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverAutoMaterializing}), false, forkReceiverJourneyOptions{noticeEffect: true})
+			runForkReceiverOwnershipJourney(t, backend, append(append([]canonicalrouting.ForkReceiver{}, receivers...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverAutoMaterializing}), false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 		t.Run(string(backend)+"/same_owner_two_events_and_duplicate", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, receivers, false, forkReceiverJourneyOptions{repeated: true, noticeEffect: true})
+			runForkReceiverOwnershipJourney(t, backend, receivers, false, forkReceiverJourneyOptions{repeated: true, executionOnly: true})
 		})
 	}
 }
@@ -690,7 +736,7 @@ func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testin
 					t.Fatal(err)
 				}
 				for event, handler := range source.ExecutableNodeEventHandlers(node) {
-					if handler.Action.ID != "" || len(handler.Rules) != 0 || len(handler.OnComplete) != 0 || handler.Join != nil {
+					if len(handler.Rules) != 0 || len(handler.OnComplete) != 0 || handler.Join != nil {
 						t.Fatalf("fixture unexpectedly carries dynamic action candidates: %s/%s %+v", node.FlowPath(), event, handler)
 					}
 					if node.FlowPath() == "consumer" && event == "work.ready" {
@@ -698,7 +744,7 @@ func TestSelectedForkReceiverCreateCompilationIsNotDynamicFlowCreation(t *testin
 						if handler.CreateEntity != (policy == canonicalrouting.ForkReceiverExplicitCreate) {
 							t.Fatalf("compiled create_entity fact differs: %+v", handler)
 						}
-						t.Logf("consumer/work.ready CreateEntity=%t Action.ID=%q", handler.CreateEntity, handler.Action.ID)
+						t.Logf("consumer/work.ready CreateEntity=%t", handler.CreateEntity)
 					}
 				}
 			}
@@ -800,34 +846,34 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 	}
 }
 
-func TestSelectedForkNestedStaticReceiverIsolationNoticeEffectBothStores(t *testing.T) {
+func TestSelectedForkNestedStaticReceiverIsolationExecutionBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{
 				{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting},
 				{Path: "sibling", Policy: canonicalrouting.ForkReceiverOptionalExisting},
-			}, false, forkReceiverJourneyOptions{nested: true, noticeEffect: true})
+			}, false, forkReceiverJourneyOptions{nested: true, executionOnly: true})
 		})
 	}
 }
 
-func TestSelectedForkOptionalReceiverOwnershipNoticeEffectBothStores(t *testing.T) {
+func TestSelectedForkOptionalReceiverOwnershipExecutionBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		for _, test := range []struct {
 			name   string
 			policy canonicalrouting.ForkReceiverPolicy
 		}{{"entityless", canonicalrouting.ForkReceiverOptionalAbsent}, {"existing", canonicalrouting.ForkReceiverOptionalExisting}} {
 			t.Run(fmt.Sprintf("%s/%s", backend, test.name), func(t *testing.T) {
-				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: test.policy}}, false, forkReceiverJourneyOptions{noticeEffect: true})
+				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: test.policy}}, false, forkReceiverJourneyOptions{executionOnly: true})
 			})
 		}
 	}
 }
 
-func TestSelectedForkRequiredReceiverOwnershipNoticeEffectBothStores(t *testing.T) {
+func TestSelectedForkRequiredReceiverOwnershipStateEffectBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend)+"/existing", func(t *testing.T) {
-			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, false, forkReceiverJourneyOptions{noticeEffect: true})
+			runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, false, forkReceiverJourneyOptions{executionOnly: true})
 		})
 		t.Run(string(backend)+"/missing_selected", func(t *testing.T) {
 			// Keep the original emitting source: missing-owner admission must
@@ -976,7 +1022,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 	}
 }
 
-func TestSelectedForkIndependentProducerReceiverEntitiesNoticeEffectBothStores(t *testing.T) {
+func TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		for _, entityless := range []bool{false, true} {
 			name := "distinct"
@@ -984,7 +1030,7 @@ func TestSelectedForkIndependentProducerReceiverEntitiesNoticeEffectBothStores(t
 				name = "entityless_producer"
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
-				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, entityless, forkReceiverJourneyOptions{noticeEffect: true})
+				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, entityless, forkReceiverJourneyOptions{executionOnly: true})
 			})
 		}
 	}

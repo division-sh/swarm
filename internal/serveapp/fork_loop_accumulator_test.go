@@ -35,7 +35,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				})
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt, started.RunID)
-				first := readForkLoopNoticeActivation(t, rt, started.RunID)
+				first := readForkLoopActivation(t, rt, started.RunID)
 				initial := readForkHandlerAccumulators(t, rt, started.RunID)
 				wantInitial := 1
 				if clearOnAdmit {
@@ -50,7 +50,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				})
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt, started.RunID)
-				current := readForkLoopNoticeActivation(t, rt, started.RunID)
+				current := readForkLoopActivation(t, rt, started.RunID)
 				if current.Attempt != 2 || current.ActivationID != first.ActivationID || current.RevisionID == first.RevisionID {
 					t.Fatalf("ordinary repeat: first=%+v current=%+v", first, current)
 				}
@@ -138,7 +138,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 						t.Fatal("child retained source generation key")
 					}
 				}
-				requireForkLoopNotice(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), readForkLoopNoticeActivation(t, rt, fork.ForkRunID).RevisionID)
+				requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), readForkLoopActivation(t, rt, fork.ForkRunID).RevisionID)
 				var replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkHandlerAccumulators(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
