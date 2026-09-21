@@ -31,7 +31,7 @@ func TestWorkflowInstanceReadRejectsBlankEntityContract(t *testing.T) {
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
-		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		Config:       []byte(`{"config":{},"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "   ", CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "entity_state.entity_type is required") {
@@ -45,7 +45,7 @@ func TestPersistedWorkflowStatePreservesIntegerForCELArithmetic(t *testing.T) {
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{"integer":75,"decimal":75.0,"exponent":75e0}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
-		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		Config:       []byte(`{"config":{},"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -115,7 +115,7 @@ func TestPersistedWorkflowStateRejectsUnsafeIntegerBeforeReadback(t *testing.T) 
 		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
 		CurrentState: "active", Revision: 1, EnteredStageAt: now,
 		Gates: []byte(`{}`), Fields: []byte(`{"score":9007199254740992}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
-		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		Config:       []byte(`{"config":{},"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
 		FlowInstance: "review/inst-1", EntityType: "review_subject", CreatedAt: now, UpdatedAt: now,
 	})
 	if err == nil || !strings.Contains(err.Error(), "$.score") || !strings.Contains(err.Error(), "declare the field as string") {
@@ -267,6 +267,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		WorkflowName:    "projection-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "reviewing",
+		Status:          "active",
 		EnteredStageAt:  time.Now().UTC().Round(time.Microsecond),
 		Config: map[string]any{
 			"status": "waiting",
@@ -316,8 +317,11 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	if got := fields["status"]; got != "entity-open" {
 		t.Fatalf("entity_state.fields status = %#v, want entity-open", got)
 	}
-	if got := controlStatus; got != "waiting" {
-		t.Fatalf("flow_instances.config status = %q, want waiting", got)
+	if got := controlStatus; got != "active" {
+		t.Fatalf("flow_instances.config runtime status = %q, want active", got)
+	}
+	if got := loaded.Config["status"]; got != "waiting" {
+		t.Fatalf("business config status = %#v, want waiting", got)
 	}
 }
 
@@ -494,21 +498,21 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			name:         "control metadata malformed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
+			mutateArg:    `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
 			wantContains: "flow_instances.config transition_history must be an array of workflow transition records",
 		},
 		{
 			name:         "instance id disagrees with flow path",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"storage-ref"}`,
+			mutateArg:    `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"storage-ref"}`,
 			wantContains: "instance_id",
 		},
 		{
 			name:         "slash-only flow path fails closed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_path = $1 AND run_id = $3::uuid`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
+			mutateArg:    `{"config":{},"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
 			wantContains: "flow_path",
 		},
 	}

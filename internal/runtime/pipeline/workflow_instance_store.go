@@ -1167,7 +1167,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		InstanceID:         strings.TrimSpace(persistedIdentity.InstanceID),
 		InstanceKind:       strings.TrimSpace(instance.InstanceKind),
 		TemplateVersion:    strings.TrimSpace(instance.TemplateVersion),
-		Status:             strings.TrimSpace(asString(instance.Config["status"])),
+		Status:             strings.TrimSpace(instance.Status),
 		ParentFlowID:       strings.TrimSpace(persistedIdentity.ParentRoute.FlowID),
 		ParentFlowInstance: strings.Trim(strings.TrimSpace(persistedIdentity.ParentRoute.FlowInstance), "/"),
 		ParentEntityID:     strings.TrimSpace(instance.ParentEntityID),
@@ -1182,21 +1182,23 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	if err := validateWorkflowTransitionHistoryFlow(control.TransitionHistory, strings.TrimSpace(instance.WorkflowName)); err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
+	config, err := clonePersistedWorkflowConfig(instance.Config)
+	if err != nil {
+		return workflowInstancePersistedProjection{}, err
+	}
 	return workflowInstancePersistedProjection{
 		Fields:      cloneStringAnyMap(instance.Fields),
 		Bookkeeping: cloneStringAnyMap(instance.Bookkeeping),
 		Gates:       cloneWorkflowGates(instance.Gates),
 		Accumulator: cloneStringAnyMap(instance.StateBuckets),
-		Config:      cloneStringAnyMap(instance.Config),
+		Config:      config,
 		Control:     control,
 	}, nil
 }
 
 func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion string) map[string]any {
-	config := cloneStringAnyMap(p.Config)
-	if config == nil {
-		config = map[string]any{}
-	}
+	// Business keys never share a namespace with persisted runtime controls.
+	config := map[string]any{"config": cloneWorkflowSchemaValue(p.Config)}
 	config["workflow_version"] = strings.TrimSpace(workflowVersion)
 	config["instance_id"] = strings.TrimSpace(p.Control.InstanceID)
 	config["storage_ref"] = strings.TrimSpace(p.Control.StorageRef)
@@ -1228,8 +1230,8 @@ func (p workflowInstancePersistedProjection) ConfigPayload(workflowVersion strin
 }
 
 // WorkflowInstanceConfigPayloadForRoute wraps activation config with the
-// canonical persisted route controls. Route recovery removes these controls
-// and returns the original activation config to runtime consumers.
+// canonical persisted route controls. Route recovery reads the separate
+// business object without interpreting any of its keys as runtime controls.
 func WorkflowInstanceConfigPayloadForRoute(
 	route runtimeflowidentity.Route,
 	workflowVersion string,
@@ -1239,14 +1241,29 @@ func WorkflowInstanceConfigPayloadForRoute(
 	if !route.Valid() {
 		return nil, fmt.Errorf("workflow instance config payload requires exact route")
 	}
+	isolated, err := clonePersistedWorkflowConfig(config)
+	if err != nil {
+		return nil, err
+	}
 	return (workflowInstancePersistedProjection{
-		Config: cloneStringAnyMap(config),
+		Config: isolated,
 		Control: workflowInstancePersistedControl{
 			StorageRef: route.InstancePath,
 			InstanceID: route.InstanceID,
 			FlowPath:   route.InstancePath,
 		},
 	}).ConfigPayload(workflowVersion), nil
+}
+
+func clonePersistedWorkflowConfig(config map[string]any) (map[string]any, error) {
+	if config == nil {
+		return map[string]any{}, nil
+	}
+	cloned, err := canonicaljson.CloneRuntimeValue(config)
+	if err != nil {
+		return nil, fmt.Errorf("workflow instance config: %w", err)
+	}
+	return cloned.(map[string]any), nil
 }
 
 func (p workflowInstancePersistedProjection) GatesAny() map[string]any {
@@ -1298,6 +1315,17 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
 	}
+	business, ok := config["config"].(map[string]any)
+	if !ok || business == nil {
+		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config requires a separate config object")
+	}
+	for key := range config {
+		switch key {
+		case "config", "workflow_version", "instance_id", "storage_ref", "flow_path", "instance_kind", "template_version", "status", "parent_flow_id", "parent_flow_instance", "parent_entity_id", "transition_history":
+		default:
+			return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config contains unknown runtime control %q", key)
+		}
+	}
 	instanceID, err := workflowInstanceOptionalString(config, "instance_id")
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
@@ -1341,16 +1369,6 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
 	}
-	delete(config, "workflow_version")
-	delete(config, "instance_id")
-	delete(config, "storage_ref")
-	delete(config, "flow_path")
-	delete(config, "instance_kind")
-	delete(config, "template_version")
-	delete(config, "parent_flow_id")
-	delete(config, "parent_flow_instance")
-	delete(config, "parent_entity_id")
-	delete(config, "transition_history")
 	control.InstanceID = strings.TrimSpace(instanceID)
 	control.FlowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	if strings.TrimSpace(control.StorageRef) == "" {
@@ -1366,7 +1384,7 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	control.ParentFlowInstance = strings.Trim(strings.TrimSpace(parentFlowInstance), "/")
 	control.ParentEntityID = strings.TrimSpace(parentEntityID)
 	control.TransitionHistory = transitionHistory
-	return config, control, nil
+	return business, control, nil
 }
 
 func workflowInstanceOptionalString(config map[string]any, key string) (string, error) {
