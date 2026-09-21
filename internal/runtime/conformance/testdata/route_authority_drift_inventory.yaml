@@ -1205,6 +1205,13 @@ seam_families:
       CopyReceiverConfigHistory (receiver_config_history.go) is the finite
       agent-consumer source for TestReceiverConfigHistoricalCaptureAndReadinessBothStores
       in internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go.
+      TestSelectedForkTemplateGenerationAssociations and
+      TestSelectedForkTemplateCompanionReadinessBothStores in
+      internal/store/internal/backend/runforkpersistence/run_fork_workflow_ownership_test.go
+      consume that same complete recorded business declaration. Companion setup
+      decodes the recorded config through the existing route codec before agent
+      materialization; generation conflicts and hostile companion mutations
+      retain their original assertions and are not masked by undeclared fields.
       It declares nested and flow_path as JSON business fields and status as
       boolean, retaining the original vertical_id key and select-only route.
       Historical number kinds, runtime-control name collisions, fixed-revision
