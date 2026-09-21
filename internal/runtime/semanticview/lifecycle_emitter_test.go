@@ -303,8 +303,6 @@ func TestCompiledLifecycleEmitterExistingFamilies(t *testing.T) {
 			"families|node_handler|rule-dispatcher|handler.rules[0].fan_out.emit|families/item",
 			"families|node_handler|completion|handler.on_complete[0].emit|families/direct",
 			"families|node_handler|completion-dispatcher|handler.on_complete[0].fan_out.emit|families/item",
-			"families|node_handler|committer|handler.action.success|families/commit.ok",
-			"families|node_handler|committer|handler.action.failure|families/commit.failed",
 		}},
 		{"generated_outcomes_root", func(t *testing.T) string { return canonicalrouting.CopyLifecycleEmitterActivityOutcomes(t, false) }, []string{
 			".|node_generated|activity-node||send.succeeded",

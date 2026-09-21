@@ -88,9 +88,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/publicingress/exposure.go:probePublicRoute:http_do:1":                                                               ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:1":                                                       ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:2":                                                       ownerOperatorInfra,
-	"internal/runtime/pipeline/artifact_repo.go:runArtifactGit:process_launch:1":                                                          ownerPipelineAction,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:1":                                 ownerPipelineAction,
-	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:1":                                                ownerPipelineAction,
 	"internal/runtime/pipeline/generic_test_module.go:init:http_do:1":                                                                     ownerBuildTest,
 	"internal/runtime/pythonmodule/artifact_cache.go:materializedArtifactDir:http_do:1":                                                   ownerComputeSandbox,
 	"internal/runtime/pythonmodule/internal/genartifactmanifest/main.go:main:filesystem_write:1":                                          ownerBuildTest,
@@ -164,12 +161,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:4":                                                         ownerCredentialLifecycle,
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:5":                                                         ownerCredentialLifecycle,
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:6":                                                         ownerCredentialLifecycle,
-	"internal/runtime/pipeline/artifact_repo.go:ensureArtifactRepoInitialized:filesystem_write:1":                                         ownerPipelineAction,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:1":                                      ownerPipelineAction,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoRootWritable:filesystem_write:2":                                      ownerPipelineAction,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:2":                                 ownerPipelineAction,
-	"internal/runtime/pipeline/artifact_repo.go:validateArtifactRepoWritableDirectory:filesystem_write:3":                                 ownerPipelineAction,
-	"internal/runtime/pipeline/artifact_repo.go:writeArtifactRepoFiles:filesystem_write:2":                                                ownerPipelineAction,
 	"internal/runtime/pythonmodule/artifact_cache.go:extractArchive:filesystem_write:1":                                                   ownerComputeSandbox,
 	"internal/runtime/pythonmodule/artifact_cache.go:extractArchive:filesystem_write:2":                                                   ownerComputeSandbox,
 	"internal/runtime/pythonmodule/artifact_cache.go:extractArchive:filesystem_write:3":                                                   ownerComputeSandbox,
@@ -237,13 +228,8 @@ func TestPipelineEffectPrimitiveOwnersAreExact(t *testing.T) {
 	if fmt.Sprint(activity) != fmt.Sprint(wantActivity) {
 		t.Fatalf("pipeline activity primitives = %v, want %v", activity, wantActivity)
 	}
-	if len(action) == 0 {
-		t.Fatal("pipeline action primitive owner is empty")
-	}
-	for _, primitive := range action {
-		if !strings.HasPrefix(primitive, "internal/runtime/pipeline/artifact_repo.go:") {
-			t.Fatalf("pipeline action primitive %q is outside artifact_repo action owner", primitive)
-		}
+	if len(action) != 0 {
+		t.Fatalf("retired pipeline action primitives = %v, want none", action)
 	}
 }
 
