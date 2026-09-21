@@ -337,7 +337,11 @@ pins:
 func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
+	removeClosedVariantFiles(t, root,
+		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
+		"account/entities.yaml", "account/nodes.yaml", "account/schema.yaml", "account")
 	files := map[string]string{
+		"schema.yaml": "name: empire-outbox\npins:\n  outputs:\n    events: [opco.create_requested]\nconnect:\n  - {event: opco.create_requested, from: ., to: operating}\n",
 
 		"events.yaml": `approval.completed:
   swarm:
@@ -346,6 +350,10 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
   instance_id: string
   product_id: string
 opco.spinup_requested:
+  instance_id: string
+  product_id: string
+opco.create_requested:
+  key: instance_id
   instance_id: string
   product_id: string
 `,
@@ -363,24 +371,35 @@ opco.spinup_requested:
 portfolio-node:
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
+  produces: [opco.create_requested]
   event_handlers:
     opco.spinup_requested:
-      action: create_flow_instance
-      template: operating
-      instance_id_from: payload.instance_id
-      config_from:
-        product_id: payload.product_id
+      emit:
+        event: opco.create_requested
+        fields:
+          instance_id: payload.instance_id
+          product_id: payload.product_id
 `,
 		"operating/schema.yaml": `name: operating
 mode: template
 instance: instance_id
+instance_variables:
+  variables:
+    product_id: text
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, ready]
+pins:
+  inputs:
+    events:
+      - event: opco.create_requested
+        resolution: {mode: create}
+        initialize:
+          product_id: payload.product_id
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
-		"operating/entities.yaml": "operating_state: {}\n",
+		"operating/entities.yaml": "operating_state:\n  instance_id: {type: text, _unused_reason: receiver instance identity}\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
   product_id: string
 component_scaffold.spawn_requested:
@@ -388,9 +407,10 @@ component_scaffold.spawn_requested:
 `,
 		"operating/nodes.yaml": `lifecycle-orchestrator:
   execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
+  subscribes_to: [opco.create_requested, opco.product_initialization_requested]
   produces: [component_scaffold.spawn_requested]
   event_handlers:
+    opco.create_requested: {}
     opco.product_initialization_requested:
       advances_to: ready
       emit:

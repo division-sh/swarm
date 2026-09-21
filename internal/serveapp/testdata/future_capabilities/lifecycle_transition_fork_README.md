@@ -33,7 +33,7 @@ not a passing test, unexplained skip, or expected-failure wrapper.
   valid child revision. This is distinct from the invalid automatic-remapping
   assumption. A future remapping design needs an explicit admission contract.
 - Supported source-owned generation execution remains independently covered by
-  `TestServedForkLoopGenerationNoticeBothStores` and the retained four-scope
+  `TestServedForkLoopGenerationStateEffectBothStores` and the retained four-scope
   static-fork positives. They are not substitutes for either current refusal.
 
 ## Reproduction

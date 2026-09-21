@@ -226,7 +226,7 @@ func CopyLifecycleEmitterHandlerFamilies(t testing.TB) string {
 	t.Helper()
 	root := CopyLifecycleEmitter(t, LifecycleGateLocal)
 	writeClosedVariantFile(t, root, "families/schema.yaml", "name: handler-families\n")
-	events := "direct: {}\nrouted: {}\naudit: {}\nescalated: {}\nspecialized:\n  bucket: text\nitem:\n  id: text\ncommit.ok: {}\ncommit.failed: {}\n"
+	events := "direct: {}\nrouted: {}\naudit: {}\nescalated: {}\nspecialized:\n  bucket: text\nitem:\n  id: text\n"
 	nodes := `worker:
   execution_type: system_node
   event_handlers:
@@ -296,17 +296,8 @@ completion-dispatcher:
             as: element
             identity: element
             emit: {event: item, fields: {id: {cel: element}}}
-committer:
-  execution_type: system_node
-  event_handlers:
-    request:
-      action:
-        id: artifact_repo_commit
-        artifact_repo:
-          success_event: commit.ok
-          failure_event: commit.failed
 `
-	for _, node := range []string{"worker", "router", "template", "dispatcher", "rule-dispatcher", "completion", "completion-dispatcher", "committer"} {
+	for _, node := range []string{"worker", "router", "template", "dispatcher", "rule-dispatcher", "completion", "completion-dispatcher"} {
 		request := "request." + strings.ReplaceAll(node, "-", "_")
 		events += request + ":\n  score: integer\n  items: \"[text]\"\n"
 		nodes = strings.Replace(nodes, "    request:\n", "    "+request+":\n", 1)

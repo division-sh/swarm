@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/mailbox"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
@@ -16,8 +17,8 @@ func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.
 			f := newMailboxCompletionFixture(t, backend)
 			rt, runID := f.rt, f.base.RunID
 			noticeID := mailboxCompletionNotice(t, f)
-			var childEvent string
-			if err := rt.DB.QueryRow(`SELECT m.source_event_id FROM mailbox m JOIN events e ON e.event_id=m.source_event_id WHERE m.item_id=$1 AND e.run_id=$2`, noticeID, runID).Scan(&childEvent); err != nil {
+			var childEvent, sourceEntity string
+			if err := rt.DB.QueryRow(`SELECT m.source_event_id,COALESCE(CAST(m.entity_id AS TEXT),'') FROM mailbox m JOIN events e ON e.event_id=m.source_event_id WHERE m.item_id=$1 AND e.run_id=$2`, noticeID, runID).Scan(&childEvent, &sourceEntity); err != nil {
 				t.Fatal(err)
 			}
 			type noticeProjection struct {
@@ -28,6 +29,10 @@ func TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores(t *testing.
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": noticeID}, &detail)
 			if detail.Kind != "notice" || detail.Notice.Item.MailboxID != noticeID || detail.Notice.Item.SourceEventID != childEvent || detail.Notice.Item.SourceFlow != "observers" || detail.Notice.Item.Status != "pending" {
 				t.Fatalf("supported notice projection: %+v", detail)
+			}
+			wantPayload := map[string]any{"proof": "mailbox-completion"}
+			if detail.Notice.Item.Type != runtimetools.NotifyHumanMailboxItemType || detail.Notice.Item.Priority != "normal" || detail.Notice.Item.SourceEntityID != sourceEntity || !reflect.DeepEqual(detail.Notice.Payload, wantPayload) || !reflect.DeepEqual(detail.Notice.Item.Payload, wantPayload) {
+				t.Fatalf("notify_human must preserve informational type, priority, owner and exact context: %+v", detail)
 			}
 			var list struct {
 				Items []struct {

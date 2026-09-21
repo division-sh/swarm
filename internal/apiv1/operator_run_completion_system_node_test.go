@@ -156,10 +156,9 @@ func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycl
 }
 
 type runCompletionSystemNodeModule struct {
-	source  semanticview.Source
-	nodes   []runtimepipeline.WorkflowNode
-	guards  runtimepipeline.GuardRegistry
-	actions runtimepipeline.ActionRegistry
+	source semanticview.Source
+	nodes  []runtimepipeline.WorkflowNode
+	guards runtimepipeline.GuardRegistry
 }
 
 func newRunCompletionSystemNodeModule(t *testing.T, source semanticview.Source) runtimepipeline.WorkflowModule {
@@ -169,10 +168,9 @@ func newRunCompletionSystemNodeModule(t *testing.T, source semanticview.Source) 
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	return runCompletionSystemNodeModule{
-		source:  source,
-		nodes:   nodes,
-		guards:  runtimepipeline.NewContractGuardRegistry(source),
-		actions: runtimepipeline.NewContractActionRegistry(source),
+		source: source,
+		nodes:  nodes,
+		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 }
 
@@ -186,10 +184,6 @@ func (m runCompletionSystemNodeModule) WorkflowNodes() []runtimepipeline.Workflo
 
 func (m runCompletionSystemNodeModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guards
-}
-
-func (m runCompletionSystemNodeModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actions
 }
 
 func waitForRunGetStatus(
