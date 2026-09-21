@@ -1168,8 +1168,10 @@ seam_families:
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go
+      - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_ingress.go
       - internal/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go
       - internal/serveapp/receiver_initialization_test.go
+      - internal/serveapp/receiver_initialization_ingress_test.go
       - internal/runtime/bus/receiver_initialization_test.go
       - internal/runtime/cataloge2e/receiver_initialization_geometry_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/tests/expected.yaml
@@ -1205,6 +1207,19 @@ seam_families:
       the ordinary producer/connect fixture consumed by
       TestServedTypedReceiverInitializationBothStores in
       internal/serveapp/receiver_initialization_test.go.
+      R18 CopyProviderReceiverInitialization (receiver_initialization_ingress.go)
+      is consumed by TestReceiverInitializationPublicProviderSchemaIngressBothStores
+      in internal/serveapp/receiver_initialization_ingress_test.go. It retains
+      the native public provider-schema import and directly creates a receiver
+      in a new run without an authored producer/connect hop, concrete target,
+      or run/entity/instance hint. The proof checks typed config and false
+      default, automatic creation payload, exact first-claim node settlements,
+      and duplicate publication without repeated execution. Private-event and
+      invalid-schema refusals preserve application, author-activity and revision
+      facts; schema rejection permits exactly one validated diagnostic-only
+      append while retaining every preexisting event. This is not provider
+      transport, webhook ingress, private-harness or replacement action proof.
+      It adds no Go-connect literal or historical retired-action corpus member.
       These are fixture ownership/proof references, not runtime pass receipts.
   - id: route_authority_conformance_artifacts
     layer: conformance_guardrails
