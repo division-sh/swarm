@@ -332,7 +332,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if err != nil {
 				t.Fatal(err)
 			}
-			flowInstanceConfig := fmt.Sprintf(`{"workflow_version":"1","instance_id":%q,"storage_ref":%q,"flow_path":%q}`, forkRunID, forkRunID, forkRunID)
+			flowInstanceConfig := fmt.Sprintf(`{"config":{},"workflow_version":"1","instance_id":%q,"storage_ref":%q,"flow_path":%q}`, forkRunID, forkRunID, forkRunID)
 			flowInstanceQuery := `
 				INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 				VALUES (?, ?, '.', 'static', ?, 'active', ?)
