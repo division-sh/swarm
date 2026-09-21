@@ -34,8 +34,6 @@ type Source interface {
 	WorkflowStageTimerByID(flowID, id string) (runtimecontracts.WorkflowTimerContract, bool)
 	GuardInstructions() []runtimeregistry.GuardInstruction
 	GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool)
-	ActionInstructions() []runtimeregistry.ActionInstruction
-	ActionInstructionByID(id string) (runtimeregistry.ActionInstruction, bool)
 	FlowSchemaEntries() map[string]runtimecontracts.FlowSchemaDocument
 	FlowInitialStage(flowID string) string
 	FlowStates(flowID string) []string

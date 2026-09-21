@@ -303,13 +303,6 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {
 			bundle := loadProducerRoutingFixture(t, tc.fixture)
-			if tc.id == "B100" {
-				node := bundle.Nodes[tc.nodeID]
-				handler := node.EventHandlers[tc.trigger]
-				handler.Action = runtimecontracts.ActionSpec{}
-				node.EventHandlers[tc.trigger] = handler
-				bundle.Nodes[tc.nodeID] = node
-			}
 			payload, err := json.Marshal(tc.payload)
 			if err != nil {
 				t.Fatal(err)
