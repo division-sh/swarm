@@ -130,6 +130,20 @@ func admitReceiverVariable(field receiverVariable, value any) (any, error) {
 // Admit applies defaults only to absent members. Explicit null and malformed
 // supplied values are validated as supplied, never converted into defaults.
 func (c ReceiverConfiguration) Admit(supplied map[string]any) (map[string]any, error) {
+	return c.validateValues(supplied, true)
+}
+
+// ValidateCommitted checks complete recorded evidence against the selected
+// declaration. It never fills defaults or changes the recorded configuration.
+func (c ReceiverConfiguration) ValidateCommitted(recorded map[string]any) error {
+	if recorded == nil {
+		return fmt.Errorf("receiver configuration requires exact committed receiver configuration")
+	}
+	_, err := c.validateValues(recorded, false)
+	return err
+}
+
+func (c ReceiverConfiguration) validateValues(supplied map[string]any, applyDefaults bool) (map[string]any, error) {
 	known := make(map[string]bool, len(c.variables))
 	for _, field := range c.variables {
 		known[field.name] = true
@@ -143,11 +157,14 @@ func (c ReceiverConfiguration) Admit(supplied map[string]any) (map[string]any, e
 	for _, field := range c.variables {
 		value, present := supplied[field.name]
 		if !present {
-			if field.hasDefault {
+			if applyDefaults && field.hasDefault {
 				value = field.defaultValue
 			} else if field.optional {
 				continue
 			} else {
+				if !applyDefaults {
+					return nil, fmt.Errorf("committed receiver variable %s is missing", field.name)
+				}
 				return nil, fmt.Errorf("receiver variable %s is missing and has no default", field.name)
 			}
 		}

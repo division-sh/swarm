@@ -537,6 +537,17 @@ func flowInstanceAgentMaterializationRecords(runID string, req runtimepipeline.F
 }
 
 func flowInstanceAgentMaterializationBlueprints(req runtimepipeline.FlowInstanceActivationRequest, schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) ([]AgentMaterializationBlueprint, error) {
+	bundle, ok := semanticview.Bundle(req.ContractBundle)
+	if !ok {
+		return nil, fmt.Errorf("committed receiver configuration requires the selected contract bundle")
+	}
+	configuration, err := bundle.ReceiverConfigurationForFlow(req.Instance.TemplateID)
+	if err != nil {
+		return nil, fmt.Errorf("flow %s receiver configuration: %w", req.Instance.TemplateID, err)
+	}
+	if err := configuration.ValidateCommitted(req.Config); err != nil {
+		return nil, fmt.Errorf("flow %s receiver configuration: %w", req.Instance.TemplateID, err)
+	}
 	instance := req.Instance
 	vars := flowActivationVars(req)
 	localEvents := flowLocalEventSet(schema, scope)

@@ -296,11 +296,25 @@ func TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt(t *testing.T) {
 
 func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 	t.Helper()
+	return templateAdmissionRequestWithVariables(t, nil)
+}
+
+func templateAdmissionRequestWithVariables(t *testing.T, variables map[string]contracts.FlowVariable) AdmissionRequest {
+	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{Consumer: canonicalrouting.TemplateInstanceAgentConsumer})
 	bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, root, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{PlatformPackBase: packfixture.EmbeddedBase(t), AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if variables != nil {
+		schema := bundle.FlowSchemas["consumer"]
+		schema.InstanceVariables = contracts.FlowInstanceVariables{Variables: variables}
+		bundle.FlowSchemas["consumer"] = schema
+		bundle.FlowTree.ByID["consumer"].Schema = schema
+		if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
+			t.Fatal(err)
+		}
 	}
 	hash, err := contracts.BundleHash(bundle)
 	if err != nil {

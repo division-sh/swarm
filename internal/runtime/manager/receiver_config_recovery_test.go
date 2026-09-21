@@ -209,7 +209,7 @@ func TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults(t *testing.T
 					"priority": {Type: "integer", HasDefault: true, Default: priority},
 				}
 				if revised {
-					variables["new_default"] = runtimecontracts.FlowVariable{Type: "string", HasDefault: true, Default: "must-not-appear"}
+					variables["new_default"] = runtimecontracts.FlowVariable{Type: "string", IsOptional: true, HasDefault: true, Default: "must-not-appear"}
 				}
 				declareReceiverConfig(t, bundle, variables)
 				return bundle
@@ -281,7 +281,7 @@ func TestTemplateFlowMaterializationRequiresExactCommittedConfig(t *testing.T) {
 	bundle := testFlowBundle(t, "")
 	declareReceiverConfig(t, bundle, map[string]runtimecontracts.FlowVariable{
 		"key": {Type: "string"}, "nested": {Type: "json"},
-		"new_default": {Type: "string", HasDefault: true, Default: "must-not-be-applied"},
+		"new_default": {Type: "string", IsOptional: true, HasDefault: true, Default: "must-not-be-applied"},
 	})
 	source := semanticview.Wrap(bundle)
 	const path = "review/ti-not-the-business-key"
