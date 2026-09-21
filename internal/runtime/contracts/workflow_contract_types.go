@@ -86,9 +86,7 @@ type WorkflowSemanticView struct {
 	Loops                  []WorkflowLoopPlan
 	Gates                  []WorkflowGatePlan
 	Guards                 []GuardActionEntry
-	Actions                []GuardActionEntry
 	GuardByID              map[string]GuardActionEntry
-	ActionByID             map[string]GuardActionEntry
 	FlowInitial            map[string]string
 	FlowStates             map[string][]string
 	FlowTerminal           map[string][]string
@@ -290,7 +288,6 @@ type HandlerTransitionSemantic struct {
 	Node             runtimeidentity.ExecutableNode
 	EventType        string
 	CreateEntity     bool
-	Action           ActionSpec
 	Activity         ActivitySpec
 	Guard            *GuardSpec
 	AdvancesTo       string
@@ -321,7 +318,6 @@ type HandlerRuleEntry struct {
 	PolicyRow           PolicySheetRowMetadata   `yaml:"-"`
 	AdvancesTo          string                   `yaml:"advances_to"`
 	Emit                EmitSpec                 `yaml:"emit"`
-	Action              ActionSpec               `yaml:"action"`
 	Activity            ActivitySpec             `yaml:"activity"`
 	DataAccumulation    WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute             *ComputeSpec             `yaml:"compute"`
@@ -811,17 +807,6 @@ type ClearSpec struct {
 	Targets []string `yaml:"targets"`
 }
 
-type ConfigFromSpec struct {
-	PolicyKeys []string          `yaml:"policy_keys"`
-	Bindings   map[string]string `yaml:",inline"`
-	Entries    []ConfigBinding   `yaml:"-"`
-}
-type ConfigBinding struct {
-	Key     string
-	Ref     string
-	RefPath paths.Path
-}
-
 func cloneStringMap(in map[string]string) map[string]string {
 	if len(in) == 0 {
 		return nil
@@ -870,74 +855,6 @@ func (s *QuerySpec) hydratePaths() {
 	for i := range s.Queries {
 		s.Queries[i].hydratePaths()
 	}
-}
-
-type ActionSpec struct {
-	ID             string            `yaml:"id"`
-	Template       string            `yaml:"template"`
-	InstanceIDFrom string            `yaml:"instance_id_from"`
-	InstanceIDPath paths.Path        `yaml:"-"`
-	ConfigFrom     *ConfigFromSpec   `yaml:"config_from"`
-	Mailbox        *MailboxWriteSpec `yaml:"mailbox"`
-	ArtifactRepo   *ArtifactRepoSpec `yaml:"artifact_repo"`
-}
-
-type MailboxWriteSpec struct {
-	ItemType     ExpressionValue            `yaml:"item_type"`
-	Severity     ExpressionValue            `yaml:"severity"`
-	Summary      ExpressionValue            `yaml:"summary"`
-	EntityID     ExpressionValue            `yaml:"entity_id"`
-	FlowInstance ExpressionValue            `yaml:"flow_instance"`
-	Payload      map[string]ExpressionValue `yaml:"payload"`
-}
-
-type ArtifactRepoSpec struct {
-	Provider       string                     `yaml:"provider"`
-	RepoID         ExpressionValue            `yaml:"repo_id"`
-	Namespace      ExpressionValue            `yaml:"namespace"`
-	PartitionKey   ExpressionValue            `yaml:"partition_key"`
-	DisplaySlug    ExpressionValue            `yaml:"display_slug"`
-	RequestID      ExpressionValue            `yaml:"request_id"`
-	Author         ExpressionValue            `yaml:"author"`
-	Provenance     map[string]ExpressionValue `yaml:"provenance"`
-	AllowedPaths   []string                   `yaml:"allowed_paths"`
-	Files          []ArtifactRepoFileSpec     `yaml:"files"`
-	Output         ArtifactRepoOutputSpec     `yaml:"output"`
-	Limits         ArtifactRepoLimitsSpec     `yaml:"limits"`
-	SuccessEvent   string                     `yaml:"success_event"`
-	SuccessPayload map[string]ExpressionValue `yaml:"success_payload"`
-	FailureEvent   string                     `yaml:"failure_event"`
-	FailurePayload map[string]ExpressionValue `yaml:"failure_payload"`
-}
-
-type ArtifactRepoFileSpec struct {
-	Path        ExpressionValue        `yaml:"path"`
-	Content     ExpressionValue        `yaml:"content"`
-	ContentType string                 `yaml:"content_type"`
-	Schema      ArtifactRepoSchemaSpec `yaml:"schema"`
-	MaxBytes    int                    `yaml:"max_bytes"`
-}
-
-type ArtifactRepoSchemaSpec struct {
-	Type           string   `yaml:"type"`
-	RequiredFields []string `yaml:"required_fields"`
-}
-
-type ArtifactRepoOutputSpec struct {
-	RepoURL           string `yaml:"repo_url"`
-	CurrentRef        string `yaml:"current_ref"`
-	FileManifest      string `yaml:"file_manifest"`
-	Status            string `yaml:"status"`
-	Failure           string `yaml:"failure"`
-	LastRequestID     string `yaml:"last_request_id"`
-	LastSourceEventID string `yaml:"last_source_event_id"`
-}
-
-type ArtifactRepoLimitsSpec struct {
-	MaxYAMLBytes     int `yaml:"max_yaml_bytes"`
-	MaxMarkdownBytes int `yaml:"max_markdown_bytes"`
-	MaxTextBytes     int `yaml:"max_text_bytes"`
-	MaxRepoBytes     int `yaml:"max_repo_bytes"`
 }
 
 type EntitySchema struct {
@@ -1720,11 +1637,9 @@ type SystemNodeContract struct {
 	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
-	Action           ActionSpec               `yaml:"action"`
 	Activity         ActivitySpec             `yaml:"activity"`
 	CreateEntity     bool                     `yaml:"create_entity"`
 	Description      string                   `yaml:"description"`
-	EvidenceTarget   string                   `yaml:"evidence_target"`
 	Emit             EmitSpec                 `yaml:"emit"`
 	OnSuccess        HandlerOnSuccessSpec     `yaml:"on_success"`
 	Guard            *GuardSpec               `yaml:"guard"`
@@ -2006,9 +1921,6 @@ type PlatformSpecDocument struct {
 		Guards []struct {
 			ID string `yaml:"id"`
 		} `yaml:"guards"`
-		Actions []struct {
-			ID string `yaml:"id"`
-		} `yaml:"actions"`
 	} `yaml:"builtin_hooks"`
 	APISpecification yaml.Node `yaml:"api_specification"`
 	ComplianceRules  yaml.Node `yaml:"compliance_rules"`
@@ -2038,21 +1950,4 @@ type PackInterfaceEvent struct {
 type PackInterfaceField struct {
 	Schema string `yaml:"schema,omitempty"`
 	Opaque string `yaml:"opaque,omitempty"`
-}
-
-func (s ConfigFromSpec) ConfigEntries() []ConfigBinding {
-	out := make([]ConfigBinding, 0, len(s.Bindings))
-	for key, value := range s.Bindings {
-		cleanKey := strings.TrimSpace(key)
-		cleanValue := strings.TrimSpace(value)
-		if cleanKey == "" || cleanValue == "" {
-			continue
-		}
-		out = append(out, ConfigBinding{
-			Key:     cleanKey,
-			Ref:     cleanValue,
-			RefPath: paths.Parse(cleanValue),
-		})
-	}
-	return out
 }

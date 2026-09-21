@@ -24,6 +24,9 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 	if err := validateUniqueNormalizedMappingKeys(resolved, "authored handler rule"); err != nil {
 		return err
 	}
+	if err := validateRetiredHandlerActionFields(resolved, "rule"); err != nil {
+		return err
+	}
 	if err := validateRuleFieldNodes(resolved); err != nil {
 		return err
 	}
@@ -130,7 +133,6 @@ var ruleFieldOptions = map[string]struct{}{
 	"default":           {},
 	"advances_to":       {},
 	"emit":              {},
-	"action":            {},
 	"activity":          {},
 	"data_accumulation": {},
 	"compute":           {},
