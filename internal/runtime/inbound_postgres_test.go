@@ -25,6 +25,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -37,6 +38,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -1080,6 +1082,23 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 	}
 }
 
+func inboundGatewayWorkflowConfig(t *testing.T, flowInstance, provider, webhookSecret string) []byte {
+	t.Helper()
+	payload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(runtimeflowidentity.RouteForInstancePath(flowInstance), "", map[string]any{
+		"secrets": map[string]any{
+			"webhook_signing": map[string]any{provider: webhookSecret},
+		},
+	})
+	if err != nil {
+		t.Fatalf("project inbound workflow config: %v", err)
+	}
+	wire, err := canonicaljson.MarshalPreservingNumberKinds(payload)
+	if err != nil {
+		t.Fatalf("marshal inbound workflow config: %v", err)
+	}
+	return wire
+}
+
 func seedPostgresInboundGatewayRuntime(
 	t *testing.T,
 	ctx context.Context,
@@ -1098,19 +1117,7 @@ func seedPostgresInboundGatewayRuntime(
 		Origin: boundedInboundStandingOrigin(t, provider),
 		RunID:  runID,
 	})
-	configBytes, err := json.Marshal(map[string]any{
-		"flow_path":   flowInstance,
-		"instance_id": flowInstance,
-		"storage_ref": flowInstance,
-		"secrets": map[string]any{
-			"webhook_signing": map[string]string{
-				provider: webhookSecret,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal flow config: %v", err)
-	}
+	configBytes := inboundGatewayWorkflowConfig(t, flowInstance, provider, webhookSecret)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES ($1::uuid, $2, $3, 'static', $4::jsonb, 'active', now())
@@ -1254,19 +1261,7 @@ func seedSQLiteInboundGatewayRuntime(
 		RunID:     runID,
 		StartedAt: now,
 	})
-	configBytes, err := json.Marshal(map[string]any{
-		"flow_path":   flowInstance,
-		"instance_id": flowInstance,
-		"storage_ref": flowInstance,
-		"secrets": map[string]any{
-			"webhook_signing": map[string]string{
-				provider: webhookSecret,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal sqlite flow config: %v", err)
-	}
+	configBytes := inboundGatewayWorkflowConfig(t, flowInstance, provider, webhookSecret)
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES (?, ?, ?, 'static', ?, 'active', ?)
