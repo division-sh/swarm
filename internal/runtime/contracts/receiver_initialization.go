@@ -20,6 +20,7 @@ type receiverVariable struct {
 	optional     bool
 	hasDefault   bool
 	defaultValue any
+	defaultWire  string
 }
 
 // ReceiverConfiguration owns receiver variable admission for every creation
@@ -104,6 +105,11 @@ func CompileReceiverConfiguration(declaration FlowInstanceVariables, catalog Typ
 				return ReceiverConfiguration{}, fmt.Errorf("receiver variable %s default: %w", name, err)
 			}
 			field.defaultValue = value
+			wire, err := canonicaljson.MarshalPreservingNumberKinds(value)
+			if err != nil {
+				return ReceiverConfiguration{}, fmt.Errorf("receiver variable %s default identity: %w", name, err)
+			}
+			field.defaultWire = string(wire)
 		}
 		out.variables = append(out.variables, field)
 	}
@@ -409,7 +415,7 @@ func (b *WorkflowContractBundle) ReceiverConfigurationForFlow(flowID string) (Re
 func (p ReceiverInitialization) semanticEvidence() any {
 	fields := make([]map[string]any, 0, len(p.configuration.variables))
 	for _, v := range p.configuration.variables {
-		fields = append(fields, map[string]any{"name": v.name, "type": v.typeRef, "schema": v.schema, "optional": v.optional, "has_default": v.hasDefault, "default": v.defaultValue})
+		fields = append(fields, map[string]any{"name": v.name, "type": v.typeRef, "schema": v.schema, "optional": v.optional, "has_default": v.hasDefault, "default": v.defaultWire})
 	}
 	bindings := make(map[string]string, len(p.bindings))
 	for _, binding := range p.bindings {
