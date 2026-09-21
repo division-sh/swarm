@@ -465,9 +465,6 @@ func bootverifyHandlerMaterializesEntity(source semanticview.Source, node runtim
 	if handler.CreateEntity {
 		return true
 	}
-	if bootverifyHandlerActionMaterializesEntity(handler) {
-		return true
-	}
 	if bootverifyHandlerMutatesEntityLifecycle(handler) {
 		return true
 	}
@@ -498,32 +495,6 @@ func bootverifyHandlerMaterializesEntity(source semanticview.Source, node runtim
 		}
 	}
 	return false
-}
-
-func bootverifyHandlerActionMaterializesEntity(handler runtimecontracts.SystemNodeEventHandler) bool {
-	if bootverifyActionMaterializesEntity(handler.Action) {
-		return true
-	}
-	for _, rule := range handler.Rules {
-		if bootverifyActionMaterializesEntity(rule.Action) {
-			return true
-		}
-	}
-	for _, rule := range handler.OnComplete {
-		if bootverifyActionMaterializesEntity(rule.Action) {
-			return true
-		}
-	}
-	return false
-}
-
-func bootverifyActionMaterializesEntity(action runtimecontracts.ActionSpec) bool {
-	switch runtimecontracts.NormalizeHandlerActionID(action.ID) {
-	case "record_evidence":
-		return true
-	default:
-		return false
-	}
 }
 
 func bootverifyHandlerMutatesEntityLifecycle(handler runtimecontracts.SystemNodeEventHandler) bool {

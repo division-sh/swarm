@@ -61,7 +61,7 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		if err != nil {
 			return err
 		}
-		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" || strings.TrimSpace(rule.Action.ID) != "" ||
+		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" ||
 			!rule.Activity.Empty() || rule.DataAccumulation.HasWrites() || rule.FanOut != nil || rule.Compute != nil {
 			return fmt.Errorf("POLICY-SHEET-ROW: lookup row %q derives a value only and cannot declare branch outputs", strings.TrimSpace(rule.ID))
 		}
@@ -72,7 +72,7 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		if err != nil {
 			return err
 		}
-		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" || strings.TrimSpace(rule.Action.ID) != "" ||
+		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" ||
 			!rule.Activity.Empty() || rule.DataAccumulation.HasWrites() || rule.FanOut != nil || rule.Compute != nil {
 			return fmt.Errorf("POLICY-SHEET-ROW: validate row %q derives a value only and cannot declare branch outputs", strings.TrimSpace(rule.ID))
 		}
@@ -83,7 +83,7 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		if err != nil {
 			return err
 		}
-		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" || strings.TrimSpace(rule.Action.ID) != "" ||
+		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" ||
 			!rule.Activity.Empty() || rule.DataAccumulation.HasWrites() || rule.FanOut != nil || rule.Compute != nil {
 			return fmt.Errorf("POLICY-SHEET-ROW: compute_module row %q derives a value only and cannot declare branch outputs", strings.TrimSpace(rule.ID))
 		}

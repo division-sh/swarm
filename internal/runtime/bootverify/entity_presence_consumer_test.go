@@ -9,7 +9,7 @@ import (
 )
 
 func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
-	for _, consumer := range []string{"guard", "rule", "write", "emit", "filter", "activity", "mailbox", "artifact"} {
+	for _, consumer := range []string{"guard", "rule", "write", "emit", "filter", "activity"} {
 		for _, safe := range []bool{false, true} {
 			name := consumer + "/unsafe"
 			value := `entity.profile.note`
@@ -32,10 +32,6 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 					handler.Filter = &rc.FilterSpec{ItemsFrom: "payload.items", Condition: value + ` == "fallback"`, StoreAs: "computed.filtered"}
 				case "activity":
 					handler.Activity = rc.ActivitySpec{Tool: "notify", Input: map[string]rc.ExpressionValue{"value": rc.CELExpression(value)}}
-				case "mailbox":
-					handler.Action = rc.ActionSpec{ID: "mailbox_write", Mailbox: &rc.MailboxWriteSpec{Summary: rc.CELExpression(value)}}
-				case "artifact":
-					handler.Action = rc.ActionSpec{ID: "artifact_repo_commit", ArtifactRepo: &rc.ArtifactRepoSpec{Namespace: rc.CELExpression(value)}}
 				}
 				source := collectionItemSemanticsSource(handler)
 				bundle, _ := semanticview.Bundle(source)

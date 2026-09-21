@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
 )
 
@@ -226,64 +225,6 @@ var activityApprovalFieldOptions = map[string]struct{}{
 	"decision": {},
 }
 
-var mailboxFieldOptions = map[string]struct{}{
-	"item_type":     {},
-	"severity":      {},
-	"summary":       {},
-	"entity_id":     {},
-	"flow_instance": {},
-	"payload":       {},
-}
-
-var artifactRepoFieldOptions = map[string]struct{}{
-	"provider":        {},
-	"repo_id":         {},
-	"namespace":       {},
-	"partition_key":   {},
-	"display_slug":    {},
-	"request_id":      {},
-	"author":          {},
-	"provenance":      {},
-	"allowed_paths":   {},
-	"files":           {},
-	"output":          {},
-	"limits":          {},
-	"success_event":   {},
-	"success_payload": {},
-	"failure_event":   {},
-	"failure_payload": {},
-}
-
-var artifactRepoFilesFieldOptions = map[string]struct{}{
-	"path":         {},
-	"content":      {},
-	"content_type": {},
-	"schema":       {},
-	"max_bytes":    {},
-}
-
-var artifactRepoFilesSchemaFieldOptions = map[string]struct{}{
-	"type":            {},
-	"required_fields": {},
-}
-
-var artifactRepoOutputFieldOptions = map[string]struct{}{
-	"repo_url":             {},
-	"current_ref":          {},
-	"file_manifest":        {},
-	"status":               {},
-	"failure":              {},
-	"last_request_id":      {},
-	"last_source_event_id": {},
-}
-
-var artifactRepoLimitsFieldOptions = map[string]struct{}{
-	"max_yaml_bytes":     {},
-	"max_markdown_bytes": {},
-	"max_text_bytes":     {},
-	"max_repo_bytes":     {},
-}
-
 func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -291,6 +232,9 @@ func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
 	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
 		*s = HandlerOnSuccessSpec{}
 		return nil
+	}
+	if err := validateRetiredHandlerActionFields(node, "on_success"); err != nil {
+		return err
 	}
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("unsupported on_success yaml node kind %d", node.Kind)
@@ -456,236 +400,6 @@ func decodeExpressionValueMapNode(node *yaml.Node, label string) (map[string]Exp
 	return fields, nil
 }
 
-func (m *MailboxWriteSpec) UnmarshalYAML(node *yaml.Node) error {
-	if m == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		*m = MailboxWriteSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("INVALID-MAILBOX-WRITE: mailbox must be a mapping")
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := mailboxFieldOptions[key]; !ok {
-			return NewUndefinedFieldDiagnostic("mailbox", key, mailboxFieldOptions)
-		}
-	}
-	var out MailboxWriteSpec
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		var err error
-		switch key {
-		case "item_type":
-			out.ItemType, err = decodeMailboxExpressionValueNode(value)
-		case "severity":
-			out.Severity, err = decodeMailboxExpressionValueNode(value)
-		case "summary":
-			out.Summary, err = decodeMailboxExpressionValueNode(value)
-		case "entity_id":
-			out.EntityID, err = decodeMailboxExpressionValueNode(value)
-		case "flow_instance":
-			out.FlowInstance, err = decodeMailboxExpressionValueNode(value)
-		case "payload":
-			out.Payload, err = decodeMailboxPayloadNode(value)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	*m = out
-	return nil
-}
-
-func decodeMailboxPayloadNode(node *yaml.Node) (map[string]ExpressionValue, error) {
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		return nil, nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("INVALID-MAILBOX-WRITE: mailbox.payload must be a mapping")
-	}
-	fields := make(map[string]ExpressionValue, len(node.Content)/2)
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		target := strings.TrimSpace(node.Content[i].Value)
-		if target == "" {
-			continue
-		}
-		value, err := decodeMailboxExpressionValueNode(node.Content[i+1])
-		if err != nil {
-			return nil, fmt.Errorf("INVALID-MAILBOX-WRITE: mailbox.payload.%s: %w", target, err)
-		}
-		fields[target] = value
-	}
-	return fields, nil
-}
-
-func decodeMailboxExpressionValueNode(node *yaml.Node) (ExpressionValue, error) {
-	if node == nil || node.Kind == 0 {
-		return ExpressionValue{}, nil
-	}
-	if node.Kind == yaml.MappingNode {
-		if err := validateEmitFieldExpressionMappingNode(node); err != nil {
-			return ExpressionValue{}, fmt.Errorf("mailbox expression values must use explicit expression keys literal, ref, cel, or expression: %w", err)
-		}
-	}
-	var value ExpressionValue
-	if err := node.Decode(&value); err != nil {
-		return ExpressionValue{}, err
-	}
-	return value, nil
-}
-
-func (s *ArtifactRepoSpec) UnmarshalYAML(node *yaml.Node) error {
-	if s == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		*s = ArtifactRepoSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo must be a mapping")
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := artifactRepoFieldOptions[key]; !ok {
-			return NewUndefinedFieldDiagnostic("artifact_repo", key, artifactRepoFieldOptions)
-		}
-	}
-	type alias ArtifactRepoSpec
-	var out alias
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*s = ArtifactRepoSpec(out)
-	return nil
-}
-
-func (f *ArtifactRepoFileSpec) UnmarshalYAML(node *yaml.Node) error {
-	if f == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		*f = ArtifactRepoFileSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.files entries must be mappings")
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := artifactRepoFilesFieldOptions[key]; !ok {
-			return NewUndefinedFieldDiagnostic("artifact_repo.files", key, artifactRepoFilesFieldOptions)
-		}
-	}
-	type alias ArtifactRepoFileSpec
-	var out alias
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*f = ArtifactRepoFileSpec(out)
-	return nil
-}
-
-func (s *ArtifactRepoSchemaSpec) UnmarshalYAML(node *yaml.Node) error {
-	if s == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		*s = ArtifactRepoSchemaSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.files.schema must be a mapping")
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := artifactRepoFilesSchemaFieldOptions[key]; !ok {
-			return NewUndefinedFieldDiagnostic("artifact_repo.files.schema", key, artifactRepoFilesSchemaFieldOptions)
-		}
-	}
-	type alias ArtifactRepoSchemaSpec
-	var out alias
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*s = ArtifactRepoSchemaSpec(out)
-	return nil
-}
-
-func (o *ArtifactRepoOutputSpec) UnmarshalYAML(node *yaml.Node) error {
-	if o == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		*o = ArtifactRepoOutputSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.output must be a mapping")
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := artifactRepoOutputFieldOptions[key]; !ok {
-			return NewUndefinedFieldDiagnostic("artifact_repo.output", key, artifactRepoOutputFieldOptions)
-		}
-	}
-	type alias ArtifactRepoOutputSpec
-	var out alias
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*o = ArtifactRepoOutputSpec(out)
-	return nil
-}
-
-func (l *ArtifactRepoLimitsSpec) UnmarshalYAML(node *yaml.Node) error {
-	if l == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		*l = ArtifactRepoLimitsSpec{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.limits must be a mapping")
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := artifactRepoLimitsFieldOptions[key]; !ok {
-			return NewUndefinedFieldDiagnostic("artifact_repo.limits", key, artifactRepoLimitsFieldOptions)
-		}
-	}
-	type alias ArtifactRepoLimitsSpec
-	var out alias
-	if err := node.Decode(&out); err != nil {
-		return err
-	}
-	*l = ArtifactRepoLimitsSpec(out)
-	return nil
-}
-
 func decodeEmitFieldValueNode(node *yaml.Node) (ExpressionValue, error) {
 	if node == nil {
 		return ExpressionValue{}, nil
@@ -735,17 +449,17 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	if h == nil {
 		return nil
 	}
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return err
+	}
+	node = resolved
 	if err := validateHandlerFieldNodes(node); err != nil {
 		return err
 	}
 	var aux struct {
-		Action           yaml.Node                `yaml:"action"`
 		Activity         ActivitySpec             `yaml:"activity"`
 		CreateEntity     bool                     `yaml:"create_entity"`
-		Template         string                   `yaml:"template"`
-		InstanceIDFrom   string                   `yaml:"instance_id_from"`
-		ConfigFrom       yaml.Node                `yaml:"config_from"`
-		EvidenceTarget   string                   `yaml:"evidence_target"`
 		Description      string                   `yaml:"description"`
 		Emit             EmitSpec                 `yaml:"emit"`
 		OnSuccess        HandlerOnSuccessSpec     `yaml:"on_success"`
@@ -776,7 +490,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	*h = SystemNodeEventHandler{
 		Activity:         aux.Activity,
 		CreateEntity:     aux.CreateEntity,
-		EvidenceTarget:   strings.TrimSpace(aux.EvidenceTarget),
 		Description:      strings.TrimSpace(aux.Description),
 		Emit:             aux.Emit,
 		OnSuccess:        aux.OnSuccess,
@@ -792,24 +505,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Filter:           aux.Filter,
 		Reduce:           aux.Reduce,
 		Count:            aux.Count,
-	}
-	var err error
-	if h.Action, err = decodeActionSpecNode(&aux.Action); err != nil {
-		return err
-	}
-	if strings.TrimSpace(h.Action.ID) != "" {
-		if strings.TrimSpace(h.Action.Template) == "" {
-			h.Action.Template = strings.TrimSpace(aux.Template)
-		}
-		if strings.TrimSpace(h.Action.InstanceIDFrom) == "" {
-			h.Action.InstanceIDFrom = strings.TrimSpace(aux.InstanceIDFrom)
-			h.Action.InstanceIDPath = paths.Parse(aux.InstanceIDFrom)
-		}
-		if h.Action.ConfigFrom == nil {
-			if h.Action.ConfigFrom, err = decodeConfigFromSpecNode(&aux.ConfigFrom); err != nil {
-				return err
-			}
-		}
 	}
 	if h.Guard, err = decodeGuardSpecNode(&aux.Guard); err != nil {
 		return err
@@ -837,9 +532,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if err := HandlerEmitSiteOwnershipError(*h); err != nil {
 		return err
-	}
-	if HandlerHasAmbiguousTopLevelAction(*h) {
-		return fmt.Errorf("AMBIGUOUS-ACTION: handler-top-level action is only allowed on handlers without rules; move action ownership to the active rule")
 	}
 	return nil
 }
@@ -921,11 +613,9 @@ func decodeAdvancesToNode(node *yaml.Node) (string, error) {
 }
 
 var handlerFieldOptions = map[string]struct{}{
-	"action":            {},
 	"activity":          {},
 	"description":       {},
 	"_note":             {},
-	"evidence_target":   {},
 	"create_entity":     {},
 	"emit":              {},
 	"on_success":        {},
@@ -949,14 +639,14 @@ var handlerFieldOptions = map[string]struct{}{
 	"reduce":            {},
 	"count":             {},
 	"clear":             {},
-	"template":          {},
-	"instance_id_from":  {},
-	"config_from":       {},
 	"from":              {},
 	"dedup_by":          {},
 }
 
 func validateHandlerFieldNodes(node *yaml.Node) error {
+	if err := validateRetiredHandlerActionFields(node, "handler"); err != nil {
+		return err
+	}
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
@@ -1052,14 +742,14 @@ func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContex
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRetiredHandlerActionFields(resolved, string(context)); err != nil {
+		return nil, err
+	}
 	var rule HandlerRuleEntry
 	if err := resolved.Decode(&rule); err != nil {
 		return nil, err
 	}
-	if err := rejectRuleActionOutsideRules(rule, context); err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && rule.Activity.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && rule.Activity.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
 		return nil, nil
 	}
 	return &rule, nil
@@ -1076,14 +766,14 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 	node = resolved
 	switch node.Kind {
 	case yaml.SequenceNode:
+		for _, row := range node.Content {
+			if err := validateRetiredHandlerActionFields(row, string(context)); err != nil {
+				return nil, err
+			}
+		}
 		var rules []HandlerRuleEntry
 		if err := node.Decode(&rules); err != nil {
 			return nil, err
-		}
-		for _, rule := range rules {
-			if err := rejectRuleActionOutsideRules(rule, context); err != nil {
-				return nil, err
-			}
 		}
 		if err := validatePolicySheetRows(rules, context); err != nil {
 			return nil, err
@@ -1112,11 +802,11 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 			if err != nil {
 				return nil, err
 			}
-			var rule HandlerRuleEntry
-			if err := row.Decode(&rule); err != nil {
+			if err := validateRetiredHandlerActionFields(row, string(context)); err != nil {
 				return nil, err
 			}
-			if err := rejectRuleActionOutsideRules(rule, context); err != nil {
+			var rule HandlerRuleEntry
+			if err := row.Decode(&rule); err != nil {
 				return nil, err
 			}
 			if strings.TrimSpace(rule.ID) == "" {
@@ -1183,6 +873,11 @@ func classifyHandlerRuleMapping(node *yaml.Node) (handlerRuleMappingShape, error
 	case singletonErr == nil:
 		return handlerRuleMappingSingleton, nil
 	case keyedStructureErr == nil:
+		if keyedErr != nil {
+			if err := validateRetiredHandlerActionFields(node, "rule"); err != nil {
+				return 0, err
+			}
+		}
 		return handlerRuleMappingKeyed, nil
 	default:
 		return 0, fmt.Errorf("invalid handler rule mapping (singleton: %v; keyed: %v)", singletonErr, keyedErr)
@@ -1192,6 +887,9 @@ func classifyHandlerRuleMapping(node *yaml.Node) (handlerRuleMappingShape, error
 func decodeSingletonHandlerRuleShape(node *yaml.Node) error {
 	resolved, err := resolveHandlerRuleYAMLNode(node)
 	if err != nil {
+		return err
+	}
+	if err := validateRetiredHandlerActionFields(resolved, "rule"); err != nil {
 		return err
 	}
 	var rule HandlerRuleEntry
@@ -1251,13 +949,6 @@ func validateKeyedHandlerRuleStructure(node *yaml.Node) error {
 	return nil
 }
 
-func rejectRuleActionOutsideRules(rule HandlerRuleEntry, context handlerRuleDecodeContext) error {
-	if context == handlerRuleDecodeContextRules || strings.TrimSpace(rule.Action.ID) == "" {
-		return nil
-	}
-	return fmt.Errorf("UNSUPPORTED-ACTION: %s entries do not support action; rule-level action is only supported under handler.rules", context)
-}
-
 func decodeQuerySpecNode(node *yaml.Node) (*QuerySpec, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
@@ -1284,93 +975,6 @@ func decodeQuerySpecNode(node *yaml.Node) (*QuerySpec, error) {
 	}
 }
 
-func (a *ActionSpec) UnmarshalYAML(node *yaml.Node) error {
-	if a == nil {
-		return nil
-	}
-	spec, err := decodeActionSpecNode(node)
-	if err != nil {
-		return err
-	}
-	*a = spec
-	return nil
-}
-
-var actionFieldOptions = map[string]struct{}{
-	"id":               {},
-	"template":         {},
-	"instance_id_from": {},
-	"config_from":      {},
-	"mailbox":          {},
-	"artifact_repo":    {},
-}
-
-func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
-	if node == nil || node.Kind == 0 {
-		return ActionSpec{}, nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
-			return ActionSpec{}, nil
-		}
-		actionID, err := ParseHandlerActionID(node.Value)
-		if err != nil {
-			return ActionSpec{}, err
-		}
-		return ActionSpec{ID: actionID}, nil
-	case yaml.MappingNode:
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key := strings.TrimSpace(node.Content[i].Value)
-			if key == "" {
-				continue
-			}
-			if _, ok := actionFieldOptions[key]; ok {
-				continue
-			}
-			switch key {
-			case "type", "flow_template", "instance_id":
-				return ActionSpec{}, fmt.Errorf("DEPRECATED: legacy action field %q is not supported; use action: create_flow_instance with template, instance_id_from, and config_from siblings", key)
-			default:
-				return ActionSpec{}, NewUndefinedFieldDiagnostic("action", key, actionFieldOptions)
-			}
-		}
-		var aux struct {
-			ID             string            `yaml:"id"`
-			Template       string            `yaml:"template"`
-			InstanceIDFrom string            `yaml:"instance_id_from"`
-			ConfigFrom     yaml.Node         `yaml:"config_from"`
-			Mailbox        *MailboxWriteSpec `yaml:"mailbox"`
-			ArtifactRepo   *ArtifactRepoSpec `yaml:"artifact_repo"`
-		}
-		if err := node.Decode(&aux); err != nil {
-			return ActionSpec{}, err
-		}
-		if strings.TrimSpace(aux.ID) == "" {
-			return ActionSpec{}, fmt.Errorf("action mapping missing id")
-		}
-		actionID, err := ParseHandlerActionID(aux.ID)
-		if err != nil {
-			return ActionSpec{}, err
-		}
-		configFrom, err := decodeConfigFromSpecNode(&aux.ConfigFrom)
-		if err != nil {
-			return ActionSpec{}, err
-		}
-		return ActionSpec{
-			ID:             actionID,
-			Template:       strings.TrimSpace(aux.Template),
-			InstanceIDFrom: strings.TrimSpace(aux.InstanceIDFrom),
-			InstanceIDPath: paths.Parse(aux.InstanceIDFrom),
-			ConfigFrom:     configFrom,
-			Mailbox:        aux.Mailbox,
-			ArtifactRepo:   aux.ArtifactRepo,
-		}, nil
-	default:
-		return ActionSpec{}, fmt.Errorf("unsupported action yaml node kind %d", node.Kind)
-	}
-}
-
 func decodeClearSpecNode(node *yaml.Node) (*ClearSpec, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
@@ -1386,43 +990,4 @@ func decodeClearSpecNode(node *yaml.Node) (*ClearSpec, error) {
 		return nil, nil
 	}
 	return &spec, nil
-}
-
-func decodeConfigFromSpecNode(node *yaml.Node) (*ConfigFromSpec, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("unsupported config_from yaml node kind %d", node.Kind)
-	}
-	spec := &ConfigFromSpec{Bindings: map[string]string{}}
-	if hasYAMLMappingKey(node, "policy_keys") {
-		return nil, NewUndefinedFieldDiagnostic("config_from", "policy_keys", nil)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" || key == "policy_keys" {
-			continue
-		}
-		if configFromKeyContainsSystemPrompt(key) {
-			return nil, fmt.Errorf("RETIRED: config_from key %q cannot author system_prompt; declare intent: on the managed agent", key)
-		}
-		spec.Bindings[key] = strings.TrimSpace(node.Content[i+1].Value)
-	}
-	if len(spec.PolicyKeys) == 0 && len(spec.Bindings) == 0 {
-		return nil, nil
-	}
-	spec.Entries = spec.ConfigEntries()
-	return spec, nil
-}
-
-func configFromKeyContainsSystemPrompt(key string) bool {
-	for _, segment := range strings.FieldsFunc(strings.TrimSpace(key), func(r rune) bool {
-		return r == '.' || r == '[' || r == ']'
-	}) {
-		if strings.TrimSpace(segment) == "system_prompt" {
-			return true
-		}
-	}
-	return false
 }

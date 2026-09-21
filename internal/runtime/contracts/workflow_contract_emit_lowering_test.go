@@ -129,24 +129,6 @@ fields:
 	}
 }
 
-func TestMailboxPayloadDoesNotAcceptEmitFromSugar(t *testing.T) {
-	var spec MailboxWriteSpec
-	err := yaml.Unmarshal([]byte(`
-from: entity
-item_type:
-  literal: review
-severity:
-  literal: info
-summary:
-  literal: ready
-payload:
-  interest_score: payload
-`), &spec)
-	if err == nil || !strings.Contains(err.Error(), `mailbox field "from" is not supported.`) {
-		t.Fatalf("yaml.Unmarshal error = %v, want mailbox from-field rejection", err)
-	}
-}
-
 func emitFieldLoweringTestBundle() *WorkflowContractBundle {
 	rootSchema := FlowSchemaDocument{}
 	events := map[string]EventCatalogEntry{

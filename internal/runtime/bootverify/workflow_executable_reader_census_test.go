@@ -27,7 +27,6 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		name    string
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
-		{name: "action input", handler: runtimecontracts.SystemNodeEventHandler{Action: runtimecontracts.ActionSpec{InstanceIDFrom: "entity.verticals"}}},
 		{name: "activity input", handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}},
 		{name: "emit field", handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{"value": entityCEL}}}},
 		{name: "guard", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "size(entity.verticals) > 0"}}},
@@ -35,7 +34,6 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		{name: "direct write ref value", handler: runtimecontracts.SystemNodeEventHandler{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{TargetRef: "metadata.copy", Value: entityRef}}}}},
 		{name: "condition", handler: runtimecontracts.SystemNodeEventHandler{Condition: "size(entity.verticals) > 0"}},
 		{name: "logic", handler: runtimecontracts.SystemNodeEventHandler{Logic: "entity.verticals"}},
-		{name: "rule action", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Action: runtimecontracts.ActionSpec{InstanceIDFrom: "entity.verticals"}}}}},
 		{name: "rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": entityRef}}}}}},
 		{name: "accumulate source", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{From: "entity.verticals"}}},
 		{name: "accumulate window", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Window: "entity.verticals"}}},
@@ -107,12 +105,6 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 			name: "on complete activity input",
 			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
 				Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.verticals")}},
-			}}},
-		},
-		{
-			name: "on complete action input",
-			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				Action: runtimecontracts.ActionSpec{ID: "create_flow_instance", InstanceIDFrom: "entity.verticals"},
 			}}},
 		},
 		{

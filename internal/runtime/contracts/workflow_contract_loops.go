@@ -261,14 +261,12 @@ func ValidateLoopHandlerCombination(handler SystemNodeEventHandler) error {
 			conflicts = append(conflicts, name)
 		}
 	}
-	add("evidence_target", strings.TrimSpace(handler.EvidenceTarget) != "")
 	add("guard", handler.Guard != nil)
 	add("rules", len(handler.Rules) > 0)
 	add("on_complete", len(handler.OnComplete) > 0)
 	add("accumulate", handler.Accumulate != nil)
 	add("join", handler.Join != nil)
 	add("fan_out", handler.FanOut != nil)
-	add("action", strings.TrimSpace(handler.Action.ID) != "")
 	add("activity", !handler.Activity.Empty())
 	add("on_success", !handler.OnSuccess.Empty())
 	add("clear", handler.Clear != nil)
