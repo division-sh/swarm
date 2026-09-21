@@ -437,6 +437,7 @@ func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
 	if finalizer == nil {
 		return errors.New("committed flow activation finalizer is unavailable")
 	}
+	ctx = withoutEventPublicationAdmission(ctx)
 	for index, activation := range activations {
 		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
 			return fmt.Errorf("finalize committed flow activation %d for %s: %w", index, activation.Plan.Identity.Route().InstancePath, err)
@@ -463,7 +464,7 @@ func (eb *EventBus) finalizeCommittedAgentReadiness(ctx context.Context, event e
 	if finalizer == nil {
 		return errors.New("committed agent readiness finalizer is unavailable")
 	}
-	if err := finalizer.FinalizeCommittedAgentReadiness(ctx, event, routes); err != nil {
+	if err := finalizer.FinalizeCommittedAgentReadiness(withoutEventPublicationAdmission(ctx), event, routes); err != nil {
 		return fmt.Errorf("finalize committed agent readiness for event %s: %w", event.ID(), err)
 	}
 	return nil
