@@ -307,6 +307,52 @@ func TestReceiverInitializationUsesNamedAndMapTypes(t *testing.T) {
 	}
 }
 
+func TestReceiverInitializationImportedSchemaBindingIsExact(t *testing.T) {
+	config, err := CompileReceiverConfiguration(FlowInstanceVariables{Variables: map[string]FlowVariable{"count": {Type: "integer"}}}, TypeCatalogDocument{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin, err := CompileFlowInputPin(FlowPinCompilationContext{FlowID: "worker", FlowPath: "worker", Configuration: config}, FlowInputEventPin{
+		Event: "work.requested", Source: FlowInputPinSourceExternal,
+		Resolution: FlowInputPinResolution{Mode: FlowInputResolutionModeCreate}, Initialize: map[string]string{"count": "payload.count"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pin.Initialization().Evaluate(map[string]any{"count": 1}); err == nil {
+		t.Fatal("unbound input executed")
+	}
+	for _, typeRef := range []string{"integer", "text"} {
+		schema, err := CompileImportedEventSchema("worker", "work.requested", EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"count": {Type: typeRef}}}}, CompiledEventSchemaSource{FlowPath: "worker", Layer: "provider", File: "provider.yaml"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound, err := pin.BindImportedEventSchema(schema)
+		if typeRef == "text" {
+			if err == nil {
+				t.Fatal("incompatible imported source accepted")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bound.Digest() == pin.Digest() {
+			t.Fatal("imported initializer binding absent from digest")
+		}
+		values, err := bound.Initialization().Evaluate(map[string]any{"count": 7})
+		if err != nil || values["count"] != int64(7) {
+			t.Fatalf("bound initialization=%#v %v", values, err)
+		}
+		if _, err := bound.BindImportedEventSchema(schema); err == nil {
+			t.Fatal("rebound admitted schema")
+		}
+	}
+	if _, err := pin.Initialization().Evaluate(map[string]any{"count": 1}); err == nil {
+		t.Fatal("binding mutated original input")
+	}
+}
+
 func TestReceiverInitializationCreationCorpusLoads(t *testing.T) {
 	root := repoRootForContractsTest(t)
 	for _, fixture := range []string{

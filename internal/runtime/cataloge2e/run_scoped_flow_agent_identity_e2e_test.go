@@ -92,7 +92,7 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, fixtureRoot, backend, true, catalogSecondRunID)
 			selected := runScopedCatalogStore(t, h)
-			flowPath := "worker-flow/worker-001"
+			flowPath := "worker-flow/ti-878653cc40fdc8ad8e9c2d85"
 			runA, runB := catalogRuntimeRunID, catalogSecondRunID
 			completedA := make(chan struct{}, 1)
 			completedB := make(chan struct{}, 1)
