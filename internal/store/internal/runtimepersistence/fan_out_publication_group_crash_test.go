@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -180,6 +181,7 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
 				fixture := openFanOutCrashStore(t, backend, location)
 				root := canonicalrouting.CopyForkFanOutConsumer(t, false, false)
 				ctx, seeded, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, fixture, 3, time.Now().UTC(), false, false, root, nil, nil)
+				requirePublicationGroupCrashWorkflowLoad(t, ctx, fixture, seeded.runID)
 				env := []string{"SWARM_FAN_OUT_CRASH_BACKEND=" + backend, "SWARM_FAN_OUT_CRASH_LOCATION=" + location,
 					"SWARM_FAN_OUT_CRASH_ROOT=" + root, "SWARM_FAN_OUT_CRASH_RUN=" + seeded.runID, "SWARM_FAN_OUT_CRASH_CUT=" + cut}
 				cmd, evidence, exited := startPublicationGroupCrashChild(t, "predecessor", env)
@@ -235,6 +237,15 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
 				t.Logf("real group SIGKILL at %s, exact selected-store takeover, exact ordinal-prefix effects and missing-suffix handler executions, final public recipient effects/receipts, startup candidate discovery; not deferred-agent B15 signal recovery", cut)
 			})
 		}
+	}
+}
+
+func requirePublicationGroupCrashWorkflowLoad(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, runID string) {
+	t.Helper()
+	owner := pipeline.NewWorkflowPersistence(fixture.store.(pipeline.WorkflowPersistenceOwner))
+	_, found, err := owner.LoadWorkflowInstance(ctx, flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)})
+	if err != nil || !found {
+		t.Fatalf("crash root workflow load: found=%v err=%v", found, err)
 	}
 }
 

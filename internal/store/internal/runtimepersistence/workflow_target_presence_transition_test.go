@@ -320,10 +320,11 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 func stateOnlyWorkflowEngineMutationRecord(t *testing.T, runID, flowID, instancePath, entityID, expectedState string, expectedRevision int64, createdAt time.Time) runtimepipeline.WorkflowEngineStateRecord {
 	t.Helper()
 	route := runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath)
-	config, err := json.Marshal(map[string]any{
-		"flow_path": instancePath, "instance_id": route.InstanceID, "storage_ref": instancePath,
-		"workflow_version": "1",
-	})
+	payload, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(route, "1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
