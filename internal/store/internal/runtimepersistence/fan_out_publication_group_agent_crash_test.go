@@ -52,6 +52,7 @@ func TestIssue2394PublicationGroupDeferredAgentSIGKILLBothStores(t *testing.T) {
 				root := canonicalrouting.CopyFanOutGroupAgentCrash(t)
 				source := loadPublicationGroupAgentCrashSource(t, root)
 				ctx, seeded := seedPublicationGroupAgentIntent(t, backend, fixture, source)
+				requirePublicationGroupCrashWorkflowLoad(t, ctx, fixture, seeded.runID)
 				env := []string{"SWARM_FAN_OUT_CRASH_BACKEND=" + backend, "SWARM_FAN_OUT_CRASH_LOCATION=" + location,
 					"SWARM_FAN_OUT_CRASH_ROOT=" + root, "SWARM_FAN_OUT_CRASH_RUN=" + seeded.runID, "SWARM_FAN_OUT_CRASH_CUT=" + cut,
 					"SWARM_PUBLICATION_GROUP_CRASH_RECEIVER=agent"}
