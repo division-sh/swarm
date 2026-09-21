@@ -401,6 +401,7 @@ auto_emit_on_create:
 `,
 		"operating/entities.yaml": "operating_state:\n  instance_id: {type: text, _unused_reason: receiver instance identity}\n",
 		"operating/events.yaml": `opco.product_initialization_requested:
+  instance_id: string
   product_id: string
 component_scaffold.spawn_requested:
   product_id: string

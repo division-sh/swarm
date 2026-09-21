@@ -119,7 +119,7 @@ pins:
 		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
 		removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "mode: template\ninstance: order_id\n"+joinSchema,
-			joinEvents, joinEntities, joinNodes)
+			joinEvents, joinEntities+"  order_id: {type: text, _unused_reason: receiver instance identity}\n", joinNodes)
 		writeClosedVariantFile(t, root, "orders/types.yaml", joinTypes)
 	default:
 		t.Fatalf("unsupported exact join flow %q", flowID)
