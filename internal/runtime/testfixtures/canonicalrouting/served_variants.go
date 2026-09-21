@@ -227,6 +227,7 @@ product:
 opco.product_initialization_requested:
   swarm:
     source: external
+  instance_id: string
   product_id: string
 opco.product_review_requested:
   swarm:
@@ -290,6 +291,7 @@ product:
 `)
 	writeClosedVariantFile(t, root, "operating/events.yaml", `
 opco.product_initialization_requested:
+  instance_id: string
   product_id: string
 component_scaffold.spawn_requested:
   product_id: string

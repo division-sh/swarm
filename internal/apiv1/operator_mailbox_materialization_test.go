@@ -2,87 +2,15 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
-	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
-	"github.com/google/uuid"
 )
 
-func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	sqliteStore := newSQLiteMailboxMaterializationAPIStore(t, ctx)
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	entityID := uuid.NewString()
-	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.PersistedProjection(
-		eventID,
-		"mailbox.review_requested",
-		"",
-		"",
-		json.RawMessage(`{"kind":"review"}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "validation/case-1"),
-		time.Now().UTC(),
-	))
-	itemID := uuid.NewString()
-	tx, err := storetest.DatabaseForTest(sqliteStore).BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx: %v", err)
-	}
-	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
-	for i := 0; i < 2; i++ {
-		if err := sqliteStore.MaterializeMailboxWrite(txctx, runtimepipeline.MailboxWriteMaterialization{
-			ItemID:        itemID,
-			EntityID:      entityID,
-			FlowInstance:  "validation/case-1",
-			Scope:         "entity",
-			ItemType:      "review_request",
-			SourceEventID: eventID,
-			FromAgent:     "system_node:mailbox-node",
-			Severity:      "urgent",
-			Summary:       "Review validation package",
-			Payload:       json.RawMessage(`{"review_kind":"validation"}`),
-		}); err != nil {
-			_ = tx.Rollback()
-			t.Fatalf("MaterializeMailboxWrite iteration %d: %v", i, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	handler := testHandler(t, Options{
-		AuthTokens: []string{testToken},
-		Handlers: testOperatorHandlers(testOperatorCapabilities{
-			Ready:         func() bool { return true },
-			Database:      fakePinger{},
-			Mailbox:       sqliteStore,
-			DecisionCards: sqliteStore,
-		}),
-	})
-	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"mailbox.list","params":{"status":"pending","run_id":"`+runID+`","entity_id":"`+entityID+`","type":"review_request","priority":"high","limit":1}}`)
-	if list.Error != nil {
-		t.Fatalf("mailbox.list error = %#v", list.Error)
-	}
-	items := asMap(t, list.Result)["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("mailbox.list items = %#v", items)
-	}
-	got := requireTaggedNoticeProjection(t, items[0])
-	if got["mailbox_id"] != itemID || got["source_event_id"] != eventID || got["source_flow"] != "validation/case-1" || got["priority"] != "high" {
-		t.Fatalf("mailbox.list item = %#v, want materialized mailbox_write row", got)
-	}
-}
-
+// The authored mailbox_write materializer/idempotency test is retired by #2307.
+// These helpers remain shared by independent mailbox API tests. Real supported
+// notify_human/ask_human producers are exercised by the served HITL proofs.
 func newSQLiteMailboxMaterializationAPIStore(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
 	store := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)

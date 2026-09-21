@@ -408,50 +408,6 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	return root
 }
 
-func CopyArtifactRepoCommitAdmission(t testing.TB) string {
-	t.Helper()
-	root := CopyExample(t, RootIngress)
-
-	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: ready\nterminal_states: [done]\nstates: [ready, done]\npins:\n  inputs:\n    events: [artifact.requested]\n")
-	writeClosedVariantFile(t, root, "entities.yaml", `core:
-  repo_url: {type: text, _unused_reason: artifact startup admission proof output field}
-  current_ref: {type: text, _unused_reason: artifact startup admission proof output field}
-  file_manifest: {type: text, _unused_reason: artifact startup admission proof output field}
-  status: {type: text, _unused_reason: artifact startup admission proof output field}
-  failure: {type: text, _unused_reason: artifact startup admission proof output field}
-  last_request_id: {type: text, _unused_reason: artifact startup admission proof output field}
-  last_source_event_id: {type: text, _unused_reason: artifact startup admission proof output field}
-`)
-	writeClosedVariantFile(t, root, "events.yaml", "artifact.requested:\n  swarm:\n    source: external\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", `artifact-writer:
-  execution_type: system_node
-  subscribes_to: [artifact.requested]
-  event_handlers:
-    artifact.requested:
-      action:
-        id: artifact_repo_commit
-        artifact_repo:
-          provider: local_git
-          repo_id: {literal: "11111111-1111-1111-1111-111111111111"}
-          namespace: {literal: local-proof}
-          request_id: {literal: "22222222-2222-2222-2222-222222222222"}
-          allowed_paths: [readme.md]
-          files:
-            - path: {literal: readme.md}
-              content: {literal: "# Demo\n"}
-              content_type: markdown
-          output:
-            repo_url: repo_url
-            current_ref: current_ref
-            file_manifest: file_manifest
-            status: status
-            failure: failure
-            last_request_id: last_request_id
-            last_source_event_id: last_source_event_id
-`)
-	return root
-}
-
 func CopyVerifyMissingPin(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)

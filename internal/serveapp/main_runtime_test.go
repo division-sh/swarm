@@ -3382,6 +3382,10 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	runServedDynamicAutoEmitProof(t, endpoint, db, "postgres", bundleHash, blocked, release, &releaseOnce)
 }
 
+// Typed input routing derives this concrete path from the declared instance_id
+// business key; the retired create action used that key verbatim as its path.
+const servedTypedCreationInstancePath = "operating/ti-637499c0f9a5eda60519f6d3"
+
 func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
 	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
@@ -3435,10 +3439,10 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", portfolioNode)
 	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", portfolioNode)
 
-	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
+	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
 	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
 	autoEntityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
-	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, autoEventID)
+	assertServedDynamicAutoEmitPayload(t, db, backend, autoEventID, map[string]any{"instance_id": instanceID, "product_id": "product-1"})
 	lifecycleNode := identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key()
 	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, lifecycleNode)
 	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, lifecycleNode)
@@ -3451,9 +3455,9 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		t.Fatalf("%s child runtime/replay receipt count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 
-	componentEventName := "operating/" + instanceID + "/component_scaffold.spawn_requested"
+	componentEventName := servedTypedCreationInstancePath + "/component_scaffold.spawn_requested"
 	componentEventID := waitServedEventPublishEventID(t, db, backend, runID, componentEventName)
-	assertServedDynamicAutoEmitPayloadProductOnly(t, db, backend, componentEventID)
+	assertServedDynamicAutoEmitPayload(t, db, backend, componentEventID, map[string]any{"product_id": "product-1"})
 	componentEntityID := servedEventPublishEventEntityID(t, db, backend, componentEventID)
 	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
 	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, componentEventName, componentNode)
@@ -5094,7 +5098,7 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	}
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinupEventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
 
-	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
+	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
 	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
 	entityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
@@ -5103,6 +5107,9 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	}
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
 	targetFlowInstance := requireServedEventPublishEntityFlowInstance(t, db, backend, runID, entityID)
+	if targetFlowInstance != servedTypedCreationInstancePath {
+		t.Fatalf("typed receiver path = %q, want %q", targetFlowInstance, servedTypedCreationInstancePath)
+	}
 
 	targetStdout, targetStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "operating/opco.product_review_requested",
@@ -6196,7 +6203,7 @@ func servedEventPublishEventEntityID(t *testing.T, db *sql.DB, backend, eventID 
 	return strings.TrimSpace(entityID)
 }
 
-func assertServedDynamicAutoEmitPayloadProductOnly(t *testing.T, db *sql.DB, backend, eventID string) {
+func assertServedDynamicAutoEmitPayload(t *testing.T, db *sql.DB, backend, eventID string, want map[string]any) {
 	t.Helper()
 	var raw string
 	var query string
@@ -6218,13 +6225,8 @@ func assertServedDynamicAutoEmitPayloadProductOnly(t *testing.T, db *sql.DB, bac
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		t.Fatalf("decode event payload %s: %v\n%s", eventID, err, raw)
 	}
-	if got := payload["product_id"]; got != "product-1" {
-		t.Fatalf("payload product_id = %#v, want product-1: %#v", got, payload)
-	}
-	for _, key := range []string{"instance_id", "template_id", "flow_path", "parent_entity_id"} {
-		if _, ok := payload[key]; ok {
-			t.Fatalf("payload includes hidden activation context %q: %#v", key, payload)
-		}
+	if !reflect.DeepEqual(payload, want) {
+		t.Fatalf("event %s payload = %#v, want exact %#v", eventID, payload, want)
 	}
 }
 
@@ -7696,11 +7698,6 @@ func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families 
 		t.Fatalf("commit run-fork revision fixture: %v", err)
 	}
 	return revision
-}
-
-func writeArtifactRepoCommitServeFixture(t *testing.T) string {
-	t.Helper()
-	return canonicalrouting.CopyArtifactRepoCommitAdmission(t)
 }
 
 func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {
