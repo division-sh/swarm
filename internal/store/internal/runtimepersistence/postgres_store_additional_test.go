@@ -2539,6 +2539,10 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 		}),
 		Status: "active",
 	}
+	if err := agentfixture.UpsertStatic(t, ctx, pg, rec); err == nil || !strings.Contains(err.Error(), "config contains runtime-owned keys:") {
+		t.Fatalf("UpsertAgent runtime-owned opaque config error = %v, want explicit rejection", err)
+	}
+	rec.Config.Config = json.RawMessage(`{"custom_label":"x"}`)
 	if err := agentfixture.UpsertStatic(t, ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
@@ -2606,7 +2610,14 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 	`, rec.Config.ID).Scan(&configRaw, &runtimeDescriptorRaw); err != nil {
 		t.Fatalf("query persisted agent row: %v", err)
 	}
-	if err := validateOpaqueAgentConfig(configRaw); err != nil {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(configRaw, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope) != 2 || string(envelope["receiver_config"]) != "null" {
+		t.Fatalf("persisted config envelope = %s, want opaque config and absent receiver", configRaw)
+	}
+	if err := validateOpaqueAgentConfig(envelope["config"]); err != nil {
 		t.Fatalf("validateOpaqueAgentConfig: %v", err)
 	}
 	desc, err := decodePersistedAgentRuntimeDescriptor(runtimeDescriptorRaw)
@@ -2712,7 +2723,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 	}); err != nil {
 		t.Fatalf("seed canonical agent row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"system_prompt":"x","subscriptions":["wrong"]}`, identity.AgentID()); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"config":{"system_prompt":"x","subscriptions":["wrong"]},"receiver_config":null}`, identity.AgentID()); err != nil {
 		t.Fatalf("inject invalid opaque config: %v", err)
 	}
 
@@ -2908,11 +2919,11 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	}); err != nil {
 		t.Fatalf("seed canonical agent row: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"}`, identity.AgentID()); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE agents SET config=$1::jsonb WHERE agent_id=$2`, `{"config":{"type":"sonnet","mode":"worker","session_scope":"global","system_prompt":"x"},"receiver_config":null}`, identity.AgentID()); err != nil {
 		t.Fatalf("inject legacy runtime metadata: %v", err)
 	}
 	_, err := pg.LoadAgents(ctx)
-	if err == nil || !strings.Contains(err.Error(), "invalid opaque config: config contains runtime-owned keys: mode, session_scope, type") {
+	if err == nil || !strings.Contains(err.Error(), "invalid config envelope: config contains runtime-owned keys: mode, session_scope, type") {
 		t.Fatalf("LoadAgents error = %v, want fail-closed legacy runtime config error", err)
 	}
 

@@ -47,7 +47,7 @@ func TestPersistedAgentProjectionRejectsEnabledPlatformDefaultMemory(t *testing.
 		LLMBackend:        "anthropic",
 		MemoryEnabled:     true,
 		MemorySource:      string(agentmemory.SourcePlatformDefault),
-		ConfigJSON:        []byte(`{}`),
+		ConfigJSON:        []byte(`{"config":{},"receiver_config":null}`),
 		RuntimeDescriptor: []byte(`{"type":"generic"}`),
 	})
 	if err == nil || !strings.Contains(err.Error(), `requires source "authored"`) {
@@ -187,7 +187,7 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 				) VALUES (
 					$1, $2, $3, $4, $5, $6, $7,
 					'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
-					NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+					NULL, NULL, '{"config":{},"receiver_config":null}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 					$8::jsonb, 'active',
 					'00000000-0000-4000-8000-000000000001'::uuid, 'runtime-descriptor-test',
 					'00000000-0000-4000-8000-000000000002'::uuid, '00000000-0000-4000-8000-000000000003'::uuid,

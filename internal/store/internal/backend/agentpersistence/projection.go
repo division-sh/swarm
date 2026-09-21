@@ -85,13 +85,6 @@ var runtimeConfigKeys = map[string]struct{}{
 	"budget_envelope":         {},
 }
 
-var retiredAgentMemoryConfigKeys = map[string]struct{}{
-	"mode":                    {},
-	"conversation_mode":       {},
-	"session_scope":           {},
-	"session_scope_authority": {},
-}
-
 var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"type":                   {},
 	"flow_id":                {},
@@ -110,55 +103,6 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"criteria":               {},
 	"flow_data_access":       {},
 	"budget_envelope":        {},
-}
-
-func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
-	return sanitizeOpaqueAgentConfig(cfg.Config)
-}
-
-func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
-	obj := map[string]any{}
-	if len(raw) > 0 {
-		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &obj); err != nil {
-			return nil, fmt.Errorf("invalid opaque agent config: %w", err)
-		}
-	}
-	retired := make([]string, 0)
-	for key := range retiredAgentMemoryConfigKeys {
-		if _, exists := obj[key]; exists {
-			retired = append(retired, key)
-		}
-	}
-	if constraints, ok := obj["constraints"].(map[string]any); ok {
-		for key := range retiredAgentMemoryConfigKeys {
-			if _, exists := constraints[key]; exists {
-				retired = append(retired, "constraints."+key)
-			}
-		}
-	}
-	if len(retired) > 0 {
-		sort.Strings(retired)
-		return nil, fmt.Errorf("retired agent memory fields are not accepted: %s; use memory", strings.Join(retired, ", "))
-	}
-	for key := range runtimeConfigKeys {
-		delete(obj, key)
-	}
-	if constraints, ok := obj["constraints"].(map[string]any); ok {
-		delete(constraints, "conversation_mode")
-		delete(constraints, "session_scope")
-		delete(constraints, "session_scope_authority")
-		delete(constraints, "memory")
-		delete(constraints, "max_turns_per_task")
-		if len(constraints) == 0 {
-			delete(obj, "constraints")
-		} else {
-			obj["constraints"] = constraints
-		}
-	}
-	if len(obj) == 0 {
-		obj = map[string]any{}
-	}
-	return canonicaljson.MarshalPreservingNumberKinds(obj)
 }
 
 func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID string) (PersistedAgentProjection, error) {
@@ -187,13 +131,13 @@ func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID st
 	if err != nil {
 		return PersistedAgentProjection{}, fmt.Errorf("invalid llm_backend: %w", err)
 	}
-	if err := runtimeactors.ValidateNoAuthoredSystemPrompt(cfg.Config); err != nil {
-		return PersistedAgentProjection{}, err
-	}
 	if err := cfg.ValidateIntentInputs(); err != nil {
 		return PersistedAgentProjection{}, fmt.Errorf("agent %s intent inputs: %w", strings.TrimSpace(cfg.ID), err)
 	}
-	configJSON, err := mergeAgentConfigJSON(cfg)
+	if err := cfg.ValidateReceiverConfig(); err != nil {
+		return PersistedAgentProjection{}, err
+	}
+	configJSON, err := encodeAgentConfigEnvelope(cfg.Config, cfg.ReceiverConfig)
 	if err != nil {
 		return PersistedAgentProjection{}, fmt.Errorf("marshal agent config: %w", err)
 	}
@@ -245,8 +189,9 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid memory plan: %w", strings.TrimSpace(row.AgentID), err)
 	}
-	if err := validateOpaqueAgentConfig(row.ConfigJSON); err != nil {
-		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid opaque config: %w", strings.TrimSpace(row.AgentID), err)
+	config, receiverConfig, err := decodeAgentConfigEnvelope(row.ConfigJSON)
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid config envelope: %w", strings.TrimSpace(row.AgentID), err)
 	}
 	desc, err := decodePersistedAgentRuntimeDescriptor(row.RuntimeDescriptor)
 	if err != nil {
@@ -313,11 +258,15 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		FlowPath:             strings.Trim(strings.TrimSpace(row.FlowInstance), "/"),
 		EntityID:             strings.TrimSpace(row.EntityID),
 		ParentAgent:          strings.TrimSpace(row.ParentAgentID),
-		Config:               append(json.RawMessage(nil), row.ConfigJSON...),
+		Config:               config,
+		ReceiverConfig:       receiverConfig,
 		Identity:             identity,
 	}
 	cfg.NormalizeEntityID()
 	cfg.NormalizeRuntimeDescriptor()
+	if err := cfg.ValidateReceiverConfig(); err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s: %w", strings.TrimSpace(row.AgentID), err)
+	}
 	if err := cfg.ValidateIntentInputs(); err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s intent carrier: %w", strings.TrimSpace(row.AgentID), err)
 	}
@@ -441,7 +390,7 @@ func validateOpaqueAgentConfig(raw []byte) error {
 		return fmt.Errorf("config must be valid json")
 	}
 	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &obj); err != nil {
 		return fmt.Errorf("decode config: %w", err)
 	}
 	if obj == nil {
@@ -454,14 +403,14 @@ func validateOpaqueAgentConfig(raw []byte) error {
 		}
 	}
 	if constraints, ok := obj["constraints"].(map[string]any); ok {
-		for _, key := range []string{"conversation_mode", "session_scope", "session_scope_authority", "memory", "max_turns_per_task"} {
+		for _, key := range []string{"mode", "conversation_mode", "session_scope", "session_scope_authority", "memory", "max_turns_per_task"} {
 			if _, exists := constraints[key]; exists {
 				conflicts = append(conflicts, "constraints."+key)
 			}
 		}
 	}
 	if len(conflicts) == 0 {
-		return nil
+		return runtimeactors.ValidateNoAuthoredSystemPrompt(raw)
 	}
 	sort.Strings(conflicts)
 	return fmt.Errorf("config contains runtime-owned keys: %s", strings.Join(conflicts, ", "))

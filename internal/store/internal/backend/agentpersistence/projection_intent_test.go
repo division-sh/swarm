@@ -37,7 +37,7 @@ func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
 
 func TestPersistedAgentProjectionRoundTripsReceiverConfigNumberKinds(t *testing.T) {
 	cfg := persistedIntentTestAgent(t)
-	cfg.Config = json.RawMessage(`{"enabled":false,"nested":[7,7.0,null]}`)
+	cfg.ReceiverConfig = json.RawMessage(`{"enabled":false,"nested":[7,7.0,null]}`)
 	projection, err := ProjectPersistedAgentConfig(cfg, "")
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +46,8 @@ func TestPersistedAgentProjectionRoundTripsReceiverConfigNumberKinds(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(hydrated.Config) != string(cfg.Config) {
-		t.Fatalf("receiver config changed numeric kinds or precision: got %s want %s", hydrated.Config, cfg.Config)
+	if string(hydrated.ReceiverConfig) != string(cfg.ReceiverConfig) {
+		t.Fatalf("receiver config changed numeric kinds or precision: got %s want %s", hydrated.ReceiverConfig, cfg.ReceiverConfig)
 	}
 }
 
