@@ -3305,6 +3305,7 @@
     "internal/runtime/contracts/workflow_contract_action_retirement.go": "presence-based rejection only, no action interpreter",
     "internal/runtime/contracts/workflow_contract_action_retirement_test.go": "hostile rejection and distinct homonym preservation",
     "internal/runtime/contracts/workflow_contract_join.go": "calls shared presence-rejection helper",
-    "internal/runtime/contracts/workflow_contract_yaml_flow.go": "calls shared presence-rejection helper"
+    "internal/runtime/contracts/workflow_contract_yaml_flow.go": "calls shared presence-rejection helper",
+    "internal/testplanning/conformance_2394_partition_test.go": "explicit eight-root action-retirement conformance partition census and hostile scope-drift controls; test names are proof references, not an interpreter"
   }
 }
