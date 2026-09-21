@@ -193,11 +193,6 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 		}
 		opts.SourceArtifactFact = fact
 	}
-	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
-		owner := newTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
-		opts.TemplateInstancePlanner = owner
-		opts.FlowActivationFinalizer = owner
-	}
 	if opts.FlowActivationFinalizer == nil {
 		opts.FlowActivationFinalizer, _ = opts.TemplateInstancePlanner.(runtimepipeline.CommittedFlowInstanceActivationFinalizer)
 	}

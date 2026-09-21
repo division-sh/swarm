@@ -100,7 +100,7 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 	}
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: source, TemplateInstanceActivator: store.Activate, Interceptors: []EventInterceptor{interceptor},
+		ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate), Interceptors: []EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("create EventBus: %v", err)
@@ -736,7 +736,7 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 	store.setTargetOwnerRoutes(rootRoute, leftRoute, rightRoute, hostileRoute, staticRoute)
 	interceptor := &connectRoutePlanNodeInterceptor{}
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: source, TemplateInstanceActivator: store.Activate, Interceptors: []EventInterceptor{interceptor},
+		ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate), Interceptors: []EventInterceptor{interceptor},
 	})
 	if err != nil {
 		t.Fatalf("create diamond EventBus: %v", err)

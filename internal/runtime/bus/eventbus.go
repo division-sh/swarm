@@ -73,7 +73,6 @@ type EventBus struct {
 	ephemeral                   bool
 	logger                      LoggerHook
 	semanticSource              semanticview.Source
-	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
 	templateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
 	flowActivationFinalizer     runtimepipeline.CommittedFlowInstanceActivationFinalizer
 	agentReadinessFinalizer     CommittedAgentReadinessFinalizer
@@ -296,7 +295,6 @@ type EventBusOptions struct {
 	InterceptorProvider         func() []EventInterceptor
 	ContractBundle              semanticview.Source
 	RouteTable                  *RouteTable
-	TemplateInstanceActivator   runtimepipeline.FlowInstanceActivator
 	TemplateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
 	FlowActivationFinalizer     runtimepipeline.CommittedFlowInstanceActivationFinalizer
 	PayloadAdmitter             PayloadAdmitter
@@ -543,7 +541,6 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		interceptors:                filtered,
 		interceptorProvider:         opts.InterceptorProvider,
 		semanticSource:              semanticSource,
-		templateInstanceActivator:   opts.TemplateInstanceActivator,
 		templateInstancePlanner:     opts.TemplateInstancePlanner,
 		flowActivationFinalizer:     opts.FlowActivationFinalizer,
 		payloadAdmitter:             opts.PayloadAdmitter,
