@@ -25,7 +25,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
@@ -267,7 +266,6 @@ func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapabili
 		t.Fatal("typed run lifecycle candidate owner did not construct the runtime executor")
 	}
 }
-
 
 func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)

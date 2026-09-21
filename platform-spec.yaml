@@ -12403,7 +12403,7 @@ flow_model:
           declarations: |
             Configuration variables are declared under instance_variables.variables using the shared type vocabulary and refinements, with an optional default and description. Scalar declarations denote types, not descriptions. Named records, lists and typed maps retain their recursive constraints, including enum/UUID map keys and sibling equal_to. Optional presence, explicit null and default presence survive source projection. The instance key's type remains owned by its canonical entity declaration. No initialize.config wrapper, from wrapper, whole-payload copy, sender entity/event lookup or inferred payload leaf is supported.
           admission: |
-            Compile exact destination names and payload paths with the receiver-scoped type catalog and the admitted producer schema. Shared type and value admission validates every supplied value and every default before any instance creation, route installation, agent readiness or automatic creation event. Absence is different from explicit null; only absence can use a default. Invalid supplied data never becomes a default. Defaults and admitted nested values are isolated from authored maps and sibling instances. Integer/double execution kinds are preserved. Initialization facts, types and defaults participate in compiled pin identity and survive imported-schema binding.
+            Compile exact destination names and payload paths with the receiver-scoped type catalog and the admitted producer schema. Shared type and value admission validates every supplied value and every default before any instance creation, route installation, agent readiness or automatic creation event. Absence is different from explicit null; only absence can use a default. Invalid supplied data never becomes a default. Defaults and admitted nested values are isolated from authored maps and sibling instances. Integer/double execution kinds are preserved. Initialization facts, types and defaults participate in compiled pin identity and survive imported-schema binding. Default identity includes runtime numeric kinds: integer 2 and double 2.0 cannot alias even when the variable admits both.
           lifecycle: |
             Initialization applies only when a receiver is created. Select-or-create reuse, ordinary ensure, retry and recovery consume committed configuration and never update it from another incoming request or reapply current defaults. The existing activation/publication transaction owns atomic visibility; no separate action executor or follow-up initialization write exists. Automatic creation payloads and first node/agent consumers observe the same admitted configuration. Runtime coordinates and provenance are not business configuration and cannot overwrite same-named business fields.
           persistence: |
@@ -17023,7 +17023,10 @@ run_model:
       copied because revision is a current-row commit counter, not append-only historical state in entity_mutations.
       Materialization MUST consume runtime.run_fork.materialized_entity_snapshot_metadata for every reconstructed
       entity before writing fork-local entity_state. The fixed revision entity_metadata record is the sole authority
-      for flow_instance and entity_type. Event flow context is not entity ownership and MUST NOT override
+      for flow_instance and entity_type. For a flow-owned entity it also captures the owning flow_instances.config
+      envelope in the same writing transaction. This is evidence in the existing metadata family, not a new history
+      family or permission to read the mutable flow row at fork time. Business values retain integer/double kinds;
+      a change from an integer to a double is not an unchanged configuration fact. Event flow context is not entity ownership and MUST NOT override
       metadata or fill a missing metadata owner. Metadata and reconstructed entity collections MUST reject duplicate
       identities before indexing, including identical duplicates; neither ordering nor first/last-record selection
       may choose an owner. Reconstructed
@@ -17135,7 +17138,13 @@ run_model:
       that. Flow membership alone proves neither entity type nor lifecycle readiness. Every retained frontier event
       association and its execution mode remains explicit; duplicate or conflicting projections cannot elect an owner.
       A child companion and its readiness are fresh work admitted through the canonical selected declaration and
-      materialization owners, not a copy of historical flow status, readiness, configuration, or execution authority.
+      materialization owners, not a copy of historical flow status, readiness, runtime controls, or execution authority.
+      A template receiver's business configuration comes from the exact fixed-revision metadata config envelope,
+      validated against its recorded route by the shared persisted-config decoder. It is not reconstructed from
+      a path leaf, hashed instance ID, current flow row, selected-source defaults, or the triggering event payload.
+      Runtime controls are newly admitted for the child while recorded business values remain unchanged. The sealed
+      readiness binding includes the exact configuration and its numeric kinds; missing or contradictory evidence
+      refuses before fork mutation. Old selected stores lacking that evidence are unsupported.
       Runtime preparation and persistence consume one complete admitted receiver relation, bound to the fixed snapshot,
       selected declaration, full frontier event/mode relation, and resolved agent configuration. Caller-supplied subsets,
       substituted configuration, and independently supplied agent expectations cannot authorize materialization or reuse.

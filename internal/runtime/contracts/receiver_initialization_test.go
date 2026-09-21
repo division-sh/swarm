@@ -284,6 +284,32 @@ func TestCompiledInputInitializeIsImmutableAndDigestSensitive(t *testing.T) {
 	}
 }
 
+func TestReceiverInitializationDigestPreservesDefaultNumberKinds(t *testing.T) {
+	var digests []string
+	for _, value := range []any{int64(2), float64(2)} {
+		config, err := CompileReceiverConfiguration(FlowInstanceVariables{Variables: map[string]FlowVariable{
+			"ratio": {Type: "numeric", HasDefault: true, Default: value},
+		}}, TypeCatalogDocument{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin, err := CompileFlowInputPin(FlowPinCompilationContext{FlowID: "worker", FlowPath: "worker", Configuration: config}, FlowInputEventPin{
+			Event: "work.requested", Resolution: FlowInputPinResolution{Mode: FlowInputResolutionModeCreate},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, err := pin.Initialization().Evaluate(nil)
+		if err != nil || !reflect.DeepEqual(actual["ratio"], value) {
+			t.Fatalf("default=%#v (%T), want %#v (%T), error=%v", actual["ratio"], actual["ratio"], value, value, err)
+		}
+		digests = append(digests, pin.Digest())
+	}
+	if digests[0] == digests[1] {
+		t.Fatal("integer and double defaults alias in compiled input identity")
+	}
+}
+
 func TestReceiverInitializationUsesNamedAndMapTypes(t *testing.T) {
 	catalog := TypeCatalogDocument{Types: map[string]NamedTypeDecl{"Settings": {Fields: map[string]TypeFieldSpec{"count": {Type: "integer"}}}}}
 	config, err := CompileReceiverConfiguration(FlowInstanceVariables{Variables: map[string]FlowVariable{
