@@ -480,13 +480,6 @@ func (m *StateMutation) SetStateBuckets(raw map[string]map[string]any) {
 	m.StateCarrier.StateBuckets = cloneStateBucketSet(raw)
 }
 
-type RuleMatch struct {
-	ID         string
-	AdvancesTo string
-	SetsGate   string
-	ActionID   string
-}
-
 type ExecutionResult struct {
 	// Committed is acknowledged persistence, not a prediction from partial intents.
 	Committed               bool
