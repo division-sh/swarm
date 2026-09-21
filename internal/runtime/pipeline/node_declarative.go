@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -36,17 +35,9 @@ type DeclarativeNode struct {
 	source   semanticview.Source
 	policies map[string]WorkflowEventPolicy
 	engine   HandlerExecutionEngine
-	hooks    *ProductHookRegistry
 }
 
-type ActionHandler func(ctx context.Context, evt Event, outcome *HandlerOutcome) (*HandlerOutcome, error)
-
-type ProductHookRegistry struct {
-	mu      sync.RWMutex
-	actions map[string]ActionHandler
-}
-
-func NewNode(node identity.ExecutableNode, contract SystemNodeContract, source semanticview.Source, engine HandlerExecutionEngine, hooks *ProductHookRegistry) NodeExecutor {
+func NewNode(node identity.ExecutableNode, contract SystemNodeContract, source semanticview.Source, engine HandlerExecutionEngine) NodeExecutor {
 	if !node.Valid() {
 		return nil
 	}
@@ -65,7 +56,6 @@ func NewNode(node identity.ExecutableNode, contract SystemNodeContract, source s
 		source:   source,
 		policies: buildWorkflowNodePolicies(source, node, subscriptions),
 		engine:   engine,
-		hooks:    hooks,
 	}
 }
 
@@ -157,36 +147,6 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		return nil, err
 	}
 	return outcome, nil
-}
-
-func (r *ProductHookRegistry) Register(actionID string, handler ActionHandler) {
-	if r == nil || handler == nil {
-		return
-	}
-	actionID = strings.TrimSpace(actionID)
-	if actionID == "" {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.actions == nil {
-		r.actions = make(map[string]ActionHandler)
-	}
-	r.actions[actionID] = handler
-}
-
-func (r *ProductHookRegistry) Get(actionID string) (ActionHandler, bool) {
-	if r == nil {
-		return nil, false
-	}
-	actionID = strings.TrimSpace(actionID)
-	if actionID == "" {
-		return nil, false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	handler, ok := r.actions[actionID]
-	return handler, ok
 }
 
 type coordinatorHandlerExecutionEngine struct {
@@ -471,15 +431,6 @@ func prepareHandlerMaterializationStateAtNode(source semanticview.Source, node i
 		state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
 	}
 	return nil
-}
-
-func actionMaterializesEntity(action runtimecontracts.ActionSpec) bool {
-	switch runtimecontracts.NormalizeHandlerActionID(action.ID) {
-	case "record_evidence":
-		return true
-	default:
-		return false
-	}
 }
 
 func gateSpecName(spec *runtimecontracts.GateSpec) string {

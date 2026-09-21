@@ -15,7 +15,6 @@ type WorkflowRuntime interface {
 	SemanticSource() semanticview.Source
 	WorkflowNodes() []WorkflowNode
 	GuardRegistry() GuardRegistry
-	ActionRegistry() ActionRegistry
 }
 
 type WorkflowNodeExecutor interface {
@@ -49,13 +48,6 @@ type GuardRegistry interface {
 	Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool)
 }
 
-type ActionRegistry interface {
-	HasAction(id identity.ActionKey) bool
-	IsExecutable(id identity.ActionKey) bool
-	ActionIDs() []string
-	Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool)
-}
-
 func (pc *PipelineCoordinator) SemanticSource() semanticview.Source {
 	if pc == nil || pc.module == nil {
 		return nil
@@ -75,11 +67,4 @@ func (pc *PipelineCoordinator) GuardRegistry() GuardRegistry {
 		return nil
 	}
 	return pc.module.GuardRegistry()
-}
-
-func (pc *PipelineCoordinator) ActionRegistry() ActionRegistry {
-	if pc == nil || pc.module == nil {
-		return nil
-	}
-	return pc.module.ActionRegistry()
 }

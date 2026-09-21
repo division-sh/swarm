@@ -742,30 +742,6 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 		DeliveryStore:       deliveryStore,
 		DeliveryRuntime:     bus,
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		InstanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
-			err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID:         strings.TrimSpace(req.Instance.InstanceID),
-				StorageRef:         strings.TrimSpace(req.Instance.InstancePath),
-				EntityID:           strings.TrimSpace(req.Instance.EntityID),
-				InstanceKind:       "dynamic_flow",
-				ParentFlowID:       strings.TrimSpace(req.Instance.ParentRoute.FlowID),
-				ParentFlowInstance: strings.TrimSpace(req.Instance.ParentRoute.FlowInstance),
-				ParentEntityID:     strings.TrimSpace(req.Instance.ParentEntityID),
-				WorkflowName:       strings.TrimSpace(req.Instance.TemplateID),
-				WorkflowVersion:    "v-test",
-				CurrentState:       "pending",
-				Config:             cloneStringAnyMap(req.Config),
-				Fields:             map[string]any{"component_id": req.Config["component_id"]},
-				Bookkeeping:        map[string]any{"last_source_event": strings.TrimSpace(req.TriggerEvent.ID())},
-				CreatedAt:          time.Now().UTC(),
-				UpdatedAt:          time.Now().UTC(),
-				EntityType:         "test_entity",
-			}))
-			if err != nil {
-				return fmt.Errorf("activate %s entity %s: %w", req.Instance.InstancePath, req.Instance.EntityID, err)
-			}
-			return nil
-		},
 		Module: &previewWorkflowModule{
 			bundle: bundle,
 			workflowNodes: []WorkflowNode{

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -23,7 +22,6 @@ type EmitSurface string
 
 const (
 	EmitSurfaceDeclarative EmitSurface = "declarative"
-	EmitSurfaceAction      EmitSurface = "action"
 )
 
 func WithEmitSurface(ctx context.Context, surface EmitSurface) context.Context {
@@ -148,22 +146,6 @@ type GuardRunner interface {
 	EvaluateGuard(ctx context.Context, id identity.GuardKey, entry runtimeregistry.GuardInstruction, execCtx ExecutionContext) (bool, bool, error)
 }
 
-type ActionRegistry interface {
-	HasAction(id identity.ActionKey) bool
-	IsExecutable(id identity.ActionKey) bool
-	Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool)
-}
-
-type ActionExecution struct {
-	Handled     bool
-	EmitIntents []EmitIntent
-	State       *StateMutation
-}
-
-type ActionRunner interface {
-	ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx ExecutionContext) (ActionExecution, error)
-}
-
 type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
@@ -179,8 +161,6 @@ type RuntimeDependencies struct {
 	ActivityDispatcher ActivityDispatcher
 	GuardRegistry      GuardRegistry
 	GuardRunner        GuardRunner
-	ActionRegistry     ActionRegistry
-	ActionRunner       ActionRunner
 	PayloadShaper      PayloadShaper
 	EmitNow            func() time.Time
 	MaxChainDepth      int

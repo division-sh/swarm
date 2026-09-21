@@ -857,10 +857,6 @@ func (s *PostgresStore) MarkTerminalRun(ctx context.Context, request runlifecycl
 	return s.runLifecyclePostgresOwner.MarkTerminalRun(ctx, request)
 }
 
-func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item pipeline.MailboxWriteMaterialization) error {
-	return s.mailboxPostgresOwner.MaterializeMailboxWrite(ctx, item)
-}
-
 func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error) {
 	return s.runForkPostgresOwner.MaterializeRunFork(ctx, req)
 }
@@ -2039,10 +2035,6 @@ func (s *SQLiteRuntimeStore) MarkExternalAttemptResponseObserved(ctx context.Con
 
 func (s *SQLiteRuntimeStore) MarkTerminalRun(ctx context.Context, request runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
 	return s.runLifecycleSQLiteOwner.MarkTerminalRun(ctx, request)
-}
-
-func (s *SQLiteRuntimeStore) MaterializeMailboxWrite(ctx context.Context, item pipeline.MailboxWriteMaterialization) error {
-	return s.mailboxSQLiteOwner.MaterializeMailboxWrite(ctx, item)
 }
 
 func (s *SQLiteRuntimeStore) MaterializeRunFork(ctx context.Context, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error) {

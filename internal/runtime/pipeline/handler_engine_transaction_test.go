@@ -118,7 +118,6 @@ func canonicalPreviewWorkflowModuleForTest(module *previewWorkflowModule) *previ
 	rooted := handlerTestWorkflowModuleWithBundle(module.bundle, module.bundle.Semantics.Name, nodeIDs...).(*previewWorkflowModule)
 	rooted.workflowNodes = module.workflowNodes
 	rooted.guardRegistry = module.guardRegistry
-	rooted.actionRegistry = module.actionRegistry
 	return rooted
 }
 

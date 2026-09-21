@@ -187,7 +187,7 @@ func TestWorkflowNodeProjectionRejectsQualifiedExactHandlerBeforeExecution(t *te
 			if !ok {
 				t.Fatal("listener executable node missing")
 			}
-			node := NewNode(nodeRef, record.Entry, source, nil, nil)
+			node := NewNode(nodeRef, record.Entry, source, nil)
 			if subscriptions := node.Subscriptions(); len(subscriptions) != 0 {
 				t.Fatalf("invalid authored subscription reached node executor: %#v", subscriptions)
 			}

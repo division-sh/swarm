@@ -746,12 +746,6 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 				Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"owner": runtimecontracts.CELExpression("entity.owner")}},
 			}}},
 		},
-		{
-			name: "on complete action input",
-			handler: runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
-				Action: runtimecontracts.ActionSpec{ID: "create_flow_instance", InstanceIDFrom: "entity.owner"},
-			}}},
-		},
 	}
 
 	for _, tc := range tests {

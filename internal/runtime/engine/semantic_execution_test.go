@@ -207,7 +207,6 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ev
 		admitted.PolicyRow = rule.PolicyRow
 		admitted.AdvancesTo = rule.AdvancesTo
 		admitted.Emit = rule.Emit
-		admitted.Action = rule.Action
 		admitted.Activity = rule.Activity
 		admitted.DataAccumulation = rule.DataAccumulation
 		admitted.Compute = rule.Compute

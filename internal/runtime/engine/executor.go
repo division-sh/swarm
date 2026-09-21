@@ -63,7 +63,6 @@ const (
 	StepProjection Step = "projection"
 	StepTransform  Step = "transform"
 	StepEmits      Step = "emits"
-	StepAction     Step = "action"
 	StepActivity   Step = "activity"
 	StepClear      Step = "clear"
 )
@@ -89,7 +88,6 @@ var OrderedSteps = []Step{
 	StepProjection,
 	StepTransform,
 	StepEmits,
-	StepAction,
 	StepActivity,
 	StepClear,
 }
@@ -182,12 +180,6 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := runtimecontracts.HandlerEmitSiteOwnershipError(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	if runtimecontracts.HandlerHasAmbiguousTopLevelAction(req.Handler) {
-		return fmt.Errorf("%w: handler-top-level action is only allowed on handlers without rules", ErrInvalidConfig)
-	}
-	if err := validateUnsupportedRuleActions(req.Handler); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
-	}
 	if err := validateHandlerActivityRuntime(req.Handler, req.FanOutPlans); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
@@ -221,21 +213,6 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	return nil
 }
 
-func validateUnsupportedRuleActions(handler runtimecontracts.SystemNodeEventHandler) error {
-	validateRule := func(context string, rule runtimecontracts.HandlerRuleEntry) error {
-		if strings.TrimSpace(rule.Action.ID) == "" {
-			return nil
-		}
-		return fmt.Errorf("%s action is unsupported; action is only allowed in handler.rules[*]", context)
-	}
-	for idx, rule := range handler.OnComplete {
-		if err := validateRule(handlerRuleContext("handler.on_complete", idx, rule.ID), rule); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHandler, fanOutPlans []runtimecontracts.FanOutCompiledPlan) error {
 	hasTopLevelActivity := !handler.Activity.Empty()
 	hasRuleActivity := false
@@ -248,9 +225,6 @@ func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHand
 	if hasTopLevelActivity {
 		if len(handler.Rules) > 0 {
 			return fmt.Errorf("handler-level activity is only allowed on handlers without rules")
-		}
-		if strings.TrimSpace(handler.Action.ID) != "" {
-			return fmt.Errorf("activity and action are mutually exclusive")
 		}
 		if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
 			return fmt.Errorf("activity and authored emit/on_success emit are mutually exclusive in Stage 1")
@@ -266,9 +240,6 @@ func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHand
 		for idx, rule := range handler.Rules {
 			if rule.Activity.Empty() {
 				continue
-			}
-			if strings.TrimSpace(rule.Action.ID) != "" {
-				return fmt.Errorf("handler.rules[%d] activity and action are mutually exclusive", idx)
 			}
 			fanOutEmit := false
 			for _, plan := range fanOutPlans {
@@ -768,8 +739,6 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return false, e.stepTransform(frame)
 	case StepEmits:
 		return false, e.stepEmits(frame)
-	case StepAction:
-		return false, e.stepAction(frame)
 	case StepActivity:
 		return false, e.stepActivity(frame)
 	case StepClear:
@@ -2602,40 +2571,6 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 	return nil
 }
 
-func (e *Executor) stepAction(frame *executionFrame) error {
-	actionSpec := selectedActionSpec(frame.req.Handler, frame.rule, frame.ruleSource)
-	actionKey := identity.NormalizeActionKey(actionSpec.ID)
-	if actionKey.IsZero() {
-		return nil
-	}
-	if e.deps.ActionRegistry != nil {
-		entry, ok := e.deps.ActionRegistry.Action(actionKey)
-		if !ok || !e.deps.ActionRegistry.IsExecutable(actionKey) {
-			return fmt.Errorf("action %q is not executable", actionKey.String())
-		}
-		if e.deps.ActionRunner != nil {
-			execCtx := e.executionContext(frame, StepAction)
-			execution, err := e.deps.ActionRunner.ExecuteAction(frame.ctx, actionSpec, entry, execCtx)
-			if err != nil {
-				return err
-			}
-			if !execution.Handled {
-				return fmt.Errorf("action %q is not executable", actionKey.String())
-			}
-			if len(execution.EmitIntents) > 0 {
-				frame.result.EmitIntents = append(frame.result.EmitIntents, execution.EmitIntents...)
-			}
-			if execution.Handled {
-				if err := e.mergeActionState(frame, execCtx.Request.State, execution.State); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, actionKey.String())
-	return nil
-}
-
 func (e *Executor) stepActivity(frame *executionFrame) error {
 	activitySpec := selectedActivitySpec(frame.req.Handler, frame.rule, frame.ruleSource)
 	if activitySpec.Empty() {
@@ -2734,53 +2669,6 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		intent.LoopStage = frame.loopActivation.CurrentStage
 	}
 	frame.result.ActivityIntents = append(frame.result.ActivityIntents, intent)
-	return nil
-}
-
-func (e *Executor) mergeActionState(frame *executionFrame, baseline StateSnapshot, mutation *StateMutation) error {
-	if e == nil || frame == nil || mutation == nil {
-		return nil
-	}
-	fields := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	for key, value := range mutation.StateCarrier.Fields {
-		if baselineValue, ok := baseline.StateCarrier.Fields[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
-			fields[key] = value
-		}
-	}
-	bookkeeping := cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping)
-	for key, value := range mutation.StateCarrier.Bookkeeping {
-		if baselineValue, ok := baseline.StateCarrier.Bookkeeping[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
-			bookkeeping[key] = value
-		}
-	}
-	gates := mapsClone(frame.state.State.StateCarrier.Gates)
-	for key, value := range mutation.StateCarrier.Gates {
-		if baselineValue, ok := baseline.StateCarrier.Gates[key]; !ok || baselineValue != value {
-			gates[key] = value
-		}
-	}
-	buckets := cloneStateBucketSet(frame.state.State.StateCarrier.StateBuckets)
-	for key, bucket := range mutation.StateCarrier.StateBuckets {
-		currentBucket := cloneStringAnyMap(buckets[key])
-		baselineBucket := baseline.StateCarrier.StateBuckets[key]
-		for bucketKey, value := range bucket {
-			if baselineValue, ok := baselineBucket[bucketKey]; !ok || !reflect.DeepEqual(baselineValue, value) {
-				currentBucket[bucketKey] = value
-			}
-		}
-		if len(currentBucket) > 0 {
-			buckets[key] = currentBucket
-		}
-	}
-	frame.state.State.StateCarrier.Fields = fields
-	frame.state.State.StateCarrier.Bookkeeping = bookkeeping
-	frame.state.State.StateCarrier.Gates = gates
-	frame.state.State.StateCarrier.StateBuckets = buckets
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(fields)
-	frame.result.StateMutation.StateCarrier.Bookkeeping = cloneStringAnyMap(bookkeeping)
-	frame.result.StateMutation.StateCarrier.Control = frame.state.State.StateCarrier.Control
-	frame.result.StateMutation.StateCarrier.Gates = gates
-	frame.result.StateMutation.SetStateBuckets(buckets)
 	return nil
 }
 
@@ -3506,13 +3394,6 @@ func selectedDeclarativeEmitSpecs(handler runtimecontracts.SystemNodeEventHandle
 		})
 	}
 	return out
-}
-
-func selectedActionSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource) runtimecontracts.ActionSpec {
-	if source == handlerRuleSourceRules && rule != nil && strings.TrimSpace(rule.Action.ID) != "" {
-		return rule.Action
-	}
-	return handler.Action
 }
 
 func selectedActivitySpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource) runtimecontracts.ActivitySpec {

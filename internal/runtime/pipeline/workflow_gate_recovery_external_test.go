@@ -64,10 +64,9 @@ type gateRecoveryModule struct {
 	source semanticview.Source
 }
 
-func (m gateRecoveryModule) SemanticSource() semanticview.Source          { return m.source }
-func (gateRecoveryModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
-func (gateRecoveryModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
-func (gateRecoveryModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
+func (m gateRecoveryModule) SemanticSource() semanticview.Source         { return m.source }
+func (gateRecoveryModule) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
+func (gateRecoveryModule) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
 
 type proposedEffectProofModule struct {
 	source semanticview.Source
@@ -79,8 +78,7 @@ func (m proposedEffectProofModule) SemanticSource() semanticview.Source { return
 func (m proposedEffectProofModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }
-func (proposedEffectProofModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
-func (proposedEffectProofModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
+func (proposedEffectProofModule) GuardRegistry() runtimepipeline.GuardRegistry { return nil }
 
 type gateRecoveryStoreCase struct {
 	name        string

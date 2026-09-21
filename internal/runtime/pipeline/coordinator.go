@@ -61,13 +61,11 @@ type PipelineCoordinator struct {
 	module                       WorkflowModule
 	workflowStore                *workflowInstanceStore
 	expressionEval               *workflowExpressionEvaluator
-	instanceActivator            FlowInstanceActivator
 	instanceDeactivationPreparer FlowInstanceDeactivationPreparer
 	timerScheduler               *Scheduler
 	genericSchedules             GenericScheduleWakeupOwner
 	workflowTimers               *WorkflowTimerLifecycle
 	timerCancellations           *runtimetimercancellation.Reconciler
-	mailboxMaterializer          MailboxWriteMaterializationStore
 	decisionCards                decisioncard.Store
 	proposedEffects              decisioncard.ProposedEffectStore
 	humanTasks                   decisioncard.HumanTaskStore
@@ -83,7 +81,6 @@ type PipelineCoordinator struct {
 	scenarioProfiles             ScenarioExecutionProfileReader
 	effectiveSource              scenarioexecution.EffectiveSourceIdentity
 	channelActivations           *runtimechannelactivation.Owner
-	artifactRoot                 string
 	sourceArtifactFact           runtimecorrelation.SourceArtifactFact
 	runBundleAvailability        RunBundleAvailabilityReader
 	decisionCardCadence          decisioncard.CadencePolicy
@@ -111,12 +108,10 @@ type PipelineCoordinatorOptions struct {
 	DeliveryStore                    runtimedelivery.Store
 	DeadLetters                      runtimedeadletters.Recorder
 	PipelineObligations              runtimepipelineobligation.Store
-	InstanceActivator                FlowInstanceActivator
 	InstanceDeactivationPreparer     FlowInstanceDeactivationPreparer
 	TimerScheduler                   *Scheduler
 	GenericSchedules                 GenericScheduleWakeupOwner
 	TimerObligationReader            runtimetimerobligation.Reader
-	MailboxMaterializer              MailboxWriteMaterializationStore
 	DecisionCards                    decisioncard.Store
 	ProposedEffects                  decisioncard.ProposedEffectStore
 	HumanTasks                       decisioncard.HumanTaskStore
@@ -131,7 +126,6 @@ type PipelineCoordinatorOptions struct {
 	ScenarioExecutionProfiles        ScenarioExecutionProfileReader
 	EffectiveSourceIdentity          scenarioexecution.EffectiveSourceIdentity
 	ChannelActivations               *runtimechannelactivation.Owner
-	ArtifactRoot                     string
 	SourceArtifactFact               runtimecorrelation.SourceArtifactFact
 	RunBundleAvailability            RunBundleAvailabilityReader
 	DecisionCardCadence              decisioncard.CadencePolicy
@@ -284,11 +278,9 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		bus:                              bus,
 		module:                           module,
 		expressionEval:                   newWorkflowExpressionEvaluator(),
-		instanceActivator:                opts.InstanceActivator,
 		instanceDeactivationPreparer:     opts.InstanceDeactivationPreparer,
 		timerScheduler:                   opts.TimerScheduler,
 		genericSchedules:                 opts.GenericSchedules,
-		mailboxMaterializer:              opts.MailboxMaterializer,
 		decisionCards:                    opts.DecisionCards,
 		proposedEffects:                  opts.ProposedEffects,
 		humanTasks:                       opts.HumanTasks,
@@ -304,7 +296,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		scenarioProfiles:                 opts.ScenarioExecutionProfiles,
 		effectiveSource:                  opts.EffectiveSourceIdentity,
 		channelActivations:               opts.ChannelActivations,
-		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		sourceArtifactFact:               opts.SourceArtifactFact,
 		runBundleAvailability:            opts.RunBundleAvailability,
 		decisionCardCadence:              opts.DecisionCardCadence.Normalize(),

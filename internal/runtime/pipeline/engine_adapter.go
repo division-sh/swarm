@@ -19,7 +19,6 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
@@ -1041,8 +1040,6 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		ActivityDispatcher: pipelineActivityDispatcher{coordinator: pc},
 		GuardRegistry:      pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
 		GuardRunner:        pipelineEngineGuardRunner{coordinator: pc},
-		ActionRegistry:     pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
-		ActionRunner:       pipelineEngineActionRunner{coordinator: pc},
 		PayloadShaper:      pipelineEnginePayloadShaper{coordinator: pc},
 		EmitNow:            pc.testEngineEmitNow,
 		MaxChainDepth:      workflowMaxChainDepthPolicy(source),
@@ -1117,35 +1114,6 @@ func (r pipelineEngineGuardRegistry) Guard(id identity.GuardKey) (runtimeregistr
 	return r.registry.Guard(id)
 }
 
-type pipelineEngineActionRegistry struct{ registry ActionRegistry }
-
-func (r pipelineEngineActionRegistry) HasAction(id identity.ActionKey) bool {
-	if r.registry != nil && r.registry.HasAction(id) {
-		return true
-	}
-	return runtimecontracts.IsSupportedHandlerActionID(id.String())
-}
-func (r pipelineEngineActionRegistry) IsExecutable(id identity.ActionKey) bool {
-	if r.registry != nil && r.registry.IsExecutable(id) {
-		return true
-	}
-	return runtimecontracts.IsSupportedHandlerActionID(id.String())
-}
-func (r pipelineEngineActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
-	if r.registry != nil {
-		if instruction, ok := r.registry.Action(id); ok {
-			return instruction, true
-		}
-	}
-	if !runtimecontracts.IsSupportedHandlerActionID(id.String()) {
-		return runtimeregistry.ActionInstruction{}, false
-	}
-	return runtimeregistry.ActionInstruction{
-		Key:     id,
-		Builtin: id.String(),
-	}, true
-}
-
 type pipelineEngineGuardRunner struct {
 	coordinator *PipelineCoordinator
 }
@@ -1205,95 +1173,6 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 
 func hasHumanDecisionProducer(event events.Event) bool {
 	return events.ProducerIs(event, events.EventProducerExternal, "human") || events.ProducerIs(event, events.EventProducerExternal, "mailbox")
-}
-
-type pipelineEngineActionRunner struct {
-	coordinator        *PipelineCoordinator
-	artifactRepoCommit func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) (runtimeengine.ActionExecution, error)
-}
-
-func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (runtimeengine.ActionExecution, error) {
-	pc := r.coordinator
-	if pc == nil {
-		return runtimeengine.ActionExecution{}, nil
-	}
-	actionID := runtimecontracts.NormalizeHandlerActionID(firstNonEmptyString(entry.Builtin, entry.Key.String(), action.ID))
-	if actionID == "" {
-		return runtimeengine.ActionExecution{}, nil
-	}
-	switch actionID {
-	case "record_evidence":
-		payload := parsePayloadMap(execCtx.Request.Event.Payload())
-		bucketID := recordEvidenceTarget(execCtx.Request)
-		if bucketID == "" {
-			return runtimeengine.ActionExecution{Handled: true}, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.Node.Key(), recordEvidenceHandlerLabel(execCtx.Request))
-		}
-		mutation, err := pc.projectWorkflowEvidence(execCtx, bucketID, payload)
-		if err != nil {
-			return runtimeengine.ActionExecution{Handled: true}, err
-		}
-		return runtimeengine.ActionExecution{Handled: true, State: mutation}, nil
-	case "create_flow_instance":
-		plan := handlerExecutionPlan{
-			Node:           execCtx.Request.Node,
-			EventType:      strings.TrimSpace(string(execCtx.Request.Event.Type())),
-			Action:         actionID,
-			Template:       strings.TrimSpace(action.Template),
-			InstanceIDFrom: strings.TrimSpace(action.InstanceIDFrom),
-			InstanceIDPath: action.InstanceIDPath,
-			ConfigFrom:     action.ConfigFrom,
-		}
-		if err := pc.createFlowInstance(ctx, engineTriggerContext(execCtx.Request), plan, execCtx.Base); err != nil {
-			return runtimeengine.ActionExecution{Handled: true}, err
-		}
-		return runtimeengine.ActionExecution{Handled: true}, nil
-	case "mailbox_write":
-		if err := pc.materializeMailboxItem(ctx, action, execCtx); err != nil {
-			return runtimeengine.ActionExecution{Handled: true}, err
-		}
-		return runtimeengine.ActionExecution{Handled: true}, nil
-	case "artifact_repo_commit":
-		mode, err := pipelineActionExecutionMode(ctx, execCtx)
-		if err != nil {
-			return runtimeengine.ActionExecution{Handled: true}, err
-		}
-		if mode == runtimeeffects.ExecutionModeMock {
-			return runtimeengine.ActionExecution{Handled: true}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_artifact_repo_commit_forbidden", "pipeline-action-runtime", "admit_artifact_repo_commit", map[string]any{
-				"action": "artifact_repo_commit", "execution_mode": string(mode),
-			})
-		}
-		commit := r.artifactRepoCommit
-		if commit == nil {
-			commit = pc.commitArtifactRepo
-		}
-		execution, err := commit(ctx, action, execCtx)
-		execution.Handled = true
-		return execution, err
-	default:
-		return runtimeengine.ActionExecution{}, nil
-	}
-}
-
-func pipelineActionExecutionMode(ctx context.Context, execCtx runtimeengine.ExecutionContext) (runtimeeffects.ExecutionMode, error) {
-	eventMode := execCtx.Request.Event.ExecutionMode()
-	if !eventMode.Valid() {
-		return "", fmt.Errorf("pipeline action requires typed causal execution mode")
-	}
-	if contextMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok && contextMode != eventMode {
-		return "", fmt.Errorf("pipeline action execution mode conflicts with source event")
-	}
-	return eventMode, nil
-}
-
-func recordEvidenceTarget(req runtimeengine.ExecutionRequest) string {
-	return strings.TrimSpace(req.Handler.EvidenceTarget)
-}
-
-func recordEvidenceHandlerLabel(req runtimeengine.ExecutionRequest) string {
-	if handlerKey := strings.TrimSpace(req.HandlerEventKey); handlerKey != "" {
-		return handlerKey
-	}
-	return strings.TrimSpace(string(req.Event.Type()))
 }
 
 type pipelineEnginePayloadShaper struct {

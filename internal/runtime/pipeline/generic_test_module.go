@@ -13,7 +13,6 @@ type genericTestModule struct {
 	contractBundle *runtimecontracts.WorkflowContractBundle
 	workflowNodes  []WorkflowNode
 	guardRegistry  GuardRegistry
-	actionRegistry ActionRegistry
 	loadErr        error
 }
 
@@ -36,7 +35,6 @@ func (m *genericTestModule) init() {
 			return
 		}
 		m.guardRegistry = NewContractGuardRegistry(source)
-		m.actionRegistry = NewContractActionRegistry(source)
 	})
 	if m.loadErr != nil {
 		panic(m.loadErr)
@@ -60,9 +58,4 @@ func (m *genericTestModule) WorkflowNodes() []WorkflowNode {
 func (m *genericTestModule) GuardRegistry() GuardRegistry {
 	m.init()
 	return m.guardRegistry
-}
-
-func (m *genericTestModule) ActionRegistry() ActionRegistry {
-	m.init()
-	return m.actionRegistry
 }

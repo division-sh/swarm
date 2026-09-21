@@ -135,10 +135,9 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 	bus.configurePipelineTestDeliveryOwner(deliveryStore)
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
-			bundle:         bundle,
-			workflowNodes:  nodes,
-			guardRegistry:  NewContractGuardRegistry(source),
-			actionRegistry: NewContractActionRegistry(source),
+			bundle:        bundle,
+			workflowNodes: nodes,
+			guardRegistry: NewContractGuardRegistry(source),
 		},
 		Persistence:         workflowPersistenceForTest(workflowStore),
 		DeliveryStore:       deliveryStore,

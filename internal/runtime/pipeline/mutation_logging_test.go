@@ -241,19 +241,19 @@ func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	}
 }
 
-func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
+func TestAccumulatorAppend_LogsMutationRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	entityID := uuid.NewString()
 	pc := testMutationLoggingCoordinator(t, db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"}); err != nil {
-		t.Fatalf("recordWorkflowEvidence: %v", err)
+	if err := commitAccumulatorAppendForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"}); err != nil {
+		t.Fatalf("accumulator append: %v", err)
 	}
 
 	fields := mutationFieldsForEntity(t, db, entityID)
-	if !containsMutationField(fields, "accumulator:evidence") {
-		t.Fatalf("mutation fields missing accumulator:evidence: %v", fields)
+	if !containsMutationField(fields, "accumulator:journal") {
+		t.Fatalf("mutation fields missing accumulator:journal: %v", fields)
 	}
 	if err := trackedMutationStateMatchesEntityState(t, db, entityID); err != nil {
 		t.Fatalf("trackedMutationStateMatchesEntityState(evidence): %v", err)
@@ -312,18 +312,18 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		assertEntityGates(t, db, entityID, map[string]any{})
 	})
 
-	t.Run("evidence write", func(t *testing.T) {
+	t.Run("accumulator append", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		entityID := uuid.NewString()
 		pc := testMutationLoggingCoordinator(t, db)
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := commitProjectedWorkflowEvidenceForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"})
+		err := commitAccumulatorAppendForTest(testPipelineCoordinatorRunContext(t, pc), pc, testWorkflowInstanceRoute(testPipelineRunID), entityID, ".", "research", map[string]any{"summary": "done"})
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
-			t.Fatalf("recordWorkflowEvidence err = %v, want entity_mutations failure", err)
+			t.Fatalf("accumulator append err = %v, want entity_mutations failure", err)
 		}
-		assertAccumulatorBucketMissing(t, db, entityID, "evidence")
+		assertAccumulatorBucketMissing(t, db, entityID, "journal")
 	})
 }
 
