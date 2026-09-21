@@ -328,6 +328,7 @@ func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID
 		VALUES (
 			$1::uuid, $1::text, 'catalog-assertion', 'static',
 			jsonb_build_object(
+				'config', '{}'::jsonb,
 				'workflow_version', '1',
 				'instance_id', $1::text,
 				'storage_ref', $1::text,
