@@ -67,8 +67,8 @@ func TestActivateFlowInstanceAdmitsReceiverConfigBeforeAllConsumers(t *testing.T
 				t.Fatal(err)
 			}
 			cfg, found := testFlowActivationAgentConfig(t, manager, "reviewer", "review/one")
-			if !found || string(cfg.Config) != string(wire) || len(bus.published) != 1 || string(bus.published[0].Payload()) != string(wire) {
-				t.Fatalf("agent/autoemit did not consume admitted config: agent=%s events=%#v want=%s", cfg.Config, bus.published, wire)
+			if !found || string(cfg.ReceiverConfig) != string(wire) || len(bus.published) != 1 || string(bus.published[0].Payload()) != string(wire) {
+				t.Fatalf("agent/autoemit did not consume admitted config: agent=%s events=%#v want=%s", cfg.ReceiverConfig, bus.published, wire)
 			}
 			if len(bus.addedRouteRequests) != 1 {
 				t.Fatal("missing route consumer")
@@ -158,12 +158,12 @@ func TestEnsureFlowInstanceReuseCannotReplaceCommittedConfigOrPendingAutoEmit(t 
 					t.Fatal("recovered agent missing")
 				}
 				var config map[string]any
-				if err := canonicaljson.DecodePreservingNumberLexemes(cfg.Config, &config); err != nil || config["name"] != "committed" || config["priority"] != json.Number("7") {
+				if err := canonicaljson.DecodePreservingNumberLexemes(cfg.ReceiverConfig, &config); err != nil || config["name"] != "committed" || config["priority"] != json.Number("7") {
 					t.Fatalf("agent consumed incoming config: %#v %v", config, err)
 				}
 				wantWire, err := canonicaljson.MarshalPreservingNumberKinds(committedConfig)
-				if err != nil || string(cfg.Config) != string(wantWire) || string(restartBus.published[0].Payload()) != string(wantWire) {
-					t.Fatalf("recovery changed business controls or nested numeric kinds: agent=%s event=%s want=%s err=%v", cfg.Config, restartBus.published[0].Payload(), wantWire, err)
+				if err != nil || string(cfg.ReceiverConfig) != string(wantWire) || string(restartBus.published[0].Payload()) != string(wantWire) {
+					t.Fatalf("recovery changed business controls or nested numeric kinds: agent=%s event=%s want=%s err=%v", cfg.ReceiverConfig, restartBus.published[0].Payload(), wantWire, err)
 				}
 				if created, err := restarted.EnsureFlowInstance(ctx, req); err != nil || created || len(instances.creates) != 1 || len(restartBus.published) != 1 {
 					t.Fatalf("repeat ensure changed lifecycle: created=%v err=%v creates=%d emits=%d", created, err, len(instances.creates), len(restartBus.published))
@@ -261,8 +261,8 @@ func TestReceiverConfigRecoverySourceRevisionDoesNotReadmitDefaults(t *testing.T
 				t.Fatalf("recovery reapplied defaults: %#v %v", stored.Config, err)
 			}
 			cfg, found := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/one")
-			if !found || string(cfg.Config) != `{"name":"committed","priority":7}` {
-				t.Fatalf("agent recovery reapplied defaults: %s", cfg.Config)
+			if !found || string(cfg.ReceiverConfig) != `{"name":"committed","priority":7}` {
+				t.Fatalf("agent recovery reapplied defaults: %s", cfg.ReceiverConfig)
 			}
 		})
 	}
@@ -297,7 +297,7 @@ func TestTemplateFlowMaterializationRequiresExactCommittedConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(plan.Config, config) || len(plan.Agents) != 1 || string(plan.Agents[0].Config.Config) != string(wire) || plan.ActivationVariables["key"] != "original-business-key" {
+	if !reflect.DeepEqual(plan.Config, config) || len(plan.Agents) != 1 || string(plan.Agents[0].Config.ReceiverConfig) != string(wire) || plan.ActivationVariables["key"] != "original-business-key" {
 		t.Fatalf("materialization lost committed config or reapplied defaults: %#v", plan)
 	}
 	config["nested"].([]any)[0].(map[string]any)["integer"] = int64(99)
