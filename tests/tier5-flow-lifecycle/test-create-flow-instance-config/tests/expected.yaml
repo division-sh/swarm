@@ -14,11 +14,12 @@ expected:
     - flow.spawned
   flow_instance_created:
     template: worker-flow
-    instance_id: worker-cfg-001
+    instance_id: ti-5c59b413ad4dd4f8d1321e7a
     config:
+      worker_id: worker-cfg-001
       max_retries: 3
       timeout_ms: 5000
-    auto_emitted: worker-flow/worker-cfg-001/worker.ready
+    auto_emitted: worker-flow/ti-5c59b413ad4dd4f8d1321e7a/worker.ready
 
 conformance:
   disposition: runtime

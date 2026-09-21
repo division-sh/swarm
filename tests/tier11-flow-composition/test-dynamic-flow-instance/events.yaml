@@ -1,3 +1,6 @@
+worker.requested:
+  worker_id: text
+  task_label: text
 spawn.requested:
   worker_id: string
   task_label: string

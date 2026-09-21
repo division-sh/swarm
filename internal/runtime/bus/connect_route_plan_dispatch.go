@@ -94,7 +94,7 @@ type connectRoutePlanDispatch struct {
 	ReplyClaims          []runtimereplycontext.ClaimCommand
 }
 
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator, planner runtimepipeline.FlowInstanceActivationPlanner, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, planner runtimepipeline.FlowInstanceActivationPlanner, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
 	if source == nil {
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}
@@ -106,7 +106,7 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		graph:           graph,
 		issues:          append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
 		loadDescriptors: loadDescriptors,
-		lifecycle:       newTemplateInstanceLifecycleOwner(source, routeTable, loadDescriptors, activator, planner),
+		lifecycle:       newTemplateInstanceLifecycleOwner(source, routeTable, planner),
 		replyStore:      replyStore,
 	}
 }

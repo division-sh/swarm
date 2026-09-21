@@ -1,2 +1,4 @@
 flow.created:
   instance_id: string
+worker.requested:
+  instance_id: text

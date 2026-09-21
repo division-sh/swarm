@@ -119,9 +119,6 @@ vocabulary:
     - discard
     - kill
     - escalate:{event}
-  action:
-    description: 'A platform-provided operation executed as the final step of a handler. Valid actions are create_flow_instance,
-      record_evidence, mailbox_write, and artifact_repo_commit. Product-specific actions are not supported.'
   timer:
     description: 'A time-based trigger attached to a stage. When the delay elapses, the platform emits the timer''s event,
       which can trigger a transition.
@@ -4271,162 +4268,8 @@ handler_specification:
         targets: list of state store names to clear
       retired_fields:
         target: RETIRED — use targets, including a one-item list for a single clear target.
-      execution_position: After action or activity intent persistence. Last step. Resets accumulator state or specific entity
+      execution_position: After activity intent persistence. Last step. Resets accumulator state or specific entity
         field buckets. Distinct from clear_gates which runs before guard.
-    action:
-      field: action
-      type: string or object
-      purpose: 'Names a platform-provided action on a handler without rules or on a handler.rules[*] branch. Valid values:
-        create_flow_instance, record_evidence, mailbox_write, artifact_repo_commit. The platform executes the named action.
-        NOT for product actions — all behavior must be declarative.'
-      emit_interaction: If the resolved runtime action instruction emits a follow-up event, that event uses the action-originated
-        emitted-event payload rules under observation_model.emitted_events.payload_rules. The action field itself does not
-        declare authored payload fields; runtime-owned action instructions construct and validate any follow-up payload.
-      valid_values:
-        create_flow_instance:
-          description: Create a new dynamic flow instance. Duplicate resolved instance IDs fail closed; they are never updates
-            or already-exists successes.
-          required_sibling_fields:
-            template: 'string — flow template ID (must be mode: template)'
-            instance_id_from: string — payload field containing the unique instance ID
-            config_from: object — maps instance variable names to supported handler context refs (`payload.*`, `entity.*`,
-              and `event.*`). Platform resolves those refs from the canonical handler context and passes the values as config
-              to the new flow instance.
-        record_evidence:
-          description: Append event payload to entity accumulator state.
-          behavior: Reads the event payload and appends it as a new entry in the entity's evidence accumulator (from state_schema).
-            Append-only — never replaces. Used for building an audit trail of signals, scores, or decisions.
-          required_sibling_fields: {}
-        mailbox_write:
-          description: Deterministically materialize an authored mailbox request event into public.mailbox.
-          required_mapping:
-            action.id: mailbox_write
-            action.mailbox: object — typed mailbox row declaration.
-          mailbox_fields:
-            item_type: expression value resolving to the mailbox item/review kind. Required. Normalized by lowercasing and
-              replacing hyphen/dot with underscore.
-            severity: optional expression value resolving to normal, urgent, or critical. Defaults to normal.
-            summary: expression value resolving to human-readable row summary. Required.
-            entity_id: optional expression value. Defaults to the triggering event entity_id when present.
-            flow_instance: optional expression value. Defaults to the triggering event flow_instance when present.
-            payload: optional mapping of payload/context fields to expression values. Only explicitly declared fields are copied;
-              no implicit event payload pass-through occurs.
-          behavior: Inserts a pending public.mailbox row inside the system-node handler transaction. source_event_id is the
-            triggering event id. from_agent is the deterministic system node identity. item_id is deterministic for source_event_id
-            and materializer node so duplicate/replayed node delivery does not create duplicate mailbox rows.
-        artifact_repo_commit:
-          description: Deterministically materialize service-owned typed file artifacts into a local git repository and expose
-            an opaque artifact URL plus immutable git ref on the owning entity.
-          required_mapping:
-            action.id: artifact_repo_commit
-            action.artifact_repo: object — typed artifact repository commit declaration.
-          provider:
-            v1: local_git only. Unsupported providers fail closed at decode/verify/runtime.
-            product_surface: Consumers receive `swarm-artifact://...` URLs and 40-character git commit SHAs, not raw host paths.
-          artifact_repo_fields:
-            provider: string — must be local_git.
-            repo_id: expression value resolving to the service-owned repository UUID. Required. This is the authoritative
-              opaque repository identity; product concepts must not be encoded as platform identity fields.
-            namespace: optional expression value resolving to a product-neutral isolation namespace. Defaults to the triggering
-              event run_id when omitted. Only letters, digits, dash, underscore, and dot are allowed; traversal markers fail
-              closed. The namespace partitions provider storage but is not semantic product identity.
-            partition_key: optional expression value resolving to a product-neutral grouping key copied into the manifest.
-              It may be used by consumers for indexing/debugging, but the runtime does not interpret it.
-            display_slug: optional expression value resolving to a cosmetic debug label copied into the manifest/failure
-              payload. It is never authoritative identity and must not affect provider storage paths. Path separators, traversal
-              markers, and values with no letters/digits fail closed.
-            request_id: expression value resolving to the business idempotency UUID. Required.
-            author: optional expression value used for git author display only.
-            provenance: optional mapping of product-owned provenance keys to expression values. Keys are copied under a
-              manifest/failure `provenance` object and are not interpreted by the platform. Invalid keys fail closed.
-            allowed_paths: list of repository-relative paths allowed for this service action. Required. Absolute paths and
-              traversal are prohibited.
-            files: list of `{path, content, content_type, schema, max_bytes}` entries. path and content are explicit expression
-              values; content_type is yaml, markdown, or text. The resolved path must be allowlisted. yaml files must declare
-              schema.type must be object; schema.required_fields names top-level keys that must be present before commit.
-            limits: optional max_yaml_bytes, max_markdown_bytes, max_text_bytes, and max_repo_bytes.
-            output: mapping of entity field names for repo_url, current_ref, file_manifest, status, failure,
-              last_request_id, and last_source_event_id.
-            success_event: optional event name emitted after runtime has produced a verified git ref and persisted the declared
-              committed output fields. The event is action-owned readiness publication for the committed artifact result.
-            success_payload: optional mapping of additional success event payload fields to expression values. Runtime always
-              includes repo_id, namespace, request_id, source_event_id, repo_url, current_ref, file_manifest, provenance,
-              and optional partition_key and display_slug when declared/resolved.
-            failure_event: optional event name emitted transactionally with failed output state when runtime execution fails
-              after request/source identity resolution.
-            failure_payload: optional mapping of additional failure event payload fields to expression values. Runtime always
-              includes repo_id, namespace, request_id, source_event_id, failure, provenance, and optional partition_key
-              and display_slug when declared/resolved.
-            result_payload_rules: 'success_payload and failure_payload are strict. Declared fields must resolve, must validate
-              against the target event payload schema, and must not override runtime-owned result fields: repo_id, namespace,
-              partition_key, display_slug, request_id, source_event_id, repo_url, current_ref, file_manifest, failure,
-              or provenance. The target result-event schema must allow every runtime-owned field the action will emit and
-              every required target field must be supplied by runtime-owned fields or declared result payload fields.
-              Unsupported result-event declarations fail closed at verify/runtime.'
-            result_evidence: >
-              Typed artifact action emit-site evidence distinguishes runtime-owned result fields from authored payload
-              additions. Generic payload completeness and dedicated artifact validation consume that same evidence;
-              diagnostic site labels do not grant field ownership. The writer census includes all seven actual output
-              mappings at handler and handler.rules action sites. Completion and join outcome actions remain unsupported
-              and contribute no artifact writer or publication authority.
-          behavior: The runtime normalizes file content, validates yaml content against the declared file schema, writes only
-            allowlisted paths under the service-owned repo root, verifies the projected git tree stays within max_repo_bytes,
-            commits staged files atomically, verifies the resulting ref is a 40-character git SHA, persists only the declared
-            output fields on the selected/owned entity, and when success_event or failure_event is declared writes the result
-            event to the runtime outbox in the same handler transaction as the corresponding output state. Result events are
-            dispatched only after that transaction commits. Duplicate replay for the same source_event_id is a no-op only when the
-            contract-visible committed output state is already present and any declared success_event has been transactionally
-            enqueued with that state; post-commit delivery failures are recovered through outbox replay rather than by
-            re-mutating the artifact output fields. Reusing a request_id with the same content/tree may repair committed output
-            state and publish the same success readiness event; reusing a request_id with different content fails closed and
-            may publish failure_event when declared. Content hashes are diagnostic and do not replace request/source idempotency.
-            The public artifact URL is product-neutral
-            (`swarm-artifact://repos/<repo_id>`). The local-git provider path is product-neutral, collision-safe by repo_id,
-            scoped below the runtime artifact root defined by `runtime_storage.artifact_root`, and must not encode
-            product-specific path segments.
-          operation_state: The selected/owned entity is the contract-visible operation/ref ledger surface for V1. The service
-            contract must declare the output fields it wants persisted; status is committed or failed, failure records the
-            nonempty canonical platform.failure/v1 envelope for failure and the empty JSON object {} for no failure, never null.
-            Every successful fresh commit, same-tree request, provider-history reconstruction, and failure-to-success recovery
-            explicitly clears any old failure to {}. This entity-state convention does not add a failure field to success events.
-            Distinct mapped output fields must admit their receiving entity values through the canonical named-type and
-            entity-state admission owners before provider side effects. Provider refs are opaque text; current_ref and a
-            named file_manifest.ref must admit unrestricted text, rather than a sampled hash, enum, equality, or refinement
-            that could reject the provider's eventual value. The failure field admits unrestricted JSON objects; prepared
-            manifest values and both status outcomes are checked before provider access. current_ref updates only after
-            git commit/ref verification succeeds.
-            Provider history must record every accepted request_id and content/tree identity durably enough to reject historical
-            request-id conflicts after intervening commits, including accepted same-tree/no-op requests. If git history contains
-            the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the
-            contract-visible repo_url, current_ref, file_manifest, status, and last_source_event_id from durable provider history.
-            If failure_event is declared, the runtime also enqueues that typed event in the same transaction as failed status.
-          durable_activity_disposition:
-            current_owner: >
-              This action remains the canonical platform owner for artifact repository commits. Authors request
-              artifact repository writes through `action.id: artifact_repo_commit`; durable `activity` is not an alternate
-              authoring, verification, dispatch, replay, or result-event path for artifact commits in the current platform.
-            activity_non_owner_paths: >
-              `artifact_repo_commit` is not callable as a platform_builtin, MCP, native/generated,
-              shell, product-local git, or HTTP-tool activity. Those paths must fail closed or remain different semantic
-              concepts; they do not prove artifact commit support.
-            migration_blocker: >
-              Generic durable activities execute read_only authored HTTP tools and non_idempotent_write authored HTTP tools
-              through the stable activity attempt/result journal and idempotency execution owner. idempotent_write remains
-              non-executable. artifact_repo_commit remains action-owned because the generic activity surface does not admit
-              that platform_builtin source or preserve its repository-specific request-history and state-repair contract.
-            future_migration_condition: >
-              A separately gated migration may rebind artifact repository commits to a built-in
-              activity only if it preserves the current provider/root/path allowlist, schema/size/ref validation, provider
-              request history, output-state repair, and success/failure result-event guarantees in the same merge-bearing
-              spec/runtime/verifier PR.
-          fail_closed: Invalid provider, missing or non-UUID identities, invalid root, traversal, symlink/root escape, allowlist
-            miss, unsupported content type, missing/failed yaml schema validation, size-limit violation, git write/commit failure,
-            invalid ref, and idempotency conflict all fail closed. No agent prompt, native_tools, shell command, or product-local
-            git syntax may bypass this action.
-          execution_mode_admission: >
-            artifact_repo_commit is an action-owned external-effect launch. Runtime dispatch must resolve and compare the typed
-            causal execution mode before artifact-root lookup, directory or file mutation, and git process launch. live preserves
-            the action contract above; mock fails closed and cannot substitute a responder or activity-attempt journal.
     activity:
       field: activity
       type: object
@@ -4593,13 +4436,6 @@ handler_specification:
         to an earlier phase (e.g., review.rejected returning to draft) must clear all gates, not just the ones
         its node declared.'
       limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
-    evidence_target:
-      description: Specifies which accumulator key the evidence is appended to when action is record_evidence. Required
-        when the handler action (or a selected handler.rules branch action) is record_evidence; there is no default.
-        Omitted evidence_target is a contract error rejected by boot verification with a teaching error naming the field
-        and the declared evidence targets in the same flow.
-      type: string
-      example: build_evidence
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
       rules.condition, data_accumulation.expression, query.filter, and filter.condition. Each namespace resolves to a specific
@@ -5243,17 +5079,16 @@ engine:
   dynamic_instance_lifecycle:
     description: 'Flow instances are created from schema.yaml mode: template declarations owned by a filesystem FlowNode.'
     creation:
-      trigger: A system node handler declares action create_flow_instance (handler action, not an agent-callable tool). The node
-        decides when to create instances based on its product logic; managed agents inside the created flow remain statically
-        declared by that flow's agents.yaml.
-      instance_id: Supplied by the node (from event payload or generated). Must be unique within the template scope. If already
-        exists with different semantic facts, creation fails before mutating flow_instances, entity_state, routes, agents,
+      trigger: A typed event reaches a receiver input with create or select-or-create resolution. The receiver owns its
+        identity and typed initialization; managed agents remain statically declared by that flow's agents.yaml.
+      instance_id: Derived by the canonical receiver identity owner from the resolved instance key within the template scope.
+        A conflicting creation fails before mutating flow_instances, entity_state, routes, agents,
         timers, or auto_emit_on_create. Exact replay consumes the existing durable readiness plan idempotently so an
         interrupted creation can converge without repeating the creation-only event.
       process:
-        - 1. Node handler calls create_flow_instance with template ID and instance_id
+        - 1. Resolve the receiving input and canonical instance key from the compiled route plan
         - '2. Platform validates: template exists and is mode: template'
-        - '3. Platform validates: instance_id is new or an exact semantic replay; conflicting resolved IDs fail closed before create side effects'
+        - '3. Admit creating input bindings and typed receiver defaults before mutation; reuse consumes committed configuration'
         - Platform loads the exact template FlowNode from the admitted artifact.
         - '5. Platform constructs paths: {template_id}/{instance_id}/{local_name}'
         - 6. Platform atomically creates the entity at initial_state, dormant initial timers, and one durable runtime-readiness plan containing the exact route, declared-agent revisions, run, and optional deterministic creation event occurrence
@@ -5280,7 +5115,7 @@ engine:
           fabricates routes when the registry lacks that scope. An unknown template fails before in-memory or durable route
           mutation.
         subscriber_identity_variables: Dynamic flow-instance route subscribers MUST render from the same activation variable
-          set used to materialize the child instance's agents. That set includes `config_from` values plus runtime built-ins
+          set used to materialize the child instance's agents. That set includes admitted receiver configuration plus runtime built-ins
           `instance_id`, `template_id`, `flow_scope_key`, and `flow_instance_path`; built-ins remain authoritative for their
           reserved names.
         persisted_truth: Materialized `routing_rules.subscriber_id` rows store concrete rendered subscriber IDs. Route
@@ -8901,10 +8736,8 @@ compliance:
     - Message delivery checked against agent message scope permission
     - State state_changes only follow declared advances_to paths
     - Guards evaluated before state advancement — block if false
-    - Events, including action-originated emits, validated against payload schema before publish
-    - mailbox_write handler actions preserve source_event_id and are row-idempotent for the same source event and materializer
-    - artifact_repo_commit handler actions expose only opaque artifact URLs and immutable git refs, reject unsafe paths/providers,
-      and are idempotent by source_event_id plus request_id/content identity
+    - Events validated against payload schema before publish
+    - Receiver initialization validates typed supplied values and defaults before creation; reuse retains committed configuration
     - Accumulation is idempotent — duplicate events do not double-count
     - Permission checks read from agent.permissions, not hardcoded policy functions
     - Product behavior read from policy configuration, not hardcoded
@@ -8918,10 +8751,8 @@ compliance:
     - Every declared handler has a matching Handle() implementation
     - Every state state_change follows declared advances_to paths
     - Every emitted event has a payload schema in events.yaml
-    - mailbox_write materializes exactly one mailbox row per source event/materializer and rejects unsupported declarations
-    - artifact_repo_commit writes only allowlisted files, produces a pinned git ref, publishes declared success/failure result
-      events with schema-validated runtime-owned payload fields, rejects unsupported declarations and unsafe paths, and preserves
-      replay/idempotency invariants
+    - Receiver configuration survives creation, reuse, restart and supported fork/readback without reinitialization
+    - Supported HITL operations preserve mailbox readback and acknowledgment guarantees
     - Every agent subscription resolves to an event some node or agent produces
     - Permission enforcement blocks unauthorized tool calls
     - Accumulation is idempotent under duplicate event delivery
@@ -8935,17 +8766,14 @@ compliance:
     - 'If handler has guard: evaluate condition. If false, reject or kill.'
     - 'If handler has accumulate: admit the open/windowed stream arrival, persist a new non-duplicate item, and continue per arrival.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
-    - 'If handler has rules: match payload field, select the matching rule-local emit and action if present.'
+    - 'If handler has rules: match payload field, select the matching rule-local emit if present.'
     - 'Resolve side effects per handler_specification.rules_handler_interaction.side_effect_resolution: advances_to uses handler default with selected-entry override, sets_gate is handler-level only, and data_accumulation composes selected-entry writes before handler-level writes.'
     - 'If the active emit site has emit: publish the selected follow-up event.'
-    - 'If the active handler or selected rule has action that is a platform action: call registered platform action.'
-    - 'If the resolved action runtime instruction emits an event: publish it using the action-originated payload rules and fail-closed schema validation before commit.'
   product_boundary:
     description: Rules for product-specific code isolation.
     rules:
     - Product-specific Go code lives only in approved product packages (e.g., internal/runtime/pipeline/product/)
     - Generic runtime packages contain zero product references
-    - Platform actions are platform action, not imported by generic code
     - CI guard fails if product literals appear in generic non-test Go files
   flow_coherence:
     - Every live FlowNode must satisfy its schema-owned lifecycle and declaration contracts.
@@ -9098,20 +8926,18 @@ tool_model:
       process_presentation: One process-scoped sink is created beside the serve lifecycle presenter and shared by boot-selected and selected-fork execution. After a durable notify_human commit it receives only mailbox_id and the exact count and emits the channel-less teaching note at most once per serve process generation.
       delivery_readiness: Until #2079 provides an exact connected operator-delivery fact, delivery is unavailable and the first committed notice teaching note is unconditional. Ingress packs, provider bindings, credentials, and authored config never infer readiness.
       failure_rule: Presentation failure never rolls back, duplicates, or reinterprets the committed notice. Process restart may emit the teaching note again; in-process source mutation is unsupported and cannot duplicate it.
-    handler_actions:
-      description: These are handler/rules-branch ACTION field values, not agent-callable tools. They are invoked via the
-        action field in node handlers without rules or in selected handler.rules branches. The platform ships the handler code.
-        They are listed separately from the tool catalog because agents cannot call them directly.
-      actions:
-        create_flow_instance: Create a new dynamic flow instance from a template.
-        record_evidence: Append payload to entity accumulator. Required when the handler action (or a selected handler.rules
-          branch action) is record_evidence; there is no default. Omitted evidence_target is a contract error rejected by
-          boot verification with a teaching error naming the field and the declared evidence targets in the same flow.
-        mailbox_write: Deterministically materialize authored mailbox request events into public.mailbox. Handler-without-rules
-          or selected handler.rules branch action only.
-        artifact_repo_commit: Deterministically commit allowlisted service-owned artifact files to a local git repository,
-          persist opaque artifact URL/ref metadata, and publish declared result events. Handler-without-rules or selected
-          handler.rules branch action only.
+    handler_action_retirement:
+      rule: >
+        Handler and rule action, evidence_target, and handler-level template, instance_id_from and config_from fields
+        are rejected on presence, including null, empty, alias and merged declarations. There is no action interpreter
+        or compatibility spelling. Rule emit.template, timer instructions and connector tool operations are distinct grammar.
+      supported_operations: >
+        Receiver input resolution with typed initialize owns declarative creation. Typed state accumulation owns append
+        behavior. notify_human and ask_human own supported mailbox effects. Node delivery ownership and settlement do not
+        imply an available mailbox business effect for optional/entityless nodes.
+      local_git: >
+        Built-in local Git commits are unavailable. No activity, tool or provider alias replaces the removed capability.
+        A future local repository capability is tracked separately under #2029 and requires its own contract and proof.
     planned_tools:
       description: Tools planned for future platform versions. Not yet implemented. The permission may exist (as an authorization
         gate) before the tool does.

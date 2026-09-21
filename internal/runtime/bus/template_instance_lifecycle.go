@@ -10,7 +10,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -43,11 +42,9 @@ func templateInstanceLifecycleActionCode(a TemplateInstanceLifecycleAction) stri
 type templateInstanceLifecyclePreviewKey struct{}
 
 type templateInstanceLifecycleOwner struct {
-	source          semanticview.Source
-	routeTable      *RouteTable
-	loadDescriptors connectRoutePlanDescriptorLoader
-	activate        runtimepipeline.FlowInstanceActivator
-	plan            runtimepipeline.FlowInstanceActivationPlanner
+	source     semanticview.Source
+	routeTable *RouteTable
+	plan       runtimepipeline.FlowInstanceActivationPlanner
 }
 
 type TemplateInstanceLifecycleDecision struct {
@@ -63,13 +60,11 @@ type TemplateInstanceLifecycleDecision struct {
 	receiver      runtimepinrouting.ConnectRoutePlanEndpoint
 }
 
-func newTemplateInstanceLifecycleOwner(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activate runtimepipeline.FlowInstanceActivator, planner runtimepipeline.FlowInstanceActivationPlanner) templateInstanceLifecycleOwner {
+func newTemplateInstanceLifecycleOwner(source semanticview.Source, routeTable *RouteTable, planner runtimepipeline.FlowInstanceActivationPlanner) templateInstanceLifecycleOwner {
 	return templateInstanceLifecycleOwner{
-		source:          source,
-		routeTable:      routeTable,
-		loadDescriptors: loadDescriptors,
-		activate:        activate,
-		plan:            planner,
+		source:     source,
+		routeTable: routeTable,
+		plan:       planner,
 	}
 }
 
@@ -183,67 +178,34 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 		}
 		return templateInstanceLifecycleMaterialization(plan, matches), o.decision(plan, evt, keyMaterial, matches[0], templateInstanceLifecycleExistingAction(mode)), true, nil
 	}
-	req, decision, err := o.activationRequest(evt, plan, instanceContract, keyMaterial)
-	if err != nil {
-		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
-	}
-	derivedRoute := plan.ReceiverRoute(decision.InstancePath, decision.EntityID)
+	instanceID := templateInstanceLifecycleInstanceID(plan, keyMaterial)
+	instance := plan.DeriveReceiverIdentity(o.source, instanceID)
+	derivedRoute := plan.ReceiverRoute(instance.InstancePath, instance.EntityID)
 	if templateInstanceLifecycleMatchIsRoutable(o.routeTable, evt.RunID(), plan, derivedRoute) {
 		if mode == runtimecontracts.FlowInputResolutionModeCreate {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureInstanceConflict}, TemplateInstanceLifecycleDecision{}, true, nil
 		}
-		decision.Action = templateInstanceLifecycleExistingAction(mode)
+		decision := o.decision(plan, evt, keyMaterial, derivedRoute, templateInstanceLifecycleExistingAction(mode))
 		return templateInstanceLifecycleMaterialization(plan, []events.RouteIdentity{derivedRoute}), decision, true, nil
 	}
 	if mode == runtimecontracts.FlowInputResolutionModeSelect {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, true, nil
 	}
-	if o.activate == nil {
+	if o.plan == nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureLifecycleUnavailable}, TemplateInstanceLifecycleDecision{}, true, nil
 	}
-	if templateInstanceLifecyclePreview(ctx) {
-		if o.plan == nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureLifecycleUnavailable}, TemplateInstanceLifecycleDecision{}, true, nil
-		}
-		activation, err := o.plan.PrepareFlowInstanceActivation(ctx, req)
-		if err != nil {
-			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("plan connect-time template instance %s: %w", req.Instance.InstancePath, err)
-		}
-		decision.Activation = &activation
-		decision.Action = templateInstanceLifecycleActionPreviewCreate
-		route := plan.ReceiverRoute(req.Instance.InstancePath, req.Instance.EntityID)
-		return templateInstanceLifecycleMaterialization(plan, []events.RouteIdentity{route}), decision, true, nil
-	}
-	if err := o.activate(ctx, req); err != nil {
-		if templateInstanceLifecycleCanReuseAfterActivationError(plan, err) {
-			refreshed, refreshErr := o.reloadDescriptors(ctx)
-			if refreshErr != nil {
-				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, refreshErr
-			}
-			matches = runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, refreshed)
-			if len(matches) == 1 && templateInstanceLifecycleMatchIsRoutable(o.routeTable, evt.RunID(), plan, matches[0]) {
-				return templateInstanceLifecycleMaterialization(plan, matches), o.decision(plan, evt, keyMaterial, matches[0], templateInstanceLifecycleActionReused), true, nil
-			}
-			if len(matches) > 1 {
-				return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetAmbiguous}, decision, true, nil
-			}
-		}
-		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("activate connect-time template instance %s: %w", req.Instance.InstancePath, err)
-	}
-	refreshed, err := o.reloadDescriptors(ctx)
+	req, decision, err := o.activationRequest(evt, plan, instanceContract, keyMaterial)
 	if err != nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, err
 	}
-	matches = runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, refreshed)
-	if len(matches) == 0 {
-		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, decision, true, nil
+	activation, err := o.plan.PrepareFlowInstanceActivation(ctx, req)
+	if err != nil {
+		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("plan connect-time template instance %s: %w", req.Instance.InstancePath, err)
 	}
-	if len(matches) > 1 {
-		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetAmbiguous}, decision, true, nil
-	}
-	decision.InstancePath = matches[0].FlowInstance
-	decision.EntityID = matches[0].EntityID
-	return templateInstanceLifecycleMaterialization(plan, matches), decision, true, nil
+	decision.Activation = &activation
+	decision.Action = templateInstanceLifecycleActionPreviewCreate
+	route := plan.ReceiverRoute(req.Instance.InstancePath, req.Instance.EntityID)
+	return templateInstanceLifecycleMaterialization(plan, []events.RouteIdentity{route}), decision, true, nil
 }
 
 func instanceKeyMaterialForTemplateLifecycle(evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) (runtimepinrouting.ConnectRoutePlanInstanceKeyMaterial, runtimepinrouting.ConnectRoutePlanFailure) {
@@ -307,13 +269,6 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 	}, decision, nil
 }
 
-func (o templateInstanceLifecycleOwner) reloadDescriptors(ctx context.Context) ([]runtimepinrouting.Descriptor, error) {
-	if o.loadDescriptors == nil {
-		return nil, nil
-	}
-	return o.loadDescriptors(ctx)
-}
-
 func templateInstanceLifecycleMaterialization(plan runtimepinrouting.ConnectRoutePlan, routes []events.RouteIdentity) runtimepinrouting.ConnectRoutePlanMaterialization {
 	routes = templateInstanceLifecycleRoutes(routes)
 	if len(routes) == 0 {
@@ -372,14 +327,6 @@ func templateInstanceLifecycleExistingAction(mode runtimecontracts.FlowInputReso
 	return templateInstanceLifecycleActionSelectedExisting
 }
 
-func templateInstanceLifecycleCanReuseAfterActivationError(plan runtimepinrouting.ConnectRoutePlan, activationErr error) bool {
-	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelectOrCreate {
-		return false
-	}
-	failure, ok := runtimefailures.As(activationErr)
-	return ok && failure.Failure.Class == runtimefailures.ClassConflictingDuplicate
-}
-
 func templateInstanceLifecycleMatchIsRoutable(routeTable *RouteTable, runID string, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) bool {
 	if routeTable == nil || strings.TrimSpace(runID) == "" {
 		return false
@@ -408,19 +355,6 @@ func templateInstanceLifecycleInstanceID(plan runtimepinrouting.ConnectRoutePlan
 		digest = digest[:24]
 	}
 	return "ti-" + digest
-}
-
-func templateInstanceLifecycleKeyMap(keyMaterial []runtimecontracts.TemplateInstanceKeyValue) map[string]any {
-	out := make(map[string]any, len(keyMaterial))
-	for _, key := range keyMaterial {
-		field := key.Field.Path()
-		value := strings.TrimSpace(key.Value)
-		if field == "" || value == "" {
-			continue
-		}
-		out[field] = value
-	}
-	return out
 }
 
 func templateInstanceLifecycleKeyMaterialDetail(keyMaterial []runtimecontracts.TemplateInstanceKeyValue) []map[string]string {

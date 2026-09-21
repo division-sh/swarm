@@ -1,8 +1,11 @@
 worker:
   execution_type: system_node
-  subscribes_to: [auto.started]
+  subscribes_to: [auto.started, worker.requested]
   produces: [auto.processed]
   event_handlers:
+    worker.requested:
+      guard:
+        check: payload.instance_id != ''
     auto.started:
       advances_to: started
       emit:

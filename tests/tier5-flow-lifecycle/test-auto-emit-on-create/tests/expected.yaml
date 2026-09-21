@@ -7,14 +7,18 @@ expected:
   handler_outcome: success
   entity_state: spawned
   emitted_events:
-    - worker/worker-001/auto.started
-    - worker/worker-001/auto.processed
+    - worker.requested
+    - worker/ti-7f54a49b1f8b8765cb7c40ef/auto.started
+    - worker/ti-7f54a49b1f8b8765cb7c40ef/auto.processed
   causal_events:
-    - worker/worker-001/auto.started
-    - worker/worker-001/auto.processed
+    - worker.requested
+    - worker/ti-7f54a49b1f8b8765cb7c40ef/auto.started
+    - worker/ti-7f54a49b1f8b8765cb7c40ef/auto.processed
   flow_instance_created:
     template: worker
-    instance_id: worker-001
+    instance_id: ti-7f54a49b1f8b8765cb7c40ef
+    config:
+      instance_id: worker-001
   flow_entities:
     worker:
       entity_state: done

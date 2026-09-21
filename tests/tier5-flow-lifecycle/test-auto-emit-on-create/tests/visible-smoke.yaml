@@ -5,7 +5,7 @@ steps:
       instance_id: worker-001
 expect:
   events:
-    include: [worker/worker-001/auto.started, worker/worker-001/auto.processed]
+    include: [worker/ti-7f54a49b1f8b8765cb7c40ef/auto.started, worker/ti-7f54a49b1f8b8765cb7c40ef/auto.processed]
   entities:
     - type: test_entity
       current_state: spawned

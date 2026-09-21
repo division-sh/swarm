@@ -7,5 +7,9 @@ states: [idle, complete]
 auto_emit_on_create:
   event: worker.ready
 pins:
+  inputs:
+    events:
+      - event: flow.spawned
+        resolution: {mode: create}
   outputs:
     events: [worker.ready, worker.observed]

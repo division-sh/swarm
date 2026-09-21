@@ -1,6 +1,6 @@
 agent_fixtures:
   worker-agent:
-    - on: worker-flow/worker-001/worker.ready
+    - on: worker-flow/ti-878653cc40fdc8ad8e9c2d85/worker.ready
       emits:
         - event: worker.observed
           payload: {}

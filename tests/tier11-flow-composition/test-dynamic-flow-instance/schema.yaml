@@ -6,8 +6,11 @@ pins:
   inputs:
     events: [spawn.requested, assign.requested]
   outputs:
-    events: [work.assign]
+    events: [work.assign, worker.requested]
 connect:
+  - event: worker.requested
+    from: .
+    to: worker
   - event: work.assign
     from: .
     to: worker

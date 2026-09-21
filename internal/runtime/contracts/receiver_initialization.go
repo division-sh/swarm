@@ -219,55 +219,66 @@ func receiverPayloadPath(raw string) ([]string, error) {
 }
 
 func decodeReceiverInitialize(node *yaml.Node) (map[string]string, error) {
-	if yamlsource.ValueFromNode(node).Presence() != yamlsource.PresenceMapping {
+	value := yamlsource.ValueFromNode(node)
+	if value.Presence() != yamlsource.PresenceMapping {
 		return nil, fmt.Errorf("initialize must be a non-empty variable-to-payload-path mapping")
 	}
-	if err := validateExactW2MappingKeys(node, "initialize"); err != nil {
+	fields, err := uniqueYAMLMappingFields(value, "initialize")
+	if err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		name, value := node.Content[i].Value, node.Content[i+1]
-		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
-			return nil, fmt.Errorf("initialize %s must be one exact payload.field path", name)
+	for _, field := range fields {
+		path, err := requiredLiteralString(field.Value, "initialize "+field.Name)
+		if err != nil {
+			return nil, err
 		}
-		if _, err := receiverPayloadPath(value.Value); err != nil {
-			return nil, fmt.Errorf("initialize %s: %w", name, err)
+		if field.Name == "" || field.Name != strings.TrimSpace(field.Name) {
+			return nil, fmt.Errorf("initialize destination %q must be exact", field.Name)
 		}
-		out[name] = value.Value
+		if _, err := receiverPayloadPath(path); err != nil {
+			return nil, fmt.Errorf("initialize %s: %w", field.Name, err)
+		}
+		out[field.Name] = path
 	}
 	return out, nil
 }
 
 func decodeReceiverVariable(node *yaml.Node, out *FlowVariable) error {
-	if node.Kind == yaml.ScalarNode {
-		var field TypeFieldSpec
-		if err := node.Decode(&field); err != nil {
+	value := yamlsource.ValueFromNode(node)
+	if value.Presence() != yamlsource.PresenceMapping {
+		field, err := projectTypeFieldSpec(value)
+		if err != nil {
 			return err
 		}
 		*out = FlowVariable{Type: field.Type, IsOptional: field.IsOptional}
 		return nil
 	}
-	if err := validateExactW2MappingKeys(node, "receiver variable"); err != nil {
+	fields, err := uniqueYAMLMappingFields(value, "receiver variable")
+	if err != nil {
 		return err
 	}
-	fieldNode := *node
-	fieldNode.Content = nil
-	var defaultNode *yaml.Node
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == "default" {
-			defaultNode = node.Content[i+1]
+	fieldNode := yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	var defaultValue yamlsource.Value
+	hasDefault := false
+	for _, member := range fields {
+		if member.Name == "default" {
+			defaultValue, hasDefault = member.Value, true
 			continue
 		}
-		fieldNode.Content = append(fieldNode.Content, node.Content[i], node.Content[i+1])
+		var child yaml.Node
+		if err := member.Value.Project(&child); err != nil {
+			return err
+		}
+		fieldNode.Content = append(fieldNode.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: member.Name}, &child)
 	}
 	var field TypeFieldSpec
 	if err := fieldNode.Decode(&field); err != nil {
 		return err
 	}
-	*out = FlowVariable{Type: field.Type, IsOptional: field.IsOptional, Description: field.Description, HasDefault: defaultNode != nil, Refinements: field.Refinements}
-	if defaultNode != nil {
-		if err := defaultNode.Decode(&out.Default); err != nil {
+	*out = FlowVariable{Type: field.Type, IsOptional: field.IsOptional, Description: field.Description, HasDefault: hasDefault, Refinements: field.Refinements}
+	if hasDefault {
+		if err := defaultValue.Project(&out.Default); err != nil {
 			return err
 		}
 	}
@@ -275,15 +286,34 @@ func decodeReceiverVariable(node *yaml.Node, out *FlowVariable) error {
 }
 
 func (v *FlowInstanceVariables) UnmarshalYAML(node *yaml.Node) error {
-	if err := validateKnownMappingFields(node, "instance_variables", map[string]struct{}{"description": {}, "variables": {}}); err != nil {
+	fields, err := uniqueYAMLMappingFields(yamlsource.ValueFromNode(node), "instance_variables")
+	if err != nil {
 		return err
 	}
-	type raw FlowInstanceVariables
-	var decoded raw
-	if err := node.Decode(&decoded); err != nil {
-		return err
+	out := FlowInstanceVariables{Variables: map[string]FlowVariable{}}
+	for _, field := range fields {
+		switch field.Name {
+		case "description":
+			if err := field.Value.Project(&out.Description); err != nil {
+				return err
+			}
+		case "variables":
+			variables, err := uniqueYAMLMappingFields(field.Value, "instance_variables.variables")
+			if err != nil {
+				return err
+			}
+			for _, variable := range variables {
+				var declaration FlowVariable
+				if err := variable.Value.Project(&declaration); err != nil {
+					return err
+				}
+				out.Variables[variable.Name] = declaration
+			}
+		default:
+			return fmt.Errorf("instance_variables field %q is unsupported; declare typed variables under variables", field.Name)
+		}
 	}
-	*v = FlowInstanceVariables(decoded)
+	*v = out
 	return nil
 }
 

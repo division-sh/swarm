@@ -5,13 +5,17 @@ initial_state: idle
 terminal_states: [complete]
 states: [idle, complete]
 instance_variables:
-  worker_id: string
-  task_label: string
+  variables:
+    task_label: text
 auto_emit_on_create:
   event: work.setup
 pins:
   inputs:
     events:
+      - event: worker.requested
+        resolution: {mode: create}
+        initialize:
+          task_label: payload.task_label
       - work.setup
       - event: work.assign
         resolution:

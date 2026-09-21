@@ -1,14 +1,22 @@
 name: worker-flow
 mode: template
-instance: max_retries
+instance: worker_id
 initial_state: idle
 terminal_states: [complete]
 states: [idle, complete]
 instance_variables:
-  max_retries: integer
-  timeout_ms: integer
+  variables:
+    max_retries: integer
+    timeout_ms: integer
 auto_emit_on_create:
   event: worker.ready
 pins:
+  inputs:
+    events:
+      - event: flow.spawned
+        resolution: {mode: create}
+        initialize:
+          max_retries: payload.config.max_retries
+          timeout_ms: payload.config.timeout_ms
   outputs:
     events: [worker.ready]

@@ -1,7 +1,10 @@
 task-runner:
   execution_type: system_node
-  subscribes_to: [task.assign]
+  subscribes_to: [task.assign, spawn.done]
   produces: []
   event_handlers:
+    spawn.done:
+      guard:
+        check: payload.worker_id != ''
     task.assign:
       advances_to: done

@@ -1,4 +1,7 @@
 worker:
+  worker_id:
+    type: text
+    _unused_reason: canonical receiver identity
   max_retries:
     type: integer
     _unused_reason: lifecycle config fixture proof field

@@ -1,6 +1,9 @@
 worker-node:
   execution_type: system_node
-  subscribes_to: [worker.observed]
+  subscribes_to: [worker.observed, flow.spawned]
   event_handlers:
+    flow.spawned:
+      guard:
+        check: payload.worker_id != ''
     worker.observed:
       advances_to: complete
