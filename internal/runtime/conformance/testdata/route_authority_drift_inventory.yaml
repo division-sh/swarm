@@ -1169,6 +1169,7 @@ seam_families:
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_ingress.go
+      - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go
       - internal/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go
       - internal/serveapp/receiver_initialization_test.go
       - internal/serveapp/receiver_initialization_ingress_test.go
@@ -1220,6 +1221,14 @@ seam_families:
       append while retaining every preexisting event. This is not provider
       transport, webhook ingress, private-harness or replacement action proof.
       It adds no Go-connect literal or historical retired-action corpus member.
+      CopyTemplateInstanceEmpireStyle and CopyTemplateInstanceActivationConfigSubscriber
+      (receiver_initialization_runtime.go) own the unchanged complete connected
+      bundles for TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect
+      and TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows.
+      Their consumers load closed roots rather than constructing raw bundles.
+      ReceiverInitializeParserSnippet in parser_snippets.go owns only the finite
+      positive TestReceiverInitializeGrammar sample; dynamic negative grammar
+      cases remain at the parser test boundary.
       These are fixture ownership/proof references, not runtime pass receipts.
   - id: route_authority_conformance_artifacts
     layer: conformance_guardrails

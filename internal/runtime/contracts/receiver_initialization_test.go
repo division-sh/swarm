@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -172,15 +173,25 @@ func TestReceiverInitializationValuesAreIsolated(t *testing.T) {
 }
 
 func TestReceiverInitializeGrammar(t *testing.T) {
+	snippet := canonicalrouting.ReceiverInitializeParserSnippet(t)
+	source, err := snippet.SourceBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const initialization = "initialize: {count: payload.settings.count}"
+	if strings.Count(string(source), initialization) != 1 {
+		t.Fatal("closed parser snippet must contain exactly one initialization mapping")
+	}
 	for _, raw := range []string{"null", "{}", "{count: payload}", "{count: entity.count}", "{count: {from: payload.count}}", "{count: payload..count}"} {
 		var pins FlowInputPins
-		err := yaml.Unmarshal([]byte("events:\n  - event: work.requested\n    resolution: {mode: create}\n    initialize: "+raw+"\n"), &pins)
+		malformed := strings.Replace(string(source), initialization, "initialize: "+raw, 1)
+		err := yaml.Unmarshal([]byte(malformed), &pins)
 		if err == nil {
 			t.Errorf("admitted %s", raw)
 		}
 	}
 	var pins FlowInputPins
-	if err := yaml.Unmarshal([]byte("events:\n  - event: work.requested\n    resolution: {mode: create}\n    initialize: {count: payload.settings.count}\n"), &pins); err != nil {
+	if err := snippet.Decode(&pins); err != nil {
 		t.Fatal(err)
 	}
 	if got := pins.EventPins[0].Initialize["count"]; got != "payload.settings.count" {

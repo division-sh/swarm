@@ -116,6 +116,11 @@ func W2EmptyResolutionParserSnippet(t testing.TB) ParserSnippet {
 	return NewParserSnippet(t, "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution: {}\n")
 }
 
+func ReceiverInitializeParserSnippet(t testing.TB) ParserSnippet {
+	t.Helper()
+	return NewParserSnippet(t, "events:\n  - event: work.requested\n    resolution: {mode: create}\n    initialize: {count: payload.settings.count}\n")
+}
+
 func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnippet {
 	t.Helper()
 	var source string
