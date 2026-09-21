@@ -3,6 +3,7 @@ registry_version: 1
 matrix_version: 1
 status: checked_merge_bearing
 census_head: 25ad370da
+decoder_census_head: f4e9574cc
 scope:
   loader_root: LoadWorkflowContractBundle
   included:
@@ -41,11 +42,11 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 97
-  custom_unmarshal_reachable: 95
+  custom_unmarshal_total: 91
+  custom_unmarshal_reachable: 89
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
-    contracts: 82
+    contracts: 76
     flowmodel_policy: 11
     agentintent: 1
     channel_pack: 1
@@ -233,7 +234,7 @@ rows:
   - id: flow.other_surface
     ruled: mechanical-ratified
     paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.instance_variables.description, schema.instance_variables.variables.<name>, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description"
-    owners: [FlowVariable.UnmarshalYAML, FlowSchemaDocument.UnmarshalYAML]
+    owners: [FlowInstanceVariables.UnmarshalYAML, FlowVariable.UnmarshalYAML, FlowSchemaDocument.UnmarshalYAML]
     information:
       choice: [tool_surface, variable declarations, auto_emit_on_create]
       derived_projection: [required_agents]
@@ -368,13 +369,13 @@ rows:
     paths: "nodes.<node>.event_handlers.<event>.*"
     owner: SystemNodeEventHandler.UnmarshalYAML
     information:
-      choice: [action, activity, create_entity, emit, on_success, guard, advances_to, sets_gate, clear_gates, data_accumulation, loop, on_complete, rules, accumulate, join, compute, query, fan_out, group_by, filter, reduce, count, clear, template, instance_id_from, config_from, from, dedup_by]
-      annotation: [description, _note, evidence_target]
+      choice: [activity, create_entity, emit, on_success, guard, advances_to, sets_gate, clear_gates, data_accumulation, loop, on_complete, rules, accumulate, join, compute, query, fan_out, group_by, filter, reduce, count, clear, from, dedup_by]
+      annotation: [description, _note]
     spelling:
       canonical_candidate: effect_owned_nested_mapping
-      retired_duplicates: [action_options_repeated_as_handler_siblings]
-      already_retired: [condition, logic, branch, emits, payload_transform, on_below_threshold, on_dedup, on_pass, select_entity, select_or_create_entity]
-    f2_bug: "template/instance_id_from/config_from can be authored both inside action and beside action; action-local silently wins on conflict"
+      retired_duplicates: []
+      already_retired: [action, evidence_target, template, instance_id_from, config_from, condition, logic, branch, emits, payload_transform, on_below_threshold, on_dedup, on_pass, select_entity, select_or_create_entity]
+    action_retirement: "#2307: reject action and its four sibling options on presence, before values or aliases are interpreted; no action-local or sibling precedence remains. Other handler grammar work is not closed."
     corpus: {handlers: 31, duplicate_action_option_uses: 0}
 
   - id: handler.rules_shape
@@ -390,6 +391,7 @@ rows:
       retired_duplicates: [scalar_description, single_rule_mapping, keyed_rule_mapping]
       distinct_overrides: []
     corpus: {rules_sequences: 1, rules_mappings: 0, scalar_rows: 0}
+    action_retirement: "#2307: all rule/completion/join rows reject retired action fields; this does not retire keyed/singleton rule shapes or reserve their display labels."
 
   - id: handler.policy_selection_rows
     ruled: mechanical-ratified
@@ -408,16 +410,18 @@ rows:
 
   - id: handler.emit_action_activity
     ruled: mechanical-ratified
-    paths: "emit, action, activity, activity.approval, on_success.emit"
-    owners: [EmitSpec.UnmarshalYAML, ActionSpec.UnmarshalYAML, ActivitySpec.UnmarshalYAML, HandlerOnSuccessSpec.UnmarshalYAML]
+    paths: "emit, activity, activity.approval, on_success.emit"
+    owners: [EmitSpec.UnmarshalYAML, ActivitySpec.UnmarshalYAML, HandlerOnSuccessSpec.UnmarshalYAML]
     information:
-      fact: [event/tool/action/decision identity]
+      fact: [event/tool/decision identity]
       choice: [from, fields, input, approval]
     spelling:
       canonical_candidate: mapping_when_payload_or_options_exist_else_scalar
-      retired_duplicates: [emit_mapping_with_event_only, action_mapping_with_id_only]
+      retired_duplicates: [emit_mapping_with_event_only]
+      already_retired: [all_authored_handler_actions]
       distinct_overrides: [mapping_with_fields_or_options]
     corpus: {emit_scalar: 0, emit_mapping: 19, action_rows: 2, activity_rows: 0}
+    action_retirement: "#2307: action_rows above is historical at census_head, not current authority; emit specialization and activity/tool grammar remain separate, open owners."
 
   - id: handler.guard_gate_clear
     ruled: mechanical-ratified
@@ -434,7 +438,7 @@ rows:
 
   - id: handler.expression
     ruled: R2
-    paths: "emit.fields.*, activity.input.*, mailbox.*, artifact_repo expression fields, stage_gate.context.*, data_accumulation.writes[].value, data_accumulation.writes[].expression"
+    paths: "emit.fields.*, activity.input.*, stage_gate.context.*, data_accumulation.writes[].value, data_accumulation.writes[].expression"
     owners: [ExpressionValue.UnmarshalYAML, decodeEmitFieldValueNode, decodeWorkflowDataWriteValueNode]
     information:
       fact: [literal values and references]
@@ -443,7 +447,7 @@ rows:
       canonical_candidate: context_specific_scalar_plus_explicit_ref_or_cel_mapping
       retired_duplicates: ["{expression: X} versus {cel: X}", "{literal: X} versus literal scalar/sequence/map", "stage-gate scalar rewritten to CEL versus {cel: X}"]
       distinct_overrides: [literal_vs_ref_vs_cel]
-    f2_bug: "the same scalar is literal in ExpressionValue, CEL in emit/mailbox, and rewritten from literal to CEL in gate context"
+    f2_bug: "the same scalar is literal in ExpressionValue, CEL in emit/activity input, and rewritten from literal to CEL in gate context"
     corpus: {expression_alias_uses: 0}
 
   - id: handler.data_write
@@ -471,7 +475,7 @@ rows:
     spelling:
       canonical_candidate: strict_typed_mapping
       retired_duplicates: [query_mapping_equals_one_item_sequence]
-      already_retired: [fan_out.target, fan_out.emit_per_item, fan_out.emit_mapping, clear.target, config_from.policy_keys]
+      already_retired: [fan_out.target, fan_out.emit_per_item, fan_out.emit_mapping, clear.target]
     corpus: {fan_out: 0, compute: 0, query: 0}
 
   - id: handler.join
@@ -489,14 +493,14 @@ rows:
     corpus: {joins: 0}
 
   - id: handler.mailbox_artifact_repo
-    ruled: mechanical-ratified
-    paths: "mailbox.*, artifact_repo.*"
-    owners: [MailboxWriteSpec.UnmarshalYAML, ArtifactRepoSpec.UnmarshalYAML, ArtifactRepoFileSpec.UnmarshalYAML, ArtifactRepoSchemaSpec.UnmarshalYAML, ArtifactRepoOutputSpec.UnmarshalYAML, ArtifactRepoLimitsSpec.UnmarshalYAML]
+    ruled: issue-2307-gate-A-5754202888
+    paths: "retired handler action.mailbox and action.artifact_repo"
+    owners: []
     information:
-      fact: [provider/repo/request/file/schema/output identity and content]
-      choice: [limits, allowed paths, success/failure events and payloads]
-    spelling: {canonical: strict_mapping, distinct_overrides: [], retired_duplicates: []}
+      fact: [no_live_authored_handler_surface]
+    spelling: {canonical: no_live_authored_form, distinct_overrides: [], retired_duplicates: [], already_retired: [mailbox_write, artifact_repo_commit]}
     corpus: {mailbox: 0, artifact_repo: 0}
+    action_retirement: "#2307: action-only decoders, emitters and writers deleted, not replaced by dummy producers. Supported HITL activities retain their independent mailbox owner. Local Git capability is deliberately removed; #2029 is not an implementation dependency."
 
   - id: agent.identity_defaults
     ruled: mechanical-ratified
@@ -671,6 +675,8 @@ f2_priority_rows:
   - event.metadata_roles
 
 decoder_coverage:
+  receiver_initialization.go:
+    flow.other_surface: [FlowInstanceVariables]
   workflow_contract_yaml_wave1.go:
     schema.ingress: [ProjectFlowIngress, ProjectFlowIngressProvider, ProjectFlowIngressAdmission, ProjectFlowIngressAdmissionPack, ProjectFlowIngressAuthentication, ProjectFlowIngressDeliveryID]
     schema.imports: [ConnectorPackImports, ConnectorPackImport, ProviderTriggerEventImports, ProviderTriggerEventImport]
@@ -694,8 +700,7 @@ decoder_coverage:
   workflow_contract_yaml_handlers.go:
     node.timer: [WorkflowTimerContract]
     unreachable_retired_decoders: [EventEmission]
-    handler.emit_action_activity: [EmitSpec, HandlerOnSuccessSpec, ActivitySpec, ActionSpec]
-    handler.mailbox_artifact_repo: [MailboxWriteSpec, ArtifactRepoSpec, ArtifactRepoFileSpec, ArtifactRepoSchemaSpec, ArtifactRepoOutputSpec, ArtifactRepoLimitsSpec]
+    handler.emit_action_activity: [EmitSpec, HandlerOnSuccessSpec, ActivitySpec]
     handler.container: [SystemNodeEventHandler]
   durable_data.go:
     agent.behavior: [DurableDataAccessRef]
@@ -736,10 +741,21 @@ decoder_exclusions:
     deployment.swarm_yaml: [WorkspaceConfig, RuntimeConfig]
 
 registry_result:
-  completeness: "all 98 remaining production custom unmarshallers classified as 96 source-reachable row owners and 2 deployment swarm.yaml exclusions; package/project and authored element-id decoders are retired"
+  completeness: "all 91 remaining production custom unmarshallers classified as 89 source-reachable row owners and 2 deployment swarm.yaml exclusions; seven authored-action decoders removed by #2307"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
+
+action_retirement:
+  issue: 2307
+  ruling: "5754202888"
+  status: grammar_retired_corpus_pending
+  rows: [handler.container, handler.rules_shape, handler.emit_action_activity, handler.expression, handler.collection_compute, handler.join, handler.mailbox_artifact_repo]
+  retired_fields: [action, evidence_target, template, instance_id_from, config_from]
+  retired_decoders: [ActionSpec, MailboxWriteSpec, ArtifactRepoSpec, ArtifactRepoFileSpec, ArtifactRepoSchemaSpec, ArtifactRepoOutputSpec, ArtifactRepoLimitsSpec]
+  preserved: [emit_template_specialization, timer_action, guard_failure_action, activity_tool, provider_event_template, data_accumulation_source_event]
+  corpus_ledger: internal/runtime/conformance/testdata/action_retirement_corpus_ledger.json
+  scope: "Action authority retirement only; neither all 45 grammar rows nor parent #2293/#2412 is closed. Historical corpus/shape counts above remain pinned to census_head; the decoder inventory is current."
 
 wave_3:
   issue: 2300

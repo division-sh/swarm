@@ -119,7 +119,6 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 		"internal/runtime/engine/executor.go::(*Executor).applyRule":                                                               {Count: 2, Reason: "durable fact presentation label"},
 		"internal/runtime/engine/executor.go::(*Executor).selectRule":                                                              {Count: 2, Reason: "failed-evaluation fact and diagnostic presentation label"},
 		"internal/runtime/engine/executor.go::(*Executor).stepActivity":                                                            {Count: 1, Reason: "deferred activity identity authority: HandlerRuleEntry.ID -> ActivitySite.RuleID -> DefaultActivityID -> generated event identity; tracked by #1769/#1775"},
-		"internal/runtime/engine/executor.go::validateUnsupportedRuleActions":                                                      {Count: 1, Reason: "diagnostic rule label"},
 	}
 }
 

@@ -679,12 +679,6 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 			}
 			return []runtimebus.EventInterceptor{coordinator}
 		},
-		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return fmt.Errorf("fan-in barrier instance manager is not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if manager == nil {
 				return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("fan-in barrier instance manager is not initialized")
@@ -712,19 +706,12 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	}
 	module := conformanceLoadedWorkflowModule{
 		source: source, nodes: nodes,
-		guards:  runtimepipeline.NewContractGuardRegistry(source),
-		actions: runtimepipeline.NewContractActionRegistry(source),
+		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{
-		ExecutionPosture: executionposture.Live,
-		Module:           module,
-		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return fmt.Errorf("fan-in barrier instance manager is not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
+		ExecutionPosture:        executionposture.Live,
+		Module:                  module,
 		Persistence:             workflowPersistence,
 		RunLifecycle:            backend,
 		PipelineObligations:     backend.PipelineObligations(),

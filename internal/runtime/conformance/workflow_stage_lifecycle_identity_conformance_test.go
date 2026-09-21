@@ -270,7 +270,6 @@ func stageLifecycleIdentityPostgresDeps(deps runtimepkg.RuntimeDeps, selected *s
 	deps.PipelineObligations = selected.PipelineObligations()
 	deps.GenericScheduleStore = selected
 	deps.TimerObligationReader = selected
-	deps.MailboxMaterializer = selected
 	deps.DecisionCards = selected
 	deps.ProposedEffects = selected
 	deps.DecisionCardHumanTasks = selected
@@ -314,7 +313,6 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 	deps.PipelineObligations = selected.PipelineObligations()
 	deps.GenericScheduleStore = selected
 	deps.TimerObligationReader = selected
-	deps.MailboxMaterializer = selected
 	deps.DecisionCards = selected
 	deps.ProposedEffects = selected
 	deps.DecisionCardHumanTasks = selected

@@ -252,7 +252,9 @@ func TestNodeIDRetirementCorpusEffectiveEquivalence(t *testing.T) {
 			nodes[ref.Key()] = map[string]any{"identity": ref, "behavior": behavior, "effective": bundle.Semantics.EffectiveNodes[ref.Key()]}
 			nodeCount++
 		}
-		got[path] = map[string]any{"nodes": nodes, "handlers": bundle.Semantics.NodeHandlers, "owners": bundle.Semantics.EventOwners, "transitions": bundle.Semantics.HandlerTransitions, "connects": bundle.Semantics.CompositionConnects}
+		transitions := append([]HandlerTransitionSemantic(nil), bundle.Semantics.HandlerTransitions...)
+		sort.Slice(transitions, func(i, j int) bool { return transitions[i].ID < transitions[j].ID })
+		got[path] = map[string]any{"nodes": nodes, "handlers": bundle.Semantics.NodeHandlers, "owners": bundle.Semantics.EventOwners, "transitions": transitions, "connects": bundle.Semantics.CompositionConnects}
 	}
 	if nodeCount != 24 {
 		t.Fatalf("public node census = %d, want 24", nodeCount)
@@ -262,6 +264,13 @@ func TestNodeIDRetirementCorpusEffectiveEquivalence(t *testing.T) {
 		t.Fatal(err)
 	}
 	filename := filepath.Join("testdata", "node_identity_effective_baseline.json")
+	// Explicit generation still loads every corpus root and checks its exact
+	// node census. Ordinary runs always compare the complete projection.
+	if os.Getenv("SWARM_UPDATE_NODE_ID_BASELINE") == "1" {
+		if err := os.WriteFile(filename, append(raw, '\n'), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	wantRaw, err := os.ReadFile(filename)
 	if err != nil {
 		t.Fatal(err)

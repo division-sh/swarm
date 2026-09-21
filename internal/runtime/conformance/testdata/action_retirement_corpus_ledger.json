@@ -1,0 +1,3297 @@
+{
+  "version": "handler-action-retirement/v1",
+  "historical_base": "34c558b660bf8d7986209dd1dbfebd819da64f18",
+  "scope": "All checked .go/.yaml/.yml/.json/.md files containing the listed retired spellings or dedicated action symbols at the pinned baseline. Lexical historical/reference census, not executable-row counts or qualification. historical_functions preserve original assertion/source names; proofs are named proof obligations or owner-ledger references, NOT pass receipts. Pending rows remain pending.",
+  "historical_files": [
+    {
+      "path": "README.md",
+      "historical_sha256": "c46e033546704313a5d775aeb7cdd184d69b668cb1c93e04313ab0426435e903",
+      "historical_markers": [
+        "artifact_repo_commit"
+      ],
+      "disposition": "main_owned_spec_reference_retirement_not_runtime_equivalence",
+      "proofs": [
+        "TestCanonicalFormsRegistryPinsHandlerActionRetirement",
+        "R35"
+      ]
+    },
+    {
+      "path": "internal/apispec/platform_spec_flow_instance_authoring_test.go",
+      "historical_sha256": "2327bf8add6100db84932cec04d55b1adada91dcad5ba0c9774aaaa21746ab6c",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "historical_functions": [
+        "TestPlatformSpecFlowInstanceAuthoringSourceAuthority"
+      ],
+      "disposition": "main_owned_spec_reference_retirement_not_runtime_equivalence",
+      "proofs": [
+        "TestCanonicalFormsRegistryPinsHandlerActionRetirement",
+        "R35"
+      ]
+    },
+    {
+      "path": "internal/apispec/platform_spec_source_refs_test.go",
+      "historical_sha256": "e40e2bd90eeeb09381c35d0f712bfed88b89e3ca1311bf1b345d8adfcf2f7547",
+      "historical_markers": [
+        "evidence_target"
+      ],
+      "historical_functions": [
+        "TestPlatformSpecHandlerSpecificationHierarchy"
+      ],
+      "disposition": "main_owned_spec_reference_retirement_not_runtime_equivalence",
+      "proofs": [
+        "TestCanonicalFormsRegistryPinsHandlerActionRetirement",
+        "R35"
+      ]
+    },
+    {
+      "path": "internal/apiv1/operator_mailbox_materialization_test.go",
+      "historical_sha256": "e917e17ef6c738c4ac829b70de8dfd3f6a2244a45f92c79afdc45db1e143a855",
+      "historical_markers": [
+        "MailboxWriteMaterialization",
+        "MaterializeMailboxWrite",
+        "TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite",
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite"
+      ]
+    },
+    {
+      "path": "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go",
+      "historical_sha256": "cc454f6d92cb5feb99407bf036d300ced2fb5871b11307c9be00f79b5031afb1",
+      "historical_markers": [
+        "loadMailboxWritePersistedEvent"
+      ],
+      "historical_functions": [
+        "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
+      ]
+    },
+    {
+      "path": "internal/apiv1/operator_mailbox_write_supported_surface_test.go",
+      "historical_sha256": "2cf405211b4c2fe76c47ab184e97b0dee43d9f2c09272bc81e4ab9bf3e197847",
+      "historical_markers": [
+        "MailboxWriteMaterializationStore",
+        "TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud",
+        "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
+        "TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends",
+        "assertMailboxWriteEntityState",
+        "assertMailboxWriteSupportedSurfaceItem",
+        "conditionalRuleMailboxWriteSupportedSurfaceBundle",
+        "drainMailboxWriteBus",
+        "drainMailboxWriteBusPoll",
+        "loadMailboxWriteEntityState",
+        "loadMailboxWritePersistedEvent",
+        "loadMailboxWriteSupportedSurfaceBundle",
+        "mailbox_write",
+        "newMailboxWriteSupportedSurfaceHandler",
+        "releaseMailboxWritePendingNodeDeliveries",
+        "waitForConditionalRuleMailboxWrite",
+        "waitForMailboxWriteLifecycleDeliveryStatus",
+        "waitForMailboxWriteNodeDeliveryStatus",
+        "waitForMailboxWriteSupportedSurface"
+      ],
+      "historical_functions": [
+        "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
+        "TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends",
+        "TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud",
+        "newMailboxWriteSupportedSurfaceHandler",
+        "releaseMailboxWritePendingNodeDeliveries",
+        "waitForMailboxWriteLifecycleDeliveryStatus",
+        "waitForMailboxWriteNodeDeliveryStatus",
+        "loadMailboxWritePersistedEvent",
+        "waitForMailboxWriteSupportedSurface",
+        "waitForConditionalRuleMailboxWrite",
+        "drainMailboxWriteBusPoll",
+        "drainMailboxWriteBus",
+        "assertMailboxWriteSupportedSurfaceItem",
+        "assertMailboxWriteEntityState",
+        "waitForConditionalRuleEntityState",
+        "loadMailboxWriteEntityState",
+        "mailboxWriteSupportedSurfaceBundle",
+        "conditionalRuleMailboxWriteSupportedSurfaceBundle",
+        "loadMailboxWriteSupportedSurfaceBundle"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
+        "TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends",
+        "TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud"
+      ]
+    },
+    {
+      "path": "internal/apiv1/operator_run_completion_system_node_test.go",
+      "historical_sha256": "6fccf07f6d156996d4d9bf4a9da32b0c10cdf4947afc12021faf30f04566db03",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newRunCompletionSystemNodeModule",
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/apiv1/public_surface_backend_matrix_test.go",
+      "historical_sha256": "822f2f84d95ea4fd3ffe3d3b0946f9e33240ad78b44cf4c12f723877bac2a139",
+      "historical_markers": [
+        "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends"
+      ],
+      "historical_functions": [
+        "publicSurfaceSelectedOperatorReadAPIProofs"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/apiv1/testdata/public_surface_backend_matrix.yaml",
+      "historical_sha256": "21132126998ab385b7907ae7b32837574977cb51d5f69dd497e785af61964084",
+      "historical_markers": [
+        "MailboxWriteMaterializationStore",
+        "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
+        "mailbox_write"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/cliapp/workflow_module.go",
+      "historical_sha256": "10409b19e0118c4369b70998ec956551b81a40b2a2d75cc3834e7eea24ede8db",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "NewSwarmWorkflowModuleForBundle",
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/cliapp/workspace_lifecycle.go",
+      "historical_sha256": "4414d5bffbf71003232f292f3fbad94774fc8faa0816c007f3d2100e306f0f8b",
+      "historical_markers": [
+        "dockerWorkspaceConfigFromRuntimeConfig",
+        "hostWorkspaceConfigFromRuntimeConfig"
+      ],
+      "historical_functions": [
+        "configuredWorkspaceLifecycle",
+        "configuredHostWorkspaceLifecycle"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/cliapp/workspace_runtime_config.go",
+      "historical_sha256": "7b765e8ff76572361baf0671f2c14ed26d6b16e91e26a3fa7149a4bc59efe64d",
+      "historical_markers": [
+        "dockerWorkspaceConfigFromRuntimeConfig",
+        "hostWorkspaceConfigFromRuntimeConfig"
+      ],
+      "historical_functions": [
+        "dockerWorkspaceConfigFromRuntimeConfig",
+        "hostWorkspaceConfigFromRuntimeConfig"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/artifact_action_result_delivery_test.go",
+      "historical_sha256": "f4a01630abc70fd831eeffc1ebd121666ad98162360b9050660d9270f23ffb13",
+      "historical_markers": [
+        "TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery",
+        "TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery"
+      ],
+      "historical_functions": [
+        "TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery",
+        "TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery",
+        "TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/artifact_writer_evidence_test.go",
+      "historical_sha256": "aeecc434a55a5679014ee53aa2009de9bb83fc4a463e4bc131932d8d0bb6fb55",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoSpec",
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "TestArtifactWriterEvidenceCoversOnlySupportedActionSites"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34",
+        "TestArtifactWriterEvidenceCoversOnlySupportedActionSites"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/checks.go",
+      "historical_sha256": "abed5fb89e345b785e90351f71acac955d176632f0473dd928be3e3cdc13393e",
+      "historical_markers": [
+        "checkConfigFromPayloadAlignment"
+      ],
+      "disposition": "preserved_data_accumulation_source_event_alignment_despite_ConfigFrom_name",
+      "proofs": [
+        "R03",
+        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_AllowsFanOutDerivedAccumulationSourceEvent"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/entity_presence_consumer_test.go",
+      "historical_sha256": "a9ecdac0594d31087d7420a7555680d5e3ec91de7685952ba438498e5ef75635",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoSpec",
+        "MailboxWriteSpec",
+        "artifact_repo_commit",
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "TestEntityNestedPresenceAcrossBootConsumers"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34",
+        "TestEntityNestedPresenceAcrossBootConsumers"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/report_test.go",
+      "historical_sha256": "af06f863e8111af9f815bc83adb76f6f7098d8723c9d1f3f2f83084c3e89ee7b",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoFileSpec",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoSpec",
+        "ConfigFrom",
+        "ConfigFromSpec",
+        "EvidenceTarget",
+        "MailboxWriteSpec",
+        "TestArtifactRepoResultEventEntryDoesNotUseAnotherFlowDeclaration",
+        "TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult",
+        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_ReportsArtifactRepoCommitInvalidShape",
+        "TestRun_ReportsArtifactRepoCommitMissingSpec",
+        "TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch",
+        "TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch",
+        "TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema",
+        "TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction",
+        "TestRun_ReportsCreateFlowInstanceMissingConfigFrom",
+        "TestRun_ReportsMailboxWriteMissingMailboxSpec",
+        "TestRun_ReportsMailboxWriteMissingRequiredFields",
+        "TestRun_ReportsRecordEvidenceMissingEvidenceTarget",
+        "TestRun_ReportsRuleMailboxWriteMissingMailboxSpec",
+        "TestRun_ReportsRuleMailboxWriteMissingRequiredFields",
+        "artifact_repo_commit",
+        "config_from",
+        "create_flow_instance",
+        "evidence_target",
+        "instance_id_from",
+        "mailbox_write",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "TestRun_ReportsRecordEvidenceMissingEvidenceTarget",
+        "TestRun_ReportsRecordEvidenceMissingTargetNamesDeclaredFlowTargetsSorted",
+        "TestRun_ReportsRuleRecordEvidenceMissingTargetNamesDeclaredFlowTargets",
+        "TestRun_RecordEvidenceMissingTargetDoesNotLeakOtherFlowTargets",
+        "writeEvidenceLeakProofFixture",
+        "TestRun_ReportsMailboxWriteMissingMailboxSpec",
+        "TestRun_ReportsRuleMailboxWriteMissingMailboxSpec",
+        "TestRun_ReportsMailboxWriteMissingRequiredFields",
+        "TestRun_ReportsRuleMailboxWriteMissingRequiredFields",
+        "TestRun_ReportsHandlerLevelActionWithRules",
+        "TestRun_ReportsUnsupportedRuleActionContexts",
+        "TestRun_ReportsMailboxDeclarationOnNonMailboxAction",
+        "TestRun_ReportsArtifactRepoCommitMissingSpec",
+        "TestRun_ReportsArtifactRepoCommitInvalidShape",
+        "TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch",
+        "TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch",
+        "TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema",
+        "TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction",
+        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom",
+        "TestRun_ReportsCreateFlowInstanceMissingConfigFrom",
+        "TestRun_MapsHandlerFieldComplianceToNamedError",
+        "TestArtifactRepoResultEventEntryDoesNotUseAnotherFlowDeclaration",
+        "TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult",
+        "bootverifyTransitionRuntimeOwnershipBundle"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34",
+        "TestRun_ReportsRecordEvidenceMissingEvidenceTarget",
+        "TestRun_ReportsRecordEvidenceMissingTargetNamesDeclaredFlowTargetsSorted",
+        "TestRun_ReportsRuleRecordEvidenceMissingTargetNamesDeclaredFlowTargets",
+        "TestRun_RecordEvidenceMissingTargetDoesNotLeakOtherFlowTargets",
+        "TestRun_ReportsMailboxWriteMissingMailboxSpec",
+        "TestRun_ReportsRuleMailboxWriteMissingMailboxSpec",
+        "TestRun_ReportsMailboxWriteMissingRequiredFields",
+        "TestRun_ReportsRuleMailboxWriteMissingRequiredFields",
+        "TestRun_ReportsHandlerLevelActionWithRules",
+        "TestRun_ReportsUnsupportedRuleActionContexts",
+        "TestRun_ReportsMailboxDeclarationOnNonMailboxAction",
+        "TestRun_ReportsArtifactRepoCommitMissingSpec",
+        "TestRun_ReportsArtifactRepoCommitInvalidShape",
+        "TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch",
+        "TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch",
+        "TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema",
+        "TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction",
+        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_ReportsCreateFlowInstanceMissingInstanceIDFrom",
+        "TestRun_ReportsCreateFlowInstanceMissingConfigFrom",
+        "TestRun_MapsHandlerFieldComplianceToNamedError",
+        "TestArtifactRepoResultEventEntryDoesNotUseAnotherFlowDeclaration",
+        "TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_entity_contract_coverage_checks.go",
+      "historical_sha256": "d0cf0f1e9559e4f99f109bff70af30de9981c5d4c66d013e91005a16f0cb0154",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "wave1HandlerWriteTargets"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_executable_reader_census.go",
+      "historical_sha256": "16b247921017d14b37d6b27c90f3b40b31bec4d6c1640256993aad70241156a7",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ConfigFrom",
+        "EvidenceTarget",
+        "config_from",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "appendActionExecutableReaders"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_executable_reader_census_test.go",
+      "historical_sha256": "e7e5b67d766068b735271fd5b88c2d32a1efb17b98cdde4a6eec29a71b7246f1",
+      "historical_markers": [
+        "ActionSpec",
+        "create_flow_instance"
+      ],
+      "historical_functions": [
+        "TestExecutableReaderCensusCoversEveryReaderFamily",
+        "TestExecutableReaderCensusExcludesUnevaluatedFields"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34",
+        "TestExecutableReaderCensusCoversEveryReaderFamily",
+        "TestExecutableReaderCensusExcludesUnevaluatedFields"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_flow_boundary_checks.go",
+      "historical_sha256": "d4bfb6e29ebc85525612e43200e0717fc6fa6ceaf7eab44f2cc7f6f61968aa03",
+      "historical_markers": [
+        "ActionSpec",
+        "NormalizeHandlerActionID",
+        "bootverifyHandlerActionMaterializesEntity",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "bootverifyHandlerMaterializesEntity",
+        "bootverifyHandlerActionMaterializesEntity",
+        "bootverifyActionMaterializesEntity"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_handler_contract_checks.go",
+      "historical_sha256": "c3c8155d60e5bd233a06b110773ef73ddb2ee49140896083d78ef81484727710",
+      "historical_markers": [
+        "ActionInstructionByID",
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoResultPayloadFieldReserved",
+        "ArtifactRepoResultPublication",
+        "ConfigFrom",
+        "EvidenceTarget",
+        "IsSupportedHandlerActionID",
+        "artifact_repo_commit",
+        "config_from",
+        "create_flow_instance",
+        "declaredEvidenceTargetsForFlow",
+        "evidence_target",
+        "instance_id_from",
+        "isSupportedWorkflowHandlerActionID",
+        "mailbox_write",
+        "record_evidence",
+        "validateArtifactRepoActionSpec",
+        "validateArtifactRepoDeclaredPath",
+        "validateArtifactRepoDisplaySlug",
+        "validateArtifactRepoProvenanceKey",
+        "validateArtifactRepoResultEventSpec",
+        "validateArtifactRepoResultRuntimePayloadFieldTypes",
+        "validateArtifactRepoSegment",
+        "validateWorkflowActionSpec"
+      ],
+      "historical_functions": [
+        "handlerFieldCompliance",
+        "validateWorkflowActionSpec",
+        "recordEvidenceMissingTargetMessage",
+        "declaredEvidenceTargetsForFlow",
+        "isSupportedWorkflowHandlerActionID",
+        "handlerActionExecutable",
+        "validateArtifactRepoActionSpec",
+        "validateArtifactRepoResultEventSpec",
+        "validateArtifactRepoResultRuntimePayloadFieldTypes",
+        "validateArtifactRepoSegment",
+        "validateArtifactRepoProvenanceKey",
+        "validateArtifactRepoDisplaySlug",
+        "validateArtifactRepoDeclaredPath"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_input_alignment_checks.go",
+      "historical_sha256": "1441d6ef27df44579b7bca8e993290184cb3dc7f41fb4f6ab661310cb8eec8e2",
+      "historical_markers": [
+        "checkConfigFromPayloadAlignment"
+      ],
+      "historical_functions": [
+        "checkConfigFromPayloadAlignment"
+      ],
+      "disposition": "preserved_data_accumulation_source_event_alignment_despite_ConfigFrom_name",
+      "proofs": [
+        "R03",
+        "TestRun_MapsConfigFromPayloadMismatchToNamedError",
+        "TestRun_AllowsFanOutDerivedAccumulationSourceEvent"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_loop_checks.go",
+      "historical_sha256": "0239b904acbfa313182689c30a70734449b5e05f09e8b53b063a34228e8f2381",
+      "historical_markers": [
+        "ActionSpec",
+        "loopHandlerActions",
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "validateLoopEmitCarriage",
+        "loopHandlerActions"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_transition_consumer_test.go",
+      "historical_sha256": "2379b4f7451ab302e7a331b9d54bfe13c5023587d6637dbeba5b82753915e505",
+      "historical_markers": [
+        "ActionSpec"
+      ],
+      "historical_functions": [
+        "TestCompiledTransitionHandlerReferenceGuards",
+        "TestCompiledTransitionAllRuleContextActionReferences"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34",
+        "TestCompiledTransitionHandlerReferenceGuards",
+        "TestCompiledTransitionAllRuleContextActionReferences"
+      ]
+    },
+    {
+      "path": "internal/runtime/bootverify/workflow_transition_runtime_checks.go",
+      "historical_sha256": "8577670a2e92fa535c714a0e7304fd36e040feeeebc8903178c86f921f837074",
+      "historical_markers": [
+        "ActionInstructionByID",
+        "ActionSpec",
+        "isSupportedWorkflowHandlerActionID"
+      ],
+      "historical_functions": [
+        "transitionReferences"
+      ],
+      "disposition": "retired_action_consumers_and_assertions_preserved_other_families_integrated_receipt_pending",
+      "proofs": [
+        "R04",
+        "R31",
+        "R34"
+      ]
+    },
+    {
+      "path": "internal/runtime/bus/event_identity_dispatch_surface_test.go",
+      "historical_sha256": "276c2db397b54ac60c364f091329e89617ec691f393bfa28ee2cdbb2c28f3f84",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/bus/eventbus_publish_test.go",
+      "historical_sha256": "bb7c5ead72c2545a1f70a98b586a9e3fa6ec400605538cb59e1082d6123bdfeb",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry",
+        "newFixtureWorkflowModule",
+        "mixedNodeRouteWorkflowModule"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/cataloge2e/helpers_test.go",
+      "historical_sha256": "7a9c774c54b0b6c82221064175e694b8bdd1b72d3aba53f3e3ceea069e64867b",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newFixtureWorkflowModule",
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/deterministic_work_ladder_design_record_test.go",
+      "historical_sha256": "afe500b05e61855991ca3b17c1ee970d3105d2875afcd1f016ea74185e68dd88",
+      "historical_markers": [
+        "TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec",
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec",
+        "validateDeterministicWorkLadderDesignRepairs"
+      ],
+      "disposition": "historical_reference_or_generic_surface_proof_action_case_retired_not_replaced",
+      "proofs": [
+        "TestActionRetirementCorpusLedgerIsComplete",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/fan_in_barrier_runtime_conformance_test.go",
+      "historical_sha256": "776c3c850bc069c4a4e8d3ad9499df540acd8ba7b55ec66aa0399431113911e9",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newFanInBarrierRuntime"
+      ],
+      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "proofs": [
+        "R04",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/notify_all_children_runtime_conformance_test.go",
+      "historical_sha256": "07147b3f08d1772ef2f06c46e1a109ebc1b69392c2127ef13ca1726dce3a895f",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newNotifyAllChildrenRuntime"
+      ],
+      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "proofs": [
+        "R04",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/persisted_surfaces_test.go",
+      "historical_sha256": "842841a991ad3be3e5596d4e68a072df901cba3116e25444a3cbde32db5c2ea5",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry",
+        "ActionRegistry",
+        "loadConformanceWorkflowFixtureModule"
+      ],
+      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "proofs": [
+        "R04",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/producer_routing_retirement_conformance_test.go",
+      "historical_sha256": "b080a667a498c68240240d8740da1c033f25ef9ab83a7f20c002396e10f3a72d",
+      "historical_markers": [
+        "ActionSpec"
+      ],
+      "historical_functions": [
+        "TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput"
+      ],
+      "disposition": "B100_action_runtime_claim_retired_other_routing_assertions_preserved",
+      "proofs": [
+        "TestRetiredActionHistoricalFixtureFailsClosed",
+        "TestProducerRoutingRetirementLedger"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/reply_resolution_conformance_test.go",
+      "historical_sha256": "ea2acfda8c498d6c648ec7c8d549f353ba3f2894db3744120cd1edbdbd1ca7a8",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newDurableReplyHumanTaskRuntime"
+      ],
+      "disposition": "retired_action_registry_test_adapter_removed_surviving_guards_and_assertions_preserved_runtime_receipt_pending",
+      "proofs": [
+        "R04",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/testdata/canonical_forms_registry.yaml",
+      "historical_sha256": "9b7c1fb8bbba6501be8e423fdd266ba8a8610cfa5584066df3479f95aeafcbbc",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepoFileSpec",
+        "ArtifactRepoLimitsSpec",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoSchemaSpec",
+        "ArtifactRepoSpec",
+        "MailboxWriteSpec",
+        "config_from",
+        "evidence_target",
+        "instance_id_from"
+      ],
+      "disposition": "seven_action_decoders_removed_one_variable_decoder_added_other_grammar_rows_open",
+      "proofs": [
+        "TestCanonicalFormsRegistryOwnsCompleteDecoderInventory",
+        "TestCanonicalFormsRegistryPinsHandlerActionRetirement"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/testdata/deterministic_work_ladder_design_record.yaml",
+      "historical_sha256": "d5c8827ea641f7400c915e4e2c2d08843d9f0296d88366e51229cf204b16e380",
+      "historical_markers": [
+        "artifact_repo_commit"
+      ],
+      "disposition": "historical_reference_or_generic_surface_proof_action_case_retired_not_replaced",
+      "proofs": [
+        "TestActionRetirementCorpusLedgerIsComplete",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml",
+      "historical_sha256": "28b8abfdeb7fb77e028934d7bd003b2b50e546627e926edf6dc579594de9955e",
+      "historical_markers": [
+        "artifact_repo_commit"
+      ],
+      "disposition": "historical_reference_or_generic_surface_proof_action_case_retired_not_replaced",
+      "proofs": [
+        "TestActionRetirementCorpusLedgerIsComplete",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/conformance/testdata/route_authority_matrix.yaml",
+      "historical_sha256": "37cbe56837cee46d5cb146ec04343d7a8c8191e067e27f4bde124006c3617f53",
+      "historical_markers": [
+        "TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud",
+        "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
+        "TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends"
+      ],
+      "disposition": "historical_reference_or_generic_surface_proof_action_case_retired_not_replaced",
+      "proofs": [
+        "TestActionRetirementCorpusLedgerIsComplete",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/artifact_repo_evidence.go",
+      "historical_sha256": "4d4bd506b4f53608cd08f06366e8eac7e2b0968199ca835ab565ff9a6966504f",
+      "historical_markers": [
+        "ArtifactRepoOutputField",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoResultPayloadFieldReserved",
+        "ArtifactRepoResultPublication",
+        "ArtifactRepoSpec"
+      ],
+      "historical_functions": [
+        "Label",
+        "EmitSpec",
+        "RuntimePayloadFields",
+        "ResultPublications",
+        "ArtifactRepoResultPayloadFieldReserved",
+        "Fields"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/artifact_repo_evidence_test.go",
+      "historical_sha256": "0bc2cf6a0045360d8c5ffef8445ff1bf5a044eb2eb95d1c9e2646408c32b7550",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoOutputField",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoResultPayloadFieldReserved",
+        "ArtifactRepoSpec",
+        "TestArtifactRepoEmitSitesKeepRuntimeOwnershipSeparate",
+        "TestArtifactRepoOutputEvidenceAndReservedFields",
+        "TestArtifactRepoPublicationEvidence",
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "TestArtifactRepoPublicationEvidence",
+        "TestArtifactRepoEmitSitesKeepRuntimeOwnershipSeparate",
+        "TestArtifactRepoOutputEvidenceAndReservedFields"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/load_validation_test.go",
+      "historical_sha256": "d11616e6c430ec0d5580929bf79983f0f363919b2536e996ab290190c27f61d0",
+      "historical_markers": [
+        "ActionSpec",
+        "EvidenceTarget",
+        "TestLoadWorkflowContractBundle_PreservesEvidenceTarget",
+        "TestValidateWorkflowContractBundleLoadConstraintsRejectsUnsupportedHandlerAction",
+        "evidence_target",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "TestValidateWorkflowContractBundleLoadConstraintsRejectsUnsupportedHandlerAction",
+        "TestLoadWorkflowContractBundle_PreservesEvidenceTarget"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/loader_diagnostics.go",
+      "historical_sha256": "4749dd083ef4c8791cb608612b4732d11cfef7a00427e3a7989e3173049a6443",
+      "historical_markers": [
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "NewUndefinedFieldDiagnostic"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/phase1_foundation_test.go",
+      "historical_sha256": "091314d6887fdd97d222466330921b10177091d45d12f19a4d838351b0f5ced1",
+      "historical_markers": [
+        "ActionSpec",
+        "ConfigFrom"
+      ],
+      "historical_functions": [
+        "TestPhase1SemanticModelUsesTypedContracts"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/system_node_contract_vocab.go",
+      "historical_sha256": "b258ba93111a7d76889ddb2dc9ba4dbad50c6353d0007320f44668a3285f13c2",
+      "historical_markers": [
+        "IsSupportedHandlerActionID",
+        "NormalizeHandlerActionID",
+        "ParseHandlerActionID",
+        "artifact_repo_commit",
+        "create_flow_instance",
+        "mailbox_write",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "NormalizeHandlerActionID",
+        "IsSupportedHandlerActionID",
+        "ParseHandlerActionID"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/testdata/node_identity_effective_baseline.json",
+      "historical_sha256": "c93be8e85134e8e2238de8609f6bd3472b57717ff68d8aa789138ced1748d26d",
+      "historical_markers": [
+        "ArtifactRepo",
+        "ConfigFrom",
+        "EvidenceTarget"
+      ],
+      "disposition": "regenerated_full_effective_projection_no_field_filter",
+      "proofs": [
+        "TestNodeIDRetirementCorpusEffectiveEquivalence"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_emit.go",
+      "historical_sha256": "cace5dd220e0ca5077a1ce58049bb38095b0a69d9905bee3a60ba9af8430386a",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "HandlerDeclarativeEmitSites",
+        "actionResultEvents"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_emit_lowering_test.go",
+      "historical_sha256": "0068ab3a23983f0934837b2ae06996aa84912fa49306396e0467e7e30b74f26f",
+      "historical_markers": [
+        "MailboxWriteSpec"
+      ],
+      "historical_functions": [
+        "TestMailboxPayloadDoesNotAcceptEmitFromSugar"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_emit_test.go",
+      "historical_sha256": "40724354420c734305b9b5b7160205409365d2a77716b114ad919011ceb883e5",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoSpec",
+        "TestHandlerEmitEventsIncludesArtifactRepoCommitResults",
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "TestHandlerEmitEventsIncludesArtifactRepoCommitResults",
+        "TestHandlerEmitEventsExcludesUnsupportedCompletionActionResults"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_loading.go",
+      "historical_sha256": "9c88e064c7274065caf83bff42a6c3020052d38aa444d8bdce2f4443aa806e28",
+      "historical_markers": [
+        "IsSupportedHandlerActionID"
+      ],
+      "historical_functions": [
+        "validateWorkflowContractBundleLoadConstraints"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_loops.go",
+      "historical_sha256": "a39ff193c393792243d927b57e2addc528ba8b4c4255d96384bbf66967515196",
+      "historical_markers": [
+        "EvidenceTarget",
+        "evidence_target"
+      ],
+      "historical_functions": [
+        "ValidateLoopHandlerCombination"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_semantics_test.go",
+      "historical_sha256": "1d1ca826fed1c08fdf8df46b021b134e90d4a7dccd490c296460b5f4d82af4ae",
+      "historical_markers": [
+        "ActionSpec"
+      ],
+      "historical_functions": [
+        "TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_types.go",
+      "historical_sha256": "d46aade5827d589c8919edd77b775b1c3c8e90f83c9ee630f6335fc360807da2",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoFileSpec",
+        "ArtifactRepoLimitsSpec",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoSchemaSpec",
+        "ArtifactRepoSpec",
+        "ConfigFrom",
+        "ConfigFromSpec",
+        "EvidenceTarget",
+        "MailboxWriteSpec",
+        "config_from",
+        "evidence_target",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "ConfigEntries"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_yaml_handlers.go",
+      "historical_sha256": "118d8134676f9ae5cebde5ae6332a9ea1369d260dd4ec969ec0e6411f1d9c5e4",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoFileSpec",
+        "ArtifactRepoLimitsSpec",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoSchemaSpec",
+        "ArtifactRepoSpec",
+        "ConfigFrom",
+        "ConfigFromSpec",
+        "EvidenceTarget",
+        "MailboxWriteSpec",
+        "ParseHandlerActionID",
+        "config_from",
+        "create_flow_instance",
+        "decodeActionSpecNode",
+        "decodeConfigFromSpecNode",
+        "evidence_target",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "UnmarshalYAML",
+        "UnmarshalYAML",
+        "UnmarshalYAML",
+        "UnmarshalYAML",
+        "UnmarshalYAML",
+        "UnmarshalYAML",
+        "UnmarshalYAML",
+        "UnmarshalYAML",
+        "decodeActionSpecNode",
+        "decodeConfigFromSpecNode"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+      "historical_sha256": "dbe93a5505e3b22abec3718121d561a15e41cd510f747242a6b5ab42d933c586",
+      "historical_markers": [
+        "ArtifactRepo",
+        "ConfigFrom",
+        "EvidenceTarget",
+        "TestSystemNodeEventHandlerDecode_PreservesArtifactRepoCommitAction",
+        "TestSystemNodeEventHandlerDecode_PreservesEvidenceTarget",
+        "TestSystemNodeEventHandlerDecode_PreservesMailboxWriteAction",
+        "TestSystemNodeEventHandlerDecode_RejectsAuthoredSystemPromptConfigFrom",
+        "TestSystemNodeEventHandlerDecode_RejectsConfigFromPolicyKeys",
+        "TestSystemNodeEventHandlerDecode_RejectsHandlerActionWithRules",
+        "TestSystemNodeEventHandlerDecode_RejectsLegacyArtifactRepoProductFields",
+        "TestSystemNodeEventHandlerDecode_RejectsUnknownArtifactRepoField",
+        "TestSystemNodeEventHandlerDecode_RejectsUnknownMailboxWriteField",
+        "artifact_repo_commit",
+        "config_from",
+        "create_flow_instance",
+        "evidence_target",
+        "instance_id_from",
+        "mailbox_write",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "TestSystemNodeEventHandlerDecode_RejectsLegacyCreateFlowInstanceActionShape",
+        "TestSystemNodeEventHandlerDecode_RejectsActionMappingMissingID",
+        "TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields",
+        "TestSystemNodeEventHandlerDecode_PreservesRuleLevelAction",
+        "TestSystemNodeEventHandlerDecode_RejectsHandlerActionWithRules",
+        "TestSystemNodeEventHandlerDecode_RejectsActionOutsideRulesContext",
+        "TestSystemNodeEventHandlerDecode_MergesScalarActionWithCreateFlowFields",
+        "TestSystemNodeEventHandlerDecode_RejectsConfigFromPolicyKeys",
+        "TestSystemNodeEventHandlerDecode_RejectsAuthoredSystemPromptConfigFrom",
+        "TestSystemNodeEventHandlerDecode_PreservesEvidenceTarget",
+        "TestSystemNodeEventHandlerDecode_PreservesMailboxWriteAction",
+        "TestSystemNodeEventHandlerDecode_RejectsUnknownMailboxWriteField",
+        "TestSystemNodeEventHandlerDecode_RejectsUnsupportedMailboxExpressionShape",
+        "TestSystemNodeEventHandlerDecode_PreservesArtifactRepoCommitAction",
+        "TestSystemNodeEventHandlerDecode_RejectsUnknownArtifactRepoField",
+        "TestSystemNodeEventHandlerDecode_RejectsLegacyArtifactRepoProductFields"
+      ],
+      "disposition": "authored_action_grammar_and_evidence_retired_gate_A",
+      "proofs": [
+        "TestRetiredHandlerActionsRejectedOnPresence",
+        "TestRetiredHandlerActionOptionsRejected",
+        "TestHandlerActionRetirementPreservesOtherActionConcepts"
+      ]
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contracts_tree_test.go",
+      "historical_sha256": "7720d2b7759d0ffe31306afcdf8f0c4d6fbef8f3df18ffa505da035300e251c4",
+      "historical_markers": [
+        "evidence_target",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "currentWorkflowContractsDirForTest"
+      ],
+      "disposition": "incidental_action_removed_ordinary_emit_and_tree_assertions_retained",
+      "proofs": [
+        "TestPhase1SchemaRegistryUsesMASContractsSource"
+      ]
+    },
+    {
+      "path": "internal/runtime/core/registry/instructions.go",
+      "historical_sha256": "5d57c2cb450c87ad6880a52ad09a127aa031fd2679fe8d4238181fa43d681842",
+      "historical_markers": [
+        "ActionInstruction"
+      ],
+      "historical_functions": [
+        "ActionFromContract",
+        "Kind",
+        "Executable"
+      ],
+      "disposition": "pending_main_removal_of_dead_ActionInstruction_projection",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/core/registry/instructions_test.go",
+      "historical_sha256": "a0313c35d10fc6266b37b1213029d92344ef3601961efdd60a1bf63714b1e4cd",
+      "historical_markers": [
+        "ActionInstruction",
+        "TestActionRegistryHasNoImplicitEmissionTransport",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "TestActionRegistryHasNoImplicitEmissionTransport",
+        "TestActionFromContract_PreservesBuiltinAndKind"
+      ],
+      "disposition": "pending_main_removal_of_dead_ActionInstruction_projection",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/effects/source_manifest_test.go",
+      "historical_sha256": "aa7a15844d5994421e0788b4601d29712f23ab4b053521e534afab66d8d131fc",
+      "historical_markers": [
+        "ensureArtifactRepoInitialized",
+        "validateArtifactRepoRootWritable",
+        "validateArtifactRepoWritableDirectory",
+        "writeArtifactRepoFiles"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/engine/executor.go",
+      "historical_sha256": "cd8eff4baab6dfc8822252bea8aef43fddc47abc3433261e64ec191c85e25be0",
+      "historical_markers": [
+        "ActionRegistry",
+        "ActionRunner",
+        "ActionSpec",
+        "selectedActionSpec"
+      ],
+      "historical_functions": [
+        "stepAction",
+        "selectedActionSpec"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/engine/executor_test.go",
+      "historical_sha256": "9c4ea63a171943adc9d448da35648325ed601b9acf7252b9d16ba77457bd6c5d",
+      "historical_markers": [
+        "ActionExecution",
+        "ActionInstruction",
+        "ActionRegistry",
+        "ActionRunner",
+        "ActionSpec",
+        "TestExecutor_ActionRegistryDoesNotInventEmitsAndRunsActionRunner",
+        "TestExecutor_ActionRegistryWithoutImplementationRejectsHandler",
+        "TestSelectedActionSpecConsumesRuleActionOnlyFromHandlerRules",
+        "selectedActionSpec",
+        "stubActionRegistry",
+        "stubActionRunner"
+      ],
+      "historical_functions": [
+        "HasAction",
+        "IsExecutable",
+        "Action",
+        "ExecuteAction",
+        "TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps",
+        "TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop",
+        "TestExecutor_ActionRegistryDoesNotInventEmitsAndRunsActionRunner",
+        "TestExecutor_RuleActionRunsOnlyForSelectedRule",
+        "TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules",
+        "TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution",
+        "TestSelectedActionSpecConsumesRuleActionOnlyFromHandlerRules",
+        "TestExecutor_ActionRegistryWithoutImplementationRejectsHandler"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/engine/interfaces.go",
+      "historical_sha256": "5f9db08c029a67275311216a0c25536cb708fa77d8da1a52957cf2907f0db59b",
+      "historical_markers": [
+        "ActionExecution",
+        "ActionInstruction",
+        "ActionRegistry",
+        "ActionRunner",
+        "ActionSpec",
+        "EmitSurfaceAction"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/manager/flow_activation.go",
+      "historical_sha256": "95479e8a0b5abaf88db58a9f5f0db1dce7f77bb6f1fc83fd4f2be1de956e48fd",
+      "historical_markers": [
+        "nativeToolConfigFromMap"
+      ],
+      "historical_functions": [
+        "buildFlowAgentBlueprint",
+        "buildStaticFlowAgentBlueprint"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/manager/helpers.go",
+      "historical_sha256": "c5ef4befabed33034125cf1e384b4fa1550c793965c3de00323b8be74ce28190",
+      "historical_markers": [
+        "nativeToolConfigFromMap"
+      ],
+      "historical_functions": [
+        "nativeToolConfigFromMap"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/action_result_event_context_test.go",
+      "historical_sha256": "d09e9a81e23dedb93aab6e8024647c67ab139b60282d281d06af32967ca14d69",
+      "historical_markers": [
+        "TestArtifactRepoResultEventPreservesScopedProducerSourceRoute"
+      ],
+      "historical_functions": [
+        "TestArtifactRepoResultEventPreservesScopedProducerSourceRoute"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/artifact_repo.go",
+      "historical_sha256": "1e2c57f641d100e6b16821f1cc4b2f8d31825acb56263072279ac12fcf19ceff",
+      "historical_markers": [
+        "ActionExecution",
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoLimitsSpec",
+        "ArtifactRepoResultPayloadFieldReserved",
+        "ArtifactRepoRootResolution",
+        "ArtifactRepoSchemaSpec",
+        "ArtifactRepoSpec",
+        "EmitSurfaceAction",
+        "EnsureArtifactRepoRootWritable",
+        "ResolveArtifactRepoRoot",
+        "ResolveArtifactRepoRootWithSource",
+        "SourceUsesArtifactRepoCommit",
+        "artifactActionSpecIsCommit",
+        "artifact_repo_commit",
+        "commitArtifactRepo",
+        "commitArtifactRepoFiles",
+        "ensureArtifactRepoInitialized",
+        "persistAndPublishArtifactRepoFailure",
+        "persistAndPublishArtifactRepoSuccess",
+        "prepareArtifactRepoFiles",
+        "validateArtifactRepoDisplaySlug",
+        "validateArtifactRepoManifestOutput",
+        "validateArtifactRepoOutputContract",
+        "validateArtifactRepoProvenanceKey",
+        "validateArtifactRepoResultPayload",
+        "validateArtifactRepoRoot",
+        "validateArtifactRepoRootWritable",
+        "validateArtifactRepoSegment",
+        "validateArtifactRepoWritableDirectory",
+        "verifyArtifactRepoStagedPaths",
+        "writeArtifactRepoFiles"
+      ],
+      "historical_functions": [
+        "commitArtifactRepo",
+        "persistAndPublishArtifactRepoFailure",
+        "persistAndPublishArtifactRepoSuccess",
+        "artifactRepoRoot",
+        "ResolveArtifactRepoRoot",
+        "ResolveArtifactRepoRootWithSource",
+        "EnsureArtifactRepoRootWritable",
+        "validateArtifactRepoRootWritable",
+        "validateArtifactRepoWritableDirectory",
+        "artifactRepoLocalGitStorageBase",
+        "SourceUsesArtifactRepoCommit",
+        "artifactActionSpecIsCommit",
+        "validateArtifactRepoRoot",
+        "artifactRepoOutputsComplete",
+        "artifactNamespace",
+        "requiredArtifactSegment",
+        "optionalArtifactDisplaySlug",
+        "artifactRepoProvenance",
+        "prepareArtifactRepoFiles",
+        "artifactRepoMaxBytes",
+        "artifactFileLimit",
+        "normalizeArtifactContent",
+        "validateArtifactYAMLSchema",
+        "validateArtifactRepoSegment",
+        "validateArtifactRepoProvenanceKey",
+        "validateArtifactRepoDisplaySlug",
+        "artifactRepoPath",
+        "ensureArtifactRepoInitialized",
+        "writeArtifactRepoFiles",
+        "commitArtifactRepoFiles",
+        "verifyArtifactRepoStagedPaths",
+        "artifactRepoRequestRecord",
+        "artifactRepoSuccessPayload",
+        "artifactRepoFailurePayload",
+        "specSuccessPayload",
+        "specFailurePayload",
+        "artifactRepoDeclaredResultPayload",
+        "validateArtifactRepoResultPayload"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/artifact_repo_output.go",
+      "historical_sha256": "6fb13e73fb972ffaac7d2b15fdf8b134468f1f452e580cea885c0337048d19d8",
+      "historical_markers": [
+        "ArtifactRepoSpec",
+        "validateArtifactRepoManifestOutput",
+        "validateArtifactRepoOutputContract"
+      ],
+      "historical_functions": [
+        "validateArtifactRepoOutputContract",
+        "validateArtifactRepoManifestOutput"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/artifact_repo_output_test.go",
+      "historical_sha256": "97d71d2a68efa3f89807df03db050d74059f324048501a2a062173093352d830",
+      "historical_markers": [
+        "ArtifactRepo",
+        "ArtifactRepoSpec",
+        "TestArtifactRepoOutputContractRejectsBeforeProvider",
+        "TestArtifactRepoOutputReadbackRecoveryBothStores",
+        "commitArtifactRepo",
+        "requireArtifactRepoFailure",
+        "testArtifactRepoActionAndContext",
+        "testArtifactRepoEntityFieldsForSource",
+        "testArtifactRepoResultEventSource"
+      ],
+      "historical_functions": [
+        "TestArtifactRepoOutputReadbackRecoveryBothStores",
+        "TestArtifactRepoOutputContractRejectsBeforeProvider"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/composition_receiver_business_test.go",
+      "historical_sha256": "c28e52d4454b57d41e925c4c69e52ba0f4c0a31af480f6710ae03e74b51cc4ad",
+      "historical_markers": [
+        "ArtifactRepo",
+        "testArtifactRepoActionAndContext",
+        "testArtifactRepoEntityFieldsForSource"
+      ],
+      "historical_functions": [
+        "TestCompositionReceiverInitializationFeedsArtifactCommitBothStores"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/coordinator.go",
+      "historical_sha256": "dc28755dbd4d68fa3596fff23cf511442147916b4126f2c96ef71815b7863a52",
+      "historical_markers": [
+        "MailboxWriteMaterializationStore"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/create_entity_exact_once_test.go",
+      "historical_sha256": "ea158ab6457aa601058c6c0712fb555747042ce400ecdaf0c4eca132b04f0ca9",
+      "historical_markers": [
+        "ActionSpec",
+        "MailboxWriteSpec",
+        "mailbox_write",
+        "recordingMailboxWriteMaterializer"
+      ],
+      "historical_functions": [
+        "TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations",
+        "TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler",
+        "newExactOnceCoordinator",
+        "exactOnceCreateEntityHandler"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/delivery_target_ownership.go",
+      "historical_sha256": "38445a2afe5192c08f68c1957e227ee2d62fc782bfa0e56804f6743f351fc770",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoSpec",
+        "ConfigFrom",
+        "EvidenceTarget",
+        "MailboxWriteSpec"
+      ],
+      "historical_functions": [
+        "actionEntityRequirement",
+        "actionReferencesEntity",
+        "mailboxReferencesEntity",
+        "artifactRepoReferencesEntity"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/delivery_target_ownership_test.go",
+      "historical_sha256": "5ca9da01f0661449e966587621ff8a3cd30d8cc85aa3ed82c38bfebf19a2e9a9",
+      "historical_markers": [
+        "ActionSpec",
+        "create_flow_instance"
+      ],
+      "historical_functions": [
+        "TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/engine_adapter.go",
+      "historical_sha256": "f55b939fb100f69f9f24e823ad96c32d393957cd8b8b5cc0a0ac28c49786c916",
+      "historical_markers": [
+        "ActionExecution",
+        "ActionInstruction",
+        "ActionRegistry",
+        "ActionRunner",
+        "ActionSpec",
+        "ConfigFrom",
+        "EvidenceTarget",
+        "IsSupportedHandlerActionID",
+        "NormalizeHandlerActionID",
+        "artifact_repo_commit",
+        "commitArtifactRepo",
+        "create_flow_instance",
+        "evidence_target",
+        "mailbox_write",
+        "pipelineActionExecutionMode",
+        "pipelineEngineActionRegistry",
+        "pipelineEngineActionRunner",
+        "recordEvidenceTarget",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "coordinatorEngineDependencies",
+        "HasAction",
+        "IsExecutable",
+        "Action",
+        "ExecuteAction",
+        "pipelineActionExecutionMode",
+        "recordEvidenceTarget"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/engine_adapter_test.go",
+      "historical_sha256": "5439368a6f442164a1bbe71fcf130e36430f1dc8829a0cdaa0fd68e67507e233",
+      "historical_markers": [
+        "ActionExecution",
+        "ActionInstruction",
+        "ActionSpec",
+        "ArtifactRepo",
+        "ArtifactRepoFileSpec",
+        "ArtifactRepoLimitsSpec",
+        "ArtifactRepoOutputSpec",
+        "ArtifactRepoSchemaSpec",
+        "ArtifactRepoSpec",
+        "ConfigFrom",
+        "ConfigFromSpec",
+        "EmitSurfaceAction",
+        "EnsureArtifactRepoRootWritable",
+        "EvidenceTarget",
+        "MailboxWriteMaterialization",
+        "MailboxWriteSpec",
+        "MaterializeMailboxWrite",
+        "ResolveArtifactRepoRoot",
+        "SourceUsesArtifactRepoCommit",
+        "TestArtifactRepoPathRejectsUnsafeGenericSegments",
+        "TestEnsureArtifactRepoRootWritableRejectsBlockedLocalGitStorageBase",
+        "TestEnsureArtifactRepoRootWritableRejectsUnusableRoot",
+        "TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureRollsBackState",
+        "TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughOutbox",
+        "TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughOutbox",
+        "TestPipelineActionExecutionModeRejectsMissingAndConflictingAuthority",
+        "TestPipelineEngineActionRegistry_DoesNotSynthesizeRemovedBuiltinActions",
+        "TestPipelineEngineActionRegistry_SynthesizesSupportedBuiltinActions",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSuccessResultEvent",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAllowlist",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMismatch",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistory",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifactRoot",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentConflict",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoot",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHistory",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent",
+        "TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextForConfigFrom",
+        "TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpression",
+        "TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow",
+        "TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunchSQLitePostgres",
+        "TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError",
+        "TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTargetForConcreteEvents",
+        "TestResolveArtifactRepoRootDefaultUsesRuntimePrivateRoot",
+        "TestResolveArtifactRepoRootExplicitOptionOverridesEnv",
+        "TestResolveArtifactRepoRootRejectsUnsafeRoots",
+        "TestSourceUsesArtifactRepoCommitDetectsSupportedActionSurfaces",
+        "TestWriteArtifactRepoFilesRejectsSymlinkEscape",
+        "artifact_repo_commit",
+        "assertArtifactRepoQueuedIntent",
+        "create_flow_instance",
+        "mailbox_write",
+        "pipelineActionExecutionMode",
+        "pipelineEngineActionRegistry",
+        "pipelineEngineActionRunner",
+        "record_evidence",
+        "recordingMailboxWriteMaterializer",
+        "requireArtifactRepoFailure",
+        "testArtifactRepoActionAndContext",
+        "testArtifactRepoEntityFields",
+        "testArtifactRepoEntityFieldsForSource",
+        "testArtifactRepoResultEventSource",
+        "writeArtifactRepoFiles"
+      ],
+      "historical_functions": [
+        "executeAction",
+        "TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError",
+        "TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTargetForConcreteEvents",
+        "TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextForConfigFrom",
+        "TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow",
+        "TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpression",
+        "MaterializeMailboxWrite",
+        "rows",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef",
+        "TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunchSQLitePostgres",
+        "TestPipelineActionExecutionModeRejectsMissingAndConflictingAuthority",
+        "TestResolveArtifactRepoRootDefaultUsesRuntimePrivateRoot",
+        "TestResolveArtifactRepoRootExplicitOptionOverridesEnv",
+        "TestResolveArtifactRepoRootRejectsUnsafeRoots",
+        "TestEnsureArtifactRepoRootWritableRejectsUnusableRoot",
+        "TestEnsureArtifactRepoRootWritableRejectsBlockedLocalGitStorageBase",
+        "TestSourceUsesArtifactRepoCommitDetectsSupportedActionSurfaces",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifactRoot",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoot",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent",
+        "TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughOutbox",
+        "TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughOutbox",
+        "TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureRollsBackState",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSuccessResultEvent",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAllowlist",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMismatch",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentConflict",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistory",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHistory",
+        "TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize",
+        "TestWriteArtifactRepoFilesRejectsSymlinkEscape",
+        "TestArtifactRepoPathRejectsUnsafeGenericSegments",
+        "assertArtifactRepoQueuedIntent",
+        "testArtifactRepoResultEventSource",
+        "testArtifactRepoEntityFields",
+        "testArtifactRepoEntityFieldsForSource",
+        "requireArtifactRepoFailure",
+        "testArtifactRepoActionAndContext",
+        "TestPipelineEnginePayloadShaper_AllowsDeclaredPayloadOnActionSurface",
+        "TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface",
+        "TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSurface",
+        "TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface",
+        "TestPipelineEnginePayloadShaper_RejectsUndeclaredFieldsOnActionSurface",
+        "TestPipelineEngineActionRegistry_SynthesizesSupportedBuiltinActions",
+        "TestPipelineEngineActionRegistry_DoesNotSynthesizeRemovedBuiltinActions"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/entity_presence_consumers_test.go",
+      "historical_sha256": "5109bccb8507f26d868067b18d9316721acd582e65b59955619eecf25f3605d9",
+      "historical_markers": [
+        "ActionSpec",
+        "ArtifactRepoSpec",
+        "MailboxWriteSpec",
+        "recordingMailboxWriteMaterializer"
+      ],
+      "historical_functions": [
+        "TestEntityPresenceAtMailboxArtifactAndGateConsumers"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/errors.go",
+      "historical_sha256": "f7516300331849a85ca95728dc34c699bfd712fc1da1be12d0d1115c56c0d506",
+      "historical_markers": [
+        "ErrUnknownHandlerAction"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/final_flow_instance_authoring_delivery_test.go",
+      "historical_sha256": "02bbffe3689ec5f5753c62f402db7dc2475d9746b419694c7e11e214aed753d9",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newFinalFlowInstanceAuthoringPipelineCoordinator"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/fixture_module_test.go",
+      "historical_sha256": "d49cd91a5daaec83289963af70283aca6c9294eecb6ac6ff093a4c2754b3b0a3",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newPipelineFixtureWorkflowModule",
+        "ActionRegistry"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/generic_test_module.go",
+      "historical_sha256": "12ce12afa7b14dea50f065d720fa1576fc1e6ceb061828390c0d0147e1f71b04",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "init",
+        "ActionRegistry"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/guard_action_registry.go",
+      "historical_sha256": "2978fcf40b65d9395789e2e7d4997eb0df2ee6f1f9e9aa6201bf097c8201fb07",
+      "historical_markers": [
+        "ActionInstruction",
+        "ActionInstructions",
+        "ActionRegistry",
+        "IsSupportedHandlerActionID",
+        "NewContractActionRegistry",
+        "contractActionRegistry",
+        "isSupportedWorkflowHandlerActionID"
+      ],
+      "historical_functions": [
+        "isSupportedWorkflowHandlerActionID",
+        "HasAction",
+        "IsExecutable",
+        "ActionIDs",
+        "Action",
+        "NewContractActionRegistry"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/mailbox_materialization.go",
+      "historical_sha256": "ae83ea43088b8acd0a09b29f0387770dfe4990cfc8e9b97287ddaecb5868ecf7",
+      "historical_markers": [
+        "ActionSpec",
+        "MailboxWriteMaterialization",
+        "MailboxWriteMaterializationStore",
+        "MaterializeMailboxWrite",
+        "mailbox_write",
+        "normalizeMailboxWriteItemType",
+        "normalizeMailboxWriteSeverity"
+      ],
+      "historical_functions": [
+        "materializeMailboxItem",
+        "deterministicMailboxItemID",
+        "normalizeMailboxWriteSeverity",
+        "normalizeMailboxWriteItemType"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/module.go",
+      "historical_sha256": "cdae10e0c5ebde853c3dc5480729a812e171d051c4523baf945a8cec064ed0ad",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/node_declarative.go",
+      "historical_sha256": "cae67ad0cbcf90ca813fe32b6a98463ef5414f39ba824274836b53b471bd27cc",
+      "historical_markers": [
+        "ActionSpec",
+        "NormalizeHandlerActionID",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "actionMaterializesEntity"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/runtime_interfaces.go",
+      "historical_sha256": "6da1a8969479343baf1d2e37fd7a6fbfee00e3c252c528dadd01613319182d81",
+      "historical_markers": [
+        "ActionInstruction",
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/singleton_coordinator_pilot_delivery_test.go",
+      "historical_sha256": "b206c662a1f86cfcb8029f5e08db5f720771db3558ccf0a0e494a7eccfd8ba55",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newSingletonCoordinatorPilotPipelineCoordinator"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/template_flow_pilot_delivery_test.go",
+      "historical_sha256": "d3afaa3b4bf9af2ee9bface390f028ae3c579841b9d3559e0ee1e13d50141096",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "newTemplateFlowPilotPipelineCoordinator"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/testdata/receiver_selector_retirement_proofs.md",
+      "historical_sha256": "65a61a49d79a7278c85abfc4646f3bc857b8987957f078ac66c465b388e5d7c0",
+      "historical_markers": [
+        "SelectOrCreateEntityFeedsEntityIDToArtifactRepoCommit"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_execution_plan.go",
+      "historical_sha256": "9f144d69206267c0aa0e85e24a20d718527e6402f47becde22de2344e05fc6c0",
+      "historical_markers": [
+        "ConfigFrom",
+        "ConfigFromSpec",
+        "EvidenceTarget"
+      ],
+      "historical_functions": [
+        "handlerExecutionPlanFromNodeHandler"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
+      "historical_sha256": "cf757fd41c292e33f58840e087efbff2b1c58c71c1b13388beff9813ae361a9b",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry",
+        "ActionRegistry"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_handler_preview.go",
+      "historical_sha256": "9a85ea1ef04a6e763093d3f796280545460c7d3234e12c83cb302114d8babc30",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry",
+        "PreviewContractHandlerExecution"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_instance_activation.go",
+      "historical_sha256": "605c47600a78d1c5499f13626674fdf2639f9b8c39410e07f7f9d69263abf2f6",
+      "historical_markers": [
+        "ConfigFrom",
+        "ConfigFromSpec",
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "Error",
+        "createFlowInstance",
+        "hasRequiredCreateFlowInstanceSiblings",
+        "resolveFlowInstanceConfig"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_instance_activation_test.go",
+      "historical_sha256": "5bab8eb1b7c91b11886d5b9a3231d18161488184b1051f7408ce684ec8d65fbf",
+      "historical_markers": [
+        "ActionRegistry",
+        "ConfigFrom",
+        "ConfigFromSpec",
+        "EvidenceTarget",
+        "TestCreateFlowInstancePreservesNullConfigFromValues",
+        "TestCreateFlowInstanceRejectsEmptyConfigFromBindings",
+        "TestCreateFlowInstanceResolvesConfigFromBindings",
+        "TestCreateFlowInstanceResolvesConfigFromHandlerEventContext",
+        "TestTemplateInstanceRecordEvidenceUsesExactLocalHandlerEvidenceTarget",
+        "config_from",
+        "create_flow_instance",
+        "evidence_target",
+        "instance_id_from",
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath",
+        "TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers",
+        "TestCreateFlowInstanceResolvesConfigFromBindings",
+        "TestCreateFlowInstancePreservesNullConfigFromValues",
+        "TestCreateFlowInstanceResolvesConfigFromHandlerEventContext",
+        "TestCreateFlowInstanceRejectsUnknownEventConfigRef",
+        "TestCreateFlowInstanceRejectsUnsupportedConfigRefRoot",
+        "TestCreateFlowInstanceDoesNotResolveInstanceIDFromEventRef",
+        "TestCreateFlowInstanceRejectsMissingRequiredSiblingFields",
+        "TestCreateFlowInstanceRejectsGeneratedFallbackWithoutInstanceIDFrom",
+        "TestCreateFlowInstanceRejectsEmptyConfigFromBindings",
+        "TestCreateFlowInstanceRejectsEmptyResolvedConfig",
+        "TestTemplateInstanceRecordEvidenceUsesExactLocalHandlerEvidenceTarget",
+        "ActionRegistry"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_state_persistence.go",
+      "historical_sha256": "bed99fdd301b4809dc627ff94d70aade4a9a6be074903cf6e2826fe088e50377",
+      "historical_markers": [
+        "record_evidence"
+      ],
+      "historical_functions": [
+        "projectWorkflowEvidence"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/runforkexecution/admission.go",
+      "historical_sha256": "ca1563448b958dd950407a647add8dfbd3f1a684b5e3a0fc6dc125119ab56fb0",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry",
+        "LoadRunForkSelectedContractSourceForRequest"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/runforkexecution/admitted_fixture_test.go",
+      "historical_sha256": "d4cbaaf258720551b7c12fda4b39fafb7e4a102c845e5dd6c88740e8d995e152",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "LoadRunForkSelectedContractSourceForRequest"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/runforkexecution/deferred_work_admission.go",
+      "historical_sha256": "ba0ba4bbc4ac1db90a86f8fc8a72be2e41be9a84d6dbd154559b2532c2759d83",
+      "historical_markers": [
+        "ActionSpec",
+        "NormalizeHandlerActionID",
+        "create_flow_instance"
+      ],
+      "historical_functions": [
+        "selectedContractHandlerCreatesDynamicFlow"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/runforkexecution/deferred_work_admission_test.go",
+      "historical_sha256": "6fb20ced73834be751664407f1e66922249bf82d1eb0215af5478d776d326f50",
+      "historical_markers": [
+        "ActionSpec",
+        "create_flow_instance"
+      ],
+      "historical_functions": [
+        "TestSelectedContractHandlerDynamicFlowCreationCapabilityMatrix",
+        "selectedDeferredWorkDynamicFlowActionTestSource"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestSelectedContractHandlerDynamicFlowCreationCapabilityMatrix"
+      ]
+    },
+    {
+      "path": "internal/runtime/runforkexecution/execution_test.go",
+      "historical_sha256": "1a69fec020baba79a58f70679c271e19daa418c41aff139692b10dc553f71912",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation"
+      ]
+    },
+    {
+      "path": "internal/runtime/runforkexecution/store_ports.go",
+      "historical_sha256": "36822cbe079442e2086f0473b6c468ef304d68b7da9fe736d3c92d75f6f2fa47",
+      "historical_markers": [
+        "MailboxWriteMaterializationStore"
+      ],
+      "historical_functions": [
+        "NewSelectedContractExecutionOwner"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/runtime.go",
+      "historical_sha256": "4a7612e5af44f305319bebd99a934a77a805ab2b01f96ae0a1ef165ee0a4a555",
+      "historical_markers": [
+        "MailboxWriteMaterializationStore",
+        "ResolveArtifactRepoRoot"
+      ],
+      "historical_functions": [
+        "newRuntime"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/runtime_startup_readiness_test.go",
+      "historical_sha256": "40c281b94ad7be16fef62dfdfdd7377724ce61d848eb36d51fa8c3c4dc871929",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/runtime_test_helpers_test.go",
+      "historical_sha256": "75d2144894c37af0d469371eceaa4e217d4d76cdc1f95c74d3f97034608f4dab",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/semanticview/source.go",
+      "historical_sha256": "7a73d6743271a6c348fd0c59e6b5ad138a643f0db502292a3405e26f51ed36c4",
+      "historical_markers": [
+        "ActionInstruction",
+        "ActionInstructionByID",
+        "ActionInstructions"
+      ],
+      "disposition": "action_interface_and_projections_deleted",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/semanticview/source_artifact.go",
+      "historical_sha256": "4fd90d1f10e1c0c730823a6e070d4e67e22b482fe84306c3f4a4e1cbd024fd24",
+      "historical_markers": [
+        "ActionInstruction",
+        "ActionInstructionByID",
+        "ActionInstructions"
+      ],
+      "historical_functions": [
+        "ActionInstructions",
+        "ActionInstructionByID"
+      ],
+      "disposition": "action_interface_and_projections_deleted",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/runtime/slack_connector_managed_credential_supported_surface_test.go",
+      "historical_sha256": "6388a195add14faa41e246fd0548e9babbc01600a57d4782726d98c3ecc7cd1b",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry",
+        "startSlackManagedConnectorBusAndCoordinator"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/telegram_connector_supported_surface_test.go",
+      "historical_sha256": "0ca304d17872b6f8dd16edc680e0c909cb023cf3ac2d90325eb09e7b4d0399c5",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry",
+        "startTelegramConnectorSupportedSurfaceCoordinator"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/template_instance_delivery_test.go",
+      "historical_sha256": "249ef447a982c38834189f5a52ca4ca43d5d040406e79891702f97959718c126",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry",
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "newRuntimeTestWorkflowModule",
+        "ActionRegistry",
+        "templateInstanceEmpireStyleFixtureFiles",
+        "templateInstanceActivationConfigSubscriberFixtureFiles"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/testcases/agent_lifecycle_test.go",
+      "historical_sha256": "7b5c26d50811ab9e5e1ef98113d16dc12440a6dbf88337d14477d70d4f3695c4",
+      "historical_markers": [
+        "agentConfigFromEntry"
+      ],
+      "historical_functions": [
+        "TestGenericBundle_AgentLifecyclePatterns"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestGenericBundle_AgentLifecyclePatterns"
+      ]
+    },
+    {
+      "path": "internal/runtime/testcases/helpers_test.go",
+      "historical_sha256": "67860560a9c3cc72d66597e8dcb17ee70e6d341e3e3208dfa8ca2945f3f6ee72",
+      "historical_markers": [
+        "agentConfigFromEntry"
+      ],
+      "historical_functions": [
+        "agentConfigFromEntry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/artifact_action_result.go",
+      "historical_sha256": "0e63abb24dcd1607b32e58f0735af0200aae5ec91865f5492bde501d71bb2f7e",
+      "historical_markers": [
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "artifactActionResultDeliveryFixtureFiles"
+      ],
+      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "proofs": [
+        "R34",
+        "R35",
+        "R37",
+        "TestServedCreationFixturesVerificationConsumersAgree",
+        "TestStateResultPublicationVerificationConsumersAgree",
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/fixture.go",
+      "historical_sha256": "800c7d02b4529af37cc4f4f0169205be4a1432156bd29f50f4bd2caf10a08f59",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "historical_functions": [
+        "yamlNodeContainsAuthoredRoutingAt"
+      ],
+      "disposition": "pending_Euler_fixture_migration_or_explicit_capability_retirement",
+      "proofs": [
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions",
+        "yamlNodeContainsAuthoredRoutingAt"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/fork_loop_generation_notice.go",
+      "historical_sha256": "5cf98ca78e2757be5f6216da5334c3146ab0523082354b636edd574d43dae453",
+      "historical_markers": [
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "CopyForkLoopGenerationNotice"
+      ],
+      "disposition": "R41_node_mailbox_effect_retired_execution_geometry_and_state_effects_separate",
+      "proofs": [
+        "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores",
+        "TestSelectedForkReceiverPolicyPermutationExecutionBothStores",
+        "TestSelectedForkNestedStaticReceiverIsolationExecutionBothStores",
+        "TestServedForkLoopGenerationStateEffectBothStores",
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/fork_receiver_notice_effect.go",
+      "historical_sha256": "f78e5a467cb7ab7577e748c1f20c46c6fbf31952f714fc025e69eec07cfba1d6",
+      "historical_markers": [
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "CopyForkReceiverNoticeOwnership"
+      ],
+      "disposition": "R41_node_mailbox_effect_retired_execution_geometry_and_state_effects_separate",
+      "proofs": [
+        "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores",
+        "TestSelectedForkReceiverPolicyPermutationExecutionBothStores",
+        "TestSelectedForkNestedStaticReceiverIsolationExecutionBothStores",
+        "TestServedForkLoopGenerationStateEffectBothStores",
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/lifecycle_emitter_static.go",
+      "historical_sha256": "42a02969bcbfc5fb7d43a72f33dfdd9e6c5dd3b899e52d0c7196363be1b99e19",
+      "historical_markers": [
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "CopyLifecycleEmitterHandlerFamilies"
+      ],
+      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "proofs": [
+        "R34",
+        "R35",
+        "R37",
+        "TestServedCreationFixturesVerificationConsumersAgree",
+        "TestStateResultPublicationVerificationConsumersAgree",
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/publication_artifact.go",
+      "historical_sha256": "dc4cacfc3bed5a28d0b970507ef9a94c0dd50c092397c2357ff4a7f5b4abd4c6",
+      "historical_markers": [
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "CopyPublicationArtifact"
+      ],
+      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "proofs": [
+        "R34",
+        "R35",
+        "R37",
+        "TestServedCreationFixturesVerificationConsumersAgree",
+        "TestStateResultPublicationVerificationConsumersAgree",
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/remaining_variants.go",
+      "historical_sha256": "e718dd7f57a254b8798828909b280eb9350b70b4016401f8856ee1b20dad8278",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "CopyTemplateInstanceEmpireOutbox"
+      ],
+      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "proofs": [
+        "R34",
+        "R35",
+        "R37",
+        "TestServedCreationFixturesVerificationConsumersAgree",
+        "TestStateResultPublicationVerificationConsumersAgree",
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/runtime_variants.go",
+      "historical_sha256": "5971c8c277e104ba12a71fbea3c6deb10029f48295a520edbeaad26666a6adf4",
+      "historical_markers": [
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "CopyLegacyStaticCreate"
+      ],
+      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "proofs": [
+        "R34",
+        "R35",
+        "R37",
+        "TestServedCreationFixturesVerificationConsumersAgree",
+        "TestStateResultPublicationVerificationConsumersAgree",
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/served_variants.go",
+      "historical_sha256": "5564a83506eb53cc72883d35c2b8f703e212d12a6e26b24b0ee438c6ab7ce669",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "addLegacyTemplateRoot"
+      ],
+      "disposition": "d43a2ba2b_migrated_supported_creation_or_state_result_or_removed_Git_only_fixture_integrated_receipt_pending",
+      "proofs": [
+        "R34",
+        "R35",
+        "R37",
+        "TestServedCreationFixturesVerificationConsumersAgree",
+        "TestStateResultPublicationVerificationConsumersAgree",
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions"
+      ]
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/specialized_variants.go",
+      "historical_sha256": "c808d8aa3deedc75f7357242918c59518566b06fb6b86b40e0254e29172d70eb",
+      "historical_markers": [
+        "CopyArtifactRepoCommitAdmission",
+        "artifact_repo_commit"
+      ],
+      "historical_functions": [
+        "CopyArtifactRepoCommitAdmission"
+      ],
+      "disposition": "pending_Euler_fixture_migration_or_explicit_capability_retirement",
+      "proofs": [
+        "TestActionRetirementCorpusHasNoLiveAuthoredActions",
+        "CopyArtifactRepoCommitAdmission"
+      ]
+    },
+    {
+      "path": "internal/runtime/tools/contracts_test.go",
+      "historical_sha256": "8ba2a9823ef1ea64416a44db9a26f7de019893fef221b09bcc36255f3b473f21",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "historical_functions": [
+        "TestContractDefinitionsForSource_DoesNotExposeCreateFlowInstance"
+      ],
+      "disposition": "distinct_tool_permission_or_retired_native_tool_refusal_not_handler_dispatch",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters",
+        "R03",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/runtime/tools/executor_native.go",
+      "historical_sha256": "56a1cb164827f998a604e9b850d25dfac6d2c031a69fd2b860a8339702e22ed5",
+      "historical_markers": [
+        "resolveWebSearchProviderConfigFromSourceForFlow"
+      ],
+      "historical_functions": [
+        "resolveWebSearchProviderConfigForActor",
+        "resolveWebSearchProviderConfigFromSourceForFlow"
+      ],
+      "disposition": "distinct_tool_permission_or_retired_native_tool_refusal_not_handler_dispatch",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters",
+        "R03",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/runtime/tools/native_tools_admission.go",
+      "historical_sha256": "43f19e1a111cfd63cc94f922fc49f4cce817b42f17271739db119cd752d0b86f",
+      "historical_markers": [
+        "nativeToolConfigFromContract"
+      ],
+      "historical_functions": [
+        "nativeToolAgentConfig",
+        "nativeToolConfigFromContract"
+      ],
+      "disposition": "distinct_tool_permission_or_retired_native_tool_refusal_not_handler_dispatch",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters",
+        "R03",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/runtime/tools/permissions.go",
+      "historical_sha256": "0bf0e79159b9bed7cc8bb266b511df5c3d61e67a3182af2394c9e422314c5d68",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "distinct_tool_permission_or_retired_native_tool_refusal_not_handler_dispatch",
+      "proofs": [
+        "TestNoRetiredHandlerActionInterpreters",
+        "R03",
+        "R38"
+      ]
+    },
+    {
+      "path": "internal/serveapp/fork_receiver_notice_effect_test.go",
+      "historical_sha256": "ba7d70663e05685f673556f9b63ce6d19bf1e3277e19a3d1d1d5d05275a8f84f",
+      "historical_markers": [
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "requireForkReceiverNoticeEffect"
+      ],
+      "disposition": "R41_node_mailbox_effect_retired_execution_geometry_and_state_effects_separate",
+      "proofs": [
+        "TestSelectedForkOptionalReceiverOwnershipExecutionBothStores",
+        "TestSelectedForkReceiverPolicyPermutationExecutionBothStores",
+        "TestSelectedForkNestedStaticReceiverIsolationExecutionBothStores",
+        "TestServedForkLoopGenerationStateEffectBothStores",
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores"
+      ]
+    },
+    {
+      "path": "internal/serveapp/main.go",
+      "historical_sha256": "439c89359edea7c00819297773c185a6945a3540857c66256fdc2337b25b5257",
+      "historical_markers": [
+        "EnsureArtifactRepoRootWritable",
+        "SourceUsesArtifactRepoCommit"
+      ],
+      "historical_functions": [
+        "buildServeRuntimeBundleContext"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/serveapp/main_runtime_test.go",
+      "historical_sha256": "48dfa2902d2493da9a8e2303feaf05e887be625a43d0e6b3846035b4b1786321",
+      "historical_markers": [
+        "CopyArtifactRepoCommitAdmission",
+        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStorageBase",
+        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot",
+        "writeArtifactRepoCommitServeFixture"
+      ],
+      "historical_functions": [
+        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot",
+        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStorageBase",
+        "writeArtifactRepoCommitServeFixture"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifactRoot",
+        "TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStorageBase"
+      ]
+    },
+    {
+      "path": "internal/serveapp/process_lifecycle_test_support_test.go",
+      "historical_sha256": "4e3aa11e104352ffd0a34403ef714e4193ae5524a88cee656afcb5d84272ee7d",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/serveapp/store_backend_selection_test.go",
+      "historical_sha256": "28c9a3cb48e8764a26b22356acd2f0ef8abf493750a06454fed7e826ce702c12",
+      "historical_markers": [
+        "mailbox_write"
+      ],
+      "historical_functions": [
+        "TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore",
+        "TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore",
+        "TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner"
+      ]
+    },
+    {
+      "path": "internal/store/internal/mailboxpersistence/materialization.go",
+      "historical_sha256": "8c7e15523967a5ec9c94877a4623f4be608157ae8d979ef64f474c4179e8edb5",
+      "historical_markers": [
+        "MailboxWriteMaterialization",
+        "MaterializeMailboxWrite",
+        "mailbox_write",
+        "normalizeMailboxWriteMaterialization"
+      ],
+      "historical_functions": [
+        "MaterializeMailboxWrite",
+        "MaterializeMailboxWrite",
+        "normalizeMailboxWriteMaterialization"
+      ],
+      "disposition": "runtime_owner_retirement_general_assertions_separate_Git_capability_removed",
+      "proofs": [
+        "R05",
+        "R31",
+        "R34",
+        "R35",
+        "TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores",
+        "TestExecutor_GenericAppendReferenceControls",
+        "TestNoRetiredHandlerActionInterpreters"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/agent_fixture_authority_parity_test.go",
+      "historical_sha256": "8a4b709ef01d4c8be57bfae51630d467c51c3f7315ce58211b26eedee73794fe",
+      "historical_markers": [
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "configureAgentFixtureFlowLifecycle"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/dynamic_flow_creation_atomicity_test.go",
+      "historical_sha256": "677c8e0b2e5bd2eb356f685c489808fa0a8e3cbb16bd4f2625660973f879dfd4",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/facade_forwarders_generated.go",
+      "historical_sha256": "1127ac1fdadf8ef815d87aa31b624a83525adfd43a2525f7b526400a645b2c8c",
+      "historical_markers": [
+        "MailboxWriteMaterialization",
+        "MaterializeMailboxWrite"
+      ],
+      "historical_functions": [
+        "MaterializeMailboxWrite",
+        "MaterializeMailboxWrite"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/mailbox_materialization_test.go",
+      "historical_sha256": "f0a766d498a9a177d65bb8a64164b7744dcdadffec741539bc29a416b5c9fcdf",
+      "historical_markers": [
+        "MailboxWriteMaterialization",
+        "MaterializeMailboxWrite",
+        "TestPostgresStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner",
+        "TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner"
+      ],
+      "historical_functions": [
+        "TestPostgresStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner",
+        "TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner",
+        "assertV1MailboxMaterializationRead"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestPostgresStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner",
+        "TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/reply_context_store_test.go",
+      "historical_sha256": "b9dd150ca6d5857e7c49f1537737580acb43949d70a40ce1653c9a4fb9048d0c",
+      "historical_markers": [
+        "MailboxWriteMaterialization",
+        "MaterializeMailboxWrite"
+      ],
+      "historical_functions": [
+        "TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37",
+        "TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/run_fork_fan_out_downstream_test.go",
+      "historical_sha256": "a49c7700b99774e8791a38e32fbff4d4cf1273562084467079f2b54a91f7684d",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/run_fork_gate_activation_test.go",
+      "historical_sha256": "1eb438514d38abe575891e30ef7291acc2326ba72eec7afdeb69fa087c1bf9ea",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/sqlite_runtime_test.go",
+      "historical_sha256": "ed6b8d34b9e8de79e54bb032e49cc168960b53ed9d99343944c59265906b4e72",
+      "historical_markers": [
+        "ActionRegistry",
+        "NewContractActionRegistry"
+      ],
+      "historical_functions": [
+        "configureSQLiteFlowActivationLifecycle",
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/workflow_persistence_test.go",
+      "historical_sha256": "5ab3370de1f6ed4d15447844cfe366d1984175c0ca406147ec28638d313e66c5",
+      "historical_markers": [
+        "ActionRegistry"
+      ],
+      "historical_functions": [
+        "ActionRegistry"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "internal/testcatalog/catalog_authoring_test.go",
+      "historical_sha256": "687d4c3252902261f04536baf63fe817af6593bf3887fa38662c6f96c8c2515f",
+      "historical_markers": [
+        "assertCanonicalConfigFromBindings",
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "historical_functions": [
+        "assertCanonicalCreateFlowInstanceHandler",
+        "assertCanonicalConfigFromBindings"
+      ],
+      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "proofs": [
+        "R37"
+      ]
+    },
+    {
+      "path": "platform-spec.yaml",
+      "historical_sha256": "e0236e132f4f50452db3af84441b7c70c39075f19d5cec37d5dc80a8da78f423",
+      "historical_markers": [
+        "MailboxWriteMaterializationStore",
+        "MaterializeMailboxWrite",
+        "artifact_repo_commit",
+        "config_from",
+        "create_flow_instance",
+        "evidence_target",
+        "instance_id_from",
+        "mailbox_write",
+        "record_evidence"
+      ],
+      "disposition": "main_owned_spec_reference_retirement_not_runtime_equivalence",
+      "proofs": [
+        "TestCanonicalFormsRegistryPinsHandlerActionRetirement",
+        "R35"
+      ]
+    },
+    {
+      "path": "tests/tier1-primitives/test-record-evidence/manifest.yaml",
+      "historical_sha256": "ba288818ae436498d67d91d542e23375b3a4787c0808f7dccb74783d9b1da5d2",
+      "historical_markers": [
+        "record_evidence"
+      ],
+      "disposition": "typed_list_append_source_migrated_order_duplicate_restart_receipt_pending",
+      "proofs": [
+        "TestTier1PrimitiveCanonicalRoutingOwnership",
+        "R31"
+      ]
+    },
+    {
+      "path": "tests/tier1-primitives/test-record-evidence/nodes.yaml",
+      "historical_sha256": "81728f605d406c383a9a1cc03ac9ba71afc3184c999ab923f62bf0d4c326119b",
+      "historical_markers": [
+        "evidence_target",
+        "record_evidence"
+      ],
+      "disposition": "typed_list_append_source_migrated_order_duplicate_restart_receipt_pending",
+      "proofs": [
+        "TestTier1PrimitiveCanonicalRoutingOwnership",
+        "R31"
+      ]
+    },
+    {
+      "path": "tests/tier11-flow-composition/test-dynamic-flow-instance/manifest.yaml",
+      "historical_sha256": "e0dc9a9f6f6976379e5aba08cb7a6dcdfce2a8f7f1dd269b3ee189e23d20416d",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier11-flow-composition/test-dynamic-flow-instance/nodes.yaml",
+      "historical_sha256": "852598599344c6fbe0b3c42311a8633ae56683a1c64bf9d25a3c4a09b952e81e",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores2/test-dynamic-flow-instance"
+      ]
+    },
+    {
+      "path": "tests/tier11-flow-composition/test-dynamic-flow-instance/worker/entities.yaml",
+      "historical_sha256": "5c4564f7e848e3895b51af57c4c668ddc3cf87447f4888928c199c6362f728f8",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier4-cross-entity/test-create-entity/nodes.yaml",
+      "historical_sha256": "2e018d656eab9906d08870b9e0064c93bf7e716b6581e6907f11b90b4077afa4",
+      "historical_markers": [
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "disposition": "retired_historical_fixture_not_a_seventh_passing_creation_cell",
+      "proofs": [
+        "TestRetiredActionHistoricalFixtureFailsClosed"
+      ]
+    },
+    {
+      "path": "tests/tier4-cross-entity/test-create-entity/tests/expected.yaml",
+      "historical_sha256": "6797bcef627ba87b01d03a6645dc33084bdf11c48de24cec3f288541fccfd623",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "retired_historical_fixture_not_a_seventh_passing_creation_cell",
+      "proofs": [
+        "TestRetiredActionHistoricalFixtureFailsClosed"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-auto-emit-on-create/nodes.yaml",
+      "historical_sha256": "48745275f9e2d5a24cc4f49e63496dc77d62c0910259d7250bbf43be19cc94d6",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1/test-auto-emit-on-create"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-auto-emit-on-create/worker/entities.yaml",
+      "historical_sha256": "57dd2b96e9b9c7003e39b6cc6e4ca2d47b2ed91810b3241698120d278ad103c7",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance-config/manifest.yaml",
+      "historical_sha256": "94fee34c908290756f5ac54eef96f029b9f1cc2437efcb63b664990eeecc282a",
+      "historical_markers": [
+        "config_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance-config/nodes.yaml",
+      "historical_sha256": "8c4265bc3736a8cfc387b1cff34037183d3a1d0fee14bbd24e5f5a84d43cc374",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1/test-create-flow-instance-config"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance-config/worker-flow/manifest.yaml",
+      "historical_sha256": "c43bb183887bf4ed1090689cc3000cc679798ae58b39eab6f9e8790beb462071",
+      "historical_markers": [
+        "config_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/nodes.yaml",
+      "historical_sha256": "5ba84d0318bb7825945962e9d4e395140c58941988340595cd6d127236a93dde",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1/test-create-flow-instance-duplicate"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/worker-flow/entities.yaml",
+      "historical_sha256": "aede6b3899bbdcafabf06c1268ca077c95b154735cea6148ddea7eefcbde851d",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/worker-flow/manifest.yaml",
+      "historical_sha256": "f841a61368dd32e4c462b813545a40960efa13ae119b44314af2a05f89a41e06",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance/nodes.yaml",
+      "historical_sha256": "5ba84d0318bb7825945962e9d4e395140c58941988340595cd6d127236a93dde",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1/test-create-flow-instance"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance/worker-flow/entities.yaml",
+      "historical_sha256": "aede6b3899bbdcafabf06c1268ca077c95b154735cea6148ddea7eefcbde851d",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-create-flow-instance/worker-flow/manifest.yaml",
+      "historical_sha256": "50fb0fd8a824c27aec4597326bef2ad8ea21005966b70dc5f689a66413a9ab6b",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-template-no-boot-instance/manifest.yaml",
+      "historical_sha256": "04dcaf81fb04eaa1607cf983f507adf421956ad26dae0e12b909812c9e0bdd89",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "retained_template_lifecycle_homonym_not_handler_action",
+      "proofs": [
+        "R03",
+        "R38"
+      ]
+    },
+    {
+      "path": "tests/tier5-flow-lifecycle/test-template-no-boot-instance/worker/entities.yaml",
+      "historical_sha256": "18d4349e71965e95bec491f8453476d0e1c8c4dfbf119b282b79381c6e8ad2ed",
+      "historical_markers": [
+        "create_flow_instance"
+      ],
+      "disposition": "retained_template_lifecycle_homonym_not_handler_action",
+      "proofs": [
+        "R03",
+        "R38"
+      ]
+    },
+    {
+      "path": "tests/tier9-composition-patterns/test-compose-create-instance-config/manifest.yaml",
+      "historical_sha256": "7365dbf154593ae539b97330dd6ad81efb8918f245c735d0fee6d583bba3495a",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1",
+        "TestCatalogReplayClean_SelectedStores2"
+      ]
+    },
+    {
+      "path": "tests/tier9-composition-patterns/test-compose-create-instance-config/nodes.yaml",
+      "historical_sha256": "4dc8548d6b63e6cfd332579a51e9b93f6335555e69eba5002c7ec453ac748d5f",
+      "historical_markers": [
+        "config_from",
+        "create_flow_instance",
+        "instance_id_from"
+      ],
+      "disposition": "catalog_creation_migrated_source_not_integrated_receipt",
+      "proofs": [
+        "TestCatalogReplayClean_SelectedStores1/test-compose-create-instance-config"
+      ]
+    }
+  ],
+  "new_reference_files": {
+    "internal/apiv1/operator_mailbox_event_fixture_test.go": "d43a2ba2b retained mailbox event/selected-store helper split; action materializer is not retained",
+    "internal/runtime/conformance/action_retirement_corpus_test.go": "historical corpus census and live-source/negative guards",
+    "internal/runtime/conformance/handler_action_retirement_guard_test.go": "repository AST retirement guard and hostile mutations",
+    "internal/runtime/contracts/workflow_contract_action_retirement.go": "presence-based rejection only, no action interpreter",
+    "internal/runtime/contracts/workflow_contract_action_retirement_test.go": "hostile rejection and distinct homonym preservation",
+    "internal/runtime/contracts/workflow_contract_join.go": "calls shared presence-rejection helper",
+    "internal/runtime/contracts/workflow_contract_yaml_flow.go": "calls shared presence-rejection helper"
+  }
+}

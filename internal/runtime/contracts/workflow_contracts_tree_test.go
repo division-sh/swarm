@@ -588,8 +588,6 @@ audit-node:
     - evidence.recorded
   event_handlers:
     item.created:
-      action: record_evidence
-      evidence_target: item.audit
       emit: evidence.recorded
 `)
 	return root
