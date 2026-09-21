@@ -1172,9 +1172,12 @@ seam_families:
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_ingress.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go
       - internal/runtime/testfixtures/canonicalrouting/served_receiver_initialization.go
+      - internal/runtime/testfixtures/canonicalrouting/typed_receiver_fork_refusal.go
       - internal/serveapp/receiver_initialization_test.go
       - internal/serveapp/receiver_initialization_ingress_test.go
       - internal/serveapp/receiver_initialization_release_test.go
+      - internal/serveapp/typed_receiver_fork_refusal_test.go
+      - internal/store/internal/runtimepersistence/receiver_public_input_finalization_test.go
       - internal/runtime/bus/receiver_initialization_test.go
       - internal/runtime/cataloge2e/receiver_initialization_geometry_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/tests/expected.yaml
@@ -1237,6 +1240,17 @@ seam_families:
       append while retaining every preexisting event. This is not provider
       transport, webhook ingress, private-harness or replacement action proof.
       It adds no Go-connect literal or historical retired-action corpus member.
+      TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores consumes
+      the provider fixture through native publication and real committed
+      manager finalization without a recovery driver. Public-input and API
+      endpoint grants belong only to the admitted event; both committed flow
+      and agent finalizers retain runtime authority but not those grants.
+      CopyForkReceiverRecordedConfig (typed_receiver_fork_refusal.go) is the
+      closed source for TestTypedReceiverConfigSourceAndForkRefusalBothStores.
+      It proves real typed configuration creation and node/public readback,
+      including business/control-name collisions, then exact no-mutation
+      dynamic-flow-creation refusal at two fork cuts under existing #642.
+      It does not claim successful dynamic fork or static initialization.
       CopyTemplateInstanceEmpireStyle and CopyTemplateInstanceActivationConfigSubscriber
       (receiver_initialization_runtime.go) own the unchanged complete connected
       bundles for TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect
