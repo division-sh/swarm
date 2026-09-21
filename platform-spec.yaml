@@ -8458,10 +8458,10 @@ engine:
       scope: global
       trigger: Two system nodes declare handlers for the same event name. Only one node may own a handler per event.
       when: boot-only
-    - id: config_from_payload_alignment
+    - id: data_accumulation_source_alignment
       severity: error
       scope: per-node
-      trigger: A data_accumulation source_event payload field is absent from that event's admitted payload schema.
+      trigger: A non-empty data_accumulation.source_event does not match its handler event and is not a derived fan_out source.
         Receiver initialize bindings are validated separately by the compiled input-pin owner against the bound source schema.
       when: boot-only
     - id: phantom_produces

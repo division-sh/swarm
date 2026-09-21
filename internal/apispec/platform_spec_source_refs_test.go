@@ -20,6 +20,30 @@ func TestPlatformSpecStaticAnalyzerSpecBasisRefsResolve(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecDataAccumulationSourceAlignment(t *testing.T) {
+	checks := mustYAMLPath(t, loadPlatformSpecYAMLNode(t), "engine", "boot_verification", "checks")
+	found := 0
+	for _, check := range checks.Content {
+		id := mustMappingValue(t, check, "id").Value
+		if id == "config_from_payload_alignment" {
+			t.Fatal("retired config_from_payload_alignment diagnostic remains")
+		}
+		if id != "data_accumulation_source_alignment" {
+			continue
+		}
+		found++
+		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "does not match its handler event")
+		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "not a derived fan_out source")
+		assertScalarContains(t, mustMappingValue(t, check, "trigger"), "Receiver initialize bindings are validated separately")
+		assertScalarValue(t, mustMappingValue(t, check, "severity"), "error")
+		assertScalarValue(t, mustMappingValue(t, check, "scope"), "per-node")
+		assertScalarValue(t, mustMappingValue(t, check, "when"), "boot-only")
+	}
+	if found != 1 {
+		t.Fatalf("data_accumulation_source_alignment checks = %d, want 1", found)
+	}
+}
+
 func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	handlerSpec := mustMappingValue(t, root, "handler_specification")
