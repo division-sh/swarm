@@ -427,12 +427,11 @@ func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersis
 	if !route.Valid() || strings.TrimSpace(record.FlowInstance) != route.InstancePath {
 		return WorkflowInstance{}, fmt.Errorf("workflow entity state row disagrees with admitted route")
 	}
-	config, err := json.Marshal(map[string]any{
-		"workflow_version": strings.TrimSpace(workflowVersion),
-		"instance_id":      route.InstanceID,
-		"storage_ref":      route.InstancePath,
-		"flow_path":        route.InstancePath,
-	})
+	payload, err := WorkflowInstanceConfigPayloadForRoute(route, workflowVersion, map[string]any{})
+	if err != nil {
+		return WorkflowInstance{}, fmt.Errorf("project workflow entity state control: %w", err)
+	}
+	config, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
 		return WorkflowInstance{}, fmt.Errorf("encode workflow entity state control: %w", err)
 	}
