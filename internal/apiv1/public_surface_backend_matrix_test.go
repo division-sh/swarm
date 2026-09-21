@@ -1235,7 +1235,7 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 			Backends: []string{"explicit_postgres"},
 			Methods:  []string{"health.check"},
 		},
-		"TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends": {
+		"TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"mailbox.get", "mailbox.list"},
 		},

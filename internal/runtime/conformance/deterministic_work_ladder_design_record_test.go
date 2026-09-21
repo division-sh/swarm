@@ -75,6 +75,9 @@ type deterministicWorkLadderLockedBoundary struct {
 type deterministicWorkLadderDesignRepair struct {
 	ID                                   string   `yaml:"id"`
 	OwnerIssue                           int      `yaml:"owner_issue"`
+	SupersededByIssue                    int      `yaml:"superseded_by_issue"`
+	SupersededByRuling                   string   `yaml:"superseded_by_ruling"`
+	HistoricalDisposition                string   `yaml:"historical_disposition"`
 	Decision                             string   `yaml:"decision"`
 	HiddenRuntimeSurfaceAllowed          bool     `yaml:"hidden_runtime_surface_allowed"`
 	RequiredSurfaces                     []string `yaml:"required_surfaces"`
@@ -198,6 +201,20 @@ func TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims(t *testi
 			want: "repair policy_sheet_row_model decision = \"standalone_switch_lookup_threshold_keywords\", want first_selection_helpers_are_policy_sheet_row_types",
 		},
 		{
+			name: "retired action survives pending migration",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				deterministicWorkLadderDesignRepairByID(t, record, "artifact_repo_commit_disposition").CurrentActionSurvivesUntilMigration = true
+			},
+			want: "current_action_survives_until_migration = true, want false",
+		},
+		{
+			name: "retirement loses exact ruling",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				deterministicWorkLadderDesignRepairByID(t, record, "artifact_repo_commit_disposition").SupersededByRuling = ""
+			},
+			want: "missing exact #2307 retirement ruling",
+		},
+		{
 			name: "duplicate repair id",
 			mutate: func(record *deterministicWorkLadderDesignRecord) {
 				record.Repairs = append(record.Repairs, *deterministicWorkLadderDesignRepairByID(t, record, "compute_name_collision"))
@@ -291,47 +308,26 @@ func TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec(t 
 	if err := source.Decode(&spec); err != nil {
 		t.Fatalf("parse platform spec: %v", err)
 	}
-	artifact := yamlMapAt(t, spec,
-		"handler_specification",
-		"handler_fields",
-		"action",
-		"valid_values",
-		"artifact_repo_commit",
-	)
-	disposition := yamlMapValue(t, artifact, "durable_activity_disposition")
+	for _, fields := range []map[string]any{
+		yamlMapAt(t, spec, "handler_specification", "handler_fields"),
+		yamlMapAt(t, spec, "handler_specification", "handler_fields", "rules", "rule_fields"),
+	} {
+		for _, retired := range []string{"action", "template", "instance_id_from", "config_from", "evidence_target"} {
+			if _, exists := fields[retired]; exists {
+				t.Fatalf("platform spec restores authored handler field %s", retired)
+			}
+		}
+	}
+	disposition := yamlMapAt(t, spec, "tool_model", "platform_builtin_tools", "handler_action_retirement")
 	for field, wants := range map[string][]string{
-		"current_owner": {
-			"canonical platform owner",
-			"action.id: artifact_repo_commit",
-			"not an alternate",
-		},
-		"activity_non_owner_paths": {
-			"platform_builtin",
-			"MCP",
-			"native/generated",
-			"shell",
-			"HTTP-tool activity",
-			"fail closed",
-		},
-		"migration_blocker": {
-			"read_only authored HTTP",
-			"idempotent_write",
-			"non_idempotent_write",
-			"stable activity attempt/result journal",
-			"idempotency execution owner",
-		},
-		"future_migration_condition": {
-			"separately gated migration",
-			"provider/root/path allowlist",
-			"provider request history",
-			"output-state repair",
-			"success/failure result-event guarantees",
-		},
+		"rule":                 {"rejected on presence", "null, empty, alias", "no action interpreter", "compatibility spelling", "emit.template", "timer instructions", "connector tool operations"},
+		"supported_operations": {"typed initialize", "Typed state accumulation", "notify_human", "ask_human", "optional/entityless nodes"},
+		"local_git":            {"Built-in local Git commits are unavailable", "No activity, tool or provider alias", "#2029", "requires its own contract and proof"},
 	} {
 		got := yamlStringValue(t, disposition, field)
 		for _, want := range wants {
 			if !strings.Contains(got, want) {
-				t.Fatalf("platform spec artifact_repo_commit durable_activity_disposition.%s missing %q in:\n%s", field, want, got)
+				t.Fatalf("platform spec handler_action_retirement.%s missing %q in:\n%s", field, want, got)
 			}
 		}
 	}
@@ -343,7 +339,7 @@ func TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec(t 
 		"supported_tool_sources",
 		"platform_builtin",
 	)
-	for _, want := range []string{"Not callable from activity", "artifact_repo_commit", "action-owned", "write-effect activity migration"} {
+	for _, want := range []string{"Not callable from activity", "fail closed", "no activity replacement"} {
 		if !strings.Contains(platformBuiltin, want) {
 			t.Fatalf("platform spec activity.supported_tool_sources.platform_builtin missing %q in:\n%s", want, platformBuiltin)
 		}
@@ -604,28 +600,36 @@ func validateDeterministicWorkLadderDesignRepairs(repairs []deterministicWorkLad
 	if artifactDisposition.OwnerIssue != 1667 {
 		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition owner_issue = %d, want 1667", artifactDisposition.OwnerIssue))
 	}
-	if artifactDisposition.Decision != "canonical_action_owner_until_write_activity_journal" {
-		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition decision = %q, want canonical_action_owner_until_write_activity_journal", artifactDisposition.Decision))
+	if artifactDisposition.SupersededByIssue != 2307 || artifactDisposition.SupersededByRuling != "5754202888" {
+		problems = append(problems, "repair artifact_repo_commit_disposition missing exact #2307 retirement ruling")
 	}
-	if artifactDisposition.CanonicalOwner != "platform-spec.yaml#handler_specification.handler_fields.action.valid_values.artifact_repo_commit" {
-		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition canonical_owner = %q, want platform-spec.yaml#handler_specification.handler_fields.action.valid_values.artifact_repo_commit", artifactDisposition.CanonicalOwner))
+	if artifactDisposition.Decision != "retired_without_replacement" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition decision = %q, want retired_without_replacement", artifactDisposition.Decision))
 	}
-	if artifactDisposition.CurrentDisposition != "canonical_platform_action_owner" {
-		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition current_disposition = %q, want canonical_platform_action_owner", artifactDisposition.CurrentDisposition))
+	if artifactDisposition.CanonicalOwner != "platform-spec.yaml#tool_model.platform_builtin_tools.handler_action_retirement" {
+		problems = append(problems, "repair artifact_repo_commit_disposition canonical_owner must name handler_action_retirement")
+	}
+	if artifactDisposition.CurrentDisposition != "unavailable" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition current_disposition = %q, want unavailable", artifactDisposition.CurrentDisposition))
 	}
 	if artifactDisposition.ActivityOwnerStatus != "non_owner_for_artifact_commits" {
 		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition activity_owner_status = %q, want non_owner_for_artifact_commits", artifactDisposition.ActivityOwnerStatus))
 	}
-	if artifactDisposition.MigrationBlocker != "stable_activity_attempt_result_journal_and_idempotency_execution_owner" {
-		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition migration_blocker = %q, want stable_activity_attempt_result_journal_and_idempotency_execution_owner", artifactDisposition.MigrationBlocker))
+	if artifactDisposition.MigrationBlocker != "" {
+		problems = append(problems, "repair artifact_repo_commit_disposition retirement must not depend on a future migration")
 	}
-	for _, want := range []string{"separately gated", "artifact root/path safety", "provider request history", "output-state repair", "result-event guarantees"} {
+	for _, want := range []string{"#1667", "stable activity attempt/result journal", "idempotency execution owner", "artifact root/path safety", "provider request history", "output-state repair", "result-event guarantees", "grants no surviving action"} {
+		if !strings.Contains(artifactDisposition.HistoricalDisposition, want) {
+			problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition historical_disposition missing %q", want))
+		}
+	}
+	for _, want := range []string{"separately gated", "#2029", "requires its own contract and proof", "not a dependency of #2307"} {
 		if !strings.Contains(artifactDisposition.FutureMigrationCondition, want) {
 			problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition future_migration_condition missing %q", want))
 		}
 	}
-	if !artifactDisposition.CurrentActionSurvivesUntilMigration {
-		problems = append(problems, "repair artifact_repo_commit_disposition current_action_survives_until_migration = false, want true")
+	if artifactDisposition.CurrentActionSurvivesUntilMigration {
+		problems = append(problems, "repair artifact_repo_commit_disposition current_action_survives_until_migration = true, want false")
 	}
 
 	stageOrder := byID["stage_order_after_activity"]

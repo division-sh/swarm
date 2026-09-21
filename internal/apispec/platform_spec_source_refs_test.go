@@ -45,10 +45,8 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 		"filter",
 		"count",
 		"clear",
-		"action",
 		"retired_fields",
 		"clear_gates",
-		"evidence_target",
 	}
 	for _, key := range expectedHandlerFields {
 		if !hasMappingKey(handlerFields, key) {
@@ -59,9 +57,15 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 		}
 	}
 
-	for _, retired := range []string{"select_entity", "select_or_create_entity"} {
-		if hasMappingKey(handlerFields, retired) {
-			t.Fatalf("spec restored retired handler grammar %s", retired)
+	ruleFields := mustYAMLPath(t, handlerFields, "rules", "rule_fields")
+	for _, retired := range []string{"select_entity", "select_or_create_entity", "action", "evidence_target", "template", "instance_id_from", "config_from"} {
+		for _, owner := range []struct {
+			name string
+			node *yaml.Node
+		}{{"handler_fields", handlerFields}, {"rules.rule_fields", ruleFields}, {"expression_context", expressionContext}} {
+			if hasMappingKey(owner.node, retired) {
+				t.Fatalf("spec restored retired handler grammar %s under %s", retired, owner.name)
+			}
 		}
 	}
 	expectedExpressionContext := map[string]bool{

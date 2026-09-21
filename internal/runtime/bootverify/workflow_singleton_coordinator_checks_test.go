@@ -62,7 +62,11 @@ instance: vertical_id
 pins:
   inputs:
     events: [job.received]
-`, singletonCoordinatorEntitiesYAML(), "", "")
+`, `
+coordinator_state:
+  vertical_id: text
+  verticals: map[text]VerticalState
+`, "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
