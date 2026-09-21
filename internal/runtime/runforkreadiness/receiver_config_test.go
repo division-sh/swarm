@@ -115,8 +115,8 @@ func TestSelectedContractReceiverConfigAdmissionSealsRecordedBusinessConfig(t *t
 			config["nested"].([]any)[0] = "mutated readback"
 		}
 		flow := projection.Flows[0]
-		if flow.ActivationVariables["vertical_id"] != "original-business-key" || string(flow.Agents[0].Config.Config) != want {
-			t.Fatalf("first activation consumers lost exact config: %#v, %s", flow.ActivationVariables, flow.Agents[0].Config.Config)
+		if flow.ActivationVariables["vertical_id"] != "original-business-key" || string(flow.Agents[0].Config.ReceiverConfig) != want {
+			t.Fatalf("first activation consumers lost exact config: %#v, %s", flow.ActivationVariables, flow.Agents[0].Config.ReceiverConfig)
 		}
 	}
 	req.Plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(strings.Replace(string(req.Plan.Entities[0].MaterializationMetadata.FlowConfig), "[7,7.0,null]", "[7,7,null]", 1))

@@ -269,12 +269,12 @@ func TestReceiverConfigActivationRaceAndRollbackBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					var loaded any
-					if err := canonicaljson.DecodePreservingNumberLexemes(agent.Config.Config, &loaded); err != nil {
+					if err := canonicaljson.DecodePreservingNumberLexemes(agent.Config.ReceiverConfig, &loaded); err != nil {
 						t.Fatal(err)
 					}
 					actual, err := canonicaljson.MarshalPreservingNumberKinds(loaded)
 					if err != nil || string(actual) != string(wire) {
-						t.Fatalf("agent consumed losing config: %s want %s: %v", agent.Config.Config, wire, err)
+						t.Fatalf("agent consumed losing config: %s want %s: %v", agent.Config.ReceiverConfig, wire, err)
 					}
 				}
 			})
