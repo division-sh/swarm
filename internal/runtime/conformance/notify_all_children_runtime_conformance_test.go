@@ -1968,12 +1968,6 @@ func newNotifyAllChildrenRuntime(
 			}
 			return []runtimebus.EventInterceptor{coordinator}
 		},
-		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return fmt.Errorf("agent manager is not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
 		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 			if manager == nil {
 				return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("agent manager is not initialized")
@@ -2095,22 +2089,15 @@ func newNotifyAllChildrenRuntime(
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	module := conformanceLoadedWorkflowModule{
-		source:  source,
-		nodes:   nodes,
-		guards:  runtimepipeline.NewContractGuardRegistry(source),
-		actions: runtimepipeline.NewContractActionRegistry(source),
+		source: source,
+		nodes:  nodes,
+		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinatorOptions := runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture:   posture,
 		Module:             module,
 		SourceArtifactFact: sourceArtifactFact,
-		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-			if manager == nil {
-				return fmt.Errorf("agent manager is not initialized")
-			}
-			return manager.ActivateFlowInstance(ctx, req)
-		},
 		InstanceDeactivationPreparer: func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
 			if manager == nil {
 				return nil, fmt.Errorf("agent manager is not initialized")

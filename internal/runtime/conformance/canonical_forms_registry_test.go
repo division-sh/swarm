@@ -190,11 +190,11 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 97 || record.Inventory.CustomUnmarshalReachable != 95 || record.Inventory.CustomUnmarshalExcluded != 2 || len(expectedReachable) != 95 || len(expectedExcluded) != 2 || len(actual) != 97 {
-		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 97/95/2/95/2/97", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
-	}
 	if err := validateCustomYAMLDecoderInventory(expectedReachable, expectedExcluded, actual); err != nil {
 		t.Fatal(err)
+	}
+	if record.Inventory.CustomUnmarshalTotal != 91 || record.Inventory.CustomUnmarshalReachable != 89 || record.Inventory.CustomUnmarshalExcluded != 2 || len(expectedReachable) != 89 || len(expectedExcluded) != 2 || len(actual) != 91 {
+		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 91/89/2/89/2/91", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
 	}
 }
 
@@ -409,7 +409,7 @@ func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
 	if record.Wave2.Issue != 2352 || record.Wave2.Status != "closed" || !reflect.DeepEqual(record.Wave2.Rows, wantRows) || !reflect.DeepEqual(record.Wave2.RetiredSurfaces, wantRetired) || !reflect.DeepEqual(record.Wave2.CanonicalOwners, wantOwners) {
 		t.Fatalf("wave 2 registry = %#v", record.Wave2)
 	}
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event", "resolution", "source"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event", "initialize", "resolution", "source"})
 	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowOutputEventPin{}), []string{"event", "sink"})
 	for _, owner := range []reflect.Type{
 		reflect.TypeOf(runtimecontracts.CompiledFlowInputPin{}),

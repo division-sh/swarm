@@ -66,7 +66,7 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 		fixtures[fixture.RelativePath] = fixture
 	}
 	wantDispositionCounts := map[string]int{
-		"harness": 93, "negative_removal": 39, "dead_removal": 47,
+		"harness": 88, "negative_removal": 39, "dead_removal": 47, "retired_handler_action": 1, "connected_creation": 4,
 		"same_flow": 7, "external": 3, "historical_connect": 8,
 	}
 	gotDispositionCounts := map[string]int{}
@@ -113,6 +113,23 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 			schemaPath := filepath.Join(filepath.Dir(path), "schema.yaml")
 			outputSinks := outputPinSinksInYAML(readProducerRoutingProofYAML(t, schemaPath))
 			switch row.Disposition {
+			case "connected_creation":
+				wantTargets := map[string]string{"B104": "worker-flow", "B105": "worker-flow", "B106": "worker-flow", "B183": "worker"}
+				wantTarget, exact := wantTargets[row.ID]
+				sink, hasOutput := outputSinks[row.Event]
+				if !exact || !hasOutput || sink != "" || !containsProducerRoutingValue(emits, row.Event) {
+					t.Fatalf("connected creation event=%q emits=%v sinks=%v row=%s", row.Event, emits, outputSinks, row.ID)
+				}
+				bundle := loadProducerRoutingFixture(t, filepath.ToSlash(filepath.Dir(row.Path)))
+				connects := bundle.CompositionConnects()
+				if len(connects) != 1 || connects[0].Event != row.Event || connects[0].From != "." || connects[0].To != wantTarget {
+					t.Fatalf("connected creation %s lost exact route to %s: %#v", row.ID, wantTarget, connects)
+				}
+			case "retired_handler_action":
+				if row.ID != "B100" || row.Path != "tests/tier4-cross-entity/test-create-entity/nodes.yaml" || row.Proof != "TestRetiredActionHistoricalFixtureFailsClosed" {
+					t.Fatalf("unexpected handler-action retirement: %#v", row)
+				}
+				requireRetiredActionHistoricalFixture(t, repoRoot)
 			case "harness":
 				if outputSinks[row.Event] != "harness" || !containsProducerRoutingValue(emits, row.Event) {
 					t.Fatalf("harness migration event=%q emits=%v sinks=%v", row.Event, emits, outputSinks)
@@ -298,7 +315,6 @@ func TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput(t *test
 		{id: "B045", fixture: "tests/tier11-flow-composition/test-child-flow-absolute-path", nodeID: "listener", trigger: "task.done", wantEmitted: "work.finished"},
 		{id: "B078", fixture: "tests/tier11-flow-composition/test-tool-override", nodeID: "root-node", trigger: "child.done", wantEmitted: "task.done"},
 		{id: "B081", fixture: "tests/tier11-flow-composition/test-wildcard-deep-subscription", nodeID: "collector", trigger: "task.done", wantEmitted: "pipeline.complete"},
-		{id: "B100", fixture: "tests/tier4-cross-entity/test-create-entity", nodeID: "test-node", trigger: "entity.create_requested", payload: map[string]any{"child_id": "child-001"}, wantEmitted: "entity.created"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.id, func(t *testing.T) {

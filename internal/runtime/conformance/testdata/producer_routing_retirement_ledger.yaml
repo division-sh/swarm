@@ -530,8 +530,9 @@ rows:
 - id: B100
   path: tests/tier4-cross-entity/test-create-entity/nodes.yaml
   event: entity.created
-  disposition: harness
-  proof: TestProducerRoutingRetirementExcludedFixturesExecuteCanonicalOutput/B100
+  disposition: retired_handler_action
+  proof: TestRetiredActionHistoricalFixtureFailsClosed
+  action_retirement: "#2307 Gate A 5754202888: historical action fixture is rejected, not a passing canonical-output runtime cell; supported creation is independently proved by tier11 dynamic-flow-instance."
 - id: B101
   path: tests/tier4-cross-entity/test-query-filter/nodes.yaml
   event: filter.completed
@@ -550,17 +551,17 @@ rows:
 - id: B104
   path: tests/tier5-flow-lifecycle/test-create-flow-instance-config/nodes.yaml
   event: flow.spawned
-  disposition: harness
+  disposition: connected_creation
   proof: TestCatalogReplayClean_SelectedStores1/test-create-flow-instance-config
 - id: B105
   path: tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/nodes.yaml
   event: flow.spawned
-  disposition: harness
+  disposition: connected_creation
   proof: TestCatalogReplayClean_SelectedStores1/test-create-flow-instance-duplicate
 - id: B106
   path: tests/tier5-flow-lifecycle/test-create-flow-instance/nodes.yaml
   event: flow.spawned
-  disposition: harness
+  disposition: connected_creation
   proof: TestCatalogReplayClean_SelectedStores1/test-create-flow-instance
 - id: B107
   path: tests/tier5-flow-lifecycle/test-template-no-boot-instance/nodes.yaml
@@ -948,7 +949,7 @@ rows:
 - id: B183
   path: tests/tier9-composition-patterns/test-compose-create-instance-config/nodes.yaml
   event: spawn.done
-  disposition: harness
+  disposition: connected_creation
   proof: TestCatalogReplayClean_SelectedStores1/test-compose-create-instance-config
 - id: B184
   path: tests/tier9-composition-patterns/test-compose-gate-chain-three/nodes.yaml

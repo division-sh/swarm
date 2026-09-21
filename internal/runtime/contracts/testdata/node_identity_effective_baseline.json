@@ -4,19 +4,6 @@
     "handlers": {
       "dGVsZWdyYW0tY2hhdA.dGVsZWdyYW0tcmVzcG9uZGVy": {
         "telegram.reply_requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "telegram_send_message",
             "Tool": "telegram.send_message",
@@ -48,7 +35,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -94,19 +80,6 @@
           "EventHandlers": {
             "telegram.reply_requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "telegram_send_message",
@@ -153,7 +126,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -222,19 +194,6 @@
         },
         "EventType": "telegram.reply_requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -302,19 +261,6 @@
     "handlers": {
       "aW5ncmVzcw.aW5ncmVzcy1ub2Rl": {
         "operating.report.triggered": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -323,7 +269,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "operating.report.requested",
             "From": "",
@@ -386,19 +331,6 @@
       },
       "b3BlcmF0aW5n.b3BlcmF0aW5nLW5vZGU": {
         "operating.report.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -407,7 +339,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "operating.reported",
             "From": "",
@@ -481,19 +412,6 @@
       },
       "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg": {
         "operating.reported": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -502,7 +420,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -605,19 +522,6 @@
                 "From": "",
                 "Fields": null
               },
-              "Action": {
-                "ID": "",
-                "Template": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Root": 0,
-                  "Segments": null,
-                  "Raw": ""
-                },
-                "ConfigFrom": null,
-                "Mailbox": null,
-                "ArtifactRepo": null
-              },
               "Activity": {
                 "ID": "",
                 "Tool": "",
@@ -663,19 +567,6 @@
                   "From": "",
                   "Fields": null
                 },
-                "Action": {
-                  "ID": "",
-                  "Template": "",
-                  "InstanceIDFrom": "",
-                  "InstanceIDPath": {
-                    "Root": 0,
-                    "Segments": null,
-                    "Raw": ""
-                  },
-                  "ConfigFrom": null,
-                  "Mailbox": null,
-                  "ArtifactRepo": null
-                },
                 "Activity": {
                   "ID": "",
                   "Tool": "",
@@ -703,19 +594,6 @@
           "Clear": null
         },
         "portfolio.setup": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -724,7 +602,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -882,19 +759,6 @@
           "EventHandlers": {
             "operating.report.triggered": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -941,7 +805,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -1005,19 +868,6 @@
           "EventHandlers": {
             "operating.report.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -1075,7 +925,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -1139,19 +988,6 @@
           "EventHandlers": {
             "operating.reported": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -1175,7 +1011,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -1201,19 +1036,6 @@
                   }
                 },
                 "OnComplete": {
-                  "Action": {
-                    "ArtifactRepo": null,
-                    "ConfigFrom": null,
-                    "ID": "",
-                    "InstanceIDFrom": "",
-                    "InstanceIDPath": {
-                      "Raw": "",
-                      "Root": 0,
-                      "Segments": null
-                    },
-                    "Mailbox": null,
-                    "Template": ""
-                  },
                   "Activity": {
                     "Approval": null,
                     "ID": "",
@@ -1270,19 +1092,6 @@
                 "Timeout": {
                   "After": "5m",
                   "Outcome": {
-                    "Action": {
-                      "ArtifactRepo": null,
-                      "ConfigFrom": null,
-                      "ID": "",
-                      "InstanceIDFrom": "",
-                      "InstanceIDPath": {
-                        "Raw": "",
-                        "Root": 0,
-                        "Segments": null
-                      },
-                      "Mailbox": null,
-                      "Template": ""
-                    },
                     "Activity": {
                       "Approval": null,
                       "ID": "",
@@ -1361,19 +1170,6 @@
             },
             "portfolio.setup": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -1509,7 +1305,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -1591,19 +1386,6 @@
         },
         "EventType": "operating.report.triggered",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -1676,19 +1458,6 @@
         },
         "EventType": "operating.report.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -1765,6 +1534,192 @@
         "Clear": null
       },
       {
+        "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg:operating.reported",
+        "Node": {
+          "flow_path": "portfolio",
+          "node_id": "portfolio-collector"
+        },
+        "EventType": "operating.reported",
+        "CreateEntity": false,
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": null,
+          "SourceEvent": ""
+        },
+        "Emit": {
+          "Event": "",
+          "From": "",
+          "Fields": null
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": {
+          "ID": "awaiting",
+          "Stage": "awaiting",
+          "Members": {
+            "From": "entity.expected_operating_ids",
+            "FromPath": {
+              "Root": 3,
+              "Segments": [
+                "expected_operating_ids"
+              ],
+              "Raw": "entity.expected_operating_ids"
+            },
+            "By": "",
+            "ByPath": {
+              "Root": 0,
+              "Segments": null,
+              "Raw": ""
+            },
+            "FromFanOut": false
+          },
+          "Window": {
+            "From": "entity.period_id",
+            "FromPath": {
+              "Root": 3,
+              "Segments": [
+                "period_id"
+              ],
+              "Raw": "entity.period_id"
+            },
+            "By": "",
+            "ByPath": {
+              "Root": 0,
+              "Segments": null,
+              "Raw": ""
+            }
+          },
+          "Output": "payload.revenue",
+          "OutputPath": {
+            "Root": 1,
+            "Segments": [
+              "revenue"
+            ],
+            "Raw": "payload.revenue"
+          },
+          "CompleteWhen": "",
+          "Remaining": "",
+          "OnComplete": {
+            "ID": "",
+            "Description": "",
+            "Condition": "",
+            "PolicyRow": {
+              "Kind": "",
+              "Selectors": null,
+              "CaseValues": null,
+              "RangeValue": "",
+              "RangeLower": {
+                "Operator": "",
+                "Value": "",
+                "Kind": ""
+              },
+              "RangeUpper": {
+                "Operator": "",
+                "Value": "",
+                "Kind": ""
+              },
+              "Monotonicity": null,
+              "Lookup": null,
+              "Validation": null,
+              "Module": null
+            },
+            "AdvancesTo": "complete",
+            "Emit": {
+              "Event": "",
+              "From": "",
+              "Fields": null
+            },
+            "Activity": {
+              "ID": "",
+              "Tool": "",
+              "Input": null,
+              "Approval": null
+            },
+            "DataAccumulation": {
+              "Writes": null,
+              "SourceEvent": ""
+            },
+            "Compute": null,
+            "FanOut": null
+          },
+          "Timeout": {
+            "After": "5m",
+            "Outcome": {
+              "ID": "",
+              "Description": "",
+              "Condition": "",
+              "PolicyRow": {
+                "Kind": "",
+                "Selectors": null,
+                "CaseValues": null,
+                "RangeValue": "",
+                "RangeLower": {
+                  "Operator": "",
+                  "Value": "",
+                  "Kind": ""
+                },
+                "RangeUpper": {
+                  "Operator": "",
+                  "Value": "",
+                  "Kind": ""
+                },
+                "Monotonicity": null,
+                "Lookup": null,
+                "Validation": null,
+                "Module": null
+              },
+              "AdvancesTo": "failed",
+              "Emit": {
+                "Event": "",
+                "From": "",
+                "Fields": null
+              },
+              "Activity": {
+                "ID": "",
+                "Tool": "",
+                "Input": null,
+                "Approval": null
+              },
+              "DataAccumulation": {
+                "Writes": null,
+                "SourceEvent": ""
+              },
+              "Compute": null,
+              "FanOut": null
+            }
+          },
+          "OnCompleteFound": true,
+          "TimeoutFound": true
+        },
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
         "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg:portfolio.setup",
         "Node": {
           "flow_path": "portfolio",
@@ -1772,19 +1727,6 @@
         },
         "EventType": "portfolio.setup",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -1937,231 +1879,6 @@
         "Reduce": null,
         "Count": null,
         "Clear": null
-      },
-      {
-        "ID": "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg:operating.reported",
-        "Node": {
-          "flow_path": "portfolio",
-          "node_id": "portfolio-collector"
-        },
-        "EventType": "operating.reported",
-        "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
-        "Activity": {
-          "ID": "",
-          "Tool": "",
-          "Input": null,
-          "Approval": null
-        },
-        "Guard": null,
-        "AdvancesTo": "",
-        "SetsGate": null,
-        "ClearGates": null,
-        "DataAccumulation": {
-          "Writes": null,
-          "SourceEvent": ""
-        },
-        "Emit": {
-          "Event": "",
-          "From": "",
-          "Fields": null
-        },
-        "OnSuccess": {
-          "Emit": {
-            "Event": "",
-            "From": "",
-            "Fields": null
-          }
-        },
-        "Condition": "",
-        "Loop": null,
-        "OnComplete": null,
-        "Rules": null,
-        "Accumulate": null,
-        "Join": {
-          "ID": "awaiting",
-          "Stage": "awaiting",
-          "Members": {
-            "From": "entity.expected_operating_ids",
-            "FromPath": {
-              "Root": 3,
-              "Segments": [
-                "expected_operating_ids"
-              ],
-              "Raw": "entity.expected_operating_ids"
-            },
-            "By": "",
-            "ByPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "FromFanOut": false
-          },
-          "Window": {
-            "From": "entity.period_id",
-            "FromPath": {
-              "Root": 3,
-              "Segments": [
-                "period_id"
-              ],
-              "Raw": "entity.period_id"
-            },
-            "By": "",
-            "ByPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            }
-          },
-          "Output": "payload.revenue",
-          "OutputPath": {
-            "Root": 1,
-            "Segments": [
-              "revenue"
-            ],
-            "Raw": "payload.revenue"
-          },
-          "CompleteWhen": "",
-          "Remaining": "",
-          "OnComplete": {
-            "ID": "",
-            "Description": "",
-            "Condition": "",
-            "PolicyRow": {
-              "Kind": "",
-              "Selectors": null,
-              "CaseValues": null,
-              "RangeValue": "",
-              "RangeLower": {
-                "Operator": "",
-                "Value": "",
-                "Kind": ""
-              },
-              "RangeUpper": {
-                "Operator": "",
-                "Value": "",
-                "Kind": ""
-              },
-              "Monotonicity": null,
-              "Lookup": null,
-              "Validation": null,
-              "Module": null
-            },
-            "AdvancesTo": "complete",
-            "Emit": {
-              "Event": "",
-              "From": "",
-              "Fields": null
-            },
-            "Action": {
-              "ID": "",
-              "Template": "",
-              "InstanceIDFrom": "",
-              "InstanceIDPath": {
-                "Root": 0,
-                "Segments": null,
-                "Raw": ""
-              },
-              "ConfigFrom": null,
-              "Mailbox": null,
-              "ArtifactRepo": null
-            },
-            "Activity": {
-              "ID": "",
-              "Tool": "",
-              "Input": null,
-              "Approval": null
-            },
-            "DataAccumulation": {
-              "Writes": null,
-              "SourceEvent": ""
-            },
-            "Compute": null,
-            "FanOut": null
-          },
-          "Timeout": {
-            "After": "5m",
-            "Outcome": {
-              "ID": "",
-              "Description": "",
-              "Condition": "",
-              "PolicyRow": {
-                "Kind": "",
-                "Selectors": null,
-                "CaseValues": null,
-                "RangeValue": "",
-                "RangeLower": {
-                  "Operator": "",
-                  "Value": "",
-                  "Kind": ""
-                },
-                "RangeUpper": {
-                  "Operator": "",
-                  "Value": "",
-                  "Kind": ""
-                },
-                "Monotonicity": null,
-                "Lookup": null,
-                "Validation": null,
-                "Module": null
-              },
-              "AdvancesTo": "failed",
-              "Emit": {
-                "Event": "",
-                "From": "",
-                "Fields": null
-              },
-              "Action": {
-                "ID": "",
-                "Template": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Root": 0,
-                  "Segments": null,
-                  "Raw": ""
-                },
-                "ConfigFrom": null,
-                "Mailbox": null,
-                "ArtifactRepo": null
-              },
-              "Activity": {
-                "ID": "",
-                "Tool": "",
-                "Input": null,
-                "Approval": null
-              },
-              "DataAccumulation": {
-                "Writes": null,
-                "SourceEvent": ""
-              },
-              "Compute": null,
-              "FanOut": null
-            }
-          },
-          "OnCompleteFound": true,
-          "TimeoutFound": true
-        },
-        "Compute": null,
-        "Query": null,
-        "FanOut": null,
-        "GroupBy": null,
-        "Filter": null,
-        "Reduce": null,
-        "Count": null,
-        "Clear": null
       }
     ]
   },
@@ -2189,19 +1906,6 @@
     "handlers": {
       "aW5ncmVzcw.aW5ncmVzcy1ub2Rl": {
         "operating.report.triggered": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -2210,7 +1914,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "operating.report.requested",
             "From": "",
@@ -2273,19 +1976,6 @@
       },
       "b3BlcmF0aW5n.b3BlcmF0aW5nLW5vZGU": {
         "operating.report.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -2294,7 +1984,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "operating.reported",
             "From": "",
@@ -2368,19 +2057,6 @@
       },
       "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvbGxlY3Rvcg": {
         "operating.reported": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -2389,7 +2065,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -2528,19 +2203,6 @@
           "EventHandlers": {
             "operating.report.triggered": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -2587,7 +2249,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -2651,19 +2312,6 @@
           "EventHandlers": {
             "operating.report.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -2721,7 +2369,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -2800,19 +2447,6 @@
                   "Root": 0,
                   "Segments": null
                 }
-              },
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
               },
               "Activity": {
                 "Approval": null,
@@ -2914,7 +2548,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -2989,19 +2622,6 @@
         },
         "EventType": "operating.report.triggered",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3074,19 +2694,6 @@
         },
         "EventType": "operating.report.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3170,19 +2777,6 @@
         },
         "EventType": "operating.reported",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3324,19 +2918,6 @@
     "handlers": {
       "d29ya2Vy.d29ya2VyLW5vZGU": {
         "work.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -3345,7 +2926,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "work.completed",
             "From": "",
@@ -3403,19 +2983,6 @@
           "EventHandlers": {
             "work.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -3451,7 +3018,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -3524,19 +3090,6 @@
         },
         "EventType": "work.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -3616,19 +3169,6 @@
     "handlers": {
       "YWNjb3VudA.YWNjb3VudC1ub2Rl": {
         "account.notification.completed": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -3637,7 +3177,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -3675,19 +3214,6 @@
           "Clear": null
         },
         "account.notify.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -3696,7 +3222,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -3772,19 +3297,6 @@
           "Clear": null
         },
         "account.registered": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -3793,7 +3305,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -3871,19 +3382,6 @@
       },
       "cG9ydGZvbGlv.cG9ydGZvbGlvLWNvb3JkaW5hdG9y": {
         "portfolio.account.register.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -3892,7 +3390,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "account.registered",
             "From": "",
@@ -3942,19 +3439,6 @@
           "Clear": null
         },
         "portfolio.accounts.register.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -3963,7 +3447,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -4069,19 +3552,6 @@
           "Clear": null
         },
         "portfolio.membership.seeded": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -4090,7 +3560,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -4166,19 +3635,6 @@
           "Clear": null
         },
         "portfolio.notify.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -4187,7 +3643,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -4266,19 +3721,6 @@
           "Clear": null
         },
         "portfolio.opened": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -4287,7 +3729,6 @@
           },
           "CreateEntity": true,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -4371,19 +3812,6 @@
           "EventHandlers": {
             "account.notification.completed": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -4407,7 +3835,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -4430,19 +3857,6 @@
             },
             "account.notify.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -4504,7 +3918,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -4527,19 +3940,6 @@
             },
             "account.registered": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -4601,7 +4001,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -4665,19 +4064,6 @@
           "EventHandlers": {
             "portfolio.account.register.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -4713,7 +4099,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -4736,19 +4121,6 @@
             },
             "portfolio.accounts.register.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -4810,7 +4182,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": {
                 "As": "account_id",
                 "Emit": {
@@ -4863,19 +4234,6 @@
             },
             "portfolio.membership.seeded": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -4937,7 +4295,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -4960,19 +4317,6 @@
             },
             "portfolio.notify.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -4996,7 +4340,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": {
                 "As": "account_id",
                 "Emit": {
@@ -5060,19 +4403,6 @@
             },
             "portfolio.opened": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -5134,7 +4464,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -5228,6 +4557,55 @@
     },
     "transitions": [
       {
+        "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.notification.completed",
+        "Node": {
+          "flow_path": "account",
+          "node_id": "account-node"
+        },
+        "EventType": "account.notification.completed",
+        "CreateEntity": false,
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "completed",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": null,
+          "SourceEvent": ""
+        },
+        "Emit": {
+          "Event": "",
+          "From": "",
+          "Fields": null
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": null,
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
         "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.notify.requested",
         "Node": {
           "flow_path": "account",
@@ -5235,19 +4613,6 @@
         },
         "EventType": "account.notify.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5328,68 +4693,6 @@
         "Clear": null
       },
       {
-        "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.notification.completed",
-        "Node": {
-          "flow_path": "account",
-          "node_id": "account-node"
-        },
-        "EventType": "account.notification.completed",
-        "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
-        "Activity": {
-          "ID": "",
-          "Tool": "",
-          "Input": null,
-          "Approval": null
-        },
-        "Guard": null,
-        "AdvancesTo": "completed",
-        "SetsGate": null,
-        "ClearGates": null,
-        "DataAccumulation": {
-          "Writes": null,
-          "SourceEvent": ""
-        },
-        "Emit": {
-          "Event": "",
-          "From": "",
-          "Fields": null
-        },
-        "OnSuccess": {
-          "Emit": {
-            "Event": "",
-            "From": "",
-            "Fields": null
-          }
-        },
-        "Condition": "",
-        "Loop": null,
-        "OnComplete": null,
-        "Rules": null,
-        "Accumulate": null,
-        "Join": null,
-        "Compute": null,
-        "Query": null,
-        "FanOut": null,
-        "GroupBy": null,
-        "Filter": null,
-        "Reduce": null,
-        "Count": null,
-        "Clear": null
-      },
-      {
         "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.registered",
         "Node": {
           "flow_path": "account",
@@ -5397,19 +4700,6 @@
         },
         "EventType": "account.registered",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5497,19 +4787,6 @@
         },
         "EventType": "portfolio.account.register.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5571,19 +4848,6 @@
         },
         "EventType": "portfolio.accounts.register.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5701,19 +4965,6 @@
         },
         "EventType": "portfolio.membership.seeded",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5801,19 +5052,6 @@
         },
         "EventType": "portfolio.notify.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -5904,19 +5142,6 @@
         },
         "EventType": "portfolio.opened",
         "CreateEntity": true,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6013,19 +5238,6 @@
     "handlers": {
       "Y29uc3VtZXI.Y29uc3VtZXItbm9kZQ": {
         "work.ready": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -6034,7 +5246,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -6074,19 +5285,6 @@
       },
       "cHJvZHVjZXI.cHJvZHVjZXItbm9kZQ": {
         "work.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -6095,7 +5293,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "work.ready",
             "From": "",
@@ -6153,19 +5350,6 @@
           "EventHandlers": {
             "work.ready": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -6189,7 +5373,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -6249,19 +5432,6 @@
           "EventHandlers": {
             "work.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -6297,7 +5467,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -6373,19 +5542,6 @@
         },
         "EventType": "work.ready",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6435,19 +5591,6 @@
         },
         "EventType": "work.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6508,19 +5651,6 @@
     "handlers": {
       "Lg.aXRlbS1oYW5kbGVy": {
         "item.received": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -6529,7 +5659,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "item.processed",
             "From": "",
@@ -6581,19 +5710,6 @@
       },
       "Lg.aXRlbS1vYnNlcnZlcg": {
         "item.processed": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -6602,7 +5718,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -6648,19 +5763,6 @@
           "EventHandlers": {
             "item.received": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -6696,7 +5798,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -6760,19 +5861,6 @@
           "EventHandlers": {
             "item.processed": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -6796,7 +5884,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -6868,19 +5955,6 @@
         },
         "EventType": "item.received",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -6942,19 +6016,6 @@
         },
         "EventType": "item.processed",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7022,19 +6083,6 @@
     "handlers": {
       "cHJvZHVjZXI.cHJvZHVjZXItbm9kZQ": {
         "validation.started": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -7043,7 +6091,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -7099,19 +6146,6 @@
                 "From": "",
                 "Fields": null
               },
-              "Action": {
-                "ID": "",
-                "Template": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Root": 0,
-                  "Segments": null,
-                  "Raw": ""
-                },
-                "ConfigFrom": null,
-                "Mailbox": null,
-                "ArtifactRepo": null
-              },
               "Activity": {
                 "ID": "",
                 "Tool": "",
@@ -7138,19 +6172,6 @@
           "Clear": null
         },
         "validation.triggered": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -7159,7 +6180,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "validation.requested",
             "From": "",
@@ -7211,19 +6231,6 @@
       },
       "dmFsaWRhdG9y.dmFsaWRhdG9yLW5vZGU": {
         "validation.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -7232,7 +6239,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "validation.started",
             "From": "",
@@ -7301,19 +6307,6 @@
           "EventHandlers": {
             "validation.started": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -7337,7 +6330,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -7357,19 +6349,6 @@
               "Reduce": null,
               "Rules": [
                 {
-                  "Action": {
-                    "ArtifactRepo": null,
-                    "ConfigFrom": null,
-                    "ID": "",
-                    "InstanceIDFrom": "",
-                    "InstanceIDPath": {
-                      "Raw": "",
-                      "Root": 0,
-                      "Segments": null
-                    },
-                    "Mailbox": null,
-                    "Template": ""
-                  },
                   "Activity": {
                     "Approval": null,
                     "ID": "",
@@ -7417,19 +6396,6 @@
             },
             "validation.triggered": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -7465,7 +6431,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -7531,19 +6496,6 @@
           "EventHandlers": {
             "validation.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -7590,7 +6542,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -7662,80 +6613,6 @@
     },
     "transitions": [
       {
-        "ID": "cHJvZHVjZXI.cHJvZHVjZXItbm9kZQ:validation.triggered",
-        "Node": {
-          "flow_path": "producer",
-          "node_id": "producer-node"
-        },
-        "EventType": "validation.triggered",
-        "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
-        "Activity": {
-          "ID": "",
-          "Tool": "",
-          "Input": null,
-          "Approval": null
-        },
-        "Guard": null,
-        "AdvancesTo": "",
-        "SetsGate": null,
-        "ClearGates": null,
-        "DataAccumulation": {
-          "Writes": null,
-          "SourceEvent": ""
-        },
-        "Emit": {
-          "Event": "validation.requested",
-          "From": "",
-          "Fields": {
-            "candidate": {
-              "Kind": "cel",
-              "Literal": null,
-              "Ref": "",
-              "RefPath": {
-                "Root": 0,
-                "Segments": null,
-                "Raw": ""
-              },
-              "CEL": "payload.candidate"
-            }
-          }
-        },
-        "OnSuccess": {
-          "Emit": {
-            "Event": "",
-            "From": "",
-            "Fields": null
-          }
-        },
-        "Condition": "",
-        "Loop": null,
-        "OnComplete": null,
-        "Rules": null,
-        "Accumulate": null,
-        "Join": null,
-        "Compute": null,
-        "Query": null,
-        "FanOut": null,
-        "GroupBy": null,
-        "Filter": null,
-        "Reduce": null,
-        "Count": null,
-        "Clear": null
-      },
-      {
         "ID": "cHJvZHVjZXI.cHJvZHVjZXItbm9kZQ:validation.started",
         "Node": {
           "flow_path": "producer",
@@ -7743,19 +6620,6 @@
         },
         "EventType": "validation.started",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7816,19 +6680,6 @@
               "From": "",
               "Fields": null
             },
-            "Action": {
-              "ID": "",
-              "Template": "",
-              "InstanceIDFrom": "",
-              "InstanceIDPath": {
-                "Root": 0,
-                "Segments": null,
-                "Raw": ""
-              },
-              "ConfigFrom": null,
-              "Mailbox": null,
-              "ArtifactRepo": null
-            },
             "Activity": {
               "ID": "",
               "Tool": "",
@@ -7855,6 +6706,67 @@
         "Clear": null
       },
       {
+        "ID": "cHJvZHVjZXI.cHJvZHVjZXItbm9kZQ:validation.triggered",
+        "Node": {
+          "flow_path": "producer",
+          "node_id": "producer-node"
+        },
+        "EventType": "validation.triggered",
+        "CreateEntity": false,
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": null,
+          "SourceEvent": ""
+        },
+        "Emit": {
+          "Event": "validation.requested",
+          "From": "",
+          "Fields": {
+            "candidate": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.candidate"
+            }
+          }
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": null,
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
         "ID": "dmFsaWRhdG9y.dmFsaWRhdG9yLW5vZGU:validation.requested",
         "Node": {
           "flow_path": "validator",
@@ -7862,19 +6774,6 @@
         },
         "EventType": "validation.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -7983,19 +6882,6 @@
     "handlers": {
       "aW5pdGlhdG9y.aW5pdGlhdG9yLW5vZGU": {
         "request.submitted": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -8004,7 +6890,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "requester.requested",
             "From": "",
@@ -8054,19 +6939,6 @@
           "Clear": null
         },
         "requester.setup.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -8075,7 +6947,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "requester.setup",
             "From": "",
@@ -8127,19 +6998,6 @@
       },
       "cHJvdmlkZXI.cHJvdmlkZXItbm9kZQ": {
         "provider.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -8148,7 +7006,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "provider.replied",
             "From": "",
@@ -8211,19 +7068,6 @@
       },
       "cmVxdWVzdGVy.cmVxdWVzdGVyLW5vZGU": {
         "provider.replied": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -8232,7 +7076,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -8270,19 +7113,6 @@
           "Clear": null
         },
         "requester.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -8291,7 +7121,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "provider.requested",
             "From": "",
@@ -8341,19 +7170,6 @@
           "Clear": null
         },
         "requester.setup": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -8362,7 +7178,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -8408,19 +7223,6 @@
           "EventHandlers": {
             "request.submitted": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -8456,7 +7258,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -8479,19 +7280,6 @@
             },
             "requester.setup.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -8527,7 +7315,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -8595,19 +7382,6 @@
           "EventHandlers": {
             "provider.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -8654,7 +7428,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -8718,19 +7491,6 @@
           "EventHandlers": {
             "provider.replied": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -8754,7 +7514,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -8777,19 +7536,6 @@
             },
             "requester.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -8825,7 +7571,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -8848,19 +7593,6 @@
             },
             "requester.setup": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -8884,7 +7616,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -8967,80 +7698,6 @@
     },
     "transitions": [
       {
-        "ID": "aW5pdGlhdG9y.aW5pdGlhdG9yLW5vZGU:requester.setup.requested",
-        "Node": {
-          "flow_path": "initiator",
-          "node_id": "initiator-node"
-        },
-        "EventType": "requester.setup.requested",
-        "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
-        "Activity": {
-          "ID": "",
-          "Tool": "",
-          "Input": null,
-          "Approval": null
-        },
-        "Guard": null,
-        "AdvancesTo": "",
-        "SetsGate": null,
-        "ClearGates": null,
-        "DataAccumulation": {
-          "Writes": null,
-          "SourceEvent": ""
-        },
-        "Emit": {
-          "Event": "requester.setup",
-          "From": "",
-          "Fields": {
-            "account_id": {
-              "Kind": "cel",
-              "Literal": null,
-              "Ref": "",
-              "RefPath": {
-                "Root": 0,
-                "Segments": null,
-                "Raw": ""
-              },
-              "CEL": "payload.account_id"
-            }
-          }
-        },
-        "OnSuccess": {
-          "Emit": {
-            "Event": "",
-            "From": "",
-            "Fields": null
-          }
-        },
-        "Condition": "",
-        "Loop": null,
-        "OnComplete": null,
-        "Rules": null,
-        "Accumulate": null,
-        "Join": null,
-        "Compute": null,
-        "Query": null,
-        "FanOut": null,
-        "GroupBy": null,
-        "Filter": null,
-        "Reduce": null,
-        "Count": null,
-        "Clear": null
-      },
-      {
         "ID": "aW5pdGlhdG9y.aW5pdGlhdG9yLW5vZGU:request.submitted",
         "Node": {
           "flow_path": "initiator",
@@ -9048,19 +7705,6 @@
         },
         "EventType": "request.submitted",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9115,6 +7759,67 @@
         "Clear": null
       },
       {
+        "ID": "aW5pdGlhdG9y.aW5pdGlhdG9yLW5vZGU:requester.setup.requested",
+        "Node": {
+          "flow_path": "initiator",
+          "node_id": "initiator-node"
+        },
+        "EventType": "requester.setup.requested",
+        "CreateEntity": false,
+        "Activity": {
+          "ID": "",
+          "Tool": "",
+          "Input": null,
+          "Approval": null
+        },
+        "Guard": null,
+        "AdvancesTo": "",
+        "SetsGate": null,
+        "ClearGates": null,
+        "DataAccumulation": {
+          "Writes": null,
+          "SourceEvent": ""
+        },
+        "Emit": {
+          "Event": "requester.setup",
+          "From": "",
+          "Fields": {
+            "account_id": {
+              "Kind": "cel",
+              "Literal": null,
+              "Ref": "",
+              "RefPath": {
+                "Root": 0,
+                "Segments": null,
+                "Raw": ""
+              },
+              "CEL": "payload.account_id"
+            }
+          }
+        },
+        "OnSuccess": {
+          "Emit": {
+            "Event": "",
+            "From": "",
+            "Fields": null
+          }
+        },
+        "Condition": "",
+        "Loop": null,
+        "OnComplete": null,
+        "Rules": null,
+        "Accumulate": null,
+        "Join": null,
+        "Compute": null,
+        "Query": null,
+        "FanOut": null,
+        "GroupBy": null,
+        "Filter": null,
+        "Reduce": null,
+        "Count": null,
+        "Clear": null
+      },
+      {
         "ID": "cHJvdmlkZXI.cHJvdmlkZXItbm9kZQ:provider.requested",
         "Node": {
           "flow_path": "provider",
@@ -9122,19 +7827,6 @@
         },
         "EventType": "provider.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9200,26 +7892,13 @@
         "Clear": null
       },
       {
-        "ID": "cmVxdWVzdGVy.cmVxdWVzdGVyLW5vZGU:requester.setup",
+        "ID": "cmVxdWVzdGVy.cmVxdWVzdGVyLW5vZGU:provider.replied",
         "Node": {
           "flow_path": "requester",
           "node_id": "requester-node"
         },
-        "EventType": "requester.setup",
+        "EventType": "provider.replied",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9269,19 +7948,6 @@
         },
         "EventType": "requester.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9336,26 +8002,13 @@
         "Clear": null
       },
       {
-        "ID": "cmVxdWVzdGVy.cmVxdWVzdGVyLW5vZGU:provider.replied",
+        "ID": "cmVxdWVzdGVy.cmVxdWVzdGVyLW5vZGU:requester.setup",
         "Node": {
           "flow_path": "requester",
           "node_id": "requester-node"
         },
-        "EventType": "provider.replied",
+        "EventType": "requester.setup",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -9423,19 +8076,6 @@
     "handlers": {
       "YWNjb3VudA.YWNjb3VudC1ub2Rl": {
         "account.ready": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -9444,7 +8084,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -9482,19 +8121,6 @@
           "Clear": null
         },
         "account.setup": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -9503,7 +8129,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -9543,19 +8168,6 @@
       },
       "cHJvZHVjZXI.cHJvZHVjZXItbm9kZQ": {
         "account.setup.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -9564,7 +8176,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "account.setup",
             "From": "",
@@ -9614,19 +8225,6 @@
           "Clear": null
         },
         "account.work.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -9635,7 +8233,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "account.ready",
             "From": "",
@@ -9693,19 +8290,6 @@
           "EventHandlers": {
             "account.ready": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -9729,7 +8313,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -9752,19 +8335,6 @@
             },
             "account.setup": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -9788,7 +8358,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -9850,19 +8419,6 @@
           "EventHandlers": {
             "account.setup.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -9898,7 +8454,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -9921,19 +8476,6 @@
             },
             "account.work.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -9969,7 +8511,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -10048,26 +8589,13 @@
     },
     "transitions": [
       {
-        "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.setup",
+        "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.ready",
         "Node": {
           "flow_path": "account",
           "node_id": "account-node"
         },
-        "EventType": "account.setup",
+        "EventType": "account.ready",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10110,26 +8638,13 @@
         "Clear": null
       },
       {
-        "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.ready",
+        "ID": "YWNjb3VudA.YWNjb3VudC1ub2Rl:account.setup",
         "Node": {
           "flow_path": "account",
           "node_id": "account-node"
         },
-        "EventType": "account.ready",
+        "EventType": "account.setup",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10179,19 +8694,6 @@
         },
         "EventType": "account.setup.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10253,19 +8755,6 @@
         },
         "EventType": "account.work.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10336,19 +8825,6 @@
     "handlers": {
       "YWNjb3VudA.YWNjb3VudC1ub2Rl": {
         "account.ready": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -10357,7 +8833,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -10397,19 +8872,6 @@
       },
       "cHJvZHVjZXI.cHJvZHVjZXItbm9kZQ": {
         "account.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "",
             "Tool": "",
@@ -10418,7 +8880,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "account.ready",
             "From": "",
@@ -10476,19 +8937,6 @@
           "EventHandlers": {
             "account.ready": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -10512,7 +8960,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -10572,19 +9019,6 @@
           "EventHandlers": {
             "account.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "",
@@ -10620,7 +9054,6 @@
                 },
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -10696,19 +9129,6 @@
         },
         "EventType": "account.ready",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10758,19 +9178,6 @@
         },
         "EventType": "account.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
@@ -10831,19 +9238,6 @@
     "handlers": {
       "Lg.c2VuZC1ub3RpZmljYXRpb24": {
         "automation.requested": {
-          "Action": {
-            "ID": "",
-            "Template": "",
-            "InstanceIDFrom": "",
-            "InstanceIDPath": {
-              "Root": 0,
-              "Segments": null,
-              "Raw": ""
-            },
-            "ConfigFrom": null,
-            "Mailbox": null,
-            "ArtifactRepo": null
-          },
           "Activity": {
             "ID": "send_notification",
             "Tool": "telegram.send_message",
@@ -10875,7 +9269,6 @@
           },
           "CreateEntity": false,
           "Description": "",
-          "EvidenceTarget": "",
           "Emit": {
             "Event": "",
             "From": "",
@@ -10921,19 +9314,6 @@
           "EventHandlers": {
             "automation.requested": {
               "Accumulate": null,
-              "Action": {
-                "ArtifactRepo": null,
-                "ConfigFrom": null,
-                "ID": "",
-                "InstanceIDFrom": "",
-                "InstanceIDPath": {
-                  "Raw": "",
-                  "Root": 0,
-                  "Segments": null
-                },
-                "Mailbox": null,
-                "Template": ""
-              },
               "Activity": {
                 "Approval": null,
                 "ID": "send_notification",
@@ -10980,7 +9360,6 @@
                 "Fields": null,
                 "From": ""
               },
-              "EvidenceTarget": "",
               "FanOut": null,
               "Filter": null,
               "GroupBy": null,
@@ -11049,19 +9428,6 @@
         },
         "EventType": "automation.requested",
         "CreateEntity": false,
-        "Action": {
-          "ID": "",
-          "Template": "",
-          "InstanceIDFrom": "",
-          "InstanceIDPath": {
-            "Root": 0,
-            "Segments": null,
-            "Raw": ""
-          },
-          "ConfigFrom": null,
-          "Mailbox": null,
-          "ArtifactRepo": null
-        },
         "Activity": {
           "ID": "",
           "Tool": "",
