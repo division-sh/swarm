@@ -1,0 +1,4 @@
+types:
+  Finding:
+    finding: text
+    severity: text

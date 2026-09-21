@@ -4,7 +4,11 @@ test-node:
   produces: [evidence.recorded]
   event_handlers:
     evidence.submitted:
-      action: record_evidence
-      evidence_target: evidence.items
+      data_accumulation:
+        writes:
+          - op: append
+            target: entity.findings
+            value:
+              cel: '{"finding": payload.finding, "severity": payload.severity}'
       emit:
         event: evidence.recorded

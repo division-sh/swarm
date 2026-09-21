@@ -8,6 +8,10 @@ expected:
 
   handler_outcome: success
   entity_state: collecting
+  entity_fields:
+    findings:
+      - finding: missing-field
+        severity: high
   emitted_events:
     - evidence.recorded
 

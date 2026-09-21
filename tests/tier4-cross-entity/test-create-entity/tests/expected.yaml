@@ -15,7 +15,7 @@ conformance:
   proves:
     - catalog.runtime.cross_entity
   retirement:
-    reason: "legacy mapping-shaped create_flow_instance authoring is unsupported"
+    reason: "All authored handler actions are retired; this historical artifact has no executable compatibility path"
     replacement: "tests/tier11-flow-composition/test-dynamic-flow-instance"
   public_companion:
     path: tests/visible-smoke.yaml
