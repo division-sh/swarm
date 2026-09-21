@@ -33,6 +33,7 @@ type compiledFlowInputPinValue struct {
 	producerEventSchema CompiledEventSchema
 	receiverEventSchema CompiledEventSchema
 	projection          CompiledFlowInputProjection
+	initialization      ReceiverInitialization
 	provenance          CompiledFlowPinProvenance
 	digest              string
 }
@@ -72,10 +73,11 @@ func (p CompiledFlowInputProjection) Readback() CompiledFlowInputProjectionReadb
 // FlowPinCompilationContext supplies the already-admitted scope and event
 // schema facts required to compile a pin independently of any connect edge.
 type FlowPinCompilationContext struct {
-	FlowID      string
-	FlowPath    string
-	SourceFile  string
-	EventSchema CompiledEventSchema
+	FlowID        string
+	FlowPath      string
+	SourceFile    string
+	EventSchema   CompiledEventSchema
+	Configuration ReceiverConfiguration
 }
 
 // CompiledFlowPinProvenance is diagnostic source evidence. It is immutable
@@ -105,7 +107,14 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s resolution: %w", pin.Event, err)
 	}
 	provenance := compiledFlowPinProvenance(context, pin.sourceLine, pin.sourceCol)
-	digest, err := compiledFlowPinDigest("input", context, pin.Event, FlowInputPinSourceCode(pin.Source), "", resolution, context.EventSchema, context.EventSchema, CompiledFlowInputProjection{})
+	initialization, err := CompileReceiverInitialization(context.Configuration, pin.Initialize, context.EventSchema)
+	if err != nil {
+		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s: %w", pin.Event, err)
+	}
+	if len(pin.Initialize) > 0 && !initialization.bound && pin.Source != FlowInputPinSourceExternal {
+		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s initialize requires an admitted producer schema", pin.Event)
+	}
+	digest, err := compiledFlowPinDigest("input", context, pin.Event, FlowInputPinSourceCode(pin.Source), "", resolution, context.EventSchema, context.EventSchema, CompiledFlowInputProjection{}, initialization)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("compile input pin %s digest: %w", pin.Event, err)
 	}
@@ -114,11 +123,14 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 	return CompiledFlowInputPin{value: &compiledFlowInputPinValue{
 		event: pin.Event, source: pin.Source, resolution: resolution,
 		context: storedContext, producerEventSchema: context.EventSchema, receiverEventSchema: context.EventSchema,
-		provenance: provenance, digest: digest,
+		provenance: provenance, digest: digest, initialization: initialization,
 	}}, nil
 }
 
 func validateAuthoredFlowInputPin(pin FlowInputEventPin) error {
+	if len(pin.Initialize) > 0 && pin.Resolution.Mode != FlowInputResolutionModeCreate && pin.Resolution.Mode != FlowInputResolutionModeSelectOrCreate {
+		return fmt.Errorf("input pin %s initialize requires create or select-or-create resolution", pin.Event)
+	}
 	event := pin.Event
 	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
 		return fmt.Errorf("input pin event %q is not an exact local canonical event identity", event)
@@ -301,7 +313,11 @@ func (p CompiledFlowInputPin) BindImportedEventSchema(schema CompiledEventSchema
 	value := *p.value
 	value.producerEventSchema = schema
 	value.receiverEventSchema = receiverSchema
-	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, FlowInputPinSourceCode(value.source), "", value.resolution, schema, receiverSchema, value.projection)
+	value.initialization, err = CompileReceiverInitialization(value.initialization.configuration, value.initialization.Bindings(), schema)
+	if err != nil {
+		return CompiledFlowInputPin{}, err
+	}
+	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, FlowInputPinSourceCode(value.source), "", value.resolution, schema, receiverSchema, value.projection, value.initialization)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("compile imported input pin %s digest: %w", value.event, err)
 	}
@@ -328,7 +344,7 @@ func CompileFlowOutputPin(context FlowPinCompilationContext, pin FlowOutputEvent
 		return CompiledFlowOutputPin{}, err
 	}
 	provenance := compiledFlowPinProvenance(context, pin.sourceLine, pin.sourceCol)
-	digest, err := compiledFlowPinDigest("output", context, pin.Event, "", FlowOutputSinkCode(pin.Sink), FlowInputPinResolution{}, context.EventSchema, CompiledEventSchema{}, CompiledFlowInputProjection{})
+	digest, err := compiledFlowPinDigest("output", context, pin.Event, "", FlowOutputSinkCode(pin.Sink), FlowInputPinResolution{}, context.EventSchema, CompiledEventSchema{}, CompiledFlowInputProjection{}, ReceiverInitialization{})
 	if err != nil {
 		return CompiledFlowOutputPin{}, fmt.Errorf("compile output pin %s digest: %w", pin.Event, err)
 	}
@@ -418,9 +434,13 @@ func compiledFlowPinProvenance(context FlowPinCompilationContext, line, column i
 	}
 }
 
-func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, event, source, sink string, resolution FlowInputPinResolution, producerSchema, receiverSchema CompiledEventSchema, projection CompiledFlowInputProjection) (string, error) {
+func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, event, source, sink string, resolution FlowInputPinResolution, producerSchema, receiverSchema CompiledEventSchema, projection CompiledFlowInputProjection, initialization ReceiverInitialization) (string, error) {
 	key, hasKey := producerSchema.BusinessKey()
 	projectionReadback := projection.Readback()
+	var initialize any
+	if direction == "input" {
+		initialize = initialization.semanticEvidence()
+	}
 	return canonicaljson.Hash(struct {
 		Direction            string                              `json:"direction"`
 		FlowPath             string                              `json:"flow_path"`
@@ -435,12 +455,14 @@ func compiledFlowPinDigest(direction string, context FlowPinCompilationContext, 
 		HasEventBusinessKey  bool                                `json:"has_event_business_key"`
 		ReceiverSchemaDigest string                              `json:"receiver_schema_digest,omitempty"`
 		Projection           CompiledFlowInputProjectionReadback `json:"projection,omitempty"`
+		Initialization       any                                 `json:"initialization,omitempty"`
 	}{
 		Direction: direction, FlowPath: context.FlowPath, Event: event, Source: source, Sink: sink,
 		Resolution: resolution, EventSchemaName: producerSchema.EventName(),
 		EventSchemaDigest: producerSchema.AcceptanceSchemaDigest(),
 		BusinessKeyField:  key.Field, BusinessKeyType: key.SemanticType, HasEventBusinessKey: hasKey,
 		ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(), Projection: projectionReadback,
+		Initialization: initialize,
 	})
 }
 
@@ -570,6 +592,11 @@ func flowInputPinCompilationContext(bundle *WorkflowContractBundle, flowID, flow
 	if bundle == nil {
 		return context, nil
 	}
+	configuration, err := bundle.ReceiverConfigurationForFlow(flowID)
+	if err != nil {
+		return FlowPinCompilationContext{}, err
+	}
+	context.Configuration = configuration
 	producerFlowID, producerEvent := flowID, event
 	if row, found, ambiguous := connectedEventSchemaOwnershipRow(bundle, flowID, event); ambiguous {
 		return FlowPinCompilationContext{}, fmt.Errorf("input pin %s has ambiguous connected producer ownership", event)
@@ -615,7 +642,7 @@ func compileIntrinsicFlowInputProjection(bundle *WorkflowContractBundle, flowID 
 			return CompiledFlowInputPin{}, err
 		}
 	}
-	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, FlowInputPinSourceCode(value.source), "", value.resolution, producerSchema, value.receiverEventSchema, projection)
+	value.digest, err = compiledFlowPinDigest("input", value.context, value.event, FlowInputPinSourceCode(value.source), "", value.resolution, producerSchema, value.receiverEventSchema, projection, value.initialization)
 	if err != nil {
 		return CompiledFlowInputPin{}, err
 	}

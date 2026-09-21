@@ -2866,12 +2866,12 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil, nil)
-	request, decision, failure := owner.activationRequest(evt, plan, instanceContract, []runtimecontracts.TemplateInstanceKeyValue{{
+	request, decision, err := owner.activationRequest(evt, plan, instanceContract, []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: plan.InstanceKey().Field(),
 		Value: "acct-1",
 	}})
-	if !failure.Empty() {
-		t.Fatalf("activationRequest failure = %q", failure.Code())
+	if err != nil {
+		t.Fatalf("activationRequest failure = %v", err)
 	}
 	for _, typ := range []reflect.Type{reflect.TypeOf(TemplateInstanceLifecycleDecision{}), reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{})} {
 		for index := 0; index < typ.NumField(); index++ {

@@ -12594,9 +12594,19 @@ flow_model:
       resolved_input_pin:
         location: schema.yaml pins.inputs.events
         canonical_form: |
-          An input event pin MAY be authored as an object `{event, source, resolution}` only when non-default source or resolution choices are required. Otherwise it is one scalar exact local event identity. `source` is optional and is a closed enum of `external` or validation-only `harness`. For a template receiver, `resolution.mode` owns create/select/ select-or-create behavior and `resolution.from` owns a supported exceptional typed identity source.
+          An input event pin MAY be authored as an object `{event, source, resolution, initialize}` only when non-default choices are required. Otherwise it is one scalar exact local event identity. `source` is optional and is a closed enum of `external` or validation-only `harness`. For a template receiver, `resolution.mode` owns create/select/select-or-create behavior and `resolution.from` owns a supported exceptional typed identity source. `initialize` is allowed only with create or select-or-create and never supplies an alternate instance identity.
         scalar_form: |
           A scalar input event pin is valid when no source or resolution choice is needed. A scalar input pin on a template receiver is not a selector.
+        receiver_initialization:
+          syntax: 'initialize: {priority: payload.priority, timeout_ms: payload.settings.timeout_ms}'
+          declarations: |
+            Configuration variables are declared under instance_variables.variables using the shared type vocabulary, with an optional default and description. Scalar declarations denote types, not descriptions. The instance key's type remains owned by its canonical entity declaration. No initialize.config wrapper, from wrapper, whole-payload copy, sender entity/event lookup or inferred payload leaf is supported.
+          admission: |
+            Compile exact destination names and payload paths with the receiver-scoped type catalog and the admitted producer schema. Shared type and value admission validates every supplied value and every default before any instance creation, route installation, agent readiness or automatic creation event. Absence is different from explicit null; only absence can use a default. Invalid supplied data never becomes a default. Defaults and admitted nested values are isolated from authored maps and sibling instances. Integer/double execution kinds are preserved. Initialization facts, types and defaults participate in compiled pin identity and survive imported-schema binding.
+          lifecycle: |
+            Initialization applies only when a receiver is created. Select-or-create reuse, ordinary ensure, retry and recovery consume committed configuration and never update it from another incoming request or reapply current defaults. The existing activation/publication transaction owns atomic visibility; no separate action executor or follow-up initialization write exists. Automatic creation payloads and first node/agent consumers observe the same admitted configuration. Runtime coordinates and provenance are not business configuration and cannot overwrite same-named business fields.
+          historical: |
+            Restart, readback and supported fork preparation consume exact committed or lawfully admitted configuration evidence. They do not derive business identity/configuration from path leaves, hashed instance IDs, current source defaults or first-match maps. Missing required historical evidence fails closed under the existing fork policy; this rule adds no fork capability.
         instance_fields:
           identity: 'The template flow''s scalar `instance: <field>` is the only receiver identity owner.'
           source: Omitted resolution.from derives payload.<instance> from the required producer schema; an override may select generated.uuid, event.id, or one exact top-level payload.<field>.

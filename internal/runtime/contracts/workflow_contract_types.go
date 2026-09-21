@@ -1061,9 +1061,12 @@ func (e ExpressionValue) HasCELValue() bool {
 }
 
 type FlowVariable struct {
-	Type        string `yaml:"type"`
-	Default     any    `yaml:"default"`
-	Description string `yaml:"description"`
+	Type        string            `yaml:"type"`
+	Default     any               `yaml:"default"`
+	Description string            `yaml:"description"`
+	HasDefault  bool              `yaml:"-"`
+	IsOptional  bool              `yaml:"-"`
+	Refinements SchemaRefinements `yaml:"-"`
 }
 type EventEmitterRef struct {
 	AgentID string `yaml:"agent_id"`
@@ -1393,6 +1396,7 @@ type FlowInputEventPin struct {
 	Event      string                 `yaml:"event"`
 	Source     FlowInputPinSource     `yaml:"source"`
 	Resolution FlowInputPinResolution `yaml:"resolution"`
+	Initialize map[string]string      `yaml:"initialize,omitempty"`
 	sourceLine int
 	sourceCol  int
 }
