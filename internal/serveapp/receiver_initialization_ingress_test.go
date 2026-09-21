@@ -37,101 +37,109 @@ func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.
 					t.Fatalf("direct input proof contains authored connect at %s", path)
 				}
 			}
-			payload := map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": 7, "text": "direct initialization"}
-			for _, tc := range []struct {
-				name, event, code string
-				payload           map[string]any
-			}{
-				{"private_child", "telegram-chat/chat.initialized", apiv1.EventNotDeclaredCode, map[string]any{"conversation_reference": "2307", "initial_text": "not a declared input", "message_number": 7, "enabled": false}},
-				{"wrong_provider_integer", input, apiv1.PayloadValidationFailedCode, map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": "7", "text": "invalid"}},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					before := receiverIngressApplicationSnapshot(t, rt)
-					err := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"bundle_hash": rt.BundleHash, "event_name": tc.event, "payload": tc.payload, "idempotency_key": tc.name})
-					if err.Data["code"] != tc.code {
-						t.Fatalf("scope/type refusal=%+v, want %s", err, tc.code)
-					}
-					after := receiverIngressApplicationSnapshot(t, rt)
-					if tc.code == apiv1.PayloadValidationFailedCode {
-						requireReceiverIngressRejectionDiagnostic(t, before, after, input)
-					}
-					for table, rows := range after {
-						if !reflect.DeepEqual(before[table], rows) {
-							t.Errorf("rejected public input changed %s: before=%v after=%v", table, before[table], rows)
-						}
-					}
-				})
-			}
-			// No run, concrete target, source event, entity, or flow-instance hints.
-			params := map[string]any{"bundle_hash": rt.BundleHash, "event_name": input, "payload": payload, "idempotency_key": "direct-provider-input"}
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			if !seed.NewRunCreated || seed.RunID == "" || seed.EventID == "" {
-				t.Fatalf("target-free creation acknowledgment=%+v", seed)
-			}
-			waitPublicationSiteCompletion(t, rt, seed.RunID)
-			const path = "telegram-chat/ti-1531b1e4416a29704d690346"
-			entityID := flowidentity.EntityID(path)
-			var raw string
-			if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template='telegram-chat'`, seed.RunID, path).Scan(&raw); err != nil {
-				t.Fatal(err)
-			}
-			var descriptor map[string]any
-			if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &descriptor); err != nil {
-				t.Fatal(err)
-			}
-			config, err := canonicaljson.CloneRuntimeValue(descriptor["config"])
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := map[string]any{"conversation_reference": "2307", "initial_text": "direct initialization", "message_number": int64(7), "enabled": false}
-			if !reflect.DeepEqual(config, want) {
-				t.Fatalf("provider-initialized typed config=%#v, want %#v", config, want)
-			}
-			var entity operatorread.OperatorEntityFull
-			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
-			wantFields := map[string]any{"conversation_reference": "2307", "initial_text": "direct initialization", "message_number": float64(7), "enabled": false}
-			if entity.Entity.RunID != seed.RunID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || !reflect.DeepEqual(entity.Fields, wantFields) {
-				t.Fatalf("real child did not consume typed initialization: %+v", entity)
-			}
-			var autoEvent string
-			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, seed.RunID, path+"/chat.initialized", seed.EventID).Scan(&autoEvent); err != nil {
-				t.Fatal(err)
-			}
-			node, err := identity.ParseExecutableNode("telegram-chat", "receiver")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, eventID := range []string{seed.EventID, autoEvent} {
-				var public operatorread.OperatorEventFull
-				requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &public)
-				if public.EventID != eventID || public.RunID != seed.RunID || len(public.Deliveries) != 1 {
-					t.Fatalf("direct input publication/recipients=%+v", public)
-				}
-				delivery := public.Deliveries[0]
-				if delivery.SubscriberType != "node" || delivery.SubscriberID != node.Key() || delivery.Status != "delivered" || delivery.Target.FlowInstance != path || delivery.Target.EntityID != entityID {
-					t.Fatalf("direct input exact owner=%+v", delivery)
-				}
-				if eventID == autoEvent && (public.SourceEventID != seed.EventID || !reflect.DeepEqual(public.Payload, wantFields)) {
-					t.Fatalf("initialization publication lost exact typed config/source: %+v", public)
-				}
-				var settled int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, eventID).Scan(&settled); err != nil {
-					t.Fatal(err)
-				}
-				if settled != 1 {
-					t.Fatalf("direct input first-claim outcomes=%d, want 1", settled)
-				}
-			}
-			var count int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name NOT LIKE 'platform.%'`, seed.RunID).Scan(&count); err != nil || count != 2 {
-				t.Fatalf("direct input introduced an intermediate publication: count=%d err=%v", count, err)
-			}
+			requireReceiverInitializationPublicProviderIngressCases(t, rt)
+		})
+	}
+}
+
+// Keep the public admission and durable readback obligations identical for the
+// in-process server and the independently built release executable.
+func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
+	const input = "inbound.telegram.text_message"
+	payload := map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": 7, "text": "direct initialization"}
+	for _, tc := range []struct {
+		name, event, code string
+		payload           map[string]any
+	}{
+		{"private_child", "telegram-chat/chat.initialized", apiv1.EventNotDeclaredCode, map[string]any{"conversation_reference": "2307", "initial_text": "not a declared input", "message_number": 7, "enabled": false}},
+		{"wrong_provider_integer", input, apiv1.PayloadValidationFailedCode, map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": "7", "text": "invalid"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			before := receiverIngressApplicationSnapshot(t, rt)
-			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, receiverIngressApplicationSnapshot(t, rt)) {
-				t.Fatal("duplicate direct input recreated receiver or repeated execution")
+			err := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"bundle_hash": rt.BundleHash, "event_name": tc.event, "payload": tc.payload, "idempotency_key": tc.name})
+			if err.Data["code"] != tc.code {
+				t.Fatalf("scope/type refusal=%+v, want %s", err, tc.code)
+			}
+			after := receiverIngressApplicationSnapshot(t, rt)
+			if tc.code == apiv1.PayloadValidationFailedCode {
+				requireReceiverIngressRejectionDiagnostic(t, before, after, input)
+			}
+			for table, rows := range after {
+				if !reflect.DeepEqual(before[table], rows) {
+					t.Errorf("rejected public input changed %s: before=%v after=%v", table, before[table], rows)
+				}
 			}
 		})
+	}
+	// No run, concrete target, source event, entity, or flow-instance hints.
+	params := map[string]any{"bundle_hash": rt.BundleHash, "event_name": input, "payload": payload, "idempotency_key": "direct-provider-input"}
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+	if !seed.NewRunCreated || seed.RunID == "" || seed.EventID == "" {
+		t.Fatalf("target-free creation acknowledgment=%+v", seed)
+	}
+	waitPublicationSiteCompletion(t, rt, seed.RunID)
+	const path = "telegram-chat/ti-1531b1e4416a29704d690346"
+	entityID := flowidentity.EntityID(path)
+	var raw string
+	if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template='telegram-chat'`, seed.RunID, path).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var descriptor map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &descriptor); err != nil {
+		t.Fatal(err)
+	}
+	config, err := canonicaljson.CloneRuntimeValue(descriptor["config"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"conversation_reference": "2307", "initial_text": "direct initialization", "message_number": int64(7), "enabled": false}
+	if !reflect.DeepEqual(config, want) {
+		t.Fatalf("provider-initialized typed config=%#v, want %#v", config, want)
+	}
+	var entity operatorread.OperatorEntityFull
+	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+	wantFields := map[string]any{"conversation_reference": "2307", "initial_text": "direct initialization", "message_number": float64(7), "enabled": false}
+	if entity.Entity.RunID != seed.RunID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || !reflect.DeepEqual(entity.Fields, wantFields) {
+		t.Fatalf("real child did not consume typed initialization: %+v", entity)
+	}
+	var autoEvent string
+	if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, seed.RunID, path+"/chat.initialized", seed.EventID).Scan(&autoEvent); err != nil {
+		t.Fatal(err)
+	}
+	node, err := identity.ParseExecutableNode("telegram-chat", "receiver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventID := range []string{seed.EventID, autoEvent} {
+		var public operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &public)
+		if public.EventID != eventID || public.RunID != seed.RunID || len(public.Deliveries) != 1 {
+			t.Fatalf("direct input publication/recipients=%+v", public)
+		}
+		delivery := public.Deliveries[0]
+		if delivery.SubscriberType != "node" || delivery.SubscriberID != node.Key() || delivery.Status != "delivered" || delivery.Target.FlowInstance != path || delivery.Target.EntityID != entityID {
+			t.Fatalf("direct input exact owner=%+v", delivery)
+		}
+		if eventID == autoEvent && (public.SourceEventID != seed.EventID || !reflect.DeepEqual(public.Payload, wantFields)) {
+			t.Fatalf("initialization publication lost exact typed config/source: %+v", public)
+		}
+		var settled int
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, eventID).Scan(&settled); err != nil {
+			t.Fatal(err)
+		}
+		if settled != 1 {
+			t.Fatalf("direct input first-claim outcomes=%d, want 1", settled)
+		}
+	}
+	var count int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name NOT LIKE 'platform.%'`, seed.RunID).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("direct input introduced an intermediate publication: count=%d err=%v", count, err)
+	}
+	before := receiverIngressApplicationSnapshot(t, rt)
+	duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+	if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, receiverIngressApplicationSnapshot(t, rt)) {
+		t.Fatal("duplicate direct input recreated receiver or repeated execution")
 	}
 }
 
