@@ -4392,7 +4392,7 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 
 func TestTemplateFlowAgentMaterializationBlueprintStaysRunlessUntilAdmission(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, "review", "review/inst-1", "ent-1")
+	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, "review", "review/inst-1", "ent-1", map[string]any{})
 	if err != nil {
 		t.Fatalf("TemplateFlowAgentMaterializationBlueprints: %v", err)
 	}

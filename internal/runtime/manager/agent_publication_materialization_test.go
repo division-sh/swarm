@@ -37,7 +37,7 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 		t.Fatal(err)
 	}
 	for _, flow := range []string{"right", "nested/deeper"} {
-		materialized, err := TemplateFlowAgentMaterializationRecords(managerIdentityTestRunID, source, flow, flow+"/instance-1", uuid.NewString())
+		materialized, err := TemplateFlowAgentMaterializationRecords(managerIdentityTestRunID, source, flow, flow+"/instance-1", uuid.NewString(), map[string]any{})
 		if err != nil {
 			t.Fatal(err)
 		}
