@@ -1229,9 +1229,10 @@
         "validateArtifactRepoWritableDirectory",
         "writeArtifactRepoFiles"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "nine_deleted_artifact_repo_primitive_entries_removed_exact_live_manifest_retained_pipeline_action_owner_required_empty",
       "proofs": [
-        "R37"
+        "TestDirectPrimitiveOwnershipManifestIsTotal",
+        "TestPipelineEffectPrimitiveOwnersAreExact"
       ]
     },
     {
