@@ -150,6 +150,10 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 		if err != nil {
 			violations = append(violations, relative+": "+err.Error())
 		}
+		minimalHistory, err := classifyReceiverHistoryMinimalRunLiterals(relative, file)
+		if err != nil {
+			violations = append(violations, relative+": "+err.Error())
+		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			literal, ok := node.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
@@ -159,7 +163,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 			if err != nil || !runWrite.MatchString(value) {
 				return true
 			}
-			if hostile[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
+			if hostile[literal.Pos()] || minimalHistory[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
 				return true
 			}
 			violations = append(violations, relative+": "+compactSQLForLifecycleGuard(value))
@@ -173,6 +177,91 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	sort.Strings(violations)
 	if len(violations) > 0 {
 		t.Fatalf("semantic run fixtures bypass the lifecycle owner:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func classifyReceiverHistoryMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
+	if path != "internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go" {
+		return nil, nil
+	}
+	// This native revision-capture test shadows runs with a transaction-local
+	// one-column TEMP table. It cannot create a semantic runtime run. Require
+	// that exact schema and insert in the same named test, not a file exemption.
+	const scope = "TestReceiverConfigHistoricalCaptureAndReadinessBothStores"
+	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY)"
+	const insert = "INSERT INTO runs VALUES ($1)"
+	schemas, inserts := 0, 0
+	approved := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING || eventBoundaryEnclosingScope(file, literal.Pos()) != scope {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		switch compactSQLForLifecycleGuard(value) {
+		case schema:
+			schemas++
+		case insert:
+			inserts++
+			approved[literal.Pos()] = true
+		}
+		return true
+	})
+	if schemas != 1 || inserts != 1 {
+		return nil, fmt.Errorf("receiver history minimal schema requires exactly one TEMP runs declaration and insert, got %d/%d", schemas, inserts)
+	}
+	return approved, nil
+}
+
+func TestReceiverHistoryMinimalRunFixtureClassificationIsExact(t *testing.T) {
+	const path = "internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go"
+	const scope = "TestReceiverConfigHistoricalCaptureAndReadinessBothStores"
+	const schema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY)"
+	const insert = "INSERT INTO runs VALUES ($1)"
+	const extra = "UPDATE runs SET status='running' WHERE run_id=$1"
+	source := "package fixture\nfunc " + scope + "() { use(" + strconv.Quote(schema) + "); use(" + strconv.Quote(insert) + ") }\n"
+	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
+	for _, tc := range []struct {
+		name, path, source string
+		want               bool
+	}{
+		{"exact", path, source, true},
+		{"wrong-path", "internal/runtime/other_test.go", source, false},
+		{"wrong-function", path, strings.ReplaceAll(source, scope, "Other"), false},
+		{"missing-schema", path, strings.Replace(source, strconv.Quote(schema), `"SELECT 1"`, 1), false},
+		{"non-temporary-schema", path, strings.Replace(source, "CREATE TEMP TABLE", "CREATE TABLE", 1), false},
+		{"semantic-schema", path, strings.Replace(source, "run_id TEXT PRIMARY KEY)", "run_id TEXT PRIMARY KEY, status TEXT)", 1), false},
+		{"duplicate-schema", path, strings.Replace(source, "use(", "use("+strconv.Quote(schema)+"); use(", 1), false},
+		{"duplicate-insert", path, strings.Replace(source, "use(", "use("+strconv.Quote(insert)+"); use(", 1), false},
+		{"changed-insert", path, strings.Replace(source, insert, "INSERT INTO runs (run_id) VALUES ($1)", 1), false},
+		{"same-function-extra", path, strings.Replace(source, "use(", "use("+strconv.Quote(extra)+"); use(", 1), false},
+		{"sibling-function", path, source + "func other() { use(" + strconv.Quote(insert) + ") }", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture_test.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved, err := classifyReceiverHistoryMinimalRunLiterals(tc.path, file)
+			allowed := err == nil
+			ast.Inspect(file, func(node ast.Node) bool {
+				literal, ok := node.(*ast.BasicLit)
+				if !ok || literal.Kind != token.STRING {
+					return true
+				}
+				value, err := strconv.Unquote(literal.Value)
+				if err == nil && runWrite.MatchString(value) && !approved[literal.Pos()] {
+					allowed = false
+				}
+				return true
+			})
+			if allowed != tc.want {
+				t.Fatalf("allowed=%v want=%v err=%v", allowed, tc.want, err)
+			}
+		})
 	}
 }
 
