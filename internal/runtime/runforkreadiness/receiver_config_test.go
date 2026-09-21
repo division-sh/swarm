@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -89,7 +90,9 @@ func TestSelectedContractReceiverConfigSealedReadbackPreservesNumericKinds(t *te
 }
 
 func TestSelectedContractReceiverConfigAdmissionSealsRecordedBusinessConfig(t *testing.T) {
-	req := templateAdmissionRequest(t)
+	req := templateAdmissionRequestWithVariables(t, map[string]contracts.FlowVariable{
+		"nested": {Type: "json"}, "status": {Type: "boolean"}, "flow_path": {Type: "json"},
+	})
 	req.Plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","status":"active","config":{"vertical_id":"original-business-key","nested":[7,7.0,null],"status":false,"flow_path":["business","path"]}}`)
 	admitted, err := Admit(req)
 	if err != nil {

@@ -447,7 +447,10 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	// Ensure adopts the committed receiver; creation-only caller inputs cannot
 	// replace its configuration, agent revisions, or pending creation payload.
 	req.Instance = projection.Identity
-	req.Config = cloneFlowConfig(projection.Config)
+	req.Config = projection.Config
+	if req.Config != nil {
+		req.Config = cloneFlowConfig(req.Config)
+	}
 	templateID := strings.TrimSpace(req.Instance.TemplateID)
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
 	if !ok {
@@ -1124,11 +1127,6 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, admission.source); err != nil {
 		return err
 	}
-	if !admission.processPrepared {
-		if err := am.retirePublishedDynamicFlowRoute(flowIdentity); err != nil {
-			return err
-		}
-	}
 	if !readiness.Eligible() {
 		return retirement.retire(flowIdentity)
 	}
@@ -1167,6 +1165,11 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	}
 	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
 		return fmt.Errorf("dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
+	}
+	if !admission.processPrepared {
+		if err := am.retirePublishedDynamicFlowRoute(flowIdentity); err != nil {
+			return err
+		}
 	}
 	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
 	if err != nil {
