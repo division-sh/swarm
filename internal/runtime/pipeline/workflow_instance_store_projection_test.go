@@ -393,7 +393,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		fieldsRaw  []byte
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT es.revision, COALESCE(fi.config->>'name', ''), es.fields
+		SELECT es.revision, COALESCE(fi.config->'config'->>'name', ''), es.fields
 		FROM entity_state es
 		JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
