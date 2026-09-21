@@ -634,6 +634,9 @@ func lifecycleConfigRevision(rec PersistedAgent) (string, error) {
 // AgentConfigPlanRevision returns the run-independent revision admitted by
 // declaration and readiness topology owners before a concrete run exists.
 func AgentConfigPlanRevision(config models.AgentConfig, plan runtimeagentidentity.Plan) (string, error) {
+	if err := config.ValidateReceiverConfig(); err != nil {
+		return "", err
+	}
 	plan = plan.Normalize()
 	if err := plan.Validate(); err != nil {
 		return "", err
@@ -649,16 +652,19 @@ func AgentConfigPlanRevision(config models.AgentConfig, plan runtimeagentidentit
 	projection["identity"] = plan
 	// Receiver config is runtime data: semantic JSON hashing alone collapses
 	// integer/double kinds and can admit a different recovered agent plan.
-	if len(config.Config) != 0 {
+	for key, data := range map[string]json.RawMessage{"config": config.Config, "receiver_config": config.ReceiverConfig} {
+		if len(data) == 0 {
+			continue
+		}
 		var business any
-		if err := canonicaljson.DecodePreservingNumberLexemes(config.Config, &business); err != nil {
+		if err := canonicaljson.DecodePreservingNumberLexemes(data, &business); err != nil {
 			return "", err
 		}
 		wire, err := canonicaljson.MarshalPreservingNumberKinds(business)
 		if err != nil {
 			return "", err
 		}
-		projection["config"] = string(wire)
+		projection[key] = string(wire)
 	}
 	raw, err = canonicaljson.Bytes(projection)
 	if err != nil {

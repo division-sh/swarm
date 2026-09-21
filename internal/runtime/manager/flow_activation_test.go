@@ -4919,9 +4919,9 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	}
 }
 
-func TestBuildFlowAgentConfigRejectsPayloadDerivedNestedSystemPromptBeforeMaterialization(t *testing.T) {
+func TestBuildFlowAgentConfigKeepsReceiverPromptNamedDataInert(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(t, ""))
-	_, err := buildFlowAgentConfig(managerIdentityTestRunID,
+	cfg, err := buildFlowAgentConfig(managerIdentityTestRunID,
 		source,
 		managerTestFlowAgentNamePlan(t, source, "review", "reviewer"),
 		"review",
@@ -4938,8 +4938,14 @@ func TestBuildFlowAgentConfigRejectsPayloadDerivedNestedSystemPromptBeforeMateri
 		map[string]struct{}{},
 		map[string]any{"opaque": []any{map[string]any{"system_prompt": "obsolete"}}},
 	)
-	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "config.opaque[0].system_prompt") {
-		t.Fatalf("buildFlowAgentConfig error = %v, want nested authored system_prompt rejection", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(cfg.Config) != "{}" || string(cfg.ReceiverConfig) != `{"opaque":[{"system_prompt":"obsolete"}]}` {
+		t.Fatalf("receiver data entered authored config: agent=%s receiver=%s", cfg.Config, cfg.ReceiverConfig)
+	}
+	if err := models.ValidateNoAuthoredSystemPrompt(cfg.ReceiverConfig); err == nil {
+		t.Fatal("same value must still be forbidden as authored agent config")
 	}
 }
 

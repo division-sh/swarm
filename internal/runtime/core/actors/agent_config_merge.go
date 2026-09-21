@@ -68,6 +68,9 @@ func MergeAgentConfig(base, patch AgentConfig) AgentConfig {
 	if len(patch.Config) > 0 {
 		out.Config = patch.Config
 	}
+	if len(patch.ReceiverConfig) > 0 {
+		out.ReceiverConfig = patch.ReceiverConfig
+	}
 	if patch.BudgetEnvelope != 0 {
 		out.BudgetEnvelope = patch.BudgetEnvelope
 	}
