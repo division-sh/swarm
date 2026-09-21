@@ -9,6 +9,7 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -117,8 +118,10 @@ func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
 
 func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
 	obj := map[string]any{}
-	if len(raw) > 0 && json.Valid(raw) {
-		_ = json.Unmarshal(raw, &obj)
+	if len(raw) > 0 {
+		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &obj); err != nil {
+			return nil, fmt.Errorf("invalid opaque agent config: %w", err)
+		}
 	}
 	retired := make([]string, 0)
 	for key := range retiredAgentMemoryConfigKeys {
@@ -155,7 +158,7 @@ func sanitizeOpaqueAgentConfig(raw json.RawMessage) ([]byte, error) {
 	if len(obj) == 0 {
 		obj = map[string]any{}
 	}
-	return json.Marshal(obj)
+	return canonicaljson.MarshalPreservingNumberKinds(obj)
 }
 
 func ProjectPersistedAgentConfig(cfg runtimeactors.AgentConfig, parentAgentID string) (PersistedAgentProjection, error) {
