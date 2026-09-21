@@ -4685,6 +4685,8 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 				t.Fatal("support flow schema missing")
 			}
 			req := testActivationRequest(bundle, "support", tc.instanceID, "ent-1", tc.instancePath)
+			// This source declares no receiver variables or instance key.
+			req.Config = map[string]any{}
 			am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
 			records, err := am.flowInstanceAgentRecords(managerIdentityTestRunID, req, schema, scope)
 			if err != nil {
