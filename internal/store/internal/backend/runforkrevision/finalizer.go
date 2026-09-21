@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
@@ -76,7 +77,7 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 					return nil, err
 				}
 			}
-			equal, comparedPrefix := compareCanonicalProjection(current, latest)
+			equal, comparedPrefix := compareFamilyCanonicalProjection(family, current, latest)
 			if equal {
 				continue
 			}
@@ -121,7 +122,7 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 					continue
 				}
 				stored, exists := family.latest[fact.key]
-				if exists && stored.present && canonicalJSONEqual(fact.fact, stored.fact) {
+				if exists && stored.present && revisionFamilyJSONEqual(family.family, fact.fact, stored.fact) {
 					continue
 				}
 				if err := appendFact(family.family, fact.key, fact.fact, true); err != nil {
@@ -208,16 +209,38 @@ func canonicalProjectionEqual(current []canonicalFact, latest map[string]ledgerF
 }
 
 func compareCanonicalProjection(current []canonicalFact, latest map[string]ledgerFact) (bool, int) {
+	return compareFamilyCanonicalProjection("", current, latest)
+}
+
+func compareFamilyCanonicalProjection(family Family, current []canonicalFact, latest map[string]ledgerFact) (bool, int) {
 	if len(current) != countPresent(latest) {
 		return false, 0
 	}
 	for i, fact := range current {
 		stored, ok := latest[fact.key]
-		if !ok || !stored.present || !canonicalJSONEqual(fact.fact, stored.fact) {
+		if !ok || !stored.present || !revisionFamilyJSONEqual(family, fact.fact, stored.fact) {
 			return false, i
 		}
 	}
 	return true, len(current)
+}
+
+func revisionFamilyJSONEqual(family Family, left, right []byte) bool {
+	if family != FamilyEntityMetadata {
+		return canonicalJSONEqual(left, right)
+	}
+	// Receiver config is runtime data: 7 and 7.0 cannot share a revision
+	// merely because the other families' semantic JSON comparison merges them.
+	configBytes := func(raw []byte) ([]byte, error) {
+		var fact map[string]any
+		if err := canonicaljson.DecodePreservingNumberLexemes(raw, &fact); err != nil {
+			return nil, err
+		}
+		return canonicaljson.MarshalPreservingNumberKinds(fact)
+	}
+	a, err := configBytes(left)
+	b, otherErr := configBytes(right)
+	return err == nil && otherErr == nil && bytes.Equal(a, b)
 }
 
 func countPresent(facts map[string]ledgerFact) int {

@@ -1309,6 +1309,22 @@ func decodeWorkflowInstanceJSONBoolMap(label string, raw []byte) (map[string]boo
 	return out, nil
 }
 
+// WorkflowInstanceBusinessConfigForRoute decodes a recorded config envelope
+// without re-admitting defaults or deriving business keys from route identity.
+func WorkflowInstanceBusinessConfigForRoute(route runtimeflowidentity.Route, raw []byte) (map[string]any, error) {
+	if !route.Valid() {
+		return nil, fmt.Errorf("workflow config readback requires an exact route")
+	}
+	business, control, err := decodeWorkflowInstanceConfigPayload(raw, workflowInstancePersistedControl{StorageRef: route.InstancePath})
+	if err != nil {
+		return nil, err
+	}
+	if control.InstanceID != route.InstanceID || control.FlowPath != route.InstancePath {
+		return nil, fmt.Errorf("workflow config readback disagrees with exact route %s", route.InstancePath)
+	}
+	return business, nil
+}
+
 func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePersistedControl) (map[string]any, workflowInstancePersistedControl, error) {
 	config, err := decodeWorkflowInstanceJSONMap("flow_instances.config", raw)
 	if err != nil {

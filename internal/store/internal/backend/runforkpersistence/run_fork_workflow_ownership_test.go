@@ -3,6 +3,7 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -12,12 +13,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -96,7 +99,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := workflowOwnershipCompanionDatabase(t, backend)
-			for _, change := range []string{"fresh_then_exact_reuse", "missing_config", "duplicate_agents", "wrong_agent_route", "missing_readiness", "wrong_readiness", "inactive", "wrong_config", "wrong_entity_owner"} {
+			for _, change := range []string{"fresh_then_exact_reuse", "missing_config", "duplicate_agents", "wrong_agent_route", "missing_readiness", "wrong_readiness", "inactive", "wrong_config", "wrong_numeric_kind", "wrong_entity_owner"} {
 				t.Run(change, func(t *testing.T) {
 					plan, planning, state, modes, forkID := workflowOwnershipProjection(t, source, "consumer")
 					state.ExecutionMode = executionmode.Live
@@ -154,6 +157,21 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 					}
 					if err != nil || len(topologies) != len(state.Agents) {
 						t.Fatalf("fresh template state-only construction: %v", err)
+					}
+					var persisted []byte
+					if err := tx.QueryRow(`SELECT config FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, candidate.RunID, candidate.Route).Scan(&persisted); err != nil {
+						t.Fatal(err)
+					}
+					readback, err := pipeline.WorkflowInstanceBusinessConfigForRoute(canonical.Route, persisted)
+					if err != nil {
+						t.Fatal(err)
+					}
+					wire, err := canonicaljson.MarshalPreservingNumberKinds(readback)
+					if err != nil || string(wire) != `{"flow_path":["business","path"],"nested":[7,7.0,null],"status":false,"vertical_id":"recorded-business-key"}` {
+						t.Fatalf("materialized business config = %s: %v", wire, err)
+					}
+					if change == "wrong_numeric_kind" {
+						candidate.Config["nested"].([]any)[1] = int64(7)
 					}
 					query := ""
 					switch change {
@@ -220,6 +238,9 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState, FlowInstance: path, EntityType: entityType,
 	}}}}
+	if mode == "template" {
+		plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":{"vertical_id":"recorded-business-key","nested":[7,7.0,null],"status":false,"flow_path":["business","path"]}}`)
+	}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})
 	eventName := "branch/producer/work.ready"
 	producer := eventtest.StaticFlowRoutingSource("branch/producer", "branch/producer", uuid.NewString())

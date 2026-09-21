@@ -66,12 +66,13 @@ type runForkRevisionEntityMutation struct {
 
 type runForkRevisionEntityMetadata struct {
 	runForkRevisionedFact
-	EntityID     string    `json:"entity_id"`
-	FlowInstance string    `json:"flow_instance"`
-	EntityType   string    `json:"entity_type"`
-	Slug         string    `json:"slug"`
-	Name         string    `json:"name"`
-	CreatedAt    time.Time `json:"created_at"`
+	FlowConfig   json.RawMessage `json:"flow_config"`
+	EntityID     string          `json:"entity_id"`
+	FlowInstance string          `json:"flow_instance"`
+	EntityType   string          `json:"entity_type"`
+	Slug         string          `json:"slug"`
+	Name         string          `json:"name"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 type runForkRevisionDelivery struct {

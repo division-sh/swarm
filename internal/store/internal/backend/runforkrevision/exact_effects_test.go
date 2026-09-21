@@ -23,6 +23,7 @@ func TestExactRevisionReadBatchesPreserveSelection(t *testing.T) {
 	for _, ddl := range []string{
 		`CREATE TABLE run_fork_fact_revisions (run_id TEXT, family TEXT, fact_key TEXT, revision INTEGER, fact TEXT, present BOOLEAN)`,
 		`CREATE TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
+		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, config TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)

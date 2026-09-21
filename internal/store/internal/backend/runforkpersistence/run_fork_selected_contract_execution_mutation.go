@@ -200,22 +200,18 @@ func selectedContractProjectedWorkflowStateRoute(forkRunID string, state runfork
 
 func selectedContractWorkflowStateConfig(state selectedContractWorkflowState) ([]byte, error) {
 	descriptor := state.Config
-	if state.Mode != "template" {
-		descriptor = map[string]any{
-			"flow_path":        state.Route,
-			"instance_id":      runtimeflowidentity.LogicalInstanceID(state.Route),
-			"storage_ref":      state.Route,
-			"workflow_version": state.WorkflowVersion,
-		}
-	} else if descriptor == nil {
+	if state.Mode == "template" && descriptor == nil {
 		return nil, fmt.Errorf("selected-contract template workflow state requires exact activation config")
+	}
+	if descriptor == nil {
+		descriptor = map[string]any{}
 	}
 	route := runtimeflowidentity.RouteForInstancePath(state.Route)
 	descriptor, err := runtimepipeline.WorkflowInstanceConfigPayloadForRoute(route, state.WorkflowVersion, descriptor)
 	if err != nil {
 		return nil, fmt.Errorf("encode selected-contract workflow route config: %w", err)
 	}
-	config, err := json.Marshal(descriptor)
+	config, err := runtimecanonicaljson.MarshalPreservingNumberKinds(descriptor)
 	if err != nil {
 		return nil, fmt.Errorf("encode selected-contract root descriptor: %w", err)
 	}
@@ -252,8 +248,15 @@ func requireSelectedContractWorkflowCompanion(ctx context.Context, tx *sql.Tx, p
 	if err != nil {
 		return false, fmt.Errorf("verify selected-contract workflow instance: %w", err)
 	}
+	business, configErr := runtimepipeline.WorkflowInstanceBusinessConfigForRoute(runtimeflowidentity.RouteForInstancePath(state.Route), persistedConfig)
+	persistedBusiness, persistedErr := runtimecanonicaljson.MarshalPreservingNumberKinds(business)
+	wantBusiness := state.Config
+	if wantBusiness == nil {
+		wantBusiness = map[string]any{}
+	}
+	expectedBusiness, expectedErr := runtimecanonicaljson.MarshalPreservingNumberKinds(wantBusiness)
 	if persistedWorkflow != state.WorkflowName || persistedMode != state.Mode || persistedStatus != "active" || !unterminated ||
-		!workflowCommitJSONEqual(persistedConfig, config) {
+		!workflowCommitJSONEqual(persistedConfig, config) || configErr != nil || persistedErr != nil || expectedErr != nil || string(persistedBusiness) != string(expectedBusiness) {
 		return false, fmt.Errorf("selected-contract workflow instance %s disagrees with exact descriptor", state.Route)
 	}
 	return true, nil

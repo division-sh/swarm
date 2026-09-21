@@ -15,6 +15,7 @@ func TestSelectedContractReceiverConfigMissingHistoricalEvidenceFailsClosed(t *t
 		for _, frontier := range []string{"agent", "activity"} {
 			t.Run(leaf+"/"+frontier, func(t *testing.T) {
 				req := templateAdmissionRequest(t)
+				req.Plan.Entities[0].MaterializationMetadata.FlowConfig = nil
 				path := "consumer/" + leaf
 				req.Plan.Entities[0].MaterializationMetadata.FlowInstance = path
 				// Neither an entity field nor an identically named state bucket
@@ -84,5 +85,64 @@ func TestSelectedContractReceiverConfigSealedReadbackPreservesNumericKinds(t *te
 			t.Fatalf("sealed config lost numeric kinds: %#v", values)
 		}
 		values[0] = "mutated readback"
+	}
+}
+
+func TestSelectedContractReceiverConfigAdmissionSealsRecordedBusinessConfig(t *testing.T) {
+	req := templateAdmissionRequest(t)
+	req.Plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","status":"active","config":{"vertical_id":"original-business-key","nested":[7,7.0,null],"status":false,"flow_path":["business","path"]}}`)
+	admitted, err := Admit(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := admitted.ValidateAgainst(req.Binding); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"flow_path":["business","path"],"nested":[7,7.0,null],"status":false,"vertical_id":"original-business-key"}`
+	for i := 0; i < 2; i++ {
+		projection, err := admitted.Projection()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, config := range []map[string]any{projection.States[0].Config, projection.Flows[0].Config} {
+			wire, err := canonicaljson.MarshalPreservingNumberKinds(config)
+			if err != nil || string(wire) != want {
+				t.Fatalf("sealed business config = %s: %v", wire, err)
+			}
+			config["nested"].([]any)[0] = "mutated readback"
+		}
+		flow := projection.Flows[0]
+		if flow.ActivationVariables["vertical_id"] != "original-business-key" || string(flow.Agents[0].Config.Config) != want {
+			t.Fatalf("first activation consumers lost exact config: %#v, %s", flow.ActivationVariables, flow.Agents[0].Config.Config)
+		}
+	}
+	req.Plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(strings.Replace(string(req.Plan.Entities[0].MaterializationMetadata.FlowConfig), "[7,7.0,null]", "[7,7,null]", 1))
+	if err := admitted.ValidateAgainst(req.Binding); err == nil {
+		t.Fatal("numeric-kind-only config change retained the original admission binding")
+	}
+	req.Plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(`{"config":{"vertical_id":"incoming"}}`)
+	if err := admitted.ValidateAgainst(req.Binding); err == nil {
+		t.Fatal("different recorded config retained the original admission binding")
+	}
+}
+
+func TestSelectedContractReceiverConfigRejectsContradictoryRecordedEnvelope(t *testing.T) {
+	for _, raw := range []string{
+		`{"instance_id":"other","flow_path":"consumer/item","config":{}}`,
+		`{"instance_id":"item","flow_path":"consumer/other","config":{}}`,
+		`{"instance_id":"item","storage_ref":"consumer/other","flow_path":"consumer/item","config":{}}`,
+		`{"instance_id":"item","flow_path":"consumer/item","vertical_id":"flat-business-key"}`,
+		`{"instance_id":"item","flow_path":"consumer/item","config":null}`,
+		`{"instance_id":"item","flow_path":"consumer/item","config":{},"config":{}}`,
+		`{"instance_id":"item","flow_path":"consumer/item","config":{}} {}`,
+		"{\"config\":{\"bad\":\"\xff\"}}",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			req := templateAdmissionRequest(t)
+			req.Plan.Entities[0].MaterializationMetadata.FlowConfig = json.RawMessage(raw)
+			if _, err := Admit(req); err == nil {
+				t.Fatal("contradictory recorded config admitted")
+			}
+		})
 	}
 }

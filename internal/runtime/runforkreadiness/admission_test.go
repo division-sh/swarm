@@ -319,6 +319,7 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 		EntityID: entityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
 			EntityType: "deployment", FlowInstance: "consumer/item",
+			FlowConfig: json.RawMessage(`{"instance_id":"item","storage_ref":"consumer/item","flow_path":"consumer/item","config":{"vertical_id":"recorded-business-key"}}`),
 		},
 	}}}
 	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})

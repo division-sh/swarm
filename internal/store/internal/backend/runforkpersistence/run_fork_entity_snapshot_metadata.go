@@ -73,6 +73,7 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
 	}
 	return runfork.RunForkMaterializedEntitySnapshotMetadata{
+		FlowConfig:   append([]byte(nil), sourceState.FlowConfig...),
 		Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 		FlowInstance: flowInstance,
 		EntityType:   entityType,

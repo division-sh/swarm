@@ -337,9 +337,11 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 	case FamilyEntityMetadata:
 		spec = projectionSpec{
-			query:  `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name, e.created_at`,
-			source: "entity_state e", runAlias: "e",
-			columns: typedColumns(map[string]valueKind{"created_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at"),
+			query: `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name, e.created_at, f.config`,
+			// Capture the config with its owning entity's revision, never by
+			// reading the mutable flow row during historical reconstruction.
+			source: `entity_state e LEFT JOIN flow_instances f ON f.run_id = e.run_id AND f.instance_path = e.flow_instance`, runAlias: "e",
+			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config"),
 		}
 	case FamilyEventDeliveries:
 		spec = projectionSpec{

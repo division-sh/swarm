@@ -188,12 +188,15 @@ const (
 )
 
 type RunForkMaterializedEntitySnapshotMetadata struct {
-	Owner        string `json:"owner"`
-	FlowInstance string `json:"flow_instance"`
-	EntityType   string `json:"entity_type"`
-	Slug         string `json:"slug,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Source       string `json:"source"`
+	// FlowConfig is the exact flow_instances.config envelope recorded with
+	// the entity metadata at the selected revision, not current flow state.
+	FlowConfig   json.RawMessage `json:"flow_config,omitempty"`
+	Owner        string          `json:"owner"`
+	FlowInstance string          `json:"flow_instance"`
+	EntityType   string          `json:"entity_type"`
+	Slug         string          `json:"slug,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Source       string          `json:"source"`
 }
 
 const (
