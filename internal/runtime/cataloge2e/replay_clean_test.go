@@ -18,7 +18,6 @@ import (
 
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
-	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testcatalog"
@@ -402,40 +401,16 @@ func (h *runtimeHarness) waitForCatalogAutomaticEventCount(eventName string, min
 		h.mu.Lock()
 		authoredIDs := cloneCatalogStringSet(h.publishedIDs)
 		h.mu.Unlock()
-		count := 0
-		opts := operatorread.OperatorEventListOptions{
-			Filter: operatorread.OperatorEventListFilter{RunID: catalogRuntimeRunID, EventName: eventName},
-			Limit:  minimum,
-		}
-		for {
-			page, err := lister.ListOperatorEvents(ctx, opts)
-			if err != nil {
-				h.t.Fatalf("load automatic events for transcript barrier: %v", err)
-			}
-			for _, full := range page.Events {
-				eventID := strings.TrimSpace(full.EventID)
-				if _, authored := authoredIDs[eventID]; authored {
-					continue
-				}
-				event, err := full.EventSnapshot()
-				if err != nil {
-					h.t.Fatalf("read automatic event %s for transcript barrier: %v", eventID, err)
-				}
-				if event.AdmissionClass() != events.EventAdmissionRootIngress {
-					count++
-				}
-			}
-			if count >= minimum || strings.TrimSpace(page.NextCursor) == "" {
-				break
-			}
-			opts.Cursor = page.NextCursor
+		count, err := countCatalogSettledAutomaticEvents(ctx, lister, eventName, minimum, authoredIDs)
+		if err != nil {
+			h.t.Fatalf("load settled automatic events for transcript barrier: %v", err)
 		}
 		if count >= minimum {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			h.t.Fatalf("wait for at least %d automatic %s events: %v (observed=%d)", minimum, eventName, ctx.Err(), count)
+			h.t.Fatalf("wait for at least %d successfully settled automatic %s events: %v (observed=%d)", minimum, eventName, ctx.Err(), count)
 		case <-ticker.C:
 		}
 	}
@@ -463,6 +438,29 @@ func reopenCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, transcri
 
 func assertCatalogReplayFixtureOutcome(t testing.TB, fixture testcatalog.Fixture, h *runtimeHarness) {
 	t.Helper()
+	var required map[string]int
+	switch fixture.RelativePath {
+	case "tests/tier5-flow-lifecycle/test-create-flow-instance-config":
+		required = map[string]int{"flow.spawn_with_config": 1, "flow.spawned": 1, "worker-flow/ti-5c59b413ad4dd4f8d1321e7a/worker.ready": 1}
+		child, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, nil, nil, "worker-flow/ti-5c59b413ad4dd4f8d1321e7a", false)
+		if err != nil || !found {
+			t.Fatalf("load configured worker completion: found=%t err=%v", found, err)
+		}
+		if child.CurrentState != "complete" {
+			t.Fatalf("configured worker state = %q, want complete", child.CurrentState)
+		}
+	case "tests/tier5-flow-lifecycle/test-timer-recurring":
+		required = map[string]int{"monitor.started": 1, "monitor.stopped": 1, "timer.tick": 2}
+	}
+	if required != nil {
+		full, err := h.catalogOperatorEvents()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateCatalogSuccessfulDeliveries(full, required); err != nil {
+			t.Fatalf("%s expected-success delivery proof: %v", fixture.Name, err)
+		}
+	}
 	if fixture.HasClaim("catalog.runtime.flow_composition") {
 		assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t, h, "work.assign", "worker/ti-7561254fcace846571c87052", "task-handler")
 	}
