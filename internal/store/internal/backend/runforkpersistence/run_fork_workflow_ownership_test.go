@@ -70,7 +70,7 @@ func TestSelectedForkWorkflowOwnerAssociations(t *testing.T) {
 }
 
 func TestSelectedForkTemplateGenerationAssociations(t *testing.T) {
-	source := workflowOwnershipSource(t, canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{Consumer: canonicalrouting.TemplateInstanceAgentConsumer}))
+	source := workflowOwnershipSource(t, canonicalrouting.CopyReceiverConfigHistory(t))
 	for _, change := range []string{"live", "mock", "conflicting_generation", "missing_generation"} {
 		t.Run(change, func(t *testing.T) {
 			plan, planning, _, modes, _ := workflowOwnershipProjection(t, source, "consumer")
@@ -95,7 +95,7 @@ func TestSelectedForkTemplateGenerationAssociations(t *testing.T) {
 }
 
 func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
-	source := workflowOwnershipSource(t, canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{Consumer: canonicalrouting.TemplateInstanceAgentConsumer}))
+	source := workflowOwnershipSource(t, canonicalrouting.CopyReceiverConfigHistory(t))
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := workflowOwnershipCompanionDatabase(t, backend)
@@ -103,7 +103,11 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 				t.Run(change, func(t *testing.T) {
 					plan, planning, state, modes, forkID := workflowOwnershipProjection(t, source, "consumer")
 					state.ExecutionMode = executionmode.Live
-					flow, err := manager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID, map[string]any{"vertical_id": "item"})
+					config, err := pipeline.WorkflowInstanceBusinessConfigForRoute(state.Route, plan.Entities[0].MaterializationMetadata.FlowConfig)
+					if err != nil {
+						t.Fatal(err)
+					}
+					flow, err := manager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID, config)
 					if err != nil {
 						t.Fatal(err)
 					}

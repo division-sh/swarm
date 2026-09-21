@@ -3,7 +3,7 @@ package canonicalrouting
 import "testing"
 
 // CopyReceiverConfigHistory declares the recorded business values used by the
-// fixed-revision config proof, including names that overlap runtime controls.
+// fixed-revision and fork-companion proofs, including runtime-control collisions.
 func CopyReceiverConfigHistory(t testing.TB) string {
 	t.Helper()
 	root := CopyTemplateInstanceRoute(t, TemplateInstanceRouteOptions{Consumer: TemplateInstanceAgentConsumer})
