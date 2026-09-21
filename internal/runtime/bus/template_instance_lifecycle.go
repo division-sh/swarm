@@ -56,7 +56,6 @@ type TemplateInstanceLifecycleDecision struct {
 	KeyMaterial   []runtimecontracts.TemplateInstanceKeyValue
 	SourceEventID string
 	Activation    *runtimepipeline.FlowInstanceActivationPlan
-	configuration map[string]any
 	receiver      runtimepinrouting.ConnectRoutePlanEndpoint
 }
 
@@ -98,36 +97,10 @@ func (d TemplateInstanceLifecycleDecision) Route() runtimeflowidentity.Route {
 }
 
 func (d TemplateInstanceLifecycleDecision) ActivationVariables() map[string]string {
-	if d.Activation != nil {
-		return cloneRouteActivationVariables(d.Activation.ActivationVariables)
+	if d.Activation == nil {
+		return nil
 	}
-	out := map[string]string{}
-	for name, value := range d.configuration {
-		out[name] = fmt.Sprint(value)
-	}
-	for _, key := range d.KeyMaterial {
-		field := key.Field.Path()
-		value := strings.TrimSpace(key.Value)
-		if field != "" && value != "" {
-			out[field] = value
-		}
-	}
-	setTemplateInstanceLifecycleVariable(out, "entity_id", d.EntityID)
-	setTemplateInstanceLifecycleVariable(out, "instance_id", d.InstanceID)
-	setTemplateInstanceLifecycleVariable(out, "template_id", d.receiver.Readback().FlowID)
-	if route := d.Route(); route.Valid() {
-		setTemplateInstanceLifecycleVariable(out, "flow_scope_key", route.ScopeKey)
-		setTemplateInstanceLifecycleVariable(out, "flow_instance_path", route.InstancePath)
-	}
-	return out
-}
-
-func setTemplateInstanceLifecycleVariable(vars map[string]string, key, value string) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return
-	}
-	vars[key] = value
+	return cloneRouteActivationVariables(d.Activation.ActivationVariables)
 }
 
 func withTemplateInstanceLifecyclePreview(ctx context.Context) context.Context {
@@ -257,7 +230,6 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 		KeyMaterial:   append([]runtimecontracts.TemplateInstanceKeyValue{}, keyMaterial...),
 		SourceEventID: strings.TrimSpace(evt.ID()),
 		receiver:      plan.ReceiverEndpoint(),
-		configuration: config,
 	}
 	return runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: o.source,

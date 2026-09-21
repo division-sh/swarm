@@ -118,3 +118,21 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 		})
 	}
 }
+
+func TestReceiverInitializationPreviewUsesOnlyPreparedActivationVariables(t *testing.T) {
+	decision := TemplateInstanceLifecycleDecision{InstanceID: "must-not-derive", EntityID: "must-not-derive"}
+	if got := decision.ActivationVariables(); got != nil {
+		t.Fatalf("unprepared decision synthesized activation variables: %#v", got)
+	}
+	decision.Activation = &runtimepipeline.FlowInstanceActivationPlan{ActivationVariables: map[string]string{
+		"label": "exact-admitted-label", "instance_id": "exact-admitted-instance", "enabled": "false",
+	}}
+	got := decision.ActivationVariables()
+	if !reflect.DeepEqual(got, decision.Activation.ActivationVariables) {
+		t.Fatalf("preview differs from prepared activation: %#v", got)
+	}
+	got["label"] = "mutated-preview"
+	if decision.Activation.ActivationVariables["label"] != "exact-admitted-label" {
+		t.Fatal("preview aliases prepared activation")
+	}
+}
