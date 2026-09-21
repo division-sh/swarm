@@ -79,6 +79,7 @@ profiles:
       - store-runtime-full-01
       - store-runtime-full-02
       - store-runtime-fanout
+      - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -135,6 +136,7 @@ profiles:
       - store-runtime-full-01
       - store-runtime-full-02
       - store-runtime-fanout
+      - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -191,6 +193,7 @@ profiles:
       - store-runtime-full-01
       - store-runtime-full-02
       - store-runtime-fanout
+      - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -247,6 +250,7 @@ profiles:
       - store-runtime-full-01
       - store-runtime-full-02
       - store-runtime-fanout
+      - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
       - store-runtime-full-04
@@ -606,8 +610,17 @@ units:
   store-runtime-fanout:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    # Preserve each complete root, including real process death and claim expiry.
-    run: '^TestFanOut.*$'
+    # Positive RE2 complement of Process; the complete crash proof runs separately.
+    run: '^TestFanOut($|[^P].*|P($|[^r].*|r($|[^o].*|o($|[^c].*|c($|[^e].*|e($|[^s].*|s($|[^s].*)))))))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-fanout-process:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    # CI 35601180844: 66.92s in real process death/takeover, not duplicate unit proof.
+    # Retain both stores, both commit cuts, lease recovery and every child assertion.
+    run: '^TestFanOutProcess.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
