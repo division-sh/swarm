@@ -123,12 +123,11 @@
         "conditionalRuleMailboxWriteSupportedSurfaceBundle",
         "loadMailboxWriteSupportedSurfaceBundle"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "handler_action_proofs_removed_without_replacement_independent_supported_notify_human_HTTP_get_list_ack_proof",
       "proofs": [
         "R37",
-        "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
-        "TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends",
-        "TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud"
+        "internal/serveapp/selected_fork_notice_controls_test.go::TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores",
+        "No equivalent handler action or CLI proof claimed"
       ]
     },
     {
@@ -156,9 +155,13 @@
       "historical_functions": [
         "publicSurfaceSelectedOperatorReadAPIProofs"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "retired_mailbox_materializer_census_removed_supported_HTTP_and_composite_CLI_proof_references_reconciled_no_action_replacement",
       "proofs": [
-        "R37"
+        "TestPublicSurfaceBackendMatrixCoversSelectedBackendRows",
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores",
+        "TestScenarioMailboxActualServerContinuationBothStores",
+        "TestMailboxListUsesTaggedNoticeAndDecisionCardProjection",
+        "TestMailboxViewRendersTaggedResources"
       ]
     },
     {
@@ -169,9 +172,13 @@
         "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
         "mailbox_write"
       ],
-      "disposition": "pending_owner_reference_or_assertion_review_no_qualification_claim",
+      "disposition": "retired_mailbox_materializer_census_removed_supported_HTTP_and_composite_CLI_proof_references_reconciled_no_action_replacement",
       "proofs": [
-        "R37"
+        "TestPublicSurfaceBackendMatrixCoversSelectedBackendRows",
+        "TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores",
+        "TestScenarioMailboxActualServerContinuationBothStores",
+        "TestMailboxListUsesTaggedNoticeAndDecisionCardProjection",
+        "TestMailboxViewRendersTaggedResources"
       ]
     },
     {
@@ -651,10 +658,10 @@
         "TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec",
         "validateDeterministicWorkLadderDesignRepairs"
       ],
-      "disposition": "historical_reference_or_generic_surface_proof_action_case_retired_not_replaced",
+      "disposition": "historical_1667_disposition_preserved_but_explicitly_superseded_by_2307_5754202888_no_current_action_or_activity_replacement",
       "proofs": [
-        "TestActionRetirementCorpusLedgerIsComplete",
-        "TestNoRetiredHandlerActionInterpreters"
+        "TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec",
+        "TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims"
       ]
     },
     {
@@ -762,10 +769,10 @@
       "historical_markers": [
         "artifact_repo_commit"
       ],
-      "disposition": "historical_reference_or_generic_surface_proof_action_case_retired_not_replaced",
+      "disposition": "historical_1667_disposition_preserved_but_explicitly_superseded_by_2307_5754202888_no_current_action_or_activity_replacement",
       "proofs": [
-        "TestActionRetirementCorpusLedgerIsComplete",
-        "TestNoRetiredHandlerActionInterpreters"
+        "TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec",
+        "TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims"
       ]
     },
     {
@@ -788,9 +795,9 @@
         "TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends",
         "TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends"
       ],
-      "disposition": "historical_reference_or_generic_surface_proof_action_case_retired_not_replaced",
+      "disposition": "three_retired_mailbox_action_proof_references_removed_without_replacement_independent_route_authority_proofs_retained",
       "proofs": [
-        "TestActionRetirementCorpusLedgerIsComplete",
+        "TestRouteAuthorityMatrixCoversApprovedRows",
         "TestNoRetiredHandlerActionInterpreters"
       ]
     },
@@ -1189,9 +1196,10 @@
         "Kind",
         "Executable"
       ],
-      "disposition": "pending_main_removal_of_dead_ActionInstruction_projection",
+      "disposition": "removed_dead_ActionInstruction_ActionFromContract_and_action_only_tests_in_62ecb3dba_GuardInstruction_and_ActionKey_preserved",
       "proofs": [
-        "TestNoRetiredHandlerActionInterpreters"
+        "TestNoRetiredHandlerActionInterpreters",
+        "main-reported registry/identity/engine PASS after ba42d3cbd integrated as 62ecb3dba"
       ]
     },
     {
@@ -1206,9 +1214,10 @@
         "TestActionRegistryHasNoImplicitEmissionTransport",
         "TestActionFromContract_PreservesBuiltinAndKind"
       ],
-      "disposition": "pending_main_removal_of_dead_ActionInstruction_projection",
+      "disposition": "removed_dead_ActionInstruction_ActionFromContract_and_action_only_tests_in_62ecb3dba_GuardInstruction_and_ActionKey_preserved",
       "proofs": [
-        "TestNoRetiredHandlerActionInterpreters"
+        "TestNoRetiredHandlerActionInterpreters",
+        "main-reported registry/identity/engine PASS after ba42d3cbd integrated as 62ecb3dba"
       ]
     },
     {
@@ -2656,10 +2665,11 @@
       "historical_functions": [
         "CopyArtifactRepoCommitAdmission"
       ],
-      "disposition": "pending_Euler_fixture_migration_or_explicit_capability_retirement",
+      "disposition": "CopyArtifactRepoCommitAdmission_Git_only_helper_removed_in_e09d75d84_other_closed_variants_preserved",
       "proofs": [
         "TestActionRetirementCorpusHasNoLiveAuthoredActions",
-        "CopyArtifactRepoCommitAdmission"
+        "TestNoRetiredHandlerActionInterpreters",
+        "Euler 4f186c0ef integrated as e09d75d84; deliberate capability removal, not replacement proof"
       ]
     },
     {
@@ -3019,10 +3029,11 @@
       "historical_markers": [
         "record_evidence"
       ],
-      "disposition": "typed_list_append_source_migrated_order_duplicate_restart_receipt_pending",
+      "disposition": "typed_list_append_migrated_order_duplicate_restart_and_exact_publications_main_reported_both_stores_count3_PASS",
       "proofs": [
         "TestTier1PrimitiveCanonicalRoutingOwnership",
-        "R31"
+        "internal/runtime/cataloge2e/receiver_evidence_append_test.go:TestRecordEvidenceReplacementUsesTypedStateAppendBothStores",
+        "R31: main-reported count=3 both stores PASS 5.745s; source f0a51f369; no local native receipt claimed"
       ]
     },
     {
@@ -3032,10 +3043,11 @@
         "evidence_target",
         "record_evidence"
       ],
-      "disposition": "typed_list_append_source_migrated_order_duplicate_restart_receipt_pending",
+      "disposition": "typed_list_append_migrated_order_duplicate_restart_and_exact_publications_main_reported_both_stores_count3_PASS",
       "proofs": [
         "TestTier1PrimitiveCanonicalRoutingOwnership",
-        "R31"
+        "internal/runtime/cataloge2e/receiver_evidence_append_test.go:TestRecordEvidenceReplacementUsesTypedStateAppendBothStores",
+        "R31: main-reported count=3 both stores PASS 5.745s; source f0a51f369; no local native receipt claimed"
       ]
     },
     {

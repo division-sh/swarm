@@ -478,6 +478,7 @@ func TestSwarmTestCatalogCompanionsAreProtocolOnly(t *testing.T) {
 	if len(companions) != 87 {
 		t.Fatalf("public catalog companions = %d, want 87", len(companions))
 	}
+	retiredActions := 0
 	for _, fixture := range companions {
 		fixture := fixture
 		t.Run(fixture.RelativePath, func(t *testing.T) {
@@ -518,8 +519,19 @@ func TestSwarmTestCatalogCompanionsAreProtocolOnly(t *testing.T) {
 			if len(doc.Expect.Entities) == 1 && !doc.Expect.Entities[0].hasDetailAssertion() {
 				t.Fatalf("scenario entity expectations = %#v, want detail assertion", doc.Expect.Entities)
 			}
+			if fixture.RelativePath == "tests/tier4-cross-entity/test-create-entity" {
+				retirement := fixture.Metadata.Retirement
+				if fixture.Metadata.Disposition != testcatalog.DispositionRetired || retirement == nil || retirement.Reason != "All authored handler actions are retired; this historical artifact has no executable compatibility path" || retirement.Replacement != "tests/tier11-flow-composition/test-dynamic-flow-instance" {
+					t.Fatalf("historical action companion lost exact retirement classification: %+v", fixture.Metadata)
+				}
+				retiredActions++
+				return
+			}
 			assertSwarmTestScenarioThroughPublicRPC(t, fixture.Root, doc)
 		})
+	}
+	if retiredActions != 1 {
+		t.Fatalf("retired action companions = %d, want exactly 1", retiredActions)
 	}
 }
 

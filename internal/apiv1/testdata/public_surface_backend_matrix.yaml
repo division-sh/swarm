@@ -383,7 +383,7 @@ store_parity:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership, served_lifecycle], proof_ids: [workflow-settlement-parity, served-test-setup, workflow-opaque-owner]}
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runs, entities, testSetup]
-      runtime_deps: [WorkflowPersistence, PipelineObligations, MailboxMaterializer]
+      runtime_deps: [WorkflowPersistence, PipelineObligations]
       nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
       platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
       public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.fan_out.list, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
@@ -1021,13 +1021,13 @@ operator_read_api_parity_ledger:
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
-      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores, backends: [default_sqlite, explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: mailbox.list
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
-      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores, backends: [default_sqlite, explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: mailbox.subscribe
     classification: different_semantic_concept_with_proof
@@ -1491,19 +1491,19 @@ rows:
       These additions do not prove run.trace or add SQLite cursor support.
 
   - id: mailbox_read_api_after_mailbox_write
-    surface: mailbox.list and mailbox.get after handler-level mailbox_write on selected stores
+    surface: mailbox.list and mailbox.get after supported notify_human on selected stores
     classification: already_covered_by_existing_proof
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
     api_methods: [mailbox.list, mailbox.get]
     openrpc_matrix_methods: [mailbox.list, mailbox.get]
     store_owners:
-      - runtimepipeline.MailboxWriteMaterializationStore
+      - runtimetools.NotifyHumanTool
       - apiv1.MailboxAPIStore
     proof_dimensions: [selected_store, real_v1_handler, canonical_store_owner, openrpc_publication]
     proof_refs:
       - kind: go_test
-        name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends
+        name: TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores
 
   - id: mailbox_read_cli
     surface: swarm mailbox list and swarm mailbox view
@@ -1523,7 +1523,17 @@ rows:
       - kind: go_test
         name: TestMailboxViewRendersTaggedResources
       - kind: go_test
-        name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends
+        name: TestSupportedHumanNoticeAcknowledgmentAfterRetirementBothStores
+      - kind: go_test
+        name: TestScenarioMailboxActualServerContinuationBothStores
+    notes: >
+      Composite proof: control_mailbox tests execute list/view commands against
+      a protocol server and assert exact method, parameters and rendering.
+      The scenario continuation test uses the real CLI API client and real
+      selected-store HTTP handlers on both stores for paginated card selection;
+      it is not a serve boot or notice creation proof. The supported notice
+      test proves notify_human HTTP get/list and acknowledgment on both stores,
+      not CLI execution. No single end-to-end list/view notice proof is claimed.
 
   - id: local_runtime_abandon_active_runs
     surface: local foreground runtime and --abandon-active-runs selected-store quiescence

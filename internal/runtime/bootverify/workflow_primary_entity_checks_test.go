@@ -119,6 +119,15 @@ func TestRun_RejectsInvalidRootPrimaryEntityForConstructedBundle(t *testing.T) {
 
 func loadPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
+	bundle, err := admitPrimaryEntityFixtureBundle(t, flowSchema, flowEntities)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func admitPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities string) (*runtimecontracts.WorkflowContractBundle, error) {
+	t.Helper()
 	repoRoot := repoRootForBootverifyTest(t)
 	root := t.TempDir()
 
@@ -127,9 +136,5 @@ func loadPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities strin
 	if strings.TrimSpace(flowEntities) != "" {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return bundle
+	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 }

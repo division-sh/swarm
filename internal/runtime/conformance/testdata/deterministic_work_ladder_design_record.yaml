@@ -36,7 +36,7 @@ source_refs:
     - platform-spec.yaml#vocabulary.agent_role.types.system_node
     - platform-spec.yaml#handler_specification.dependency_graph
     - platform-spec.yaml#handler_specification.handler_fields.compute
-    - platform-spec.yaml#handler_specification.handler_fields.action
+    - platform-spec.yaml#tool_model.platform_builtin_tools.handler_action_retirement
 watchlist:
   id: runtime_operations.deterministic_work_ladder
   owner: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
@@ -114,18 +114,23 @@ repairs:
       fork policy ad hoc from orchestration or trace code.
   - id: artifact_repo_commit_disposition
     owner_issue: 1667
-    decision: canonical_action_owner_until_write_activity_journal
-    canonical_owner: platform-spec.yaml#handler_specification.handler_fields.action.valid_values.artifact_repo_commit
-    current_disposition: canonical_platform_action_owner
+    superseded_by_issue: 2307
+    superseded_by_ruling: "5754202888"
+    historical_disposition: >
+      #1667 kept the canonical platform action owner until a separately gated
+      write-activity migration with a stable activity attempt/result journal
+      and idempotency execution owner preserved artifact root/path safety,
+      provider request history, output-state repair and result-event guarantees.
+      #2307 deliberately retires that capability instead; this historical
+      condition grants no surviving action or replacement activity authority.
+    decision: retired_without_replacement
+    canonical_owner: platform-spec.yaml#tool_model.platform_builtin_tools.handler_action_retirement
+    current_disposition: unavailable
     activity_owner_status: non_owner_for_artifact_commits
-    migration_blocker: stable_activity_attempt_result_journal_and_idempotency_execution_owner
     future_migration_condition: >
-      Only a separately gated write-effect activity migration may rebind
-      artifact repository commits, and only if it preserves artifact root/path
-      safety, provider request history, output-state repair, and declared
-      success/failure result-event guarantees in the same merge-bearing
-      spec/runtime/verifier PR.
-    current_action_survives_until_migration: true
+      A future local repository capability is separately gated under #2029,
+      requires its own contract and proof, and is not a dependency of #2307.
+    current_action_survives_until_migration: false
   - id: stage_order_after_activity
     owner_issue: 1668
     decision: declarative_helpers_before_compute_module

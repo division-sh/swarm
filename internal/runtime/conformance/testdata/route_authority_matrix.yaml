@@ -149,9 +149,6 @@ rows:
       - {kind: go_test, name: TestRouteTableTopLevelProjectNodeResolvesProgrammaticRootInputRoute}
       - {kind: go_test, name: TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor}
       - {kind: go_test, name: TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence}
-      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends}
-      - {kind: go_test, name: TestOperatorRuleMailboxWriteSupportedSurfaceIsBranchScopedAcrossBackends}
-      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfaceMissingMaterializerIsLoud}
       - {kind: go_test, name: TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows}
     notes: >
       #1355 closes the first producer/materialization slice exposed by #1293:
@@ -160,6 +157,10 @@ rows:
       persistence owner instead of lossy legacy agent-only fallback. This row
       does not claim #1293 execution admission, #1299 wildcard route production,
       or #1301 runtime callback localization closed.
+      #2307 retires the three handler mailbox_write surface proofs without
+      replacement; the named route-plan/materialization tests above remain
+      this row's route authority proof. Supported notify_human HTTP coverage
+      is accounted separately, not substituted for action or route assertions.
 
   - id: concrete_template_no_target_node_delivery_route_materialization
     concept: Already-concrete no-target flow-instance events persist semantic workflow-node authority separately from workflow-runtime carrier dispatch.
