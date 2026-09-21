@@ -20,6 +20,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -961,6 +962,8 @@ func telegramConnectorSupportedSurfaceDiagnostics(t *testing.T, backend telegram
 		`SELECT COALESCE(failure->>'class', '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM dead_letters WHERE entity_id = $1::uuid ORDER BY created_at DESC LIMIT 1`,
 		`SELECT COALESCE(json_extract(failure, '$.class'), '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM dead_letters WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1`,
 		backend.entityID))
+	_, found, err := backend.persistence.LoadWorkflowInstance(backend.ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: backend.runID, Route: runtimeflowidentity.RouteForInstancePath(backend.flowInstance)})
+	parts = append(parts, fmt.Sprintf("workflow_load=found:%t,error:%v", found, err))
 	return strings.Join(parts, " ")
 }
 
