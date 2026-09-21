@@ -1,12 +1,12 @@
 package runforkreadiness
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -58,8 +58,11 @@ func Project(
 		}
 		state.SourceEvents = []runfork.RunForkSelectedContractWorkflowStateSourceEvent{{SourceEventID: eventID, ExecutionMode: mode}}
 		if state.Mode == "template" {
+			if state.Config == nil {
+				return fmt.Errorf("selected-contract template flow %s requires exact fixed-revision receiver configuration for entity %s; entity fields and route keys are not configuration evidence", state.Route.InstancePath, state.EntityID)
+			}
 			state.ExecutionMode = mode
-			flow, err := runtimemanager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID)
+			flow, err := runtimemanager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID, state.Config)
 			if err != nil {
 				return err
 			}
@@ -424,8 +427,8 @@ func selectedContractReadinessState(source semanticview.Source, eventID, flowID 
 }
 
 func selectedContractWorkflowStatesEqual(left, right runfork.RunForkSelectedContractWorkflowState) bool {
-	leftConfig, leftErr := json.Marshal(left.Config)
-	rightConfig, rightErr := json.Marshal(right.Config)
+	leftConfig, leftErr := canonicaljson.MarshalPreservingNumberKinds(left.Config)
+	rightConfig, rightErr := canonicaljson.MarshalPreservingNumberKinds(right.Config)
 	return left.EntityID == right.EntityID && left.EntityType == right.EntityType && left.FlowID == right.FlowID &&
 		left.WorkflowVersion == right.WorkflowVersion && left.Mode == right.Mode &&
 		(left.Mode != "template" || left.ExecutionMode == right.ExecutionMode) && left.AddressKind == right.AddressKind &&

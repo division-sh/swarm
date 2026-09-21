@@ -457,8 +457,8 @@ func (am *AgentManager) flowInstanceAgentRecords(runID string, req runtimepipeli
 // records for one exact template instance without mutating durable or process
 // topology. Callers must still provide a typed topology admission before
 // execution.
-func TemplateFlowAgentMaterializationRecords(runID string, source semanticview.Source, flowID, instancePath, entityID string) ([]PersistedAgent, error) {
-	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, flowID, instancePath, entityID)
+func TemplateFlowAgentMaterializationRecords(runID string, source semanticview.Source, flowID, instancePath, entityID string, config map[string]any) ([]PersistedAgent, error) {
+	blueprints, err := TemplateFlowAgentMaterializationBlueprints(source, flowID, instancePath, entityID, config)
 	if err != nil {
 		return nil, err
 	}
@@ -468,8 +468,8 @@ func TemplateFlowAgentMaterializationRecords(runID string, source semanticview.S
 // TemplateFlowAgentMaterializationBlueprints derives declaration-owned agent
 // plans without fabricating a live run owner. The selected-store admission
 // owner materializes these plans only after it has committed the exact run.
-func TemplateFlowAgentMaterializationBlueprints(source semanticview.Source, flowID, instancePath, entityID string) ([]AgentMaterializationBlueprint, error) {
-	plan, err := TemplateFlowMaterialization(source, flowID, instancePath, entityID)
+func TemplateFlowAgentMaterializationBlueprints(source semanticview.Source, flowID, instancePath, entityID string, config map[string]any) ([]AgentMaterializationBlueprint, error) {
+	plan, err := TemplateFlowMaterialization(source, flowID, instancePath, entityID, config)
 	return plan.Agents, err
 }
 
@@ -482,10 +482,20 @@ type TemplateFlowMaterializationPlan struct {
 	ActivationVariables map[string]string
 }
 
-func TemplateFlowMaterialization(source semanticview.Source, flowID, instancePath, entityID string) (TemplateFlowMaterializationPlan, error) {
+// TemplateFlowMaterialization consumes committed configuration without applying
+// current defaults. Its caller must bind that evidence to the exact route/entity.
+func TemplateFlowMaterialization(source semanticview.Source, flowID, instancePath, entityID string, config map[string]any) (TemplateFlowMaterializationPlan, error) {
 	if source == nil {
 		return TemplateFlowMaterializationPlan{}, fmt.Errorf("template flow materialization requires semantic source")
 	}
+	if config == nil {
+		return TemplateFlowMaterializationPlan{}, fmt.Errorf("template flow materialization requires exact committed receiver configuration")
+	}
+	cloned, err := canonicaljson.CloneRuntimeValue(config)
+	if err != nil {
+		return TemplateFlowMaterializationPlan{}, fmt.Errorf("clone committed receiver configuration: %w", err)
+	}
+	config = cloned.(map[string]any)
 	flowID = strings.TrimSpace(flowID)
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
 	entityID = strings.TrimSpace(entityID)
@@ -505,10 +515,6 @@ func TemplateFlowMaterialization(source semanticview.Source, flowID, instancePat
 	scopeKey := runtimeflowidentity.ScopeKey(source, flowID)
 	if instance.Route() != runtimeflowidentity.StoredRoute(scopeKey, instanceID, instancePath) {
 		return TemplateFlowMaterializationPlan{}, fmt.Errorf("template flow materialization route %s disagrees with semantic scope %s", instancePath, scopeKey)
-	}
-	config := map[string]any{}
-	if key := schema.Instance.Path(); key != "" {
-		config[key] = instanceID
 	}
 	request := runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: source,

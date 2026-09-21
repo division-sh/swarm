@@ -111,7 +111,7 @@ func TestSelectedContractWorkflowReadinessIndependentOfAgentFrontier(t *testing.
 					loaded := selectedContractReadinessFixture(t, declarations)
 					source := loaded.Source
 					flowID, path, key, nodeID := "worker-flow", "worker-flow/instance-1", "worker_id", "worker-node"
-					flow, err := runtimemanager.TemplateFlowMaterialization(source, flowID, path, "entity-1")
+					flow, err := runtimemanager.TemplateFlowMaterialization(source, flowID, path, "entity-1", map[string]any{"worker_id": "instance-1"})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -213,7 +213,7 @@ func TestSelectedContractWorkflowStateProjectionUsesPlatformActivityRoutingSourc
 
 func TestSelectedContractPreparedActorCensusExactPlans(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 2)
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-1", "entity-1")
+	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-1", "entity-1", map[string]any{"worker_id": "instance-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestSelectedContractPreparedActorCensusExactPlans(t *testing.T) {
 	if _, err := runforkreadiness.PreparedActorCensus(live); err == nil {
 		t.Fatal("live actor configuration adopted into prospective census")
 	}
-	foreign, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-2", "entity-2")
+	foreign, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/instance-2", "entity-2", map[string]any{"worker_id": "instance-2"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -154,7 +154,7 @@ func TestSelectedContractReceiverReadinessRetainsEveryEventAssociation(t *testin
 
 func TestSelectedContractReceiverReadinessTemplateAgentDoesNotElectFromHistory(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/one", "selected-entity")
+	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/one", "selected-entity", map[string]any{"worker_id": "one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestSelectedContractReceiverReadinessTemplateAgentDoesNotElectFromHistory(t
 func TestSelectedContractReceiverReadinessTemplateRequiresOneGenerationMode(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
 	const path = "worker-flow/one"
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", path, "receiver-entity")
+	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", path, "receiver-entity", map[string]any{"worker_id": "one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestSelectedContractReceiverReadinessTemplateRequiresOneGenerationMode(t *t
 func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
 	const path = "worker-flow/one"
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", path, "receiver-entity")
+	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", path, "receiver-entity", map[string]any{"worker_id": "one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *test
 
 func TestSelectedContractReceiverReadinessRejectsUnsupportedConfigDependencyAuthoring(t *testing.T) {
 	loaded := selectedContractReadinessFixture(t, 1)
-	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/one", "receiver-entity")
+	flow, err := runtimemanager.TemplateFlowMaterialization(loaded.Source, "worker-flow", "worker-flow/one", "receiver-entity", map[string]any{"worker_id": "one"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -100,7 +100,7 @@ func TestSelectedForkTemplateCompanionReadinessBothStores(t *testing.T) {
 				t.Run(change, func(t *testing.T) {
 					plan, planning, state, modes, forkID := workflowOwnershipProjection(t, source, "consumer")
 					state.ExecutionMode = executionmode.Live
-					flow, err := manager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID)
+					flow, err := manager.TemplateFlowMaterialization(source, state.FlowID, state.Route.InstancePath, state.EntityID, map[string]any{"vertical_id": "item"})
 					if err != nil {
 						t.Fatal(err)
 					}

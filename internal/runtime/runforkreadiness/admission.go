@@ -119,7 +119,7 @@ func Admit(req AdmissionRequest) (Admission, error) {
 		}
 		prompts[blueprint.Identity] = blueprint.Config.Prompt
 	}
-	projection, err := json.Marshal(prepared)
+	projection, err := canonicaljson.MarshalPreservingNumberKinds(prepared)
 	if err != nil {
 		return Admission{}, fmt.Errorf("seal selected-contract readiness projection: %w", err)
 	}
