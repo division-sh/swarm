@@ -79,7 +79,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
 				FlowRoutes:          bus,
-				ArtifactRoot:        t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == repoNodeID && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
@@ -236,7 +235,6 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
 				FlowRoutes:          bus,
-				ArtifactRoot:        t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == repoNodeID && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {

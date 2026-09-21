@@ -386,10 +386,9 @@ func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string)
 }
 
 type telegramConnectorSupportedSurfaceModule struct {
-	source  semanticview.Source
-	nodes   []runtimepipeline.WorkflowNode
-	guards  runtimepipeline.GuardRegistry
-	actions runtimepipeline.ActionRegistry
+	source semanticview.Source
+	nodes  []runtimepipeline.WorkflowNode
+	guards runtimepipeline.GuardRegistry
 }
 
 func (m telegramConnectorSupportedSurfaceModule) SemanticSource() semanticview.Source {
@@ -402,10 +401,6 @@ func (m telegramConnectorSupportedSurfaceModule) WorkflowNodes() []runtimepipeli
 
 func (m telegramConnectorSupportedSurfaceModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guards
-}
-
-func (m telegramConnectorSupportedSurfaceModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actions
 }
 
 func startTelegramConnectorSupportedSurfaceCoordinator(
@@ -421,10 +416,9 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		t.Fatalf("LoadWorkflowNodes: %v", err)
 	}
 	module := telegramConnectorSupportedSurfaceModule{
-		source:  source,
-		nodes:   nodes,
-		guards:  runtimepipeline.NewContractGuardRegistry(source),
-		actions: runtimepipeline.NewContractActionRegistry(source),
+		source: source,
+		nodes:  nodes,
+		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, backend.db, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),

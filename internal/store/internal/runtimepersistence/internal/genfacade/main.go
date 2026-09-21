@@ -48,6 +48,10 @@ func main() {
 				if fn == nil || !fn.Exported() || constructionBinding(fn.Name()) || strings.HasSuffix(fn.Name(), "ForTest") {
 					continue
 				}
+				// This legacy fixture bridge must not expose production group authority.
+				if fn.Name() == "BeginFanOutPublicationGroup" {
+					continue
+				}
 				sig, _ := fn.Type().(*types.Signature)
 				if sig == nil || containsRawSQL(sig) {
 					continue

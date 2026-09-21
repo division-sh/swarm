@@ -72,10 +72,9 @@ func (l admittedFixtureSelectedContractSourceLoader) LoadRunForkSelectedContract
 		return LoadedSelectedContractSource{}, err
 	}
 	module := selectedContractWorkflowModule{
-		source:         source,
-		nodes:          nodes,
-		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
-		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+		source:        source,
+		nodes:         nodes,
+		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	return LoadedSelectedContractSource{
 		Selection:               selection,

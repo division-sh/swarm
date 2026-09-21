@@ -205,7 +205,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		stores.Runs() == nil || stores.Entities() == nil || stores.Agents() == nil || stores.Conversations() == nil ||
 		runtimeDeps.EventStore == nil || !runtimeDeps.WorkflowPersistence.Valid() || runtimeDeps.SessionRegistry == nil ||
 		runtimeDeps.ConversationStore == nil || runtimeDeps.ManagerStore == nil || runtimeDeps.GenericScheduleStore == nil ||
-		runtimeDeps.MailboxMaterializer == nil || runtimeDeps.MailboxStore == nil || runtimeDeps.BudgetSpendStore == nil ||
+		runtimeDeps.MailboxStore == nil || runtimeDeps.BudgetSpendStore == nil ||
 		runtimeDeps.InboundStore == nil || runtimeDeps.RuntimeIngressStore == nil {
 		t.Fatal("SQLite selected owner has an incomplete required projection")
 	}
@@ -236,9 +236,6 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 	if runtimeDeps.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeDeps RuntimeLogStore missing backend-neutral runtime diagnostics owner")
-	}
-	if runtimeDeps.MailboxMaterializer == nil {
-		t.Fatal("sqlite runtimeDeps MailboxMaterializer missing backend-neutral mailbox_write owner")
 	}
 	if runtimeDeps.BudgetSpendStore == nil {
 		t.Fatal("sqlite runtimeDeps BudgetSpendStore missing backend-neutral budget/spend owner")
@@ -388,7 +385,7 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 	}
 }
 
-func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner(t *testing.T) {
+func TestBuildStoresSQLiteRuntimeProvidesDiagnosticsAndStateOwners(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "dev.db")
 	cfg := &config.Config{Runtime: config.RuntimeConfig{}}
@@ -408,9 +405,6 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	}
 	if runtimeDeps.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeDeps RuntimeLogStore missing backend-neutral runtime diagnostics owner")
-	}
-	if runtimeDeps.MailboxMaterializer == nil {
-		t.Fatal("sqlite runtimeDeps MailboxMaterializer missing backend-neutral mailbox_write owner")
 	}
 	bundle := loadStoreBackendSelectionWorkflowBundle(t)
 	if _, err := initializeStateStores(ctx, stores.Schema(), bundle); err != nil {

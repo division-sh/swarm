@@ -18,9 +18,6 @@ func (s semanticOnlyWorkflowRuntime) SemanticSource() semanticview.Source { retu
 
 func (semanticOnlyWorkflowRuntime) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
 func (semanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry  { return nil }
-func (semanticOnlyWorkflowRuntime) ActionRegistry() runtimepipeline.ActionRegistry {
-	return nil
-}
 
 type noopLLMRuntime struct{ llm.NoopRuntime }
 

@@ -336,22 +336,23 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		RecipientPlanAdmissionGuard: guard.AuthorizeEvent,
 		RecipientPlanMaterializer:   guard.MaterializeNodeDeliveryRoutes,
 		RecipientPlanGuard:          guard.Authorize,
-		TemplateInstanceActivator: func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if lifecycleManager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
+			}
+			return lifecycleManager.PrepareFlowInstanceActivation(ctx, activation)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
 			if lifecycleManager == nil {
 				return fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
 			}
-			return lifecycleManager.ActivateFlowInstance(ctx, activation)
-		},
+			return lifecycleManager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
-	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options, func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
-		if lifecycleManager == nil {
-			return fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
-		}
-		return lifecycleManager.ActivateFlowInstance(ctx, activation)
-	}, func(ctx context.Context, deactivation runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
+	pipeline := newSelectedContractPipeline(bus, c.ports, req.LoadedSource, req.AgentRuntime.Options, func(ctx context.Context, deactivation runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
 		if lifecycleManager == nil {
 			return nil, fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
 		}

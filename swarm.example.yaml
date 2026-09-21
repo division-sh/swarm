@@ -87,7 +87,6 @@
 #   openai_responses:
 #     base_url: https://api.openai.com/v1 # OpenAI Responses endpoint base URL.
 # paths:
-#   artifact_root: .swarm/artifacts # Runtime artifact root.
 #   monitor_dir: .swarm/monitor # Runtime monitor artifact directory.
 #   swarm_dir: .swarm # Swarm state directory.
 # platform:

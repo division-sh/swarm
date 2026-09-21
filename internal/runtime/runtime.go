@@ -1187,12 +1187,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadAdmitter, func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
-		if managerRef == nil {
-			return fmt.Errorf("flow instance activator is required")
-		}
-		return managerRef.ActivateFlowInstance(ctx, req)
-	}, runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+	}, payloadAdmitter, runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
 		if managerRef == nil {
 			return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation planner is required")
 		}

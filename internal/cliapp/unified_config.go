@@ -808,7 +808,6 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"paths.contracts_path":                    {Split: "RETIRED: authored source roots are positional command inputs; remove paths.contracts_path"},
 		"paths.platform_spec_path":                {ProjectContainedPath: true},
 		"paths.prompts_dir":                       {Split: "RETIRED: paths.prompts_dir is unsupported; declare each managed agent's intent: source explicitly in agents.yaml"},
-		"paths.artifact_root":                     {Elevated: true},
 		"paths.monitor_dir":                       {Elevated: true},
 		"paths.agent_config_map_file":             {ProjectContainedPath: true},
 		"paths.verification_gates_file":           {ProjectContainedPath: true},

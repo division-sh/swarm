@@ -241,17 +241,6 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 			}
 		}
 	}
-	for _, record := range source.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil {
-			continue
-		}
-		for _, handler := range source.ExecutableNodeEventHandlers(node) {
-			if selectedContractHandlerCreatesDynamicFlow(handler) {
-				return true
-			}
-		}
-	}
 	return false
 }
 
@@ -272,26 +261,6 @@ func selectedContractFlowInputResolutionRequiresDynamicFlowOwner(mode runtimecon
 		// container's missing long-lived dynamic-flow owner.
 		return true
 	}
-}
-
-func selectedContractHandlerCreatesDynamicFlow(handler runtimecontracts.SystemNodeEventHandler) bool {
-	creates := func(action runtimecontracts.ActionSpec) bool {
-		return runtimecontracts.NormalizeHandlerActionID(action.ID) == "create_flow_instance"
-	}
-	if creates(handler.Action) {
-		return true
-	}
-	for _, rules := range [][]runtimecontracts.HandlerRuleEntry{handler.Rules, handler.OnComplete} {
-		for _, rule := range rules {
-			if creates(rule.Action) {
-				return true
-			}
-		}
-	}
-	if handler.Join != nil {
-		return creates(handler.Join.OnComplete.Action) || creates(handler.Join.Timeout.Outcome.Action)
-	}
-	return false
 }
 
 func validSelectedContractDeferredWorkCoordinates(sourceRunID, forkEventID string) bool {

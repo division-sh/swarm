@@ -66,7 +66,7 @@ func TestReceiverFlowInitializationPublicationBothStores(t *testing.T) {
 					ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: fact,
 					SemanticSource: source, WorkflowInstances: workflow, WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
 				}))
-				eventBus, err := newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TemplateInstancePlanner: planner, TemplateInstanceActivator: planner.ActivateFlowInstance})
+				eventBus, err := newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TemplateInstancePlanner: planner})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -129,7 +129,7 @@ func TestReceiverFlowInitializationPublicationBothStores(t *testing.T) {
 				if err := eventBus.ReleaseEnginePublications(ctx, plans); err != nil {
 					t.Fatal(err)
 				}
-				eventBus, err = newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TemplateInstancePlanner: planner, TemplateInstanceActivator: planner.ActivateFlowInstance})
+				eventBus, err = newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TemplateInstancePlanner: planner})
 				if err != nil {
 					t.Fatal(err)
 				}

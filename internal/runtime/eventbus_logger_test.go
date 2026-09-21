@@ -72,7 +72,7 @@ func loadRootPayloadBundle(t *testing.T, eventsYAML, typesYAML string) *runtimec
 
 func TestEventBusRejectsMalformedFailureBeforeRuntimeLog(t *testing.T) {
 	logger := NewRuntimeLogger(nil, executionposture.Live, nil)
-	eventBus, err := newRuntimeEventBus(nil, runtimebus.DurableDependencies{}, nil, logger, nil, executionposture.Live, runtimecorrelation.SourceArtifactFact{}, "", nil, nil, nil, nil, nil, nil, nil, nil)
+	eventBus, err := newRuntimeEventBus(nil, runtimebus.DurableDependencies{}, nil, logger, nil, executionposture.Live, runtimecorrelation.SourceArtifactFact{}, "", nil, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newRuntimeEventBus: %v", err)
 	}

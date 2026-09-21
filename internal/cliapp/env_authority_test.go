@@ -397,6 +397,30 @@ func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
 	}
 }
 
+func TestSwarmEnvGuardBlocksRetiredArtifactRoot(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_ARTIFACT_ROOT", t.TempDir())
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
+		t.Fatal("retired artifact environment reached serve")
+		return 0
+	}
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"serve", "."}, &stdout, &stderr, opts)
+	if code != CLIExitValidation {
+		t.Fatalf("code = %d, want %d; stdout=%s stderr=%s", code, CLIExitValidation, stdout.String(), stderr.String())
+	}
+	output := stdout.String() + stderr.String()
+	for _, want := range []string{"env/unknown_stale", "SWARM_ARTIFACT_ROOT", "unset SWARM_ARTIFACT_ROOT"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "paths.artifact_root") {
+		t.Fatalf("output advertises retired config as replacement:\n%s", output)
+	}
+}
+
 func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")

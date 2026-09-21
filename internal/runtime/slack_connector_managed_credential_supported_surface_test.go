@@ -462,10 +462,9 @@ func slackManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerco
 }
 
 type slackManagedConnectorModule struct {
-	source  semanticview.Source
-	nodes   []runtimepipeline.WorkflowNode
-	guards  runtimepipeline.GuardRegistry
-	actions runtimepipeline.ActionRegistry
+	source semanticview.Source
+	nodes  []runtimepipeline.WorkflowNode
+	guards runtimepipeline.GuardRegistry
 }
 
 func (m slackManagedConnectorModule) SemanticSource() semanticview.Source {
@@ -478,10 +477,6 @@ func (m slackManagedConnectorModule) WorkflowNodes() []runtimepipeline.WorkflowN
 
 func (m slackManagedConnectorModule) GuardRegistry() runtimepipeline.GuardRegistry {
 	return m.guards
-}
-
-func (m slackManagedConnectorModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actions
 }
 
 func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackManagedConnectorBackend, source semanticview.Source, managedStore runtimemanagedcredentials.Store) (*runtimebus.EventBus, *runtimepipeline.PipelineCoordinator) {
@@ -504,10 +499,9 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		t.Fatalf("%s LoadWorkflowNodes: %v", backend.name, err)
 	}
 	module := slackManagedConnectorModule{
-		source:  source,
-		nodes:   nodes,
-		guards:  runtimepipeline.NewContractGuardRegistry(source),
-		actions: runtimepipeline.NewContractActionRegistry(source),
+		source: source,
+		nodes:  nodes,
+		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, backend.db, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
