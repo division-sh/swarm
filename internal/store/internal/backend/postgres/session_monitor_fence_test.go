@@ -207,13 +207,48 @@ func TestSessionMonitorSilentSocketFencesBeforeJoinedRelease(t *testing.T) {
 }
 
 func TestSessionMonitorBudgetStartsAfterAdmittedTransaction(t *testing.T) {
-	backend, _ := newExitProbe(t)
+	backend, probe := newExitProbe(t)
 	lease, held, err := AcquireAdvisoryLockLease(context.Background(), backend.db, "monitor-admitted-work")
 	if err != nil || !held {
 		t.Fatalf("acquire held=%t: %v", held, err)
 	}
 	defer lease.Release(context.Background())
 	session := lease.Session()
+	var settled, earlyFence, retired atomic.Bool
+	fenced, proofReturned, resume := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var fenceOnce, resumeOnce sync.Once
+	unblock := func() { resumeOnce.Do(func() { close(resume) }) }
+	defer unblock()
+	if err := lease.InstallLocalFenceOwner(func() {
+		if !settled.Load() {
+			earlyFence.Store(true)
+		}
+		fenceOnce.Do(func() { close(fenced) })
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !lease.InstallTerminalOwner(nil, func() { retired.Store(true) }, nil) {
+		t.Fatal("install terminal owner")
+	}
+	session.SetEndTxErrorForTest(func() error {
+		settled.Store(true)
+		return nil
+	})
+	lease.SetProveForTest(func(ctx context.Context, session *SessionAuthority, key string) (bool, error) {
+		if ctx.Done() != nil {
+			t.Error("local proof budget leaked into native SQL cancellation")
+		}
+		var held bool
+		err := session.queryRowContext(ctx, retainedAdvisoryLockProofSQL, key).Scan(&held)
+		if err != nil || !held {
+			t.Errorf("native possession proof held=%t: %v", held, err)
+		}
+		close(proofReturned)
+		// Hold a real native result past the local budget, not a fabricated
+		// success or a host-dependent requirement to finish within 40ms.
+		<-resume
+		return held, err
+	})
 	tx, err := session.beginTx(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -223,11 +258,23 @@ func TestSessionMonitorBudgetStartsAfterAdmittedTransaction(t *testing.T) {
 			_ = rollbackSessionTransaction(tx, session)
 		}
 	}()
-	done := make(chan error, 1)
-	go func() { done <- lease.MonitorProveCurrent(context.Background(), 40*time.Millisecond) }()
+	started, done := make(chan struct{}), make(chan error, 1)
+	go func() {
+		close(started)
+		done <- lease.MonitorProveCurrent(context.Background(), 40*time.Millisecond)
+	}()
+	<-started
+	// Admitted work deliberately outlasts the unchanged monitor budget.
 	time.Sleep(100 * time.Millisecond)
 	if session.fenced.Load() {
 		t.Fatal("time behind admitted work consumed independent proof budget")
+	}
+	select {
+	case <-proofReturned:
+		t.Fatal("independent proof bypassed admitted transaction")
+	case err := <-done:
+		t.Fatalf("monitor returned before admitted transaction settled: %v", err)
+	default:
 	}
 	if _, err := tx.ExecContext(context.Background(), "SELECT pg_sleep(0.06)"); err != nil {
 		t.Fatal(err)
@@ -239,13 +286,73 @@ func TestSessionMonitorBudgetStartsAfterAdmittedTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	tx = nil
-	if err := <-done; err != nil {
+	<-proofReturned
+	<-fenced
+	if earlyFence.Load() || !settled.Load() {
+		t.Fatal("proof budget fenced before admitted transaction settlement")
+	}
+	if lease.Current() {
+		t.Fatal("expired proof retained current authority")
+	}
+	if release, ok := session.Retain(); ok {
+		_ = release()
+		t.Fatal("expired proof admitted another retained owner")
+	}
+	if _, err := session.beginTx(context.Background()); err == nil {
+		t.Fatal("expired proof admitted a successor transaction")
+	}
+	if retired.Load() || probe.closed.Load() != 0 {
+		t.Fatal("local fence retired native session before proof owner joined")
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("monitor returned before its native result owner joined: %v", err)
+	default:
+	}
+	unblock()
+	wantErr := errors.Join(context.DeadlineExceeded, errors.New("retained PostgreSQL session authority is fenced"))
+	if err := <-done; !errors.Is(err, context.DeadlineExceeded) || err.Error() != wantErr.Error() {
+		t.Fatalf("late healthy proof must return only deadline/fence: %v", err)
+	}
+	if lease.Current() || !retired.Load() || probe.closed.Load() != 1 {
+		t.Fatalf("joined expired proof: current=%t retired=%t closed=%d", lease.Current(), retired.Load(), probe.closed.Load())
+	}
+}
+
+func TestSessionNativePossessionAfterAdmittedTransactionAllowsSuccessor(t *testing.T) {
+	backend, probe := newExitProbe(t)
+	lease, held, err := AcquireAdvisoryLockLease(context.Background(), backend.db, "healthy-admitted-work")
+	if err != nil || !held {
+		t.Fatalf("acquire held=%t: %v", held, err)
+	}
+	defer lease.Release(context.Background())
+	var proofs atomic.Int32
+	probe.afterQuery = func(_ context.Context, query string) {
+		if query == retainedAdvisoryLockProofSQL {
+			proofs.Add(1)
+		}
+	}
+	if err := lease.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, "SELECT 1")
+		return err
+	}); err != nil {
+		t.Fatalf("admitted transaction: %v", err)
+	}
+	// Healthy possession is a native correctness obligation, not a promise
+	// that a loaded host settles the proof within the monitor's 40ms budget.
+	if err := lease.ProveCurrent(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if proofs.Load() != 1 || !lease.Current() || probe.closed.Load() != 0 {
+		t.Fatalf("healthy native proof: proofs=%d current=%t closed=%d", proofs.Load(), lease.Current(), probe.closed.Load())
 	}
 	if err := lease.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, "SELECT 1")
 		return err
 	}); err != nil {
 		t.Fatalf("healthy successor after serialized proof: %v", err)
+	}
+	if !lease.Current() || probe.closed.Load() != 0 {
+		t.Fatal("healthy successor lost retained native authority")
 	}
 }
