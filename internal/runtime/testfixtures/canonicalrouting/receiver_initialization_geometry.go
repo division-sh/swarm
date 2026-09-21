@@ -2,6 +2,29 @@ package canonicalrouting
 
 import "testing"
 
+// CopyReceiverInitializationAgentGeometry puts a real managed agent between
+// the two creation levels so a restart can interrupt, rather than skip, work.
+func CopyReceiverInitializationAgentGeometry(t testing.TB) string {
+	t.Helper()
+	root := CopyReceiverInitializationGeometry(t)
+	writeClosedVariantFile(t, root, "worker/nodes.yaml", `receiver:
+  execution_type: system_node
+  subscribes_to: [worker.requested]
+  event_handlers:
+    worker.requested:
+      guard: {check: "payload.worker_id != ''"}
+`)
+	writeClosedVariantFile(t, root, "worker/agents.yaml", `bridge:
+  id: bridge
+  model: regular
+  intent:
+    inline: Create the next receiver using worker_id, label and count from the admitted configuration.
+  subscriptions: [worker.ready]
+  emit_events: [leaf.requested]
+`)
+	return root
+}
+
 // CopyReceiverInitializationGeometry gives both receiver levels the same
 // variable names, but different values and distinct canonical instance keys.
 func CopyReceiverInitializationGeometry(t testing.TB) string {
