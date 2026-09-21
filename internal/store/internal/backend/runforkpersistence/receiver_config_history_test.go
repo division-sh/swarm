@@ -21,7 +21,7 @@ import (
 )
 
 func TestReceiverConfigHistoricalCaptureAndReadinessBothStores(t *testing.T) {
-	source := workflowOwnershipSource(t, canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{Consumer: canonicalrouting.TemplateInstanceAgentConsumer}))
+	source := workflowOwnershipSource(t, canonicalrouting.CopyReceiverConfigHistory(t))
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var db *sql.DB

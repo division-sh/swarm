@@ -791,6 +791,7 @@ wave_1:
       internal/runtime/testfixtures/canonicalrouting/ownership_guard_test.go: non_authoring_text
       internal/runtime/testfixtures/canonicalrouting/parser_snippets.go: positive_producer_and_explicit_retired_negative
       internal/runtime/testfixtures/canonicalrouting/remaining_variants.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/receiver_config_history.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/resolution_variants.go: mutation_base

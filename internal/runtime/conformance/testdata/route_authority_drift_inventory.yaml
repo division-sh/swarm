@@ -1167,6 +1167,7 @@ seam_families:
       - internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization.go
+      - internal/runtime/testfixtures/canonicalrouting/receiver_config_history.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_geometry.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_ingress.go
       - internal/runtime/testfixtures/canonicalrouting/receiver_initialization_runtime.go
@@ -1196,6 +1197,14 @@ seam_families:
       as the closed TemplateSelectExisting/select-or-create refinement consumed
       by TestReceiverInitializationEventBusAdmissionAndReuse, including typed
       defaults, hostile admission and descriptor/route reuse.
+      CopyReceiverConfigHistory (receiver_config_history.go) is the finite
+      agent-consumer source for TestReceiverConfigHistoricalCaptureAndReadinessBothStores
+      in internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go.
+      It declares nested and flow_path as JSON business fields and status as
+      boolean, retaining the original vertical_id key and select-only route.
+      Historical number kinds, runtime-control name collisions, fixed-revision
+      capture and cross-run isolation remain assertions over recorded config;
+      the shared agent fixture and committed-config validator are unchanged.
       CopyReceiverInitializationGeometry (receiver_initialization_geometry.go)
       owns the closed parent-to-nested-child fixture consumed by
       TestReceiverInitializationNestedGeometryBothStores: two parent receivers
