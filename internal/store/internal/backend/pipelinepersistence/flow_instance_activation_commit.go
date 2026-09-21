@@ -283,12 +283,21 @@ func loadFlowInstanceActivationEqual(
 		expectedCanonical, expectedErr := runtimecanonicaljson.Encode(expectedValue)
 		return actualErr == nil && expectedErr == nil && bytes.Equal(actualCanonical, expectedCanonical)
 	}
+	configEqual := func(actual, expected []byte) bool {
+		var left, right any
+		if runtimecanonicaljson.DecodePreservingNumberLexemes(actual, &left) != nil || runtimecanonicaljson.DecodePreservingNumberLexemes(expected, &right) != nil {
+			return false
+		}
+		a, err := runtimecanonicaljson.MarshalPreservingNumberKinds(left)
+		b, otherErr := runtimecanonicaljson.MarshalPreservingNumberKinds(right)
+		return err == nil && otherErr == nil && bytes.Equal(a, b)
+	}
 	equal := strings.TrimSpace(workflowName) == strings.TrimSpace(want.WorkflowName) &&
 		strings.TrimSpace(mode) == want.Mode && strings.TrimSpace(status) == "active" &&
 		strings.Trim(strings.TrimSpace(instancePath), "/") == want.Identity.Route.InstancePath &&
 		strings.TrimSpace(entityType) == want.EntityType && strings.TrimSpace(slug) == want.Slug && strings.TrimSpace(name) == want.Name &&
 		strings.TrimSpace(state) == want.CurrentState && projectionVersion == want.InitialProjectionVersion &&
-		jsonEqual(config, want.Config) && jsonEqual(gates, want.Gates) && jsonEqual(fields, want.Fields) &&
+		configEqual(config, want.Config) && jsonEqual(gates, want.Gates) && jsonEqual(fields, want.Fields) &&
 		jsonEqual(bookkeeping, want.Bookkeeping) && jsonEqual(accumulator, want.Accumulator) && jsonEqual(initial, want.InitialMaterialization) && jsonEqual(readiness, want.Readiness) &&
 		canonicalActivationTime(flowCreated).Equal(canonicalActivationTime(want.CreatedAt)) &&
 		canonicalActivationTime(enteredAt).Equal(canonicalActivationTime(want.EnteredStageAt)) &&

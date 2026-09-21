@@ -647,6 +647,19 @@ func AgentConfigPlanRevision(config models.AgentConfig, plan runtimeagentidentit
 		return "", err
 	}
 	projection["identity"] = plan
+	// Receiver config is runtime data: semantic JSON hashing alone collapses
+	// integer/double kinds and can admit a different recovered agent plan.
+	if len(config.Config) != 0 {
+		var business any
+		if err := canonicaljson.DecodePreservingNumberLexemes(config.Config, &business); err != nil {
+			return "", err
+		}
+		wire, err := canonicaljson.MarshalPreservingNumberKinds(business)
+		if err != nil {
+			return "", err
+		}
+		projection["config"] = string(wire)
+	}
 	raw, err = canonicaljson.Bytes(projection)
 	if err != nil {
 		return "", err

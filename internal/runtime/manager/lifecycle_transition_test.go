@@ -33,6 +33,14 @@ func TestLifecycleConfigRevisionUsesCanonicalConfigFacts(t *testing.T) {
 	if changed == left {
 		t.Fatalf("semantic config change retained revision %s", changed)
 	}
+	integer := revision(`{"nested":[7]}`)
+	double := revision(`{"nested":[7.0]}`)
+	if integer == double {
+		t.Fatal("receiver config numeric-kind change retained agent revision")
+	}
+	if double != revision(`{ "nested" : [7.00] }`) {
+		t.Fatal("equivalent runtime double representation changed agent revision")
+	}
 }
 
 type lifecycleTransitionTrackingBus struct {

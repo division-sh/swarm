@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -118,7 +119,20 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 						Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
 						FlowInstance: "owner/one", EntityType: "review_item", Slug: "snapshot-slug", Name: "Snapshot Name",
 					}
-					if entity.MaterializationMetadata == nil || *entity.MaterializationMetadata != wantMetadata {
+					if entity.MaterializationMetadata != nil {
+						var gotConfig, wantConfig any
+						if err := canonicaljson.DecodePreservingNumberLexemes(entity.MaterializationMetadata.FlowConfig, &gotConfig); err != nil {
+							t.Fatal(err)
+						}
+						if err := canonicaljson.DecodePreservingNumberLexemes(f.state.Config, &wantConfig); err != nil {
+							t.Fatal(err)
+						}
+						if !reflect.DeepEqual(gotConfig, wantConfig) {
+							t.Fatalf("historical config = %#v, want %#v", gotConfig, wantConfig)
+						}
+						wantMetadata.FlowConfig = entity.MaterializationMetadata.FlowConfig
+					}
+					if entity.MaterializationMetadata == nil || !reflect.DeepEqual(*entity.MaterializationMetadata, wantMetadata) {
 						t.Fatalf("metadata = %#v, want %#v", entity.MaterializationMetadata, wantMetadata)
 					}
 					if entity.Fields["entity_type"] != "authored-not-owner" {
