@@ -233,7 +233,7 @@ func actionRetirementAuthoredFields(raw []byte) ([]string, error) {
 	if root == nil || root.Kind != yaml.MappingNode {
 		return nil, nil
 	}
-	// Go fixture builders also carry node-body and handler fragments.
+	// Go fixture constructors also carry node-body and handler fragments.
 	nodes := []*yaml.Node{root}
 	rootIsNodeMap := false
 	for i := 1; i < len(root.Content); i += 2 {

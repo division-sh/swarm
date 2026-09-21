@@ -87,17 +87,21 @@ rows:
       - kind: go_test
         name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
       - kind: go_test
-        name: TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner
+        name: TestBuildStoresSQLiteRuntimeProvidesDiagnosticsAndStateOwners
       - kind: go_test
         name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape
     guard_proof_refs:
       - kind: go_test
         name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
       - kind: go_test
-        name: TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner
+        name: TestBuildStoresSQLiteRuntimeProvidesDiagnosticsAndStateOwners
     notes: >
       SQLite construction must expose only the exact typed selected owners;
       runtime consumers never receive a raw SQL database handle.
+      #2307 removed the authored mailbox materializer and its owner assertion.
+      TestBuildStoresSQLiteRuntimeProvidesDiagnosticsAndStateOwners is the
+      renamed surviving test for SQLDB absence, diagnostics, state initialization
+      and runtime pipeline construction, not replacement mailbox functionality.
 
   - id: postgres_story_order_serialization_guard
     classification: guard
