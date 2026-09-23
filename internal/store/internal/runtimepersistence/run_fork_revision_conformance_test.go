@@ -395,16 +395,23 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	defer func() { _ = deliveryTx.Rollback() }()
 	deliveryTxCtx := ctx
 	deliveryEffects := runforkrevision.NewEffects()
-	// This revision-lock proof needs only the in-progress delivery row, not a
-	// claim token. Stage it directly while the parent publication holds its lock.
+	// Stage a complete open attempt while the parent publication holds its lock.
 	if _, err := deliveryTx.ExecContext(deliveryTxCtx, `
 		UPDATE event_deliveries
 		SET status='in_progress', claim_version=claim_version+1,
 			current_attempt_version=claim_version+1, current_attempt_open=TRUE,
-			started_at=COALESCE(started_at, NOW()), updated_at=NOW()
+			started_at=COALESCE(started_at, NOW()), next_eligible_at=NULL, updated_at=NOW()
 		WHERE delivery_id=$1::uuid
 	`, deliveryID); err != nil {
 		t.Fatalf("stage delivery start: %v", err)
+	}
+	if _, err := deliveryTx.ExecContext(deliveryTxCtx, `
+		INSERT INTO event_delivery_attempts (
+			delivery_id, claim_version, claim_token, started_at, lease_expires_at,
+			current_delivery_id, open_marker
+		) VALUES ($1::uuid, 1, $2::uuid, NOW(), NOW() + INTERVAL '1 minute', $1::uuid, TRUE)
+	`, deliveryID, uuid.NewString()); err != nil {
+		t.Fatalf("stage delivery attempt: %v", err)
 	}
 	var deliveryBackendPID int
 	if err := deliveryTx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&deliveryBackendPID); err != nil {
