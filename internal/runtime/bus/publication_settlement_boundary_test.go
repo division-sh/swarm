@@ -35,7 +35,8 @@ func TestPublicationNestedBoundaryFailurePrecedesNewWork(t *testing.T) {
 			return (&EventBus{}).publishDeferred(ctx, events.Event{})
 		}},
 		{"decision_processed", func(ctx context.Context) error {
-			return (&pipelinePublicationClaim{}).MarkDecisionProcessed(ctx)
+			_, err := (&pipelinePublicationClaim{}).MarkDecisionProcessedOutcome(ctx)
+			return err
 		}},
 		{"canonical_publication_preparation", func(ctx context.Context) error {
 			_, _, err := (&EventBus{}).prepareClosedPublication(ctx, eventBusCommitPublishPlan{})

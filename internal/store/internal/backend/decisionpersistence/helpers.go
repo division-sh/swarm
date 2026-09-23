@@ -7,7 +7,6 @@ import (
 	"time"
 
 	runstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
-	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
 
 const runLifecycleActiveStateSQLValues = runstate.ActiveStateSQLValues
@@ -17,17 +16,6 @@ func sqliteNullTime(value time.Time) any {
 		return nil
 	}
 	return value.UTC()
-}
-
-type runLifecycleCandidateHandoffReservation = runhandoff.CandidateHandoff
-
-func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
-	return runhandoff.ReserveCandidateHandoff(ctx)
-}
-
-func withRunLifecycleCandidateHandoffOutcome(ctx context.Context, fn func(*runLifecycleCandidateHandoffReservation) (bool, error)) error {
-	_, err := runhandoff.WithCandidateHandoffOutcome(ctx, fn)
-	return err
 }
 
 func requirePostgresRunActiveQuery(ctx context.Context, queryer runstate.RowQueryer, runID string) error {

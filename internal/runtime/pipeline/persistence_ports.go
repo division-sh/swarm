@@ -196,11 +196,11 @@ func (pc *PipelineCoordinator) ClaimActivityAttemptForLoopGeneration(ctx context
 	return pc.workflowStore.ClaimActivityAttemptForLoopGeneration(ctx, record)
 }
 
-func (pc *PipelineCoordinator) CompleteActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, error) {
+func (pc *PipelineCoordinator) CompleteActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
 	return pc.workflowStore.CompleteActivityAttempt(ctx, record)
 }
 
-func (pc *PipelineCoordinator) MarkActivityAttemptUncertain(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, error) {
+func (pc *PipelineCoordinator) MarkActivityAttemptUncertain(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
 	return pc.workflowStore.MarkActivityAttemptUncertain(ctx, record)
 }
 
@@ -263,7 +263,7 @@ func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForRun(ctx cont
 	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
-func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
+func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
 	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 

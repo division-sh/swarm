@@ -939,28 +939,28 @@ func (eb *EventBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentit
 
 // StageFlowInstanceRouteContext persists the exact derived route set but keeps
 // it process-invisible until its topology owner publishes it.
-func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
+func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) (FlowInstanceRouteTopologyResult, error) {
 	if eb == nil {
-		return errors.New("event bus is required")
+		return FlowInstanceRouteTopologyResult{}, errors.New("event bus is required")
 	}
 	var err error
 	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return err
+		return FlowInstanceRouteTopologyResult{}, err
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
 	eb.mu.RUnlock()
 	if table == nil {
-		return errors.New("route table is not initialized")
+		return FlowInstanceRouteTopologyResult{}, errors.New("route table is not initialized")
 	}
 	persister := eb.durable.FlowRouteTopology
 	if persister == nil {
-		return errors.New("exact flow-instance route-topology persistence is required")
+		return FlowInstanceRouteTopologyResult{}, errors.New("exact flow-instance route-topology persistence is required")
 	}
 	descriptorLister := eb.durable.ActiveFlows
 	if descriptorLister == nil {
-		return errors.New("flow-instance route staging requires active flow-instance descriptors")
+		return FlowInstanceRouteTopologyResult{}, errors.New("flow-instance route staging requires active flow-instance descriptors")
 	}
 	req = req.Normalized()
 	staged, identities, err := eb.deriveFlowInstanceRouteTopology(
@@ -972,16 +972,17 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 		runtimeflowidentity.RunScopedFlowInstance{},
 	)
 	if err != nil {
-		return err
+		return FlowInstanceRouteTopologyResult{}, err
 	}
 	return persister.ReplaceFlowInstanceRouteTopology(ctx, flowInstanceRouteTopologyRecordSets(staged, identities))
 }
 
 func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
-	if err := eb.StageFlowInstanceRouteContext(ctx, req); err != nil {
-		return err
+	committed, commitErr := eb.StageFlowInstanceRouteContext(ctx, req)
+	if !committed.Acknowledged {
+		return errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged"))
 	}
-	return eb.PublishPersistedFlowInstanceRoute(req)
+	return errors.Join(commitErr, eb.PublishPersistedFlowInstanceRoute(req))
 }
 
 func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
@@ -1046,10 +1047,11 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 	identities = append(identities, owner)
 	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
 	sets := flowInstanceRouteTopologyRecordSets(staged, identities)
-	if err := persister.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
-		return err
+	committed, commitErr := persister.ReplaceFlowInstanceRouteTopology(ctx, sets)
+	if !committed.Acknowledged {
+		return errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged"))
 	}
-	return table.removeFlowInstanceRouteForContext(ctx, owner)
+	return errors.Join(commitErr, table.removeFlowInstanceRouteForContext(context.WithoutCancel(ctx), owner))
 }
 
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {

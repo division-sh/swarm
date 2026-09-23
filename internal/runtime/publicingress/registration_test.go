@@ -82,7 +82,7 @@ func (s *retryingRegistrationEffectStore) AuthorizeExternalAttempt(_ context.Con
 			return runtimeeffects.Attempt{}, err
 		}
 		attempt := runtimeeffects.Attempt{
-			OperationID: request.OperationID, AttemptID: attemptID, Authority: authority,
+			OperationID: request.OperationID, AttemptID: attemptID, Authority: authority, AuthorizationAcknowledged: true,
 			Kind: request.Kind, Class: request.Class, Adapter: request.Adapter, Transport: request.Transport,
 			Ordinal: prior.Ordinal + 1, AuthorizedAt: request.Now,
 		}
@@ -91,7 +91,7 @@ func (s *retryingRegistrationEffectStore) AuthorizeExternalAttempt(_ context.Con
 		return attempt, nil
 	}
 	attempt := runtimeeffects.Attempt{
-		OperationID: request.OperationID, AttemptID: request.AttemptID, Authority: authority,
+		OperationID: request.OperationID, AttemptID: request.AttemptID, Authority: authority, AuthorizationAcknowledged: true,
 		Kind: request.Kind, Class: request.Class, Adapter: request.Adapter, Transport: request.Transport,
 		Ordinal: 1, AuthorizedAt: request.Now,
 	}
@@ -106,10 +106,12 @@ func (s *retryingRegistrationEffectStore) MarkExternalAttemptLaunched(_ context.
 	defer s.mu.Unlock()
 	if s.faultPending {
 		s.faultPending = false
+		fault := errors.New("injected launch marker failure")
 		if s.mode == launchMarkerAckLoss {
 			s.states[attempt.AttemptID] = runtimeeffects.StateLaunched
+			return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, attempt, fault)
 		}
-		return errors.New("injected launch marker failure")
+		return fault
 	}
 	s.states[attempt.AttemptID] = runtimeeffects.StateLaunched
 	return nil
@@ -902,25 +904,45 @@ func TestProviderRegistrationPrelaunchMarkerFailureRetriesWithoutEarlyDispatch(t
 			readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
 			pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram")
 
-			if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err == nil {
-				t.Fatal("launch marker failure returned nil")
-			}
-			if _, applied := transport.counts(); applied != 0 {
-				t.Fatalf("provider dispatched before durable launch marker: count=%d", applied)
-			}
+			firstErr := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair})
 			firstOperation, ordinal, state := effectsStore.attempts()
-			if firstOperation == "" || ordinal != 1 || state != runtimeeffects.StateTerminalFailure {
-				t.Fatalf("prelaunch lifecycle operation=%q ordinal=%d state=%q", firstOperation, ordinal, state)
+			if firstOperation == "" || ordinal != 1 {
+				t.Fatalf("first lifecycle operation=%q ordinal=%d state=%q", firstOperation, ordinal, state)
 			}
-			if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
-				t.Fatalf("retry proven prelaunch failure: %v", err)
-			}
-			operation, ordinal, state := effectsStore.attempts()
-			if operation != firstOperation || ordinal != 2 || state != runtimeeffects.StateSettled {
-				t.Fatalf("retry lifecycle operation=%q ordinal=%d state=%q, want same/2/settled", operation, ordinal, state)
+			if mode == launchMarkerRollback {
+				if firstErr == nil {
+					t.Fatal("rolled-back launch marker returned nil")
+				}
+				if _, applied := transport.counts(); applied != 0 {
+					t.Fatalf("provider dispatched before durable launch marker: count=%d", applied)
+				}
+				if state != runtimeeffects.StateTerminalFailure {
+					t.Fatalf("prelaunch lifecycle operation=%q ordinal=%d state=%q", firstOperation, ordinal, state)
+				}
+				if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+					t.Fatalf("retry proven prelaunch failure: %v", err)
+				}
+				operation, ordinal, state := effectsStore.attempts()
+				if operation != firstOperation || ordinal != 2 || state != runtimeeffects.StateSettled {
+					t.Fatalf("retry lifecycle operation=%q ordinal=%d state=%q, want same/2/settled", operation, ordinal, state)
+				}
+			} else {
+				if firstErr != nil || state != runtimeeffects.StateSettled {
+					t.Fatalf("committed launch reconciled as rollback: state=%q err=%v", state, firstErr)
+				}
+				if _, applied := transport.counts(); applied != 1 {
+					t.Fatalf("committed launch dispatched %d times, want 1", applied)
+				}
+				if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
+					t.Fatalf("repeat committed registration readback: %v", err)
+				}
+				operation, ordinal, state := effectsStore.attempts()
+				if operation != firstOperation || ordinal != 1 || state != runtimeeffects.StateSettled {
+					t.Fatalf("committed launch retried: operation=%q ordinal=%d state=%q", operation, ordinal, state)
+				}
 			}
 			if _, applied := transport.counts(); applied != 1 {
-				t.Fatalf("provider retry dispatch count=%d, want 1", applied)
+				t.Fatalf("provider dispatch count=%d, want 1 without duplicate", applied)
 			}
 		})
 	}

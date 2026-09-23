@@ -31,7 +31,7 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -90,7 +90,7 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 	if err != nil {
 		t.Fatalf("Acquire(%+v): %v", identity, err)
 	}
-	if err := registry.Release(ctx, lease); err != nil {
+	if _, err := registry.ReleaseOutcome(ctx, lease); err != nil {
 		t.Fatalf("Release(%s,%s): %v", agentID, lease.SessionID, err)
 	}
 	return lease.SessionID
@@ -242,8 +242,8 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
 	}
 
-	if err := pg.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return pg.runLifecyclePostgresOwner.SyncCountersTx(txctx, tx, story, runID)
+	if err := runSelectedFixtureMutation(ctx, pg, "sync test run counters", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return pg.runLifecyclePostgresOwner.SyncCountersTx(txctx, attempt, runID)
 	}); err != nil {
 		t.Fatalf("SyncCounts: %v", err)
 	}

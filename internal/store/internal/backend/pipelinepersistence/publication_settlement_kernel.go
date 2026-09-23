@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func validateGroupedSingletonSettlementTx(ctx context.Context, tx *sql.Tx, state *pipelineClaimState) error {
@@ -28,24 +28,27 @@ func validateGroupedSingletonSettlementTx(ctx context.Context, tx *sql.Tx, state
 	return g.validateCommittedMemberTx(ctx, tx, member)
 }
 
-// The enclosing named operation owns claim admission, transaction and the one
-// revision finalizer. Singleton and segment settlement share all domain writes.
-func settlePipelineMemberTx(ctx context.Context, tx *sql.Tx, postgres bool, now time.Time,
+// The enclosing attempt owns candidate representation and revision finalization.
+func settlePipelineMemberTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, now time.Time,
 	claim pipelineobligation.Claim, disposition pipelineobligation.Disposition,
-	effects *revisionEffects, candidates CompletionCandidateRequester, handoff *runhandoff.CandidateHandoff,
+	candidates mutationprotocol.CandidateWriter,
 ) error {
 	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
 		return err
 	}
-	if err := writePipelineDispositionTx(ctx, tx, effects, claim.EventID(), claim.Purpose(), disposition, postgres, now); err != nil {
+	var runID string
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := writePipelineDispositionTx(ctx, tx, attempt, claim.EventID(), claim.Purpose(), disposition, postgres, now); err != nil {
+			return err
+		}
+		var err error
+		runID, err = eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), postgres)
 		return err
-	}
-	runID, err := eventRunIDForCompletionCandidateTx(ctx, tx, claim.EventID(), postgres)
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 	if runID != "" {
-		if _, err := candidates.RequestCompletionCandidateTx(ctx, tx, runID, nil, handoff); err != nil {
+		if _, err := attempt.RequestCompletion(ctx, candidates, runID, nil); err != nil {
 			return err
 		}
 	}
@@ -53,12 +56,8 @@ func settlePipelineMemberTx(ctx context.Context, tx *sql.Tx, postgres bool, now 
 		return nil
 	}
 	if postgres {
-		err = postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, effects, claim.EventID())
+		return postgresDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())
 	} else {
-		err = sqliteDeliveryAdapter.CommitPipelineHandoff(ctx, tx, effects, claim.EventID())
+		return sqliteDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())
 	}
-	if err != nil {
-		return err
-	}
-	return nil
 }

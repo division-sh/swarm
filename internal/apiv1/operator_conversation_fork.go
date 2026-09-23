@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -180,7 +181,7 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Conversa
 			return apiidempotency.Completion{}, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
 		}
 		execution, err := executeConversationForkChatWithHeartbeat(ctx, opts.Lifecycle, opts.Chat, prepared, message)
-		if err != nil {
+		if err != nil && !execution.AssistantCompletionAcknowledged {
 			failure := runtimefailures.FromError(err, "conversation-fork-chat", "execute")
 			failErr := opts.Lifecycle.FailOperatorConversationForkChat(context.WithoutCancel(ctx), runfork.ConversationForkChatFailureRequest{
 				Prepared: prepared, Cause: err, OutcomeUncertain: failure.Failure.Class == runtimefailures.ClassOutcomeUncertain, Now: now,
@@ -190,7 +191,12 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Conversa
 			}
 			return apiidempotency.Completion{}, err
 		}
-		result, err := opts.Lifecycle.RecordOperatorConversationForkChat(ctx, runfork.ConversationForkChatRecordRequest{
+		executionErr := err
+		recordCtx := ctx
+		if executionErr != nil {
+			recordCtx = context.WithoutCancel(ctx)
+		}
+		result, err := opts.Lifecycle.RecordOperatorConversationForkChat(recordCtx, runfork.ConversationForkChatRecordRequest{
 			ForkID:       forkID,
 			Message:      message,
 			ActorTokenID: req.ActorTokenID,
@@ -199,7 +205,10 @@ func executeConversationForkChat(ctx context.Context, req Request, opts Conversa
 			Now:          now,
 		})
 		if err != nil {
-			return apiidempotency.Completion{}, conversationForkError(err, conversationForkErrorDetails{ForkID: forkID})
+			return apiidempotency.Completion{}, conversationForkError(errors.Join(executionErr, err), conversationForkErrorDetails{ForkID: forkID})
+		}
+		if executionErr != nil {
+			slog.WarnContext(recordCtx, "conversation fork chat completion committed with follow-up error", "fork_id", forkID, "fork_turn_id", prepared.ForkTurnID, "error", executionErr)
 		}
 		result.IdempotencyReplayed = false
 		response, err := json.Marshal(result)
@@ -273,6 +282,9 @@ func executeConversationForkChatWithHeartbeat(
 	select {
 	case err := <-heartbeatErr:
 		heartbeatFailure := runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "conversation_fork_chat_heartbeat_failed", "conversation-fork-chat", "execute", nil, err)
+		if execution.AssistantCompletionAcknowledged {
+			return execution, errors.Join(executionErr, heartbeatFailure)
+		}
 		if executionErr != nil {
 			return runfork.ConversationForkChatExecution{}, errors.Join(executionErr, heartbeatFailure)
 		}

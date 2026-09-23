@@ -21,10 +21,9 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/fanoutorigin"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
@@ -143,37 +142,42 @@ func (s *fanOutPostgresOwner) ClaimFanOutIntent(ctx context.Context, request run
 	if err := validateFanOutCandidate(request, s.grant); err != nil {
 		return intent, claim, false, err
 	}
-	committed, err := s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		transactiontest.Mark(txctx, transactiontest.FanOutClaim)
-		ready, err := admitFanOutRun(txctx, tx, s.admission, s.grant, request.Candidate.RunID, true)
-		if err != nil || !ready {
-			return err
-		}
-		row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (fanOutClaimResult, error) {
+		var result fanOutClaimResult
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(txctx, transactiontest.FanOutClaim)
+			ready, err := admitFanOutRun(txctx, tx, s.admission, s.grant, request.Candidate.RunID, true)
+			if err != nil || !ready {
+				return err
+			}
+			row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=$1 AND (claim_owner IS NULL OR lease_expires_at <= clock_timestamp())
 			AND (retry_ready_at IS NULL OR retry_ready_at <= clock_timestamp())
 			AND run_id=$2 AND triggering_delivery_id=$3 AND flow_path=$4 AND declaration_family=$5 AND semantic_path=$6
 			FOR UPDATE SKIP LOCKED`, request.BundleHash, request.Candidate.RunID, request.Candidate.TriggeringDeliveryID,
-			request.Candidate.ElementRef.FlowPath, request.Candidate.ElementRef.Family, request.Candidate.ElementRef.SemanticPath)
-		var scanErr error
-		intent, scanErr = scanFanOutIntent(row)
-		if errors.Is(scanErr, sql.ErrNoRows) {
-			return nil
-		}
-		if scanErr != nil {
-			return scanErr
-		}
-		admittedAt, clockErr := fanOutAdmissionTime(txctx, tx, true, nil)
-		if clockErr != nil {
-			return clockErr
-		}
-		found = true
-		return claimFanOutIntentRow(txctx, tx, request, admittedAt, &intent, &claim)
+				request.Candidate.ElementRef.FlowPath, request.Candidate.ElementRef.Family, request.Candidate.ElementRef.SemanticPath)
+			var scanErr error
+			result.intent, scanErr = scanFanOutIntent(row)
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return nil
+			}
+			if scanErr != nil {
+				return scanErr
+			}
+			admittedAt, clockErr := fanOutAdmissionTime(txctx, tx, true, nil)
+			if clockErr != nil {
+				return clockErr
+			}
+			result.found = true
+			return claimFanOutIntentRow(txctx, tx, request, admittedAt, &result.intent, &result.claim)
+		})
+		return result, err
 	})
-	if !committed {
-		return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, err
+	result, ok := outcome.Value()
+	if !ok {
+		return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, outcome.Err()
 	}
-	return intent, claim, found, err
+	return result.intent, result.claim, result.found, outcome.Err()
 }
 
 func (s *fanOutSQLiteOwner) ClaimFanOutIntent(ctx context.Context, request runtimepipeline.FanOutClaimRequest) (intent fanoutobligation.Intent, claim fanoutobligation.Claim, found bool, err error) {
@@ -185,37 +189,48 @@ func (s *fanOutSQLiteOwner) ClaimFanOutIntent(ctx context.Context, request runti
 	}
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
-	committed, err := s.backend.RunTransactionOutcome(ctx, "claim fan-out intent", func(txctx context.Context, tx *sql.Tx) error {
-		transactiontest.Mark(txctx, transactiontest.FanOutClaim)
-		ready, err := admitFanOutRun(txctx, tx, s.admission, s.grant, request.Candidate.RunID, true)
-		if err != nil || !ready {
-			return err
-		}
-		admittedAt, clockErr := fanOutAdmissionTime(txctx, tx, false, s.now)
-		if clockErr != nil {
-			return clockErr
-		}
-		row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "claim fan-out intent", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (fanOutClaimResult, error) {
+		var result fanOutClaimResult
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(txctx, transactiontest.FanOutClaim)
+			ready, err := admitFanOutRun(txctx, tx, s.admission, s.grant, request.Candidate.RunID, true)
+			if err != nil || !ready {
+				return err
+			}
+			admittedAt, clockErr := fanOutAdmissionTime(txctx, tx, false, s.now)
+			if clockErr != nil {
+				return clockErr
+			}
+			row := tx.QueryRowContext(txctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
 			WHERE status='open' AND bundle_hash=? AND (claim_owner IS NULL OR lease_expires_at <= ?)
 			AND (retry_ready_at IS NULL OR retry_ready_at <= ?)
 			AND run_id=? AND triggering_delivery_id=? AND flow_path=? AND declaration_family=? AND semantic_path=?`,
-			request.BundleHash, admittedAt, admittedAt, request.Candidate.RunID, request.Candidate.TriggeringDeliveryID,
-			request.Candidate.ElementRef.FlowPath, request.Candidate.ElementRef.Family, request.Candidate.ElementRef.SemanticPath)
-		var scanErr error
-		intent, scanErr = scanFanOutIntent(row)
-		if errors.Is(scanErr, sql.ErrNoRows) {
-			return nil
-		}
-		if scanErr != nil {
-			return scanErr
-		}
-		found = true
-		return claimFanOutIntentRow(txctx, tx, request, admittedAt, &intent, &claim)
+				request.BundleHash, admittedAt, admittedAt, request.Candidate.RunID, request.Candidate.TriggeringDeliveryID,
+				request.Candidate.ElementRef.FlowPath, request.Candidate.ElementRef.Family, request.Candidate.ElementRef.SemanticPath)
+			var scanErr error
+			result.intent, scanErr = scanFanOutIntent(row)
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return nil
+			}
+			if scanErr != nil {
+				return scanErr
+			}
+			result.found = true
+			return claimFanOutIntentRow(txctx, tx, request, admittedAt, &result.intent, &result.claim)
+		})
+		return result, err
 	})
-	if !committed {
-		return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, err
+	result, ok := outcome.Value()
+	if !ok {
+		return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, outcome.Err()
 	}
-	return intent, claim, found, err
+	return result.intent, result.claim, result.found, outcome.Err()
+}
+
+type fanOutClaimResult struct {
+	intent fanoutobligation.Intent
+	claim  fanoutobligation.Claim
+	found  bool
 }
 
 func claimFanOutIntentRow(ctx context.Context, tx *sql.Tx, request runtimepipeline.FanOutClaimRequest, admittedAt time.Time, intent *fanoutobligation.Intent, claim *fanoutobligation.Claim) error {
@@ -418,39 +433,55 @@ func collectionRangeFromJSONL(raw []byte, want, start, end int) ([]any, error) {
 	return items, nil
 }
 
-func (s *fanOutPostgresOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
-	return releaseFanOutClaim(ctx, s.backend, "", true, time.Now, claim, s.grant.BundleHash, func(ctx context.Context, tx *sql.Tx) error {
-		return s.admission.AdmitFanOutCleanupTx(ctx, tx, s.grant)
+func (s *fanOutPostgresOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (runtimepipeline.FanOutClaimSettlement, error) {
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, releaseFanOutClaim(txctx, attempt, true, time.Now, claim, s.grant.BundleHash, func(ctx context.Context, tx *sql.Tx) error {
+			return s.admission.AdmitFanOutCleanupTx(ctx, tx, s.grant)
+		})
 	})
+	_, acknowledged := outcome.Value()
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: acknowledged}, outcome.Err()
 }
 
-func (s *fanOutSQLiteOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+func (s *fanOutSQLiteOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (runtimepipeline.FanOutClaimSettlement, error) {
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
-	return releaseFanOutClaim(ctx, s.backend, "release fan-out claim", false, s.now, claim, s.grant.BundleHash, func(ctx context.Context, tx *sql.Tx) error {
-		return s.admission.AdmitFanOutCleanupTx(ctx, tx, s.grant)
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "release fan-out claim", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, releaseFanOutClaim(txctx, attempt, false, s.now, claim, s.grant.BundleHash, func(ctx context.Context, tx *sql.Tx) error {
+			return s.admission.AdmitFanOutCleanupTx(ctx, tx, s.grant)
+		})
 	})
+	_, acknowledged := outcome.Value()
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: acknowledged}, outcome.Err()
 }
 
-func (s *fanOutPostgresOwner) ReleaseFanOutRetryable(ctx context.Context, request runtimepipeline.FanOutRetryableRelease) error {
-	return releaseFanOutRetryable(ctx, s.backend, "", true, time.Now, request, func(ctx context.Context, tx *sql.Tx) error {
-		return admitFanOutClaim(ctx, tx, s.admission, s.grant, true, request.Claim)
+func (s *fanOutPostgresOwner) ReleaseFanOutRetryable(ctx context.Context, request runtimepipeline.FanOutRetryableRelease) (runtimepipeline.FanOutClaimSettlement, error) {
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, releaseFanOutRetryable(txctx, attempt, true, time.Now, request, func(ctx context.Context, tx *sql.Tx) error {
+			return admitFanOutClaim(ctx, tx, s.admission, s.grant, true, request.Claim)
+		})
 	})
+	_, acknowledged := outcome.Value()
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: acknowledged}, outcome.Err()
 }
 
-func (s *fanOutSQLiteOwner) ReleaseFanOutRetryable(ctx context.Context, request runtimepipeline.FanOutRetryableRelease) error {
+func (s *fanOutSQLiteOwner) ReleaseFanOutRetryable(ctx context.Context, request runtimepipeline.FanOutRetryableRelease) (runtimepipeline.FanOutClaimSettlement, error) {
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
-	return releaseFanOutRetryable(ctx, s.backend, "release retryable fan-out claim", false, s.now, request, func(ctx context.Context, tx *sql.Tx) error {
-		return admitFanOutClaim(ctx, tx, s.admission, s.grant, false, request.Claim)
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "release retryable fan-out claim", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, releaseFanOutRetryable(txctx, attempt, false, s.now, request, func(ctx context.Context, tx *sql.Tx) error {
+			return admitFanOutClaim(ctx, tx, s.admission, s.grant, false, request.Claim)
+		})
 	})
+	_, acknowledged := outcome.Value()
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: acknowledged}, outcome.Err()
 }
 
-func releaseFanOutRetryable(ctx context.Context, backend any, label string, postgres bool, observeNow func() time.Time, request runtimepipeline.FanOutRetryableRelease, admit func(context.Context, *sql.Tx) error) error {
+func releaseFanOutRetryable(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, observeNow func() time.Time, request runtimepipeline.FanOutRetryableRelease, admit func(context.Context, *sql.Tx) error) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
-	operation := func(txctx context.Context, tx *sql.Tx) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		transactiontest.Mark(txctx, transactiontest.FanOutRetry)
 		if err := admit(txctx, tx); err != nil {
 			return err
@@ -489,22 +520,10 @@ func releaseFanOutRetryable(ctx context.Context, backend any, label string, post
 			return fanoutobligation.ErrStaleClaim
 		}
 		return nil
-	}
-	switch typed := backend.(type) {
-	case interface {
-		RunTransaction(context.Context, func(context.Context, *sql.Tx) error) error
-	}:
-		return typed.RunTransaction(ctx, operation)
-	case interface {
-		RunTransaction(context.Context, string, func(context.Context, *sql.Tx) error) error
-	}:
-		return typed.RunTransaction(ctx, label, operation)
-	default:
-		return fmt.Errorf("fan-out transaction owner is unavailable")
-	}
+	})
 }
 
-func blockFanOutClaim(ctx context.Context, tx *sql.Tx, postgres bool, observeNow func() time.Time, effects *revisionEffects, request runtimepipeline.FanOutBlockRequest) error {
+func blockFanOutClaim(ctx context.Context, tx *sql.Tx, postgres bool, observeNow func() time.Time, attempt *mutationprotocol.Attempt, request runtimepipeline.FanOutBlockRequest) error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
@@ -541,40 +560,44 @@ func blockFanOutClaim(ctx context.Context, tx *sql.Tx, postgres bool, observeNow
 	if err != nil {
 		return err
 	}
-	return effects.AddFacts(request.Claim.Key.RunID, ref)
+	return attempt.AddFacts(request.Claim.Key.RunID, ref)
 }
 
-func (s *fanOutPostgresOwner) BlockFanOutClaim(ctx context.Context, request runtimepipeline.FanOutBlockRequest) error {
-	effects := newRevisionEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		transactiontest.Mark(txctx, transactiontest.FanOutBlock)
-		if err := admitFanOutClaim(txctx, tx, s.admission, s.grant, true, request.Claim); err != nil {
-			return err
-		}
-		return blockFanOutClaim(txctx, tx, true, time.Now, effects, request)
+func (s *fanOutPostgresOwner) BlockFanOutClaim(ctx context.Context, request runtimepipeline.FanOutBlockRequest) (runtimepipeline.FanOutClaimSettlement, error) {
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(txctx, transactiontest.FanOutBlock)
+			if err := admitFanOutClaim(txctx, tx, s.admission, s.grant, true, request.Claim); err != nil {
+				return err
+			}
+			return blockFanOutClaim(txctx, tx, true, time.Now, attempt, request)
+		})
+		return struct{}{}, err
 	})
+	_, acknowledged := outcome.Value()
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: acknowledged}, outcome.Err()
 }
 
-func (s *fanOutSQLiteOwner) BlockFanOutClaim(ctx context.Context, request runtimepipeline.FanOutBlockRequest) error {
-	effects := newRevisionEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, "block fan-out claim", effects, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		transactiontest.Mark(txctx, transactiontest.FanOutBlock)
-		if err := admitFanOutClaim(txctx, tx, s.admission, s.grant, false, request.Claim); err != nil {
-			return err
-		}
-		return blockFanOutClaim(txctx, tx, false, s.now, effects, request)
+func (s *fanOutSQLiteOwner) BlockFanOutClaim(ctx context.Context, request runtimepipeline.FanOutBlockRequest) (runtimepipeline.FanOutClaimSettlement, error) {
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "block fan-out claim", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(txctx, transactiontest.FanOutBlock)
+			if err := admitFanOutClaim(txctx, tx, s.admission, s.grant, false, request.Claim); err != nil {
+				return err
+			}
+			return blockFanOutClaim(txctx, tx, false, s.now, attempt, request)
+		})
+		return struct{}{}, err
 	})
+	_, acknowledged := outcome.Value()
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: acknowledged}, outcome.Err()
 }
 
-type transactionRunner interface {
-	RunTransaction(context.Context, func(context.Context, *sql.Tx) error) error
-}
-
-func releaseFanOutClaim(ctx context.Context, backend any, label string, postgres bool, observeNow func() time.Time, claim fanoutobligation.Claim, bundleHash string, admit func(context.Context, *sql.Tx) error) error {
+func releaseFanOutClaim(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, observeNow func() time.Time, claim fanoutobligation.Claim, bundleHash string, admit func(context.Context, *sql.Tx) error) error {
 	if err := claim.Validate(); err != nil {
 		return err
 	}
-	operation := func(txctx context.Context, tx *sql.Tx) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		transactiontest.Mark(txctx, transactiontest.FanOutRelease)
 		if err := admit(txctx, tx); err != nil {
 			return err
@@ -595,190 +618,166 @@ func releaseFanOutClaim(ctx context.Context, backend any, label string, postgres
 			return fanoutobligation.ErrStaleClaim
 		}
 		return nil
-	}
-	switch typed := backend.(type) {
-	case interface {
-		RunTransaction(context.Context, func(context.Context, *sql.Tx) error) error
-	}:
-		return typed.RunTransaction(ctx, operation)
-	case interface {
-		RunTransaction(context.Context, string, func(context.Context, *sql.Tx) error) error
-	}:
-		return typed.RunTransaction(ctx, label, operation)
-	default:
-		return fmt.Errorf("fan-out transaction owner is unavailable")
-	}
+	})
 }
 
 func commitFanOutChunk(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
-	run func(context.Context, *revisionEffects, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error)) mutationprotocol.Result[runtimepipeline.CommittedFanOutChunk],
 	observeNow func() time.Time,
-	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
-	requestCandidate func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error),
+	candidateWriter mutationprotocol.CandidateWriter,
+	representReconciledCompletion func(context.Context, string) error,
 	readback pipelineQueryer,
 	command runtimepipeline.FanOutChunkCommand,
 ) (runtimepipeline.CommittedFanOutChunk, error) {
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return runtimepipeline.CommittedFanOutChunk{}, err
-	}
-	defer handoff.Rollback()
-	effects := newRevisionEffects()
 	result := runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
-	operationComplete := false
-	committed, err := run(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (resultErr error) {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error) {
 		result = runtimepipeline.CommittedFanOutChunk{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Outcomes))}
-		operationComplete = false
-		// Each retry owns a fresh handle; no outcome or admission facts survive it.
-		var outcomeInsert *sql.Stmt
-		defer func() {
-			if outcomeInsert != nil {
-				if err := outcomeInsert.Close(); err != nil && resultErr == nil {
-					resultErr = err
-					operationComplete = false
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (resultErr error) {
+			// Each retry owns a fresh handle; no outcome or admission facts survive it.
+			var outcomeInsert *sql.Stmt
+			defer func() {
+				if outcomeInsert != nil {
+					if err := outcomeInsert.Close(); err != nil && resultErr == nil {
+						resultErr = err
+					}
 				}
-			}
-		}()
-		intent, err := lockClaimedFanOutIntent(txctx, tx, postgres, command.Claim, observeNow)
-		if err != nil {
-			return err
-		}
-		if len(command.Outcomes) > intent.NextChunkSize || intent.Cursor+len(command.Outcomes) > intent.Request.Cardinality {
-			return fmt.Errorf("fan-out chunk exceeds claimed range")
-		}
-		var trigger events.Event
-		for _, outcome := range command.Outcomes {
-			if outcome.Publication == nil {
-				continue
-			}
-			var records []events.PersistedReplayEvent
-			if postgres {
-				records, err = hydratePostgresPersistedReplayEvents(txctx, tx, []string{intent.Request.Capsule.Lineage.ParentEventID})
-			} else {
-				records, err = hydrateSQLitePersistedReplayEvents(txctx, tx, []string{intent.Request.Capsule.Lineage.ParentEventID})
-			}
+			}()
+			intent, err := lockClaimedFanOutIntent(txctx, tx, postgres, command.Claim, observeNow)
 			if err != nil {
 				return err
 			}
-			if len(records) != 1 || records[0].ReplayFailure != nil {
-				return fmt.Errorf("fan-out chunk requires the exact immutable trigger")
+			if len(command.Outcomes) > intent.NextChunkSize || intent.Cursor+len(command.Outcomes) > intent.Request.Cardinality {
+				return fmt.Errorf("fan-out chunk exceeds claimed range")
 			}
-			trigger = records[0].Event
-			inLineage, err := fanoutorigin.SourceRunInLineage(txctx, tx, postgres, intent.Request.Key.RunID, trigger.RunID())
-			if err != nil {
-				return err
-			}
-			if !inLineage {
-				return fmt.Errorf("fan-out chunk trigger is outside the destination fork lineage")
-			}
-			break
-		}
-		for index, outcome := range command.Outcomes {
-			wantOrdinal := intent.Cursor + index
-			if outcome.Ordinal != wantOrdinal {
-				return fmt.Errorf("fan-out chunk ordinal %d = %d, want contiguous %d", index, outcome.Ordinal, wantOrdinal)
-			}
-			kind := fanoutobligation.OutcomeSemanticRejected
-			var eventID string
-			failure := any(nil)
-			if outcome.Publication != nil {
-				plan, ok := outcome.Publication.(runtimebus.EnginePublicationPlan)
-				if !ok {
-					return fmt.Errorf("fan-out publication %d has unexpected type %T", index, outcome.Publication)
+			var trigger events.Event
+			for _, outcome := range command.Outcomes {
+				if outcome.Publication == nil {
+					continue
 				}
-				projection, err := fanoutobligation.PrepareOrdinalEmission(intent, trigger, outcome.Ordinal)
-				if err != nil {
-					return err
-				}
-				committed, err := store.commitFanOutPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), projection, handoff)
-				if err != nil {
-					return fmt.Errorf("commit fan-out publication ordinal %d: %w", outcome.Ordinal, err)
-				}
-				evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
-				if err != nil {
-					return err
-				}
-				result.Publications = append(result.Publications, evidence)
-				kind = fanoutobligation.OutcomeCommitted
-				eventID = evidence.CommittedDurablePublicationEventID()
-			} else {
-				failure = string(outcome.Failure)
-			}
-			if outcomeInsert == nil {
-				query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULL,NULL,$9,$10)`
+				var records []events.PersistedReplayEvent
 				if postgres {
-					query = strings.ReplaceAll(query, "NULLIF($8,'')", "NULLIF($8,'')::uuid")
-					query = strings.ReplaceAll(query, "$9", "$9::jsonb")
+					records, err = hydratePostgresPersistedReplayEvents(txctx, tx, []string{intent.Request.Capsule.Lineage.ParentEventID})
 				} else {
-					query = postgresPlaceholdersToSQLite(query, 10)
+					records, err = hydrateSQLitePersistedReplayEvents(txctx, tx, []string{intent.Request.Capsule.Lineage.ParentEventID})
 				}
-				outcomeInsert, err = tx.PrepareContext(txctx, query)
 				if err != nil {
+					return err
+				}
+				if len(records) != 1 || records[0].ReplayFailure != nil {
+					return fmt.Errorf("fan-out chunk requires the exact immutable trigger")
+				}
+				trigger = records[0].Event
+				inLineage, err := fanoutorigin.SourceRunInLineage(txctx, tx, postgres, intent.Request.Key.RunID, trigger.RunID())
+				if err != nil {
+					return err
+				}
+				if !inLineage {
+					return fmt.Errorf("fan-out chunk trigger is outside the destination fork lineage")
+				}
+				break
+			}
+			for index, outcome := range command.Outcomes {
+				wantOrdinal := intent.Cursor + index
+				if outcome.Ordinal != wantOrdinal {
+					return fmt.Errorf("fan-out chunk ordinal %d = %d, want contiguous %d", index, outcome.Ordinal, wantOrdinal)
+				}
+				kind := fanoutobligation.OutcomeSemanticRejected
+				var eventID string
+				failure := any(nil)
+				if outcome.Publication != nil {
+					plan, ok := outcome.Publication.(runtimebus.EnginePublicationPlan)
+					if !ok {
+						return fmt.Errorf("fan-out publication %d has unexpected type %T", index, outcome.Publication)
+					}
+					projection, err := fanoutobligation.PrepareOrdinalEmission(intent, trigger, outcome.Ordinal)
+					if err != nil {
+						return err
+					}
+					committed, err := store.commitFanOutPublicationTx(txctx, attempt, plan.PublicationCommand(), projection)
+					if err != nil {
+						return fmt.Errorf("commit fan-out publication ordinal %d: %w", outcome.Ordinal, err)
+					}
+					evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+					if err != nil {
+						return err
+					}
+					result.Publications = append(result.Publications, evidence)
+					kind = fanoutobligation.OutcomeCommitted
+					eventID = evidence.CommittedDurablePublicationEventID()
+				} else {
+					failure = string(outcome.Failure)
+				}
+				if outcomeInsert == nil {
+					query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NULLIF($8,''),NULL,NULL,$9,$10)`
+					if postgres {
+						query = strings.ReplaceAll(query, "NULLIF($8,'')", "NULLIF($8,'')::uuid")
+						query = strings.ReplaceAll(query, "$9", "$9::jsonb")
+					} else {
+						query = postgresPlaceholdersToSQLite(query, 10)
+					}
+					outcomeInsert, err = tx.PrepareContext(txctx, query)
+					if err != nil {
+						return fmt.Errorf("insert fan-out outcome ordinal %d: %w", outcome.Ordinal, err)
+					}
+				}
+				if _, err := outcomeInsert.ExecContext(txctx, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, outcome.Ordinal, string(kind), nullableText(eventID), failure, command.Now.UTC()); err != nil {
 					return fmt.Errorf("insert fan-out outcome ordinal %d: %w", outcome.Ordinal, err)
 				}
+				ref, err := privaterunforkrevision.FanOutOutcomeFact(command.Claim.Key, outcome.Ordinal)
+				if err != nil {
+					return err
+				}
+				if err := attempt.AddFacts(command.Claim.Key.RunID, ref); err != nil {
+					return err
+				}
 			}
-			if _, err := outcomeInsert.ExecContext(txctx, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, outcome.Ordinal, string(kind), nullableText(eventID), failure, command.Now.UTC()); err != nil {
-				return fmt.Errorf("insert fan-out outcome ordinal %d: %w", outcome.Ordinal, err)
+			nextCursor := intent.Cursor + len(command.Outcomes)
+			status := fanoutobligation.StatusOpen
+			if nextCursor == intent.Request.Cardinality {
+				status = fanoutobligation.StatusClosed
 			}
-			ref, err := privaterunforkrevision.FanOutOutcomeFact(command.Claim.Key, outcome.Ordinal)
+			servedAt, err := fanOutAdmissionTime(txctx, tx, postgres, observeNow)
 			if err != nil {
 				return err
 			}
-			if err := effects.AddFacts(command.Claim.Key.RunID, ref); err != nil {
-				return err
-			}
-		}
-		nextCursor := intent.Cursor + len(command.Outcomes)
-		status := fanoutobligation.StatusOpen
-		if nextCursor == intent.Request.Cardinality {
-			status = fanoutobligation.StatusClosed
-		}
-		servedAt, err := fanOutAdmissionTime(txctx, tx, postgres, observeNow)
-		if err != nil {
-			return err
-		}
-		update, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET cursor=$1,status=$2,updated_at=$3,last_served_at=$3,next_chunk_size=$11,claim_owner=NULL,lease_expires_at=NULL WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND claim_owner=$9 AND claim_generation=$10 AND status='open'`, nextCursor, string(status), servedAt, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, command.Claim.Owner, command.Claim.Generation, fanoutobligation.MaxChunkSize)
-		if err != nil {
-			return err
-		}
-		rows, err := update.RowsAffected()
-		if err != nil || rows != 1 {
-			return fanoutobligation.ErrStaleClaim
-		}
-		ref, err := privaterunforkrevision.FanOutIntentFact(command.Claim.Key)
-		if err != nil {
-			return err
-		}
-		if err := effects.AddFacts(command.Claim.Key.RunID, ref); err != nil {
-			return err
-		}
-		intent.Cursor, intent.Status, intent.UpdatedAt = nextCursor, status, servedAt
-		intent.LastServedAt, intent.NextChunkSize = servedAt, fanoutobligation.MaxChunkSize
-		intent.ClaimOwner, intent.LeaseExpiresAt = "", time.Time{}
-		result.Intent = intent
-		if status == fanoutobligation.StatusClosed {
-			candidate, err := requestCandidate(txctx, tx, command.Claim.Key.RunID)
+			update, err := tx.ExecContext(txctx, `UPDATE fan_out_intents SET cursor=$1,status=$2,updated_at=$3,last_served_at=$3,next_chunk_size=$11,claim_owner=NULL,lease_expires_at=NULL WHERE run_id=$4 AND triggering_delivery_id=$5 AND flow_path=$6 AND declaration_family=$7 AND semantic_path=$8 AND claim_owner=$9 AND claim_generation=$10 AND status='open'`, nextCursor, string(status), servedAt, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, command.Claim.Owner, command.Claim.Generation, fanoutobligation.MaxChunkSize)
 			if err != nil {
 				return err
 			}
-			if err := prepare(handoff, candidate); err != nil {
+			rows, err := update.RowsAffected()
+			if err != nil || rows != 1 {
+				return fanoutobligation.ErrStaleClaim
+			}
+			ref, err := privaterunforkrevision.FanOutIntentFact(command.Claim.Key)
+			if err != nil {
 				return err
 			}
-		}
-		operationComplete = true
-		return nil
+			if err := attempt.AddFacts(command.Claim.Key.RunID, ref); err != nil {
+				return err
+			}
+			intent.Cursor, intent.Status, intent.UpdatedAt = nextCursor, status, servedAt
+			intent.LastServedAt, intent.NextChunkSize = servedAt, fanoutobligation.MaxChunkSize
+			intent.ClaimOwner, intent.LeaseExpiresAt = "", time.Time{}
+			result.Intent = intent
+			if status == fanoutobligation.StatusClosed {
+				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.Claim.Key.RunID, nil); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		return result, err
 	})
-	if !committed {
-		if err == nil || !operationComplete {
+	err := outcome.Err()
+	if !outcome.Acknowledged() {
+		// A retry refused before COMMIT is not an uncertain committed chunk.
+		if err == nil || outcome.Phase() != mutationprotocol.CommitAdmission {
 			return runtimepipeline.CommittedFanOutChunk{}, err
 		}
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -797,13 +796,34 @@ func commitFanOutChunk(
 		if !committed {
 			return runtimepipeline.CommittedFanOutChunk{}, err
 		}
+		if result.Intent.Status == fanoutobligation.StatusClosed || len(result.Publications) != 0 {
+			if representReconciledCompletion == nil {
+				err = errors.Join(err, errors.New("reconciled fan-out completion requires candidate representation"))
+			} else {
+				err = errors.Join(err, representReconciledCompletion(readCtx, command.Claim.Key.RunID))
+			}
+		}
+	} else {
+		result, _ = outcome.Value()
 	}
 	// Keep post-commit failures out of the runtime's mutation retry path.
 	result.PostCommitFailure = err
-	if err := handoff.Commit(); err != nil {
-		result.PostCommitFailure = errors.Join(result.PostCommitFailure, err)
-	}
 	return result, nil
+}
+
+func representReconciledFanOutCandidate(ctx context.Context, attempt *mutationprotocol.Attempt, writer mutationprotocol.CandidateWriter, runID string, now time.Time) error {
+	var due sql.NullTime
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT completion_due_at FROM runs WHERE run_id=$1`, runID).Scan(&due)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil || !due.Valid || due.Time.After(now) {
+		return err
+	}
+	_, err = attempt.RequestCompletion(ctx, writer, runID, nil)
+	return err
 }
 
 func reconcileFanOutChunk(ctx context.Context, db pipelineQueryer, postgres bool, command runtimepipeline.FanOutChunkCommand) (bool, error) {
@@ -969,37 +989,48 @@ func (s *fanOutPostgresOwner) CommitFanOutChunk(ctx context.Context, command run
 			}
 		}()
 	}
-	return commitFanOutChunk(ctx, s, true,
-		func(ctx context.Context, effects *revisionEffects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-			run := s.runPrivateAuthorActivityMutationOutcome
-			if group != nil {
-				run = group.runPostgresPublication
-			}
-			var operationErr error
-			committed, err := run(ctx, effects, func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return result, err
+	}
+	run := func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error)) mutationprotocol.Result[runtimepipeline.CommittedFanOutChunk] {
+		var operationErr error
+		operation := func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error) {
+			var value runtimepipeline.CommittedFanOutChunk
+			err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 				if group != nil {
 					group.publicationTx.Store(tx)
 					defer group.publicationTx.Store(nil)
 				}
-				transactiontest.Mark(ctx, transactiontest.FanOutChunk)
-				if err := admitFanOutClaim(ctx, tx, s.admission, s.grant, true, command.Claim); err != nil {
+				transactiontest.Mark(txctx, transactiontest.FanOutChunk)
+				if err := admitFanOutClaim(txctx, tx, s.admission, s.grant, true, command.Claim); err != nil {
 					return err
 				}
-				operationErr = fn(ctx, tx, story)
+				value, operationErr = write(txctx, attempt)
 				return operationErr
 			})
-			if group != nil && !committed && operationErr != nil && err == operationErr {
-				_, group.restrictAfterRollback = runtimepipeline.FanOutSafeAggregateFailure(operationErr)
-			}
-			return committed, err
-		},
-		time.Now,
-		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-			return reservation.Prepare(s.runLifecycleCandidates, result)
-		},
-		func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-			return requestPostgresCompletionCandidateTx(ctx, tx, runID, nil, false)
-		}, s.backend, command)
+			return value, err
+		}
+		var outcome mutationprotocol.Result[runtimepipeline.CommittedFanOutChunk]
+		if group != nil {
+			outcome = mutationprotocol.RunRetainedPostgres(ctx, group.session, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, operation)
+		} else {
+			outcome = mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, operation)
+		}
+		if group != nil && !outcome.Acknowledged() && operationErr != nil && outcome.Err() == operationErr {
+			_, group.restrictAfterRollback = runtimepipeline.FanOutSafeAggregateFailure(operationErr)
+		}
+		return outcome
+	}
+	represent := func(ctx context.Context, runID string) error {
+		outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, representReconciledFanOutCandidate(txctx, attempt, s.RunLifecyclePostgresOwner, runID, time.Now().UTC())
+		})
+		if !outcome.Acknowledged() {
+			return errors.Join(outcome.Err(), errors.New("reconciled fan-out completion candidate representation is unconfirmed"))
+		}
+		return outcome.Err()
+	}
+	return commitFanOutChunk(ctx, s, true, run, time.Now, s.RunLifecyclePostgresOwner, represent, s.backend, command)
 }
 
 func (s *fanOutSQLiteOwner) CommitFanOutChunk(ctx context.Context, command runtimepipeline.FanOutChunkCommand) (result runtimepipeline.CommittedFanOutChunk, resultErr error) {
@@ -1019,36 +1050,47 @@ func (s *fanOutSQLiteOwner) CommitFanOutChunk(ctx context.Context, command runti
 			}
 		}()
 	}
-	return commitFanOutChunk(ctx, s, false,
-		func(ctx context.Context, effects *revisionEffects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-			var operationErr error
-			committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "commit fan-out chunk", effects, func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return result, err
+	}
+	run := func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error)) mutationprotocol.Result[runtimepipeline.CommittedFanOutChunk] {
+		var operationErr error
+		outcome := mutationprotocol.RunSQLite(ctx, s.backend, "commit fan-out chunk", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error) {
+			var value runtimepipeline.CommittedFanOutChunk
+			err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 				if group != nil {
 					group.publicationTx.Store(tx)
 					defer group.publicationTx.Store(nil)
 				}
-				transactiontest.Mark(ctx, transactiontest.FanOutChunk)
-				if err := admitFanOutClaim(ctx, tx, s.admission, s.grant, false, command.Claim); err != nil {
+				transactiontest.Mark(txctx, transactiontest.FanOutChunk)
+				if err := admitFanOutClaim(txctx, tx, s.admission, s.grant, false, command.Claim); err != nil {
 					return err
 				}
-				operationErr = fn(ctx, tx, story)
+				value, operationErr = write(txctx, attempt)
 				return operationErr
 			})
-			if group != nil && !committed && operationErr != nil && err == operationErr {
-				_, group.restrictAfterRollback = runtimepipeline.FanOutSafeAggregateFailure(operationErr)
-			}
-			return committed, err
-		},
-		s.now,
-		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-			return reservation.Prepare(s.runLifecycleCandidates, result)
-		},
-		func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-			return requestSQLiteCompletionCandidateTx(ctx, tx, runID, nil, s.now(), false)
-		}, s.backend, command)
+			return value, err
+		})
+		if group != nil && !outcome.Acknowledged() && operationErr != nil && outcome.Err() == operationErr {
+			_, group.restrictAfterRollback = runtimepipeline.FanOutSafeAggregateFailure(operationErr)
+		}
+		return outcome
+	}
+	represent := func(ctx context.Context, runID string) error {
+		outcome := mutationprotocol.RunSQLite(ctx, s.backend, "represent reconciled fan-out completion", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, representReconciledFanOutCandidate(txctx, attempt, s.RunLifecycleSQLiteOwner, runID, s.now())
+		})
+		if !outcome.Acknowledged() {
+			return errors.Join(outcome.Err(), errors.New("reconciled fan-out completion candidate representation is unconfirmed"))
+		}
+		return outcome.Err()
+	}
+	return commitFanOutChunk(ctx, s, false, run, s.now, s.RunLifecycleSQLiteOwner, represent, s.backend, command)
 }
 
-func cancelRunFanOut(ctx context.Context, postgres bool, effects *revisionEffects, tx *sql.Tx, runID, reason string, at time.Time) error {
+func cancelRunFanOut(ctx context.Context, postgres bool, effects interface {
+	AddFacts(string, ...privaterunforkrevision.FactRef) error
+}, tx *sql.Tx, runID, reason string, at time.Time) error {
 	if strings.TrimSpace(runID) == "" || strings.TrimSpace(reason) == "" || at.IsZero() {
 		return fanOutCancellationFailure("validate_request", fmt.Errorf("fan-out cancellation requires run, reason, and time"))
 	}
@@ -1102,17 +1144,21 @@ func cancelRunFanOut(ctx context.Context, postgres bool, effects *revisionEffect
 }
 
 func (s *PipelinePostgresOwner) CancelRunFanOut(ctx context.Context, runID, reason string, at time.Time) error {
-	effects := newRevisionEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		return cancelRunFanOut(txctx, true, effects, tx, runID, reason, at)
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			return cancelRunFanOut(txctx, true, attempt, tx, runID, reason, at)
+		})
 	})
+	return outcome.Err()
 }
 
 func (s *PipelineSQLiteOwner) CancelRunFanOut(ctx context.Context, runID, reason string, at time.Time) error {
-	effects := newRevisionEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, "cancel run fan-out", effects, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		return cancelRunFanOut(txctx, false, effects, tx, runID, reason, at)
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "cancel run fan-out", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			return cancelRunFanOut(txctx, false, attempt, tx, runID, reason, at)
+		})
 	})
+	return outcome.Err()
 }
 
 func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, runID string, now time.Time) (fanoutobligation.RunSummary, error) {

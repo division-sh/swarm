@@ -1,7 +1,7 @@
 package runtimepersistence
 
 import (
-	"reflect"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -9,118 +9,132 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	privategenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
 func TestGenericScheduleExactEffectsAdmissionPreparationCancellationBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, ctx := tc.open(t)
+			selected, db, ctx := tc.open(t)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			postgres := tc.name == "postgres"
 			at := time.Now().UTC().Truncate(time.Microsecond)
-			tx, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback()
-			assertEffects := func(got *runforkrevision.Effects, ids ...string) {
+			head := func() int64 {
 				t.Helper()
-				want := runforkrevision.NewEffects()
-				for _, id := range ids {
-					if err := want.AddFact(runID, runforkrevision.FamilyTimers, id); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if !reflect.DeepEqual(got, want) {
-					t.Fatalf("generic timer contributions are not exactly %v", ids)
-				}
-				// Use the same verified collector for the actual history cut.
-				if postgres {
-					_, err = runforkrevision.FinalizePostgres(ctx, tx, got)
-				} else {
-					_, err = runforkrevision.FinalizeSQLite(ctx, tx, got)
-				}
-				if err != nil {
+				var revision int64
+				if err := db.QueryRowContext(ctx, `SELECT COALESCE((SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1),0)`, runID).Scan(&revision); err != nil {
 					t.Fatal(err)
+				}
+				return revision
+			}
+			run := func(label string, factID func() string, write func(context.Context, *mutationprotocol.Attempt) error) {
+				t.Helper()
+				before := head()
+				if err := runSelectedFixtureMutation(ctx, selected, label, write); err != nil {
+					t.Fatalf("%s: %v", label, err)
+				}
+				after := head()
+				if factID == nil {
+					if after != before {
+						t.Fatalf("%s no-op advanced revision from %d to %d", label, before, after)
+					}
+					return
+				}
+				if after != before+1 {
+					t.Fatalf("%s revision=%d, want %d", label, after, before+1)
+				}
+				var total, exact int
+				if err := db.QueryRowContext(ctx, `
+					SELECT COUNT(*), COALESCE(SUM(CASE WHEN family='timers' AND fact_key=$3 AND present THEN 1 ELSE 0 END),0)
+					FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2
+				`, runID, after, factID()).Scan(&total, &exact); err != nil {
+					t.Fatal(err)
+				}
+				if total != 1 || exact != 1 {
+					t.Fatalf("%s revision %d timer facts total=%d exact=%d, want 1/1", label, after, total, exact)
 				}
 			}
 			command := testRootGenericScheduleCommand(t, runID, uuid.NewString(), "exact-timer", runtimegenericschedule.DelayDue(time.Minute))
-			effects := runforkrevision.NewEffects()
-			created, err := privategenericschedule.AdmitTx(ctx, tx, postgres, effects, command, func() time.Time { return at })
-			if err != nil || created.Outcome != runtimegenericschedule.AdmissionCreated {
-				t.Fatalf("admit: %+v: %v", created, err)
-			}
-			assertEffects(effects, created.Activation.ID)
-			effects = runforkrevision.NewEffects()
-			replayed, err := privategenericschedule.AdmitTx(ctx, tx, postgres, effects, command, func() time.Time { return at.Add(time.Hour) })
-			if err != nil || replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.ID != created.Activation.ID {
-				t.Fatalf("admit replay: %+v: %v", replayed, err)
-			}
-			assertEffects(effects)
+			var created runtimegenericschedule.AdmissionResult
+			run("timer admission", func() string { return created.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				var err error
+				created, err = privategenericschedule.AdmitTx(txctx, attempt, postgres, command, func() time.Time { return at })
+				if err == nil && created.Outcome != runtimegenericschedule.AdmissionCreated {
+					t.Fatalf("admit: %+v", created)
+				}
+				return err
+			})
+			run("timer exact replay", nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				replayed, err := privategenericschedule.AdmitTx(txctx, attempt, postgres, command, func() time.Time { return at.Add(time.Hour) })
+				if err == nil && (replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.ID != created.Activation.ID) {
+					t.Fatalf("admit replay: %+v", replayed)
+				}
+				return err
+			})
 			wakeup, err := created.Activation.Wakeup()
 			if err != nil {
 				t.Fatal(err)
 			}
-			effects = runforkrevision.NewEffects()
-			prepared, err := privategenericschedule.PrepareOccurrenceTx(ctx, tx, postgres, effects, wakeup, at.Add(time.Minute))
-			if err != nil || prepared.Activation.ID != created.Activation.ID {
-				t.Fatalf("prepare: %+v: %v", prepared, err)
-			}
-			assertEffects(effects, created.Activation.ID)
-			effects = runforkrevision.NewEffects()
-			cancelled, err := privategenericschedule.CancelAdmissionTx(ctx, tx, postgres, effects, command, "operator_cancelled", at.Add(2*time.Minute))
-			if err != nil || cancelled.Outcome != runtimegenericschedule.CancelChanged {
-				t.Fatalf("cancel immutable admission: %+v: %v", cancelled, err)
-			}
-			assertEffects(effects, created.Activation.ID)
-			effects = runforkrevision.NewEffects()
-			_, err = privategenericschedule.CancelTx(ctx, tx, postgres, effects, runtimegenericschedule.CancelCommand{
-				ActivationID: created.Activation.ID, Cause: "operator_cancelled", CancelledAt: at.Add(2 * time.Minute),
+			run("timer occurrence preparation", func() string { return created.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				prepared, err := privategenericschedule.PrepareOccurrenceTx(txctx, attempt, postgres, wakeup, at.Add(time.Minute))
+				if err == nil && prepared.Activation.ID != created.Activation.ID {
+					t.Fatalf("prepare: %+v", prepared)
+				}
+				return err
 			})
+			run("timer cancellation", func() string { return created.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				cancelled, err := privategenericschedule.CancelAdmissionTx(txctx, attempt, postgres, command, "operator_cancelled", at.Add(2*time.Minute))
+				if err == nil && cancelled.Outcome != runtimegenericschedule.CancelChanged {
+					t.Fatalf("cancel immutable admission: %+v", cancelled)
+				}
+				return err
+			})
+			run("timer cancel replay", nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				_, err := privategenericschedule.CancelTx(txctx, attempt, postgres, runtimegenericschedule.CancelCommand{
+					ActivationID: created.Activation.ID, Cause: "operator_cancelled", CancelledAt: at.Add(2 * time.Minute),
+				})
+				return err
+			})
+			if !postgres {
+				return
+			}
+			command.ScheduleKey, command.TaskID = "malformed-exact-timer", "malformed-exact-timer"
+			var malformed runtimegenericschedule.AdmissionResult
+			run("malformed timer admission", func() string { return malformed.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				var err error
+				malformed, err = privategenericschedule.AdmitTx(txctx, attempt, postgres, command, func() time.Time { return at })
+				return err
+			})
+			if _, err := db.ExecContext(ctx, `UPDATE timers SET immutable_hash='corrupt' WHERE timer_id=$1::uuid`, malformed.Activation.ID); err != nil {
+				t.Fatal(err)
+			}
+			variantWakeup, err := runtimegenericschedule.NewWakeup(strings.ToUpper(malformed.Activation.ID), malformed.Activation.CurrentDueAt)
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertEffects(effects)
-			if postgres {
-				command.ScheduleKey, command.TaskID = "malformed-exact-timer", "malformed-exact-timer"
-				effects = runforkrevision.NewEffects()
-				malformed, err := privategenericschedule.AdmitTx(ctx, tx, postgres, effects, command, func() time.Time { return at })
-				if err != nil {
-					t.Fatal(err)
+			run("malformed timer preparation", func() string { return malformed.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				prepared, err := privategenericschedule.PrepareOccurrenceTx(txctx, attempt, postgres, variantWakeup, at.Add(time.Minute))
+				if err == nil && prepared.Outcome != runtimegenericschedule.PrepareTerminal {
+					t.Fatalf("malformed variant prepare: %+v", prepared)
 				}
-				assertEffects(effects, malformed.Activation.ID)
-				if _, err := tx.ExecContext(ctx, `UPDATE timers SET immutable_hash='corrupt' WHERE timer_id=$1::uuid`, malformed.Activation.ID); err != nil {
-					t.Fatal(err)
-				}
-				variantWakeup, err := runtimegenericschedule.NewWakeup(strings.ToUpper(malformed.Activation.ID), malformed.Activation.CurrentDueAt)
-				if err != nil {
-					t.Fatal(err)
-				}
-				effects = runforkrevision.NewEffects()
-				prepared, err := privategenericschedule.PrepareOccurrenceTx(ctx, tx, postgres, effects, variantWakeup, at.Add(time.Minute))
-				if err != nil || prepared.Outcome != runtimegenericschedule.PrepareTerminal {
-					t.Fatalf("malformed variant prepare: %+v: %v", prepared, err)
-				}
-				assertEffects(effects, malformed.Activation.ID)
-				effects = runforkrevision.NewEffects()
-				if _, err := privategenericschedule.PrepareOccurrenceTx(ctx, tx, postgres, effects, variantWakeup, at.Add(time.Minute)); err != nil {
-					t.Fatal(err)
-				}
-				assertEffects(effects)
-				for _, spelling := range []string{strings.ToUpper(runID), strings.ReplaceAll(runID, "-", "")} {
-					variantCommand := testRootGenericScheduleCommand(t, spelling, command.EntityID, "run-spelling-"+spelling, runtimegenericschedule.DelayDue(time.Minute))
-					effects = runforkrevision.NewEffects()
-					admitted, err := privategenericschedule.AdmitTx(ctx, tx, postgres, effects, variantCommand, func() time.Time { return at })
-					if err != nil || admitted.Outcome != runtimegenericschedule.AdmissionCreated {
-						t.Fatalf("run spelling admission: %+v: %v", admitted, err)
+				return err
+			})
+			run("malformed timer prepare replay", nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				_, err := privategenericschedule.PrepareOccurrenceTx(txctx, attempt, postgres, variantWakeup, at.Add(time.Minute))
+				return err
+			})
+			for _, spelling := range []string{strings.ToUpper(runID), strings.ReplaceAll(runID, "-", "")} {
+				variantCommand := testRootGenericScheduleCommand(t, spelling, command.EntityID, "run-spelling-"+spelling, runtimegenericschedule.DelayDue(time.Minute))
+				var admitted runtimegenericschedule.AdmissionResult
+				run("run spelling admission", func() string { return admitted.Activation.ID }, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+					var err error
+					admitted, err = privategenericschedule.AdmitTx(txctx, attempt, postgres, variantCommand, func() time.Time { return at })
+					if err == nil && admitted.Outcome != runtimegenericschedule.AdmissionCreated {
+						t.Fatalf("run spelling admission: %+v", admitted)
 					}
-					assertEffects(effects, admitted.Activation.ID)
-				}
-			}
-			if err := tx.Commit(); err != nil {
-				t.Fatal(err)
+					return err
+				})
 			}
 		})
 	}

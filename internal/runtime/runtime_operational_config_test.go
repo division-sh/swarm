@@ -112,8 +112,8 @@ type recoveryDisabledScheduleStore struct {
 	loadCalls   atomic.Int32
 }
 
-func (*recoveryDisabledScheduleStore) AdmitGenericSchedule(context.Context, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
-	return runtimegenericschedule.AdmissionResult{}, errors.New("unexpected generic schedule admission")
+func (*recoveryDisabledScheduleStore) AdmitGenericScheduleOutcome(context.Context, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionCommit, error) {
+	return runtimegenericschedule.AdmissionCommit{}, errors.New("unexpected generic schedule admission")
 }
 func (s *recoveryDisabledScheduleStore) LoadGenericScheduleActivation(_ context.Context, activationID string) (runtimegenericschedule.Activation, bool, error) {
 	for _, activation := range s.active {
@@ -133,8 +133,8 @@ func (*recoveryDisabledScheduleStore) PrepareGenericScheduleOccurrence(context.C
 func (*recoveryDisabledScheduleStore) CommitGenericScheduleOccurrence(context.Context, runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
 	return runtimegenericschedule.CommitResult{}, errors.New("unexpected generic schedule commit")
 }
-func (*recoveryDisabledScheduleStore) CancelGenericSchedule(context.Context, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
-	return runtimegenericschedule.CancelResult{}, errors.New("unexpected generic schedule cancellation")
+func (*recoveryDisabledScheduleStore) CancelGenericScheduleOutcome(context.Context, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelCommit, error) {
+	return runtimegenericschedule.CancelCommit{}, errors.New("unexpected generic schedule cancellation")
 }
 func (*recoveryDisabledScheduleStore) ClaimGenericScheduleWakeup(context.Context, runtimegenericschedule.Wakeup) (bool, error) {
 	return true, nil

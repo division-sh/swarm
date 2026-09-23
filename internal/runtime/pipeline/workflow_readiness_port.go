@@ -37,9 +37,9 @@ func (s *workflowInstanceStore) InspectDynamicFlowRuntimeReadinessForRun(ctx con
 	return s.readiness.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
-func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
+func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
 	if s == nil || s.readiness == nil {
-		return fmt.Errorf("dynamic flow runtime readiness owner is required")
+		return DynamicFlowRuntimeTopologyReadyResult{}, fmt.Errorf("dynamic flow runtime readiness owner is required")
 	}
 	return s.readiness.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
 }

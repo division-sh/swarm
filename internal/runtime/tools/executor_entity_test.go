@@ -1383,28 +1383,19 @@ accounts:
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
-	for _, fixture := range []struct {
-		id        string
-		eventType events.EventType
-		createdAt time.Time
-	}{
-		{id: stateEventID, eventType: "fork.state_entry", createdAt: at},
-		{id: forkEventID, eventType: "fork.field_only", createdAt: forkAt},
-	} {
-		storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
-			fixture.id, fixture.eventType, eventtest.Producer(events.EventProducerPlatform, "test"),
-			"", []byte(`{}`), 0, sourceRunID, "",
-			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, fixture.createdAt,
-		))
-	}
+	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
+		"", []byte(`{}`), 0, sourceRunID, "",
+		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, at,
+	))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $5),
-			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'revision-test', 'field-only', $6)
-	`, sourceRunID, entityID, stateEventID, forkEventID, at, forkAt); err != nil {
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4)
+	`, sourceRunID, entityID, stateEventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1413,11 +1404,24 @@ accounts:
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'review/inst-1', 'default', 'done',
-			'{}'::jsonb, '{"status":"closed"}'::jsonb, '{}'::jsonb, 7, $3, $4, $3
+			$1::uuid, $2::uuid, 'review/inst-1', 'default', 'queued',
+			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $3, $3
 		)
-	`, sourceRunID, entityID, at.Add(time.Minute), at); err != nil {
+	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
+	}
+	captureEntityToolRunForkRevision(t, db, sourceRunID)
+	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
+		"", []byte(`{}`), 0, sourceRunID, "",
+		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,
+	))
+	if _, err := db.ExecContext(ctx, `
+		UPDATE entity_state
+		SET current_state = 'done', fields = '{"status":"closed"}'::jsonb, revision = 7, updated_at = $3
+		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+		t.Fatalf("advance live source entity_state: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
 	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
@@ -1484,28 +1488,19 @@ accounts:
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
-	for _, fixture := range []struct {
-		id        string
-		eventType events.EventType
-		createdAt time.Time
-	}{
-		{id: stateEventID, eventType: "fork.state_entry", createdAt: at},
-		{id: forkEventID, eventType: "fork.field_only", createdAt: forkAt},
-	} {
-		storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
-			fixture.id, fixture.eventType, eventtest.Producer(events.EventProducerPlatform, "test"),
-			"", []byte(`{}`), 0, sourceRunID, "",
-			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, fixture.createdAt,
-		))
-	}
+	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
+		"", []byte(`{}`), 0, sourceRunID, "",
+		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, at,
+	))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $5),
-			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $4::uuid, 'platform', 'activation-tool-test', 'field-only', $6)
-	`, sourceRunID, entityID, stateEventID, forkEventID, at, forkAt); err != nil {
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $4),
+			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $4)
+	`, sourceRunID, entityID, stateEventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -1517,10 +1512,15 @@ accounts:
 			$1::uuid, $2::uuid, 'review/inst-1', 'default', 'queued',
 			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $4, $4
 		)
-	`, sourceRunID, entityID, at, forkAt); err != nil {
+	`, sourceRunID, entityID, at, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
+	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
+		"", []byte(`{}`), 0, sourceRunID, "",
+		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,
+	))
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)

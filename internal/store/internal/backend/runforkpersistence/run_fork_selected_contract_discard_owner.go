@@ -8,26 +8,24 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
 type runForkSelectedContractDiscardPort struct {
 	requireCurrent func() error
-	runMutation    func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error
+	runMutation    func(context.Context, func(context.Context, *mutationprotocol.Attempt) error) error
 	loadSnapshot   runForkLifecycleSnapshotLoader
 	guard          func(context.Context, *sql.Tx, string) error
-	terminalize    func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *runforkrevision.Effects, string, string) error
-	markTerminal   func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *runforkrevision.Effects, runtimerunlifecycle.TerminalRequest) error
+	terminalize    func(context.Context, *mutationprotocol.Attempt, string, string) error
+	markTerminal   func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.TerminalRequest) error
 	deleteEvents   func(context.Context, *sql.Tx, string) error
-	deleteRun      func(context.Context, *sql.Tx, string) error
-	finalize       func(context.Context, *sql.Tx, *runforkrevision.Effects) error
+	deleteRun      func(context.Context, *mutationprotocol.Attempt, string) error
 	now            func() time.Time
 }
 
@@ -41,68 +39,80 @@ func discardMaterializedSelectedContractExecutionFork(ctx context.Context, forkR
 	}
 	if port.requireCurrent == nil || port.runMutation == nil || port.loadSnapshot == nil || port.guard == nil ||
 		port.terminalize == nil || port.markTerminal == nil || port.deleteEvents == nil || port.deleteRun == nil ||
-		port.finalize == nil || port.now == nil {
+		port.now == nil {
 		return fmt.Errorf("selected-contract fork discard operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {
 		return err
 	}
-	return port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects) error {
-		snapshot, err := port.loadSnapshot(txctx, tx, forkRunID)
-		if err != nil {
-			if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
-				return nil
+	// Retention is decided under the transaction lock; whole-parent deletion adds no facts.
+	return port.runMutation(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			snapshot, err := port.loadSnapshot(txctx, tx, forkRunID)
+			if err != nil {
+				if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
+					retained, classifyErr := attempt.SelectForkDiscardRetention(txctx, forkRunID)
+					if classifyErr != nil {
+						return classifyErr
+					}
+					if retained {
+						return errors.New("absent selected fork has retained execution evidence")
+					}
+					return attempt.BeginDestructiveCleanup(txctx)
+				}
+				return err
 			}
-			return err
-		}
-		if snapshot.State != runtimerunlifecycle.StatePaused {
-			return fmt.Errorf("selected-contract fork discard requires materialized fork state %q; got %q", runtimerunlifecycle.StatePaused, snapshot.State)
-		}
-		if err := port.guard(txctx, tx, forkRunID); err != nil {
-			return fmt.Errorf("discard selected-contract fork with dependent lineage: %w", err)
-		}
-		var preserveCompletionEvidence bool
-		if err := tx.QueryRowContext(txctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = $1)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
-			return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
-		}
-		if err := port.terminalize(txctx, tx, story, effects, forkRunID, "fork_discarded"); err != nil {
-			return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
-		}
-		if preserveCompletionEvidence {
-			if err := port.markTerminal(txctx, tx, story, effects, runtimerunlifecycle.TerminalRequest{
-				RunID: forkRunID, State: runtimerunlifecycle.StateCancelled, EndedAt: port.now().UTC(),
-			}); err != nil {
-				return fmt.Errorf("retain selected-contract completion run tombstone: %w", err)
+			if snapshot.State != runtimerunlifecycle.StatePaused {
+				return fmt.Errorf("selected-contract fork discard requires materialized fork state %q; got %q", runtimerunlifecycle.StatePaused, snapshot.State)
 			}
-		}
-		if err := story.Finalize(txctx); err != nil {
-			return fmt.Errorf("finalize selected-contract fork terminalization activity: %w", err)
-		}
-		if err := deleteSelectedContractForkState(txctx, tx, forkRunID, preserveCompletionEvidence); err != nil {
-			return err
-		}
-		if err := port.deleteEvents(txctx, tx, forkRunID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(txctx, `DELETE FROM entity_state WHERE run_id = $1`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork entity state: %w", err)
-		}
-		if !preserveCompletionEvidence {
-			if _, err := tx.ExecContext(txctx, `DELETE FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1`, forkRunID); err != nil {
-				return fmt.Errorf("delete selected-contract fork binding: %w", err)
+			if err := port.guard(txctx, tx, forkRunID); err != nil {
+				return fmt.Errorf("discard selected-contract fork with dependent lineage: %w", err)
 			}
-			return port.deleteRun(txctx, tx, forkRunID)
-		}
-		if err := effects.Add(forkRunID,
-			runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations,
-			runforkrevision.FamilyEntityMetadata, runforkrevision.FamilyEventDeliveries,
-			runforkrevision.FamilyCommittedReplayScopes, runforkrevision.FamilyEventReceipts,
-			runforkrevision.FamilyDeadLetters, runforkrevision.FamilyTimers,
-			runforkrevision.FamilyAgentSessions, runforkrevision.FamilyFanOutObligations,
-		); err != nil {
-			return err
-		}
-		return port.finalize(txctx, tx, effects)
+			preserveCompletionEvidence, err := attempt.SelectForkDiscardRetention(txctx, forkRunID)
+			if err != nil {
+				return err
+			}
+			if err := port.terminalize(txctx, attempt, forkRunID, "fork_discarded"); err != nil {
+				return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
+			}
+			if preserveCompletionEvidence {
+				if err := port.markTerminal(txctx, attempt, runtimerunlifecycle.TerminalRequest{
+					RunID: forkRunID, State: runtimerunlifecycle.StateCancelled, EndedAt: port.now().UTC(),
+				}); err != nil {
+					return fmt.Errorf("retain selected-contract completion run tombstone: %w", err)
+				}
+			}
+			if err := attempt.BeginDestructiveCleanup(txctx); err != nil {
+				return fmt.Errorf("finalize selected-contract fork terminalization activity: %w", err)
+			}
+			if err := deleteSelectedContractForkState(txctx, tx, forkRunID, preserveCompletionEvidence); err != nil {
+				return err
+			}
+			if err := port.deleteEvents(txctx, tx, forkRunID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(txctx, `DELETE FROM entity_state WHERE run_id = $1`, forkRunID); err != nil {
+				return fmt.Errorf("delete selected-contract fork entity state: %w", err)
+			}
+			if !preserveCompletionEvidence {
+				if _, err := tx.ExecContext(txctx, `DELETE FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1`, forkRunID); err != nil {
+					return fmt.Errorf("delete selected-contract fork binding: %w", err)
+				}
+				return port.deleteRun(txctx, attempt, forkRunID)
+			}
+			for _, family := range []runforkrevision.Family{
+				runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations,
+				runforkrevision.FamilyEntityMetadata, runforkrevision.FamilyEventDeliveries,
+				runforkrevision.FamilyCommittedReplayScopes, runforkrevision.FamilyEventReceipts,
+				runforkrevision.FamilyDeadLetters, runforkrevision.FamilyTimers,
+				runforkrevision.FamilyAgentSessions, runforkrevision.FamilyFanOutObligations,
+			} {
+				if err := attempt.AddWholeFamily(forkRunID, family); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
 	})
 }
 
@@ -152,14 +162,11 @@ func deleteSelectedContractForkState(ctx context.Context, tx *sql.Tx, forkRunID 
 func postgresRunForkSelectedContractDiscardPort(s *RunForkPostgresOwner) runForkSelectedContractDiscardPort {
 	return runForkSelectedContractDiscardPort{
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error {
-			return s.backend.RunTransactionWithOptions(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable}, func(ctx context.Context, tx *sql.Tx) error {
-				story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-				if err != nil {
-					return err
-				}
-				return operation(ctx, tx, story, runforkrevision.NewEffects())
+		runMutation: func(ctx context.Context, operation func(context.Context, *mutationprotocol.Attempt) error) error {
+			result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelSerializable}, mutationprotocol.Story, mutationprotocol.RetainedForkCleanup, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, operation(txctx, attempt)
 			})
+			return result.Err()
 		},
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
@@ -167,58 +174,47 @@ func postgresRunForkSelectedContractDiscardPort(s *RunForkPostgresOwner) runFork
 		guard: func(ctx context.Context, tx *sql.Tx, runID string) error {
 			return storeadmin.GuardSourceForkDependencies(ctx, tx, []string{runID})
 		},
-		terminalize: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, runID, reason string) error {
-			_, err := s.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, runID, reason)
+		terminalize: func(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string) error {
+			_, err := s.TerminalizeRunDeliveriesTx(ctx, attempt, runID, reason)
 			return err
 		},
-		markTerminal: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, req runtimerunlifecycle.TerminalRequest) error {
-			_, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, tx, story, effects, req)
+		markTerminal: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.TerminalRequest) error {
+			_, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, attempt, req)
 			return err
 		},
 		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) error {
 			return eventrecordpostgres.DeleteSelectedForkRunEvents(ctx, tx, runID)
 		},
 		deleteRun: s.RunLifecyclePostgresOwner.DeleteMaterializedForkRunTx,
-		finalize: func(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects) error {
-			_, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
-			return err
-		},
-		now: func() time.Time { return time.Now().UTC() },
+		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
 
 func sqliteRunForkSelectedContractDiscardPort(s *RunForkSQLiteOwner) runForkSelectedContractDiscardPort {
 	return runForkSelectedContractDiscardPort{
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error {
-			return s.runRuntimeMutation(ctx, "sqlite selected-contract fork discard", func(txctx context.Context, tx *sql.Tx) error {
-				story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-				if err != nil {
-					return err
-				}
-				return operation(txctx, tx, story, runforkrevision.NewEffects())
+		runMutation: func(ctx context.Context, operation func(context.Context, *mutationprotocol.Attempt) error) error {
+			result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected-contract fork discard", mutationprotocol.Story, mutationprotocol.RetainedForkCleanup, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, operation(txctx, attempt)
 			})
+			return result.Err()
 		},
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.Snapshot, error) {
 			return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
 		},
 		guard: guardSQLiteSelectedContractForkDependencies,
-		terminalize: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, runID, reason string) error {
-			_, err := s.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, runID, reason)
+		terminalize: func(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string) error {
+			_, err := s.TerminalizeRunDeliveriesTx(ctx, attempt, runID, reason)
 			return err
 		},
-		markTerminal: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, req runtimerunlifecycle.TerminalRequest) error {
-			_, _, err := s.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, tx, story, effects, req)
+		markTerminal: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.TerminalRequest) error {
+			_, _, err := s.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, attempt, req)
 			return err
 		},
 		deleteEvents: func(ctx context.Context, tx *sql.Tx, runID string) error {
 			return eventrecordsqlite.DeleteSelectedForkRunEvents(ctx, tx, runID)
 		},
 		deleteRun: s.RunLifecycleSQLiteOwner.DeleteMaterializedForkRunTx,
-		finalize: func(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects) error {
-			_, err := runforkrevision.FinalizeSQLite(ctx, tx, effects)
-			return err
-		},
-		now: s.now,
+		now:       s.now,
 	}
 }

@@ -22,7 +22,7 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 			h := newRuntimeHarnessForBackend(t, root, backend, true)
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 			selected := runScopedCatalogStore(t, h)
-			if _, err := selected.PauseRunControl(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "preparation before materialization", ControlledBy: "cataloge2e"}); err != nil {
+			if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "preparation before materialization", ControlledBy: "cataloge2e"}); err != nil {
 				t.Fatal(err)
 			}
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "start.seeded", Payload: map[string]any{"token": "preparation"}}, 20*time.Second, true); err != nil {

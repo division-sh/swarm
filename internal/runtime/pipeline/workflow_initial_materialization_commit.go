@@ -60,6 +60,7 @@ func (c WorkflowInitialMaterializationCommand) Validate() error {
 }
 
 type CommittedWorkflowInitialMaterialization struct {
+	Committed bool
 	Result    WorkflowInitialMaterializationResult
 	Lifecycle CommittedWorkflowLifecycleMutation
 }

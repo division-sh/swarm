@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sessionstore "github.com/division-sh/swarm/internal/store/internal/backend/sessions"
@@ -47,7 +48,7 @@ func validateTurnMemory(rec runtimellm.AgentTurnRecord) (agentmemory.Plan, agent
 	return plan, identity, nil
 }
 
-func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity) error {
+func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, rec runtimellm.AgentTurnRecord, plan agentmemory.Plan, identity agentmemory.Identity) error {
 	fields, err := storeagent.IdentityFields(identity)
 	if err != nil {
 		return err
@@ -87,28 +88,29 @@ func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, effects *ru
 			return fmt.Errorf("ensure stateless conversation audit row: %w", err)
 		}
 		if previousRunID != "" {
-			if err := effects.AddFact(previousRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID); err != nil {
+			if err := attempt.AddFact(previousRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID); err != nil {
 				return err
 			}
 		}
-		return effects.AddFact(storedRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID)
+		return attempt.AddFact(storedRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID)
 	}
 }
 
-func (s *LLMPostgresOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.AgentTurnRecord) error {
-	plan, identity, err := validateTurnMemory(rec)
-	if err != nil {
-		return err
-	}
-	if !plan.Enabled {
-		return ensurePostgresStatelessAuditTx(ctx, tx, effects, rec, plan, identity)
-	}
-	fields, err := storeagent.IdentityFields(identity)
-	if err != nil {
-		return err
-	}
-	var storedSessionID, storedRunID string
-	err = tx.QueryRowContext(ctx, `
+func (s *LLMPostgresOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimellm.AgentTurnRecord) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		plan, identity, err := validateTurnMemory(rec)
+		if err != nil {
+			return err
+		}
+		if !plan.Enabled {
+			return ensurePostgresStatelessAuditTx(ctx, tx, attempt, rec, plan, identity)
+		}
+		fields, err := storeagent.IdentityFields(identity)
+		if err != nil {
+			return err
+		}
+		var storedSessionID, storedRunID string
+		err = tx.QueryRowContext(ctx, `
 		UPDATE agent_sessions SET updated_at=now()
 		WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3
 		  AND agent_name_owner=$4 AND agent_name_source=$5
@@ -117,14 +119,15 @@ func (s *LLMPostgresOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx 
 		  AND memory_enabled=TRUE AND status='active'
 		RETURNING session_id::text, run_id::text
 	`, rec.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&storedSessionID, &storedRunID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("no exact active memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
-	}
-	if err != nil {
-		return fmt.Errorf("touch completion live memory row: %w", err)
-	}
-	return addAgentSessionFacts(effects, storedRunID, storedSessionID)
+			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&storedSessionID, &storedRunID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("no exact active memory row found for completion run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
+		}
+		if err != nil {
+			return fmt.Errorf("touch completion live memory row: %w", err)
+		}
+		return addAgentSessionFacts(attempt, storedRunID, storedSessionID)
+	})
 }
 
 func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
@@ -143,16 +146,16 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 	if err != nil {
 		return err
 	}
-	effects := emptyRunForkRevisionEffects()
-	return s.runPostgresRuntimeMutation(ctx, effects, func(sqlCtx context.Context, tx *sql.Tx) error {
-		if err := storerunstate.RequirePostgresActiveTx(sqlCtx, tx, identity.RunID); err != nil {
-			return err
-		}
-		if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "upsert_conversation", false); err != nil {
-			return err
-		}
-		var storedSessionID, storedRunID string
-		err := tx.QueryRowContext(sqlCtx, `
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) error {
+			if err := storerunstate.RequirePostgresActiveTx(sqlCtx, tx, identity.RunID); err != nil {
+				return err
+			}
+			if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "upsert_conversation", false); err != nil {
+				return err
+			}
+			var storedSessionID, storedRunID string
+			err := tx.QueryRowContext(sqlCtx, `
 		UPDATE agent_sessions SET conversation=$1::jsonb, turn_count=$2,
 			runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $3::jsonb, updated_at=now()
 			WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6
@@ -161,42 +164,46 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 			  AND memory_enabled=$13 AND memory_source=$14 AND status='active'
 			RETURNING session_id::text, run_id::text
 		`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
-			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source)).Scan(&storedSessionID, &storedRunID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
-		}
-		if err != nil {
-			return fmt.Errorf("update exact live conversation: %w", err)
-		}
-		return addAgentSessionFacts(effects, storedRunID, storedSessionID)
+				fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source)).Scan(&storedSessionID, &storedRunID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
+			}
+			if err != nil {
+				return fmt.Errorf("update exact live conversation: %w", err)
+			}
+			return addAgentSessionFacts(attempt, storedRunID, storedSessionID)
+		})
+		return struct{}{}, err
 	})
+	return result.Err()
 }
 
-func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.ConversationRecord, expectedTurnCount int) error {
-	plan, identity, err := validateConversationMemory(rec)
-	if err != nil {
-		return err
-	}
-	if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
-		return fmt.Errorf("completion conversation projection requires one exact turn transition")
-	}
-	messages, state, err := conversationPayloads(rec)
-	if err != nil {
-		return err
-	}
-	fields, err := storeagent.IdentityFields(identity)
-	if err != nil {
-		return err
-	}
-	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
-		return err
-	}
-	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "project_completion_conversation", false); err != nil {
-		return err
-	}
-	var storedSessionID, storedRunID string
-	err = tx.QueryRowContext(ctx, `
+func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimellm.ConversationRecord, expectedTurnCount int) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		plan, identity, err := validateConversationMemory(rec)
+		if err != nil {
+			return err
+		}
+		if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
+			return fmt.Errorf("completion conversation projection requires one exact turn transition")
+		}
+		messages, state, err := conversationPayloads(rec)
+		if err != nil {
+			return err
+		}
+		fields, err := storeagent.IdentityFields(identity)
+		if err != nil {
+			return err
+		}
+		if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
+			return err
+		}
+		if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity, "project_completion_conversation", false); err != nil {
+			return err
+		}
+		var storedSessionID, storedRunID string
+		err = tx.QueryRowContext(ctx, `
 		UPDATE agent_sessions SET conversation=$1::jsonb, turn_count=$2,
 			runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $3::jsonb, updated_at=now()
 		WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6
@@ -205,15 +212,16 @@ func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, 
 		  AND memory_enabled=$13 AND memory_source=$14 AND status='active' AND turn_count=$15
 		RETURNING session_id::text, run_id::text
 	`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
-		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-		fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), expectedTurnCount).Scan(&storedSessionID, &storedRunID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
-	}
-	if err != nil {
-		return fmt.Errorf("project exact completion conversation: %w", err)
-	}
-	return addAgentSessionFacts(effects, storedRunID, storedSessionID)
+			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+			fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), expectedTurnCount).Scan(&storedSessionID, &storedRunID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
+		}
+		if err != nil {
+			return fmt.Errorf("project exact completion conversation: %w", err)
+		}
+		return addAgentSessionFacts(attempt, storedRunID, storedSessionID)
+	})
 }
 
 func validateConversationMemory(rec runtimellm.ConversationRecord) (agentmemory.Plan, agentmemory.Identity, error) {
@@ -306,15 +314,16 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 	if err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
-		if err := storerunstate.RequirePostgresActiveTx(sqlCtx, tx, identity.RunID); err != nil {
-			return err
-		}
-		if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "update_watchdog", false); err != nil {
-			return err
-		}
-		var storedSessionID, storedRunID string
-		err := tx.QueryRowContext(sqlCtx, `
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) error {
+			if err := storerunstate.RequirePostgresActiveTx(sqlCtx, tx, identity.RunID); err != nil {
+				return err
+			}
+			if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "update_watchdog", false); err != nil {
+				return err
+			}
+			var storedSessionID, storedRunID string
+			err := tx.QueryRowContext(sqlCtx, `
 			UPDATE agent_sessions SET runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $1::jsonb,updated_at=now()
 			WHERE session_id=$2::uuid AND run_id=$3::uuid AND agent_id=$4
 			  AND agent_name_owner=$5 AND agent_name_source=$6 AND agent_route_presence=$7
@@ -322,20 +331,18 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 			  AND memory_enabled=TRUE AND status='active'
 			RETURNING session_id::text, run_id::text
 		`, patch, update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&storedSessionID, &storedRunID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("no exact active memory row found for watchdog update")
-		}
-		if err != nil {
-			return fmt.Errorf("update exact memory watchdog: %w", err)
-		}
-		effects, err := agentSessionEffects(storedRunID, storedSessionID)
-		if err != nil {
-			return err
-		}
-		_, err = runforkrevision.FinalizePostgres(sqlCtx, tx, effects)
-		return err
+				fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&storedSessionID, &storedRunID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("no exact active memory row found for watchdog update")
+			}
+			if err != nil {
+				return fmt.Errorf("update exact memory watchdog: %w", err)
+			}
+			return addAgentSessionFacts(attempt, storedRunID, storedSessionID)
+		})
+		return struct{}{}, err
 	})
+	return result.Err()
 }
 
 func marshalConversationRuntimeStatePatch(summary *string, watchdog *runtimellm.ConversationWatchdog) (string, error) {

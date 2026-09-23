@@ -115,15 +115,6 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 	return nil
 }
 
-func (eb *EventBus) settlePipelineObligation(
-	ctx context.Context,
-	claim runtimepipelineobligation.Claim,
-	disposition runtimepipelineobligation.Disposition,
-) error {
-	_, err := eb.settlePipelineObligationOutcome(ctx, claim, disposition)
-	return err
-}
-
 func (eb *EventBus) settlePipelineObligationOutcome(
 	ctx context.Context,
 	claim runtimepipelineobligation.Claim,
@@ -139,33 +130,40 @@ func (eb *EventBus) settlePipelineObligationOutcome(
 	return outcome, err
 }
 
-func (c *pipelinePublicationClaim) MarkDecisionProcessed(ctx context.Context) error {
+func (c *pipelinePublicationClaim) MarkDecisionProcessedOutcome(ctx context.Context) (runtimepipelineobligation.SettlementOutcome, error) {
 	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	if c == nil || c.bus == nil {
-		return fmt.Errorf("pipeline publication claim owner is required")
+		return runtimepipelineobligation.SettlementOutcome{}, fmt.Errorf("pipeline publication claim owner is required")
 	}
 	c.opMu.Lock()
 	defer c.opMu.Unlock()
 	var err error
 	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return err
+		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	if c.retired.Load() || c.released.Load() {
-		return runtimepipelineobligation.ErrStaleClaim
+		return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrStaleClaim
 	}
 	if c.bus.pipelineObligations == nil {
 		if c.bus.ephemeral {
-			return nil
+			return runtimepipelineobligation.CommittedSettlement(false), nil
 		}
-		return fmt.Errorf("pipeline publication claim owner is required")
+		return runtimepipelineobligation.SettlementOutcome{}, fmt.Errorf("pipeline publication claim owner is required")
 	}
-	if err := c.bus.pipelineObligations.MarkDecisionProcessed(ctx, c.claim); err != nil {
-		return fmt.Errorf("mark decision publication %s processed: %w", c.eventID, err)
+	outcome, err := c.bus.pipelineObligations.MarkDecisionProcessed(ctx, c.claim)
+	if outcome.DeliveryHandoffCommitted() {
+		c.bus.SignalDeliveryContinuations()
 	}
-	return nil
+	if err != nil {
+		return outcome, fmt.Errorf("mark decision publication %s processed: %w", c.eventID, err)
+	}
+	if !outcome.Committed() {
+		return outcome, fmt.Errorf("mark decision publication %s was not acknowledged", c.eventID)
+	}
+	return outcome, nil
 }
 
 func (c *pipelinePublicationClaim) Claim() runtimepipelineobligation.Claim {

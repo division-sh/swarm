@@ -27,6 +27,10 @@ type runtimeMutationRunner interface {
 	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 }
 
+type acknowledgedRuntimeMutationRunner interface {
+	RunRuntimeMutationContextAcknowledged(context.Context, func(context.Context) error) (bool, error)
+}
+
 type workflowPersistenceFixture struct {
 	db      *sql.DB
 	dialect workflowStoreDialect
@@ -112,6 +116,32 @@ func (s *workflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn
 		return errors.New("pipeline fixture requires its selected mutation owner")
 	}
 	return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+		tx, ok := sqlTxFromContext(txctx)
+		if !ok || tx == nil {
+			return errors.New("pipeline fixture mutation did not provide a transaction")
+		}
+		return fn(txctx, tx)
+	})
+}
+
+func (s *workflowInstanceStore) runInPipelineTransactionAcknowledged(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	if fn == nil {
+		return false, nil
+	}
+	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
+		if authoractivityfixture.InMutation(ctx, tx) {
+			return false, fn(ctx, tx)
+		}
+		if !authoractivityfixture.FinalizedMutation(ctx, tx) {
+			return false, fmt.Errorf("pipeline fixture entered from a raw transaction without author activity ownership")
+		}
+		ctx = WithoutPipelineSQLTxContext(ctx)
+	}
+	runner, ok := s.testRuntimeMutation().(acknowledgedRuntimeMutationRunner)
+	if !ok {
+		return false, errors.New("pipeline fixture requires an acknowledged selected mutation owner")
+	}
+	return runner.RunRuntimeMutationContextAcknowledged(ctx, func(txctx context.Context) error {
 		tx, ok := sqlTxFromContext(txctx)
 		if !ok || tx == nil {
 			return errors.New("pipeline fixture mutation did not provide a transaction")

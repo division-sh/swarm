@@ -129,12 +129,12 @@ func (o *sourceMutationProbeOwner) CloseScan(ctx context.Context, scan runtimepi
 	return err
 }
 
-func (o *sourceMutationProbeOwner) MarkDecisionProcessed(ctx context.Context, _ runtimepipelineobligation.Claim) error {
+func (o *sourceMutationProbeOwner) MarkDecisionProcessed(ctx context.Context, _ runtimepipelineobligation.Claim) (runtimepipelineobligation.SettlementOutcome, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.decision++
 	o.decisionFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	return nil
+	return runtimepipelineobligation.CommittedSettlement(false), nil
 }
 
 func (o *sourceMutationProbeOwner) Settle(ctx context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
@@ -265,13 +265,13 @@ func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteRecords(
 func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []FlowInstanceRouteRecordSet,
-) error {
+) (FlowInstanceRouteTopologyResult, error) {
 	for _, set := range sets {
 		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
-			return err
+			return FlowInstanceRouteTopologyResult{}, err
 		}
 	}
-	return nil
+	return FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (*sourceBoundaryProbeStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
@@ -1008,7 +1008,7 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 			case "settle":
 				err = claim.Settle(foreignCtx, runtimepipelineobligation.Acknowledged("test"))
 			case "decision":
-				err = claim.MarkDecisionProcessed(foreignCtx)
+				_, err = claim.MarkDecisionProcessedOutcome(foreignCtx)
 			}
 			if err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
 				t.Fatalf("%s error = %v, want source conflict", action, err)
@@ -1026,7 +1026,7 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 			case "settle":
 				err = claim.Settle(context.Background(), runtimepipelineobligation.Acknowledged("test"))
 			case "decision":
-				err = claim.MarkDecisionProcessed(context.Background())
+				_, err = claim.MarkDecisionProcessedOutcome(context.Background())
 				if err == nil {
 					err = claim.Release(context.Background())
 				}

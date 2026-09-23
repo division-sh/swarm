@@ -57,15 +57,20 @@ func (*entityPersistenceStub) LoadEntityState(context.Context, EntityIdentity) (
 func (*entityPersistenceStub) QueryEntityStates(context.Context, EntityStateQuery) ([]map[string]any, error) {
 	return nil, nil
 }
-func (*entityPersistenceStub) SaveEntityField(context.Context, EntityFieldUpdate) (int, error) {
-	return 0, nil
+func (*entityPersistenceStub) SaveEntityField(context.Context, EntityFieldUpdate) (EntityFieldWriteResult, error) {
+	return EntityFieldWriteResult{Revision: 1, Acknowledged: true}, nil
 }
-func (*entityPersistenceStub) CreateEntity(context.Context, EntityCreateRecord) error { return nil }
+func (*entityPersistenceStub) CreateEntity(_ context.Context, rec EntityCreateRecord) (EntityCreateResult, error) {
+	return EntityCreateResult{EntityID: rec.EntityID, Acknowledged: true}, nil
+}
 
 type humanTaskPersistenceStub struct{}
 
 func (*humanTaskPersistenceStub) CreateHumanTaskCard(context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation) error {
 	return nil
+}
+func (*humanTaskPersistenceStub) CreateHumanTaskCardOutcome(_ context.Context, card decisioncard.Card, _ decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
+	return decisioncard.HumanTaskCreationResult{CardID: card.CardID, Acknowledged: true}, nil
 }
 func (*humanTaskPersistenceStub) LoadHumanTaskContinuation(context.Context, string) (decisioncard.HumanTaskContinuation, error) {
 	return decisioncard.HumanTaskContinuation{}, nil

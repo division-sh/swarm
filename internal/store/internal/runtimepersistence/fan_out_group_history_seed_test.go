@@ -15,13 +15,9 @@ func finalizeFanOutGroupHistorySeed(t *testing.T, f *fanOutGroupHistoryFixture, 
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	// The shared low-level fixture leaves its source event and already-delivered
-	// trigger/rule selection unrevisioned. Own only those exact seed coordinates
-	// before publication, never a later writer's unrelated family rows.
+	// The canonical source event is already revisioned. The low-level delivery
+	// seed still needs its own exact revision before publication.
 	effects := runforkrevision.NewEffects()
-	if err := effects.AddFact(seed.runID, runforkrevision.FamilyEvents, seed.eventID); err != nil {
-		t.Fatal(err)
-	}
 	if err := effects.AddFact(seed.runID, runforkrevision.FamilyEventDeliveries, seed.deliveryID); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +35,7 @@ func finalizeFanOutGroupHistorySeed(t *testing.T, f *fanOutGroupHistoryFixture, 
 	if err := tx.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2 AND family='events' AND fact_key=$3 AND present=TRUE`, seed.runID, results[seed.runID].Revision, seed.eventID).Scan(&source); err != nil {
 		t.Fatal(err)
 	}
-	if total != 2 || exact != 1 || source != 1 {
+	if total != 1 || exact != 1 || source != 0 {
 		t.Fatalf("seed captured other or missing facts: total=%d delivery=%d source=%d", total, exact, source)
 	}
 	if err := tx.Commit(); err != nil {
@@ -60,10 +56,10 @@ func TestFanOutPublicationGroupRawSeedHistoryBoundaryBothStores(t *testing.T) {
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2`, seed.runID, seed.eventID).Scan(&sourceHistory); err != nil {
 				t.Fatal(err)
 			}
-			if sourceCurrent != 1 || sourceHistory != 0 {
-				t.Fatalf("raw source event current=%d history=%d, want1/0", sourceCurrent, sourceHistory)
+			if sourceCurrent != 1 || sourceHistory != 1 {
+				t.Fatalf("canonical source event current=%d history=%d, want1/1", sourceCurrent, sourceHistory)
 			}
-			t.Logf("before any group preparation: raw source event=%s current=%d history=%d", seed.eventID, sourceCurrent, sourceHistory)
+			t.Logf("before any group preparation: canonical source event=%s current=%d history=%d", seed.eventID, sourceCurrent, sourceHistory)
 			f = prepareFanOutGroupHistoryFixture(t, f, seed, bundle, 2, "producer/mixed.none", func(int) []byte { return []byte(`{}`) })
 			tx, err := f.db.BeginTx(f.ctx, &sql.TxOptions{ReadOnly: true})
 			if err != nil {

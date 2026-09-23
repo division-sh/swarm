@@ -28,7 +28,10 @@ func TestB16ParentStopVersusPublicationGroupBothCommitOrders(t *testing.T) {
 				defer cancel()
 				before := readStopCommitEvidence(t, db, fixture.runID)
 				stop := func() error {
-					_, err := raw.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+					outcome, err := raw.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+					if !outcome.Acknowledged && err == nil {
+						return errors.New("run stop was not acknowledged")
+					}
 					return err
 				}
 				publish := func() error {
@@ -142,7 +145,10 @@ func TestB16ParentStopContendsWithGroupSettlementCommit(t *testing.T) {
 				return err
 			}
 			stop := func() error {
-				_, err := raw.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+				outcome, err := raw.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+				if !outcome.Acknowledged && err == nil {
+					return errors.New("run stop was not acknowledged")
+				}
 				return err
 			}
 			settleErr, stopErr := raceB16AtCommit(t, ctx, backend, connector, settle, stop)

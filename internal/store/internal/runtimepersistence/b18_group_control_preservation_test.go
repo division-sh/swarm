@@ -25,8 +25,8 @@ func TestB18PausedPreparedGroupRetainsAcceptedWorkBothStores(t *testing.T) {
 			fixture, ctx, group, members, owner, command := prepareP16PublicationGroup(t, raw, db, backend, 34)
 			control := raw.(runcontrol.Store)
 			request := runcontrol.TransitionRequest{RunID: fixture.runID, Reason: "b18-real-pause", ControlledBy: "conformance"}
-			if _, err := control.PauseRunControl(ctx, request); err != nil {
-				t.Fatal(err)
+			if outcome, err := control.PauseRunControlOutcome(ctx, request); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause outcome=%+v err=%v", outcome, err)
 			}
 			if _, err := owner.LoadFanOutEvaluation(ctx, command.Claim); err != nil {
 				t.Fatalf("pause revoked accepted evaluation: %v", err)
@@ -49,8 +49,8 @@ func TestB18PausedPreparedGroupRetainsAcceptedWorkBothStores(t *testing.T) {
 			requireB16Snapshot(t, db, paused)
 			// Stop is a different transition: after the accepted handoff it
 			// cancels only the remaining suffix, not the successful receipts.
-			if _, err := control.StopRunControl(ctx, request); err != nil {
-				t.Fatal(err)
+			if outcome, err := control.StopRunControlOutcome(ctx, request); err != nil || !outcome.Acknowledged {
+				t.Fatalf("stop outcome=%+v err=%v", outcome, err)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 32, 32)
 			for _, member := range members {
@@ -228,7 +228,7 @@ func TestB18CommittedGroupSurvivesEnumerationLeaseExpiryBothStores(t *testing.T)
 			if err := f.group.Close(f.ctx); err != nil {
 				t.Fatal(err)
 			}
-			if err := f.owner.ReleaseFanOutClaim(f.ctx, f.claim); err != nil {
+			if _, err := f.owner.ReleaseFanOutClaim(f.ctx, f.claim); err != nil {
 				t.Fatal(err)
 			}
 			key := f.claim.Key

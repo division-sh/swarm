@@ -17,6 +17,8 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -25,7 +27,9 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -41,13 +45,56 @@ type selectedRuntimeOutcomeProbe struct {
 	SelectedContractReplayPersistence
 	t                                                    *testing.T
 	issueErr, claimErr, failErr, closeErr, activationErr error
+	materializationErr                                   error
 	sourceErr, discardErr                                error
+	materializationCommitted, sourceCommitted            bool
+	refuseMaterialization                                bool
 	refuseIssue, refuseClaim                             bool
 	cancelClaim                                          context.CancelFunc
 	issued                                               runfork.SelectedContractRuntimeExecution
 	authority                                            runtimeeffects.Authority
 	issues, claims, fails, closes, activations, discards int
 	loads, commits                                       int
+}
+
+type selectedMaterializationCommitTestError struct {
+	value runfork.RunForkMaterialization
+	cause error
+}
+
+func (e selectedMaterializationCommitTestError) Error() string { return e.cause.Error() }
+func (e selectedMaterializationCommitTestError) Unwrap() error { return e.cause }
+func (e selectedMaterializationCommitTestError) SelectedForkMaterializationCommit() runfork.RunForkMaterialization {
+	return e.value
+}
+
+type selectedSourceEventsCommitTestError struct {
+	sourceRunID, forkRunID string
+	value                  []runfork.RunForkSelectedContractSourceEvent
+	cause                  error
+}
+
+func (e selectedSourceEventsCommitTestError) Error() string { return e.cause.Error() }
+func (e selectedSourceEventsCommitTestError) Unwrap() error { return e.cause }
+func (e selectedSourceEventsCommitTestError) SelectedForkSourceEventsCommit() (string, string, []runfork.RunForkSelectedContractSourceEvent) {
+	return e.sourceRunID, e.forkRunID, e.value
+}
+
+func (p *selectedRuntimeOutcomeProbe) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	if p.refuseMaterialization {
+		return runfork.RunForkMaterialization{ForkRunID: uuid.NewString()}, p.materializationErr
+	}
+	value, err := p.SelectedContractForkLifecycle.MaterializeRunForkForSelectedContractExecution(ctx, req)
+	if err != nil {
+		p.t.Fatalf("real materialization must succeed before outcome injection: %v", err)
+	}
+	if p.materializationErr == nil {
+		return value, nil
+	}
+	if p.materializationCommitted {
+		return value, selectedMaterializationCommitTestError{value: value, cause: p.materializationErr}
+	}
+	return value, p.materializationErr
 }
 
 func (p *selectedRuntimeOutcomeProbe) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
@@ -127,6 +174,9 @@ func (p *selectedRuntimeOutcomeProbe) LoadRunForkSelectedContractSourceEvents(ct
 	if err != nil {
 		p.t.Fatalf("real event preparation must succeed before outcome injection: %v", err)
 	}
+	if p.sourceErr != nil && p.sourceCommitted {
+		return events, selectedSourceEventsCommitTestError{sourceRunID: source, forkRunID: fork, value: events, cause: p.sourceErr}
+	}
 	return events, p.sourceErr
 }
 
@@ -143,7 +193,11 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 		for _, tc := range []struct {
 			name                                          string
 			issue, claim, fail, close, activation, source error
+			materialization                               error
 			discard                                       error
+			materializationCommitted, sourceCommitted     bool
+			refuseMaterialization                         bool
+			executeOnly                                   bool
 			refuseIssue, refuseClaim, cancel              bool
 			claims, fails, closes, activations, discards  int
 			loads, commits                                int
@@ -159,10 +213,16 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 			{name: "claim_fail_error", claim: operationErr, fail: settlementErr, claims: 1, fails: 1, state: "running", status: "paused"},
 			{name: "claim_close_error", claim: operationErr, close: settlementErr, claims: 1, fails: 1, closes: 1, state: "closed", status: "paused"},
 			{name: "prepared_events_error", source: operationErr, claims: 1, fails: 1, closes: 1, discards: 1, loads: 1, state: "closed", status: "cancelled"},
+			{name: "materialization_acknowledged_cleanup", materialization: operationErr, materializationCommitted: true, executeOnly: true, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running"},
+			{name: "materialization_missing_ack", materialization: operationErr, refuseMaterialization: true, executeOnly: true},
+			{name: "source_events_acknowledged_cleanup", source: operationErr, sourceCommitted: true, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running"},
 			{name: "activation_acknowledged_error", activation: operationErr, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running"},
 			{name: "activation_and_close_errors", activation: operationErr, close: settlementErr, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running"},
 			{name: "close_acknowledged_error", close: settlementErr, claims: 1, closes: 1, activations: 1, loads: 1, commits: 1, state: "closed", status: "running"},
 		} {
+			if tc.executeOnly && surface != "execute" {
+				continue
+			}
 			t.Run(target+"/"+tc.name, func(t *testing.T) {
 				var db *sql.DB
 				var selected SelectedContractForkLifecycle
@@ -224,7 +284,9 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					SelectedContractForkLifecycle:             owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
 					t: t, issueErr: tc.issue, claimErr: tc.claim, failErr: tc.fail, closeErr: tc.close,
 					activationErr: tc.activation, sourceErr: tc.source, discardErr: tc.discard,
-					refuseIssue: tc.refuseIssue, refuseClaim: tc.refuseClaim,
+					materializationErr: tc.materialization, materializationCommitted: tc.materializationCommitted, sourceCommitted: tc.sourceCommitted,
+					refuseMaterialization: tc.refuseMaterialization,
+					refuseIssue:           tc.refuseIssue, refuseClaim: tc.refuseClaim,
 				}
 				if tc.cancel {
 					probe.cancelClaim = cancel
@@ -251,7 +313,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					proof, activation, executed, err = result.ForkLocalRuntimeContainer, result.RunForkActivation, result.ExecutedEventCount, activateErr
 				}
 				wantError := false
-				for _, want := range []error{tc.issue, tc.claim, tc.fail, tc.close, tc.activation, tc.source, tc.discard} {
+				for _, want := range []error{tc.issue, tc.claim, tc.fail, tc.close, tc.activation, tc.source, tc.materialization, tc.discard} {
 					if want != nil {
 						wantError = true
 						if !errors.Is(err, want) {
@@ -263,9 +325,23 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					t.Fatal(err)
 				}
 				gotCalls := []int{probe.issues, probe.claims, probe.fails, probe.closes, probe.activations, probe.discards, probe.loads, probe.commits}
-				wantCalls := []int{1, tc.claims, tc.fails, tc.closes, tc.activations, tc.discards, tc.loads, tc.commits}
+				wantIssues := 1
+				if tc.refuseMaterialization {
+					wantIssues = 0
+				}
+				wantCalls := []int{wantIssues, tc.claims, tc.fails, tc.closes, tc.activations, tc.discards, tc.loads, tc.commits}
 				if !reflect.DeepEqual(gotCalls, wantCalls) {
 					t.Fatalf("issue/claim/fail/close/activate/discard/load/commit calls = %v, want %v; err=%v", gotCalls, wantCalls, err)
+				}
+				if tc.refuseMaterialization {
+					if forkID != "" || proof != nil || activation.Activated || executed != 0 {
+						t.Fatalf("unacknowledged materialization leaked output: fork=%q proof=%+v activation=%+v events=%d", forkID, proof, activation, executed)
+					}
+					var count int
+					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_fork_selected_contract_bindings`).Scan(&count); err != nil || count != 0 {
+						t.Fatalf("unacknowledged materialization wrote binding: count=%d err=%v", count, err)
+					}
+					return
 				}
 				if tc.refuseIssue {
 					if proof != nil {
@@ -278,6 +354,18 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					t.Fatalf("lost activation/event evidence: %#v executed:%d", activation, executed)
 				}
 				if activation.Activated {
+					if tc.materializationCommitted || tc.sourceCommitted {
+						var eventCount, executionCount int
+						if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, forkID, activityidentity.ForkLineageEventID(forkID, eventID)).Scan(&eventCount); err != nil {
+							t.Fatal(err)
+						}
+						if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkID).Scan(&executionCount); err != nil {
+							t.Fatal(err)
+						}
+						if eventCount != 1 || executionCount != 1 {
+							t.Fatalf("acknowledged cleanup duplicated fork execution: events=%d executions=%d", eventCount, executionCount)
+						}
+					}
 					contexts := owner.ports.contexts
 					contexts.mu.Lock()
 					retained := false
@@ -302,6 +390,45 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				} else if stateErr != nil || statusErr != nil || state != tc.state || status != tc.status {
 					t.Fatalf("durable state=%q/%v status=%q/%v, want %q/%q", state, stateErr, status, statusErr, tc.state, tc.status)
 				}
+				if tc.materializationCommitted || tc.sourceCommitted {
+					if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+						t.Fatal(err)
+					}
+					if err := owner.ports.contexts.capability.Release(context.Background()); err != nil {
+						t.Fatal(err)
+					}
+					var restarted SelectedContractExecutionOwner
+					if backend == "postgres" {
+						restarted = newSelectedContractExecutionOwnerForTest(t, selected.(*store.PostgresStore))
+					} else {
+						restarted = newSelectedContractSQLiteExecutionOwnerForTest(t, selected.(*store.SQLiteRuntimeStore))
+					}
+					process := worklifetime.NewProcess()
+					t.Cleanup(func() {
+						process.Retire()
+						if _, err := process.Join(context.Background()); err != nil {
+							t.Error(err)
+						}
+					})
+					capability := selectedContractTestProcessCapability(t, ctx, selected.(runtimestartupownership.Store))
+					if err := restarted.BindSelectedProcess(ctx, process, capability); err != nil {
+						t.Fatal(err)
+					}
+					recovered, err := restarted.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
+					if err != nil || len(recovered) != 1 || recovered[0].RunID != forkID || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
+						t.Fatalf("acknowledged fork restart recovery=%+v err=%v", recovered, err)
+					}
+					var eventCount, executionCount int
+					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, forkID, activityidentity.ForkLineageEventID(forkID, eventID)).Scan(&eventCount); err != nil {
+						t.Fatal(err)
+					}
+					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkID).Scan(&executionCount); err != nil {
+						t.Fatal(err)
+					}
+					if eventCount != 1 || executionCount != 1 {
+						t.Fatalf("restart duplicated selected fork: events=%d executions=%d", eventCount, executionCount)
+					}
+				}
 			})
 		}
 	}
@@ -318,7 +445,7 @@ func seedSelectedRuntimeOutcomeSQLite(t *testing.T, ctx context.Context, selecte
 		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()),
 	})
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if err := selected.CreateEntity(ctx, runtimetools.EntityCreateRecord{
+	if _, err := selected.CreateEntity(ctx, runtimetools.EntityCreateRecord{
 		RunID: runID, EntityID: entityID, FlowInstance: runID, EntityType: "test_entity", Name: "Selected Execution Entity",
 		CurrentState: "pending", FieldsJSON: json.RawMessage(`{"name":"Selected Execution Entity"}`), CreatedAt: at.Add(-time.Second),
 		Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "selected-execution-test", HandlerStep: "seed"},
@@ -385,8 +512,8 @@ func materializeSelectedRuntimeOutcomeFork(t *testing.T, ctx context.Context, ow
 			t.Error(err)
 		}
 	}()
-	materialized, err := owner.materializePrepared(prepared.operation.PreparationContext(), prepared)
-	if err != nil {
+	materialized, acknowledged, err := owner.materializePrepared(prepared.operation.PreparationContext(), prepared)
+	if err != nil || !acknowledged {
 		t.Fatal(err)
 	}
 	return materialized

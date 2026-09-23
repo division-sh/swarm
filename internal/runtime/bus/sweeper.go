@@ -342,15 +342,16 @@ func (eb *EventBus) processClaimedPipelineWork(
 		}
 	}()
 	if work.Claim.Purpose() == runtimepipelineobligation.PurposeDecisionRoute && work.Acknowledged {
-		err = eb.settleClaimedDecisionRoute(ctx, work)
-		claimOpen = err != nil
-		return err == nil, false, nil, err
+		outcome, settleErr := eb.settleClaimedDecisionRoute(ctx, work)
+		claimOpen = !outcome.Committed()
+		return outcome.Committed(), false, nil, settleErr
 	}
 	if disposition, preclassified := work.PreDispatchDisposition(); preclassified {
-		if err := eb.settlePipelineObligation(ctx, work.Claim, disposition); err != nil {
-			return false, false, nil, err
+		settlement, settleErr := eb.settlePipelineObligationOutcome(ctx, work.Claim, disposition)
+		claimOpen = !settlement.Committed()
+		if !settlement.Committed() {
+			return false, false, nil, settleErr
 		}
-		claimOpen = false
 		eb.logStartupRecoveryPipelineAftermath(
 			ctx,
 			work.Event,
@@ -359,7 +360,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 			disposition.Failure(),
 			nil,
 		)
-		return true, false, nil, nil
+		return true, false, nil, settleErr
 	}
 	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, work.Event)
 	if err != nil {
@@ -382,12 +383,13 @@ func (eb *EventBus) processClaimedPipelineWork(
 				failure,
 			)
 		}
-		if err := eb.settlePipelineObligation(ctx, work.Claim, disposition); err != nil {
-			return false, false, nil, errors.Join(dispatchErr, err)
+		settlement, settleErr := eb.settlePipelineObligationOutcome(ctx, work.Claim, disposition)
+		claimOpen = !settlement.Committed()
+		if !settlement.Committed() {
+			return false, false, nil, errors.Join(dispatchErr, settleErr)
 		}
-		claimOpen = false
 		eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, disposition.Failure(), recipients)
-		return true, false, nil, nil
+		return true, false, nil, settleErr
 	}
 	if release, retry := outcome.RetryRelease(); retry {
 		if runtimepipelineobligation.StartupRecoveryDiagnosticsEnabled(ctx) {
@@ -396,33 +398,39 @@ func (eb *EventBus) processClaimedPipelineWork(
 		return false, true, standingLease, dispatchErr
 	}
 	if disposition, ok := outcome.Disposition(); ok {
-		if err := eb.settlePipelineObligation(ctx, work.Claim, disposition); err != nil {
-			return false, false, nil, errors.Join(dispatchErr, err)
+		settlement, settleErr := eb.settlePipelineObligationOutcome(ctx, work.Claim, disposition)
+		claimOpen = !settlement.Committed()
+		if !settlement.Committed() {
+			return false, false, nil, errors.Join(dispatchErr, settleErr)
 		}
-		claimOpen = false
 		if disposition.Terminal() {
 			eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, disposition.Failure(), recipients)
 		}
-		return true, false, nil, dispatchErr
+		return true, false, nil, errors.Join(dispatchErr, settleErr)
 	}
 	if work.Claim.Purpose() == runtimepipelineobligation.PurposeDecisionRoute {
-		if err := eb.pipelineObligations.MarkDecisionProcessed(ctx, work.Claim); err != nil {
-			return false, false, nil, errors.Join(dispatchErr, err)
+		mark, markErr := eb.pipelineObligations.MarkDecisionProcessed(ctx, work.Claim)
+		if mark.DeliveryHandoffCommitted() {
+			eb.SignalDeliveryContinuations()
 		}
-		err = eb.settleClaimedDecisionRoute(ctx, work)
-		claimOpen = err != nil
-		return err == nil, false, nil, errors.Join(dispatchErr, err)
+		if !mark.Committed() {
+			return false, false, nil, errors.Join(dispatchErr, markErr)
+		}
+		settlement, settleErr := eb.settleClaimedDecisionRoute(ctx, work)
+		claimOpen = !settlement.Committed()
+		return settlement.Committed(), false, nil, errors.Join(dispatchErr, markErr, settleErr)
 	}
-	if err := eb.settlePipelineObligation(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
-		return false, false, nil, errors.Join(dispatchErr, err)
+	settlement, settleErr := eb.settlePipelineObligationOutcome(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
+	claimOpen = !settlement.Committed()
+	if !settlement.Committed() {
+		return false, false, nil, errors.Join(dispatchErr, settleErr)
 	}
-	claimOpen = false
 	if work.Scope == runtimepipelineobligation.ScopeDirect && len(recipients) == 0 {
 		eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, nil, nil)
 	} else {
 		eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, recipients)
 	}
-	return true, false, nil, dispatchErr
+	return true, false, nil, errors.Join(dispatchErr, settleErr)
 }
 
 func (eb *EventBus) bindClaimedRunWork(
@@ -559,8 +567,8 @@ func startupRecoveryPipelineLogEntry(
 	}
 }
 
-func (eb *EventBus) settleClaimedDecisionRoute(ctx context.Context, work runtimepipelineobligation.ClaimedWork) error {
-	return eb.settlePipelineObligation(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_settled"))
+func (eb *EventBus) settleClaimedDecisionRoute(ctx context.Context, work runtimepipelineobligation.ClaimedWork) (runtimepipelineobligation.SettlementOutcome, error) {
+	return eb.settlePipelineObligationOutcome(ctx, work.Claim, runtimepipelineobligation.Acknowledged("decision_route_settled"))
 }
 
 func (eb *EventBus) ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (runtimepipelineobligation.SweepResult, error) {

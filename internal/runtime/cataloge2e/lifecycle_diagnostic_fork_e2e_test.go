@@ -102,7 +102,7 @@ func TestLifecycleDiagnosticForkActivationBothStores(t *testing.T) {
 					path := "worker-flow/worker-001"
 					entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
 					ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
-					if _, err := selected.PauseRunControl(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "diagnostic proof", ControlledBy: "cataloge2e"}); err != nil {
+					if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "diagnostic proof", ControlledBy: "cataloge2e"}); err != nil {
 						t.Fatal(err)
 					}
 					event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/worker.ready"), "cataloge2e", "", nil, 0, catalogRuntimeRunID,

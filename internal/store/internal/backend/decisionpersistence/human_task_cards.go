@@ -12,6 +12,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -79,21 +80,41 @@ func listDueHumanTaskExpiryEvents(ctx context.Context, db decisionCardSQL, now t
 }
 
 func (s *DecisionPostgresOwner) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
-			return err
-		}
-		return insertHumanTaskCardWithStory(txctx, story, tx, card, continuation, true)
+	_, err := s.CreateHumanTaskCardOutcome(ctx, card, continuation)
+	return err
+}
+
+func (s *DecisionPostgresOwner) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
+	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (string, error) {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+				return err
+			}
+			return insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, true)
+		})
+		return card.CardID, err
 	})
+	cardID, acknowledged := result.Value()
+	return decisioncard.HumanTaskCreationResult{CardID: cardID, Acknowledged: acknowledged}, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
-	return s.runDecisionCardMutation(ctx, "sqlite create human-task card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
-			return err
-		}
-		return insertHumanTaskCardWithStory(txctx, story, tx, card, continuation, false)
+	_, err := s.CreateHumanTaskCardOutcome(ctx, card, continuation)
+	return err
+}
+
+func (s *DecisionSQLiteOwner) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
+	result := sqliteDecisionMutation(ctx, s, "sqlite create human-task card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (string, error) {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+				return err
+			}
+			return insertHumanTaskCardWithStory(txctx, attempt, tx, card, continuation, false)
+		})
+		return card.CardID, err
 	})
+	cardID, acknowledged := result.Value()
+	return decisioncard.HumanTaskCreationResult{CardID: cardID, Acknowledged: acknowledged}, result.Err()
 }
 
 func insertHumanTaskCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, postgres bool) error {
@@ -163,58 +184,59 @@ func (s *DecisionSQLiteOwner) LoadHumanTaskContinuation(ctx context.Context, car
 }
 
 func (s *DecisionPostgresOwner) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return decisioncard.HumanTaskContinuation{}, err
-	}
-	defer handoff.Rollback()
-	var continuation decisioncard.HumanTaskContinuation
-	committed, err := runPostgresDecisionCardMutationOutcome(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+	result := postgresDecisionMutation(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.HumanTaskContinuation, error) {
+		var continuation decisioncard.HumanTaskContinuation
 		var changed bool
-		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, true)
-		if err != nil || !changed {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, true)
 			return err
+		})
+		if err != nil || !changed {
+			return continuation, err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, continuation.RunID, nil, handoff)
-		return err
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
+		return continuation, err
 	})
-	if !committed {
-		return decisioncard.HumanTaskContinuation{}, err
-	}
-	return continuation, errors.Join(err, handoff.Commit())
+	continuation, _ := result.Value()
+	return continuation, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return decisioncard.HumanTaskContinuation{}, err
-	}
-	defer handoff.Rollback()
-	var continuation decisioncard.HumanTaskContinuation
-	committed, err := s.runDecisionCardMutationOutcome(ctx, "sqlite complete human-task outcome", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
+	result := sqliteDecisionMutation(ctx, s, "sqlite complete human-task outcome", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.HumanTaskContinuation, error) {
+		var continuation decisioncard.HumanTaskContinuation
 		var changed bool
-		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, false)
-		if err != nil || !changed {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, false)
 			return err
+		})
+		if err != nil || !changed {
+			return continuation, err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, continuation.RunID, nil, handoff)
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
+		return continuation, err
+	})
+	continuation, _ := result.Value()
+	return continuation, result.Err()
+}
+
+func (s *DecisionPostgresOwner) CompleteHumanTaskOutcomeTx(ctx context.Context, attempt *mutationprotocol.Attempt, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, bool, error) {
+	var continuation decisioncard.HumanTaskContinuation
+	var changed bool
+	err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, true)
 		return err
 	})
-	if !committed {
-		return decisioncard.HumanTaskContinuation{}, err
-	}
-	return continuation, errors.Join(err, handoff.Commit())
+	return continuation, changed, err
 }
 
-func (s *DecisionPostgresOwner) CompleteHumanTaskOutcomeTx(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, bool, error) {
-	return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, true)
-}
-
-func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcomeTx(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, bool, error) {
-	return completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, false)
+func (s *DecisionSQLiteOwner) CompleteHumanTaskOutcomeTx(ctx context.Context, attempt *mutationprotocol.Attempt, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, bool, error) {
+	var continuation decisioncard.HumanTaskContinuation
+	var changed bool
+	err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, false)
+		return err
+	})
+	return continuation, changed, err
 }
 
 func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time, postgres bool) (decisioncard.HumanTaskContinuation, bool, error) {
@@ -362,16 +384,18 @@ func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutat
 	return expiredEvents, nil
 }
 
-func ExpireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, now time.Time, limit int, postgres bool) ([]events.Event, error) {
-	return expireHumanTaskCards(ctx, story, tx, now, limit, postgres)
+func ExpireHumanTaskCards(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int, postgres bool) ([]events.Event, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) ([]events.Event, error) {
+		return expireHumanTaskCards(txctx, attempt, tx, now, limit, postgres)
+	})
 }
 
-func (s *DecisionPostgresOwner) ExpireHumanTasksTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, now time.Time, limit int) ([]events.Event, error) {
-	return expireHumanTaskCards(ctx, story, tx, now, limit, true)
+func (s *DecisionPostgresOwner) ExpireHumanTasksTx(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int) ([]events.Event, error) {
+	return ExpireHumanTaskCards(ctx, attempt, now, limit, true)
 }
 
-func (s *DecisionSQLiteOwner) ExpireHumanTasksTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, now time.Time, limit int) ([]events.Event, error) {
-	return expireHumanTaskCards(ctx, story, tx, now, limit, false)
+func (s *DecisionSQLiteOwner) ExpireHumanTasksTx(ctx context.Context, attempt *mutationprotocol.Attempt, now time.Time, limit int) ([]events.Event, error) {
+	return ExpireHumanTaskCards(ctx, attempt, now, limit, false)
 }
 
 func humanTaskExpiredEvent(card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, now time.Time) (events.Event, error) {

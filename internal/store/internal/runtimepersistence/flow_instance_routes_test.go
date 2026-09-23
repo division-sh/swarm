@@ -22,7 +22,7 @@ type flowRouteTestExecutor interface {
 }
 
 type flowRouteTopologyTestStore interface {
-	ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error
+	ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error)
 	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error)
 }
 
@@ -39,8 +39,6 @@ func seedFlowRouteTestRun(t *testing.T, ctx context.Context, exec flowRouteTestE
 		switch selected := exec.(type) {
 		case *sql.DB:
 			requireRunningPostgresRunForTest(t, ctx, selected, runID, time.Now().UTC())
-		case *sql.Tx:
-			requirePostgresRunFixtureInRawTxForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 		default:
 			t.Fatalf("seed flow route run requires PostgreSQL lifecycle owner, got %T", exec)
 		}
@@ -49,8 +47,6 @@ func seedFlowRouteTestRun(t *testing.T, ctx context.Context, exec flowRouteTestE
 		switch selected := exec.(type) {
 		case *sql.DB:
 			requireRunningSQLiteRunForTest(t, ctx, selected, runID, now)
-		case *sql.Tx:
-			requireSQLiteRunFixtureInRawTxForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		default:
 			t.Fatalf("seed flow route run requires SQLite lifecycle owner, got %T", exec)
 		}
@@ -445,8 +441,8 @@ func testFlowInstanceRouteTopologyAtomicity(
 
 	initial := flowRouteTopologySets(identities, "initial")
 	replacement := flowRouteTopologySets(identities, "replacement")
-	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, initial); err != nil {
-		t.Fatalf("seed route topology: %v", err)
+	if committed, err := selected.ReplaceFlowInstanceRouteTopology(ctx, initial); err != nil || !committed.Acknowledged {
+		t.Fatalf("seed route topology: committed=%+v err=%v", committed, err)
 	}
 	// Admission is reusable only for the exact run within this transaction.
 	// A later missing run must still fail and roll back earlier route owners.
@@ -454,20 +450,20 @@ func testFlowInstanceRouteTopologyAtomicity(
 	foreign[0].Identity.RunID = uuid.NewString()
 	foreign[0].Routes[0].Identity = foreign[0].Identity
 	mixed := append(append([]runtimebus.FlowInstanceRouteRecordSet(nil), replacement...), foreign...)
-	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, mixed); err == nil {
+	if committed, err := selected.ReplaceFlowInstanceRouteTopology(ctx, mixed); err == nil || committed.Acknowledged {
 		t.Fatal("route topology borrowed another run's active admission")
 	}
 	assertFlowRouteTopologySubscribers(t, ctx, selected, identities, "initial")
 
 	removeFailure := installFlowRouteTopologySecondOwnerFailure(t, ctx, db, postgres)
-	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, replacement); err == nil {
+	if committed, err := selected.ReplaceFlowInstanceRouteTopology(ctx, replacement); err == nil || committed.Acknowledged {
 		t.Fatal("replace route topology with second-owner failure unexpectedly succeeded")
 	}
 	removeFailure()
 	assertFlowRouteTopologySubscribers(t, ctx, selected, identities, "initial")
 
-	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, replacement); err != nil {
-		t.Fatalf("commit route topology replacement: %v", err)
+	if committed, err := selected.ReplaceFlowInstanceRouteTopology(ctx, replacement); err != nil || !committed.Acknowledged {
+		t.Fatalf("commit route topology replacement: committed=%+v err=%v", committed, err)
 	}
 	assertFlowRouteTopologySubscribers(t, ctx, selected, identities, "replacement")
 }
@@ -947,13 +943,13 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsDoesNotReadAmbientTransac
 	pg := admitTestPostgresStore(t, db)
 	ensureFlowInstanceRouteTables(t, ctx, db)
 	requireDefaultSourceArtifactForTest(t, ctx, pg)
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	requirePostgresRunFixtureInRawTxForTest(t, ctx, tx, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES ($1::uuid, 'component-scaffold/uncommitted', 'component-scaffold', 'template', '{}'::jsonb, 'active', NOW())

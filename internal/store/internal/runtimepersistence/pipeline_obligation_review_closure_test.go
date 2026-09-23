@@ -17,10 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
-	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -765,7 +762,8 @@ func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing
 						_, err := owner.Settle(ctx, claim, runtimepipelineobligation.Acknowledged("serialized_settlement"))
 						mutationDone <- err
 					case "mark_decision_processed":
-						mutationDone <- owner.MarkDecisionProcessed(ctx, claim)
+						_, err := owner.MarkDecisionProcessed(ctx, claim)
+						mutationDone <- err
 					default:
 						mutationDone <- fmt.Errorf("unknown mutation %q", mutation)
 					}
@@ -834,32 +832,15 @@ func insertPostgresPipelineSnapshotFixtureTx(ctx context.Context, tx *sql.Tx, ev
 			return err
 		}
 	}
-	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		return err
-	}
-	record, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
-	if err != nil {
-		return err
-	}
 	// Snapshot fixtures intentionally omit history publication.
-	effects := runforkrevision.NewEffects()
-	inserted, err := eventrecordpostgres.Insert(ctx, tx, effects, record)
-	if err != nil {
+	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
 		return err
 	}
-	if !inserted {
-		return fmt.Errorf("snapshot fixture event %s was not inserted", event.ID())
-	}
-	return insertCommittedPipelineScopeTx(
-		ctx,
-		tx,
-		effects,
-		event.ID(),
-		runtimepipelineobligation.ScopeDirect,
-		true,
-		event.CreatedAt(),
-	)
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
+		SELECT e.event_id, e.run_id, $2, $3, $3 FROM events e WHERE e.event_id = $1::uuid
+	`, event.ID(), string(runtimepipelineobligation.ScopeDirect), event.CreatedAt())
+	return err
 }
 
 func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(t *testing.T) {
@@ -964,7 +945,7 @@ func TestClaimEventReturnsTypedCorruptDecisionWorkForAcknowledgedAndUnacknowledg
 					if err != nil {
 						t.Fatalf("ClaimEvent before acknowledgement: %v", err)
 					}
-					if err := owner.MarkDecisionProcessed(ctx, current.Claim); err != nil {
+					if _, err := owner.MarkDecisionProcessed(ctx, current.Claim); err != nil {
 						t.Fatalf("MarkDecisionProcessed: %v", err)
 					}
 					if err := owner.Release(ctx, current.Claim); err != nil {
@@ -1062,7 +1043,7 @@ func TestInactiveProcessedDecisionRouteClosesAtParentTerminalizationOnSQLiteAndP
 			if err != nil {
 				t.Fatalf("claim decision route: %v", err)
 			}
-			if err := owner.MarkDecisionProcessed(ctx, work.Claim); err != nil {
+			if _, err := owner.MarkDecisionProcessed(ctx, work.Claim); err != nil {
 				t.Fatalf("mark decision processed: %v", err)
 			}
 			if err := terminalizeReviewClosureRun(ctx, fixture, owner, runID); !errors.Is(err, runtimepipelineobligation.ErrBusy) {
@@ -1310,31 +1291,22 @@ func commitReviewClosureEvent(
 		return err
 	}
 	defer release()
-	commit := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, store eventCommitTxStore) error {
-		mutation := runtimeAuthorActivityMutation(story)
-		outcome, err := store.AppendAdmittedEventTxOutcome(txctx, tx, mutation, admitted, testRouteSettlement(admitted.Event(), nil))
+	return runSelectedFixtureMutation(ctx, selected, "review closure event", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		store, ok := selected.(eventCommitTxStore)
+		if !ok {
+			return fmt.Errorf("unsupported review closure store %T", selected)
+		}
+		outcome, err := store.AppendAdmittedEventTxOutcome(txctx, attempt, admitted, testRouteSettlement(admitted.Event(), nil))
 		if err != nil {
 			return err
 		}
 		if outcome != runtimebus.EventAppendInserted {
 			return fmt.Errorf("append outcome = %v", outcome)
 		}
-		return (sqlPublishCommitter{tx: tx, store: store, story: mutation}).commitInitialSideEffects(txctx, runtimebus.CommitPublishRequest{
+		return (sqlPublishCommitter{attempt: attempt, store: store}).commitInitialSideEffects(txctx, runtimebus.CommitPublishRequest{
 			Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
 		}, true)
-	}
-	switch store := selected.(type) {
-	case *PostgresStore:
-		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return commit(txctx, tx, story, store)
-		})
-	case *SQLiteRuntimeStore:
-		return store.runPrivateAuthorActivityMutation(ctx, "sqlite review closure event", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return commit(txctx, tx, story, store)
-		})
-	default:
-		return fmt.Errorf("unsupported review closure store %T", selected)
-	}
+	})
 }
 
 func reviewClosureEventExists(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string) bool {

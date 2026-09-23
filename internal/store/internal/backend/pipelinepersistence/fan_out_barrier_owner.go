@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -427,13 +428,13 @@ func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, registratio
 func advanceFanOutDeliveryBarriersTx(
 	ctx context.Context,
 	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
 	genericSchedules GenericScheduleTxOwner,
 	runID string,
 	selectedNow time.Time,
 ) (activations []runtimerunlifecycle.CommittedGenericScheduleActivation, err error) {
-	if tx == nil || effects == nil || genericSchedules == nil || strings.TrimSpace(runID) == "" || selectedNow.IsZero() {
+	if tx == nil || attempt == nil || genericSchedules == nil || strings.TrimSpace(runID) == "" || selectedNow.IsZero() {
 		return nil, fmt.Errorf("fan-out barrier advancement requires transaction, owners, run, and selected-store time")
 	}
 	registrations, err := loadArmedFanOutBarriers(ctx, tx, postgres, runID)
@@ -458,7 +459,7 @@ func advanceFanOutDeliveryBarriersTx(
 			return nil, err
 		}
 		if !current {
-			if err := suppressSupersededArmedFanOutBarrierTx(ctx, tx, postgres, effects, registration, selectedNow); err != nil {
+			if err := suppressSupersededArmedFanOutBarrierTx(ctx, tx, postgres, attempt, registration, selectedNow); err != nil {
 				return nil, err
 			}
 			continue
@@ -477,7 +478,7 @@ func advanceFanOutDeliveryBarriersTx(
 		if err != nil {
 			return nil, err
 		}
-		admitted, err := genericSchedules.AdmitTx(ctx, tx, effects, command)
+		admitted, err := genericSchedules.AdmitTx(ctx, attempt, command)
 		if err != nil {
 			return nil, fmt.Errorf("admit fan-out barrier completion: %w", err)
 		}
@@ -514,14 +515,14 @@ func advanceFanOutDeliveryBarriersTx(
 		if err != nil || changed != 1 {
 			return nil, fmt.Errorf("fan-out barrier close lost exact armed owner")
 		}
-		if err := addFanOutBarrierRevisionEffect(effects, registration.IntentKey); err != nil {
+		if err := addFanOutBarrierRevisionEffect(attempt, registration.IntentKey); err != nil {
 			return nil, err
 		}
 	}
-	if err := suppressSupersededPendingFanOutBarriersTx(ctx, tx, postgres, effects, genericSchedules, runID, selectedNow); err != nil {
+	if err := suppressSupersededPendingFanOutBarriersTx(ctx, tx, attempt, postgres, genericSchedules, runID, selectedNow); err != nil {
 		return nil, err
 	}
-	if err := terminalizeDeadLetteredFanOutBarrierOutcomesTx(ctx, tx, postgres, effects, runID, selectedNow); err != nil {
+	if err := terminalizeDeadLetteredFanOutBarrierOutcomesTx(ctx, tx, postgres, attempt, runID, selectedNow); err != nil {
 		return nil, err
 	}
 	return activations, nil
@@ -531,7 +532,9 @@ func suppressSupersededArmedFanOutBarrierTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
+	effects interface {
+		AddFacts(string, ...privaterunforkrevision.FactRef) error
+	},
 	registration fanoutbarrier.Registration,
 	at time.Time,
 ) error {
@@ -558,8 +561,8 @@ func suppressSupersededArmedFanOutBarrierTx(
 func suppressSupersededPendingFanOutBarriersTx(
 	ctx context.Context,
 	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
 	genericSchedules GenericScheduleTxOwner,
 	runID string,
 	at time.Time,
@@ -577,7 +580,7 @@ func suppressSupersededPendingFanOutBarriersTx(
 		if current {
 			continue
 		}
-		if err := cancelSupersededFanOutBarrierScheduleTx(ctx, tx, effects, genericSchedules, barrier, at); err != nil {
+		if err := cancelSupersededFanOutBarrierScheduleTx(ctx, attempt, genericSchedules, barrier, at); err != nil {
 			return err
 		}
 		update := `
@@ -598,7 +601,7 @@ func suppressSupersededPendingFanOutBarriersTx(
 		if err != nil || changed != 1 {
 			return fmt.Errorf("fan-out barrier generation suppression lost exact pending owner")
 		}
-		if err := addFanOutBarrierRevisionEffect(effects, registration.IntentKey); err != nil {
+		if err := addFanOutBarrierRevisionEffect(attempt, registration.IntentKey); err != nil {
 			return err
 		}
 	}
@@ -607,8 +610,7 @@ func suppressSupersededPendingFanOutBarriersTx(
 
 func cancelSupersededFanOutBarrierScheduleTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	genericSchedules GenericScheduleTxOwner,
 	barrier fanoutbarrier.Barrier,
 	at time.Time,
@@ -616,7 +618,7 @@ func cancelSupersededFanOutBarrierScheduleTx(
 	if genericSchedules == nil || barrier.Summary == nil {
 		return fmt.Errorf("superseded pending fan-out barrier requires its generic schedule owner and summary")
 	}
-	activation, found, err := genericSchedules.LoadActivationTx(ctx, tx, barrier.ScheduleActivationID)
+	activation, found, err := genericSchedules.LoadActivationTx(ctx, attempt, barrier.ScheduleActivationID)
 	if err != nil {
 		return fmt.Errorf("load superseded fan-out barrier schedule: %w", err)
 	}
@@ -626,7 +628,7 @@ func cancelSupersededFanOutBarrierScheduleTx(
 	if err := runtimegenericschedule.ValidateFanOutBarrierScheduleRelation(barrier, activation); err != nil {
 		return err
 	}
-	cancelled, err := genericSchedules.CancelActivationTx(ctx, tx, effects, runtimegenericschedule.CancelCommand{
+	cancelled, err := genericSchedules.CancelActivationTx(ctx, attempt, runtimegenericschedule.CancelCommand{
 		ActivationID: activation.ID,
 		Cause:        "fan_out_generation_superseded",
 		CancelledAt:  at,
@@ -653,7 +655,9 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
+	effects interface {
+		AddFacts(string, ...privaterunforkrevision.FactRef) error
+	},
 	runID string,
 	selectedNow time.Time,
 ) error {
@@ -771,7 +775,9 @@ func suppressRunTerminalFanOutBarriersTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
+	effects interface {
+		AddFacts(string, ...privaterunforkrevision.FactRef) error
+	},
 	runID string,
 	at time.Time,
 ) error {
@@ -880,12 +886,22 @@ func summarizeFanOutDeliveryBarriersRun(ctx context.Context, queryer pipelineQue
 	return summary, summary.Validate()
 }
 
-func (s *PipelinePostgresOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, selectedNow time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
-	return advanceFanOutDeliveryBarriersTx(ctx, tx, true, effects, s.genericSchedules, runID, selectedNow)
+func (s *PipelinePostgresOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, selectedNow time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	var activations []runtimerunlifecycle.CommittedGenericScheduleActivation
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		activations, err = advanceFanOutDeliveryBarriersTx(ctx, tx, attempt, true, s.genericSchedules, runID, selectedNow)
+		return err
+	})
+	return activations, err
 }
 
-func (s *PipelineSQLiteOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, selectedNow time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
-	return advanceFanOutDeliveryBarriersTx(ctx, tx, false, effects, s.genericSchedules, runID, selectedNow)
+func (s *PipelineSQLiteOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, selectedNow time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
+	var activations []runtimerunlifecycle.CommittedGenericScheduleActivation
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		activations, err = advanceFanOutDeliveryBarriersTx(ctx, tx, attempt, false, s.genericSchedules, runID, selectedNow)
+		return err
+	})
+	return activations, err
 }
 
 func (s *PipelinePostgresOwner) SummarizeFanOutDeliveryBarriersRunTx(ctx context.Context, tx *sql.Tx, runID string) (fanoutbarrier.RunSummary, error) {
@@ -898,35 +914,37 @@ func (s *PipelineSQLiteOwner) SummarizeFanOutDeliveryBarriersRunTx(ctx context.C
 
 func (s *PipelinePostgresOwner) MaterializeRunForkFanOutBarrierTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
 	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
-	return materializeRunForkFanOutBarrierTx(ctx, tx, true, effects, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, true, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
+	})
 }
 
 func (s *PipelineSQLiteOwner) MaterializeRunForkFanOutBarrierTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	forkRunID string,
 	source fanoutbarrier.Barrier,
 	selectedRef runtimecontracts.FanOutPlanRef,
 	generation *loopruntime.ForkChildReference,
 	at time.Time,
 ) error {
-	return materializeRunForkFanOutBarrierTx(ctx, tx, false, effects, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return materializeRunForkFanOutBarrierTx(ctx, tx, attempt, false, s.genericSchedules, forkRunID, source, selectedRef, generation, at)
+	})
 }
 
 func materializeRunForkFanOutBarrierTx(
 	ctx context.Context,
 	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
 	genericSchedules GenericScheduleTxOwner,
 	forkRunID string,
 	source fanoutbarrier.Barrier,
@@ -937,7 +955,7 @@ func materializeRunForkFanOutBarrierTx(
 	if err := source.Validate(); err != nil {
 		return fmt.Errorf("source fork fan-out barrier: %w", err)
 	}
-	if strings.TrimSpace(forkRunID) == "" || at.IsZero() || effects == nil {
+	if strings.TrimSpace(forkRunID) == "" || at.IsZero() || attempt == nil {
 		return fmt.Errorf("fork fan-out barrier materialization requires run, time, and revision owner")
 	}
 	sourceJoin, _ := source.Registration.Handle.JoinRef()
@@ -996,7 +1014,7 @@ func materializeRunForkFanOutBarrierTx(
 	registration.PlanRef = selectedRef
 	registration.Handle = handle
 	registration.CreatedAt = at.UTC()
-	if err := commitFanOutBarrierRegistrationTx(ctx, tx, postgres, effects, registration); err != nil {
+	if err := commitFanOutBarrierRegistrationTx(ctx, attempt, postgres, registration); err != nil {
 		return err
 	}
 	if source.Status == fanoutbarrier.StatusArmed {
@@ -1020,7 +1038,7 @@ func materializeRunForkFanOutBarrierTx(
 		if err != nil {
 			return err
 		}
-		admitted, err := genericSchedules.AdmitTx(ctx, tx, effects, command)
+		admitted, err := genericSchedules.AdmitTx(ctx, attempt, command)
 		if err != nil {
 			return fmt.Errorf("admit fork fan-out barrier completion: %w", err)
 		}
@@ -1048,32 +1066,29 @@ func materializeRunForkFanOutBarrierTx(
 	if err != nil || changed != 1 {
 		return fmt.Errorf("fork fan-out barrier materialization lost exact armed owner")
 	}
-	return addFanOutBarrierRevisionEffect(effects, registration.IntentKey)
+	return addFanOutBarrierRevisionEffect(attempt, registration.IntentKey)
 }
 
 func commitFanOutBarrierRegistrationTx(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
 	registration fanoutbarrier.Registration,
 ) error {
-	if tx == nil {
-		return fmt.Errorf("fan-out delivery barrier requires private transaction")
-	}
 	if err := registration.Validate(); err != nil {
 		return err
 	}
-	ref, _ := registration.Handle.JoinRef()
-	handle, err := json.Marshal(registration.Handle)
-	if err != nil {
-		return fmt.Errorf("encode fan-out delivery barrier handle: %w", err)
-	}
-	routingSource, err := json.Marshal(registration.RoutingSource)
-	if err != nil {
-		return fmt.Errorf("encode fan-out delivery barrier routing source: %w", err)
-	}
-	query := `
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		ref, _ := registration.Handle.JoinRef()
+		handle, err := json.Marshal(registration.Handle)
+		if err != nil {
+			return fmt.Errorf("encode fan-out delivery barrier handle: %w", err)
+		}
+		routingSource, err := json.Marshal(registration.RoutingSource)
+		if err != nil {
+			return fmt.Errorf("encode fan-out delivery barrier routing source: %w", err)
+		}
+		query := `
 		INSERT INTO fan_out_obligation_barriers (
 			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 			bundle_hash, semantic_digest, target_flow_path,
@@ -1083,107 +1098,119 @@ func commitFanOutBarrierRegistrationTx(
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20
 		)`
-	if postgres {
-		query = strings.ReplaceAll(query, "$16", "$16::jsonb")
-		query = strings.ReplaceAll(query, "$18", "$18::jsonb")
-	} else {
-		query = postgresPlaceholdersToSQLite(query, 20)
-	}
-	_, err = tx.ExecContext(ctx, query,
-		registration.IntentKey.RunID,
-		registration.IntentKey.TriggeringDeliveryID,
-		registration.IntentKey.ElementRef.FlowPath,
-		registration.IntentKey.ElementRef.Family,
-		registration.IntentKey.ElementRef.SemanticPath,
-		registration.PlanRef.BundleHash,
-		registration.PlanRef.SemanticDigest,
-		ref.Node().FlowPath(),
-		ref.Node().NodeID(),
-		ref.HandlerEvent(),
-		ref.JoinID(),
-		registration.Route.ScopeKey,
-		registration.Route.InstanceID,
-		registration.Route.InstancePath,
-		registration.EntityID,
-		string(routingSource),
-		string(registration.ExecutionMode),
-		string(handle),
-		string(fanoutbarrier.StatusArmed),
-		registration.CreatedAt.UTC(),
-	)
-	if err != nil {
-		return fmt.Errorf("insert fan-out delivery barrier: %w", err)
-	}
-	return addFanOutBarrierRevisionEffect(effects, registration.IntentKey)
+		if postgres {
+			query = strings.ReplaceAll(query, "$16", "$16::jsonb")
+			query = strings.ReplaceAll(query, "$18", "$18::jsonb")
+		} else {
+			query = postgresPlaceholdersToSQLite(query, 20)
+		}
+		_, err = tx.ExecContext(ctx, query,
+			registration.IntentKey.RunID,
+			registration.IntentKey.TriggeringDeliveryID,
+			registration.IntentKey.ElementRef.FlowPath,
+			registration.IntentKey.ElementRef.Family,
+			registration.IntentKey.ElementRef.SemanticPath,
+			registration.PlanRef.BundleHash,
+			registration.PlanRef.SemanticDigest,
+			ref.Node().FlowPath(),
+			ref.Node().NodeID(),
+			ref.HandlerEvent(),
+			ref.JoinID(),
+			registration.Route.ScopeKey,
+			registration.Route.InstanceID,
+			registration.Route.InstancePath,
+			registration.EntityID,
+			string(routingSource),
+			string(registration.ExecutionMode),
+			string(handle),
+			string(fanoutbarrier.StatusArmed),
+			registration.CreatedAt.UTC(),
+		)
+		if err != nil {
+			return fmt.Errorf("insert fan-out delivery barrier: %w", err)
+		}
+		fact, err := privaterunforkrevision.FanOutBarrierFact(registration.IntentKey)
+		if err != nil {
+			return err
+		}
+		return attempt.AddFacts(registration.IntentKey.RunID, fact)
+	})
 }
 
 func commitFanOutBarrierCompletionTx(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *privaterunforkrevision.Effects,
 	runID string,
 	completion fanoutbarrier.Completion,
 	updatedAt time.Time,
 ) error {
-	if tx == nil || effects == nil || updatedAt.IsZero() {
-		return fmt.Errorf("fan-out barrier completion requires transaction, effects, and selected-store time")
+	if updatedAt.IsZero() {
+		return fmt.Errorf("fan-out barrier completion requires selected-store time")
 	}
 	key, err := completion.IntentKey(runID)
 	if err != nil {
 		return err
 	}
-	query := `
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		query := `
 		SELECT status, summary, schedule_key, schedule_activation_id
 		FROM fan_out_obligation_barriers
 		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`
-	if postgres {
-		query += " FOR UPDATE"
-	}
-	var status string
-	var summaryRaw any
-	var scheduleKey sql.NullString
-	var scheduleActivationID sql.NullString
-	err = tx.QueryRowContext(ctx, query, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&status, &summaryRaw, &scheduleKey, &scheduleActivationID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("fan-out barrier completion owner is missing")
-	}
-	if err != nil {
-		return err
-	}
-	var persisted fanoutbarrier.Summary
-	if err := json.Unmarshal(jsonRawMessageValue(summaryRaw), &persisted); err != nil {
-		return fmt.Errorf("decode fan-out barrier completion summary: %w", err)
-	}
-	if persisted != completion.Summary || !scheduleKey.Valid || strings.TrimSpace(scheduleKey.String) != completion.Handle.TaskID() || !scheduleActivationID.Valid || strings.TrimSpace(scheduleActivationID.String) == "" {
-		return fmt.Errorf("fan-out barrier completion contradicts its closed schedule")
-	}
-	switch fanoutbarrier.Status(strings.TrimSpace(status)) {
-	case fanoutbarrier.StatusFired:
-		return nil
-	case fanoutbarrier.StatusClosedPending:
-	default:
-		return fmt.Errorf("fan-out barrier completion requires closed_pending owner, got %q", status)
-	}
-	update := `
+		if postgres {
+			query += " FOR UPDATE"
+		}
+		var status string
+		var summaryRaw any
+		var scheduleKey sql.NullString
+		var scheduleActivationID sql.NullString
+		err = tx.QueryRowContext(ctx, query, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&status, &summaryRaw, &scheduleKey, &scheduleActivationID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("fan-out barrier completion owner is missing")
+		}
+		if err != nil {
+			return err
+		}
+		var persisted fanoutbarrier.Summary
+		if err := json.Unmarshal(jsonRawMessageValue(summaryRaw), &persisted); err != nil {
+			return fmt.Errorf("decode fan-out barrier completion summary: %w", err)
+		}
+		if persisted != completion.Summary || !scheduleKey.Valid || strings.TrimSpace(scheduleKey.String) != completion.Handle.TaskID() || !scheduleActivationID.Valid || strings.TrimSpace(scheduleActivationID.String) == "" {
+			return fmt.Errorf("fan-out barrier completion contradicts its closed schedule")
+		}
+		switch fanoutbarrier.Status(strings.TrimSpace(status)) {
+		case fanoutbarrier.StatusFired:
+			return nil
+		case fanoutbarrier.StatusClosedPending:
+		default:
+			return fmt.Errorf("fan-out barrier completion requires closed_pending owner, got %q", status)
+		}
+		update := `
 		UPDATE fan_out_obligation_barriers
 		SET status=$1, updated_at=$2
 		WHERE run_id=$3 AND triggering_delivery_id=$4 AND flow_path=$5 AND declaration_family=$6 AND semantic_path=$7 AND status='closed_pending' AND schedule_key=$8`
-	if !postgres {
-		update = postgresPlaceholdersToSQLite(update, 8)
-	}
-	result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusFired), updatedAt.UTC(), key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, completion.Handle.TaskID())
-	if err != nil {
-		return err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil || changed != 1 {
-		return fmt.Errorf("fan-out barrier completion lost exact closed owner")
-	}
-	return addFanOutBarrierRevisionEffect(effects, key)
+		if !postgres {
+			update = postgresPlaceholdersToSQLite(update, 8)
+		}
+		result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusFired), updatedAt.UTC(), key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, completion.Handle.TaskID())
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 1 {
+			return fmt.Errorf("fan-out barrier completion lost exact closed owner")
+		}
+		ref, err := privaterunforkrevision.FanOutBarrierFact(key)
+		if err != nil {
+			return err
+		}
+		return attempt.AddFacts(key.RunID, ref)
+	})
 }
 
-func addFanOutBarrierRevisionEffect(effects *privaterunforkrevision.Effects, key fanoutobligation.IntentKey) error {
+func addFanOutBarrierRevisionEffect(effects interface {
+	AddFacts(string, ...privaterunforkrevision.FactRef) error
+}, key fanoutobligation.IntentKey) error {
 	ref, err := privaterunforkrevision.FanOutBarrierFact(key)
 	if err != nil {
 		return err

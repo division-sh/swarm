@@ -126,36 +126,25 @@ func newPipelineTestDeliveryOwner(t interface {
 	return &pipelineTestDeliveryOwner{db: db, dialect: dialect, adapter: adapter}
 }
 
-func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
+func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt, *sql.Tx) error) error {
 	storyDialect := authoractivityfixture.DialectPostgres
 	if s.dialect == deliveryfixture.DialectSQLite {
 		storyDialect = authoractivityfixture.DialectSQLite
 	}
-	storyctx, err := authoractivityfixture.Begin(ctx, tx, storyDialect)
-	if err != nil {
-		return err
-	}
-	if err := fn(storyctx, tx); err != nil {
-		return err
-	}
-	if err := authoractivityfixture.Finalize(storyctx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return eventfixture.RunMutation(ctx, s.db, storyDialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return fn(ctx, attempt, tx)
+		})
+	}).Err()
 }
 
 func (s *pipelineTestDeliveryOwner) commitInitial(ctx context.Context, event events.Event, route events.DeliveryRoute) error {
-	return s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	return s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, tx *sql.Tx) error {
 		authority, err := s.authorityForRun(ctx, tx, event.RunID())
 		if err != nil {
 			return err
 		}
-		_, err = s.adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
+		_, err = s.adapter.CommitInitial(ctx, attempt, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
 		return err
 	})
 }
@@ -287,11 +276,20 @@ func (s *pipelineTestDeliveryOwner) makeRetryEligible(ctx context.Context, deliv
 	return nil
 }
 
-func (s *pipelineTestDeliveryOwner) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) (err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return s.adapter.ActivateNormalAuthority(ctx, tx, authority)
-	})
+func (s *pipelineTestDeliveryOwner) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) error {
+	_, err := s.ActivateDeliveryAuthorityOutcome(ctx, authority)
 	return err
+}
+
+func (s *pipelineTestDeliveryOwner) ActivateDeliveryAuthorityOutcome(ctx context.Context, authority runtimedelivery.ExecutionAuthority) (runtimedelivery.ActivationCommit, error) {
+	storyDialect := authoractivityfixture.DialectPostgres
+	if s.dialect == deliveryfixture.DialectSQLite {
+		storyDialect = authoractivityfixture.DialectSQLite
+	}
+	result := eventfixture.RunMutation(ctx, s.db, storyDialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return s.adapter.ActivateNormalAuthority(ctx, attempt, authority)
+	})
+	return runtimedelivery.ActivationCommit{Acknowledged: result.Acknowledged()}, result.Err()
 }
 
 func (s *pipelineTestDeliveryOwner) InspectDeliveryRecovery(
@@ -302,15 +300,18 @@ func (s *pipelineTestDeliveryOwner) InspectDeliveryRecovery(
 }
 
 func (s *pipelineTestDeliveryOwner) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (out runtimedelivery.ClaimResult, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.ClaimExactResult(ctx, tx, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		out, err = s.adapter.ClaimExactResult(ctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
+	if err == nil {
+		out.Acknowledged = true
+	}
 	return out, err
 }
 
 func (s *pipelineTestDeliveryOwner) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (out runtimedelivery.ContinuationPage, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err = s.mutate(ctx, func(ctx context.Context, _ *eventfixture.Attempt, tx *sql.Tx) error {
 		out, err = s.adapter.ScanContinuations(ctx, tx, authority, cursor, limit)
 		return err
 	})
@@ -335,32 +336,32 @@ func (s *pipelineTestDeliveryOwner) ObserveDeliveryContinuation(
 }
 
 func (s *pipelineTestDeliveryOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (out runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.BindAgentSession(ctx, tx, claim, sessionID)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		out, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
 		return err
 	})
 	return out, err
 }
 
 func (s *pipelineTestDeliveryOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (out runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.RenewClaim(ctx, tx, claim, runtimedelivery.DefaultLeaseTTL)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		out, err = s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	return out, err
 }
 
 func (s *pipelineTestDeliveryOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (out runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.SettleSuccess(ctx, tx, claim, effects, duration, selection)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		out, err = s.adapter.SettleSuccess(ctx, attempt, claim, effects, duration, selection)
 		return err
 	})
 	return out, err
 }
 
 func (s *pipelineTestDeliveryOwner) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (out runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.SettleFailure(ctx, tx, claim, settlement)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		out, err = s.adapter.SettleFailure(ctx, attempt, claim, settlement)
 		return err
 	})
 	return out, err
@@ -383,8 +384,8 @@ func (s *pipelineTestDeliveryOwner) SummarizeRun(ctx context.Context, runID stri
 }
 
 func (s *pipelineTestDeliveryOwner) TerminalizeRun(ctx context.Context, runID, reason string) (out []runtimedelivery.Terminalization, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.TerminalizeRun(ctx, tx, runID, reason)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		out, err = s.adapter.TerminalizeRun(ctx, attempt, runID, reason)
 		return err
 	})
 	return out, err

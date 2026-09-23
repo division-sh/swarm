@@ -104,10 +104,11 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 				RoutingSource: routing, ExecutionMode: executionmode.Live, ReplyContext: record.ID,
 				Due: runtimegenericschedule.AbsoluteDue(now.Add(10 * time.Minute)), TaskID: "reply-resume",
 			}
-			admitted, err := store.AdmitGenericSchedule(events.WithDeliveryContext(ctx, deliveryContext), command)
-			if err != nil {
-				t.Fatalf("AdmitGenericSchedule: %v", err)
+			commit, err := store.AdmitGenericScheduleOutcome(events.WithDeliveryContext(ctx, deliveryContext), command)
+			if err != nil || !commit.Acknowledged {
+				t.Fatalf("AdmitGenericSchedule: commit=%+v err=%v", commit, err)
 			}
+			admitted := commit.Result
 			loadedSchedule, found, err := store.LoadGenericScheduleActivation(ctx, admitted.Activation.ID)
 			if err != nil {
 				t.Fatalf("LoadGenericScheduleActivation: %v", err)
@@ -119,7 +120,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 			recurring.ScheduleKey = "reply-recurring"
 			recurring.TaskID = "reply-recurring"
 			recurring.Due = runtimegenericschedule.EveryDue(time.Hour)
-			if _, err := store.AdmitGenericSchedule(ctx, recurring); err == nil {
+			if _, err := store.AdmitGenericScheduleOutcome(ctx, recurring); err == nil {
 				t.Fatal("recurring schedule with open reply context unexpectedly accepted")
 			}
 

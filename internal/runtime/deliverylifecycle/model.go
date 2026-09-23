@@ -633,11 +633,13 @@ const (
 )
 
 type ClaimResult struct {
-	Disposition ClaimDisposition
-	Previous    ClaimDisposition
-	Snapshot    Snapshot
-	Claimed     ClaimedObligation
-	Invariant   error
+	// Acknowledged is set only after the selected-store commit reports a value.
+	Acknowledged bool
+	Disposition  ClaimDisposition
+	Previous     ClaimDisposition
+	Snapshot     Snapshot
+	Claimed      ClaimedObligation
+	Invariant    error
 }
 
 func (r ClaimResult) Acquired() (ClaimedObligation, bool) {
@@ -865,11 +867,16 @@ type AgentExecution struct {
 
 type NodeExecution = AgentExecution
 
+type ActivationCommit struct {
+	Acknowledged bool
+}
+
 // Store is the narrow selected-store semantic port consumed by runtime code.
 // Raw rows, status strings, SQL transactions, and caller-selected retry limits
 // do not cross this boundary.
 type Store interface {
 	ActivateDeliveryAuthority(context.Context, ExecutionAuthority) error
+	ActivateDeliveryAuthorityOutcome(context.Context, ExecutionAuthority) (ActivationCommit, error)
 	InspectDeliveryRecovery(context.Context, runtimecorrelation.SourceArtifactFact) (RecoveryInventory, error)
 	ClaimDelivery(context.Context, ExecutionAuthority, events.Event, events.DeliveryRoute) (ClaimResult, error)
 	ScanDeliveryContinuations(context.Context, ExecutionAuthority, ContinuationCursor, int) (ContinuationPage, error)

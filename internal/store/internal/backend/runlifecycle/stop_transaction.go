@@ -2,13 +2,11 @@ package runlifecycle
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
-	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/lib/pq"
 )
 
@@ -19,20 +17,42 @@ func runControlStageFailure(action, stage string, err error) error {
 	return runcontrol.StopFailure(stage, err)
 }
 
-func classifyStopTransactionOutcome(stage string, committed bool, err error) error {
+func classifyStopTransactionOutcome(phase mutationprotocol.Phase, committed bool, err error) error {
 	if err == nil {
 		return nil
 	}
 	if _, typed := runtimefailures.EnvelopeFromError(err); typed {
 		return err
 	}
-	if stage == "commit" && !committed && !stopCommitRejected(err) {
+	stage := stopMutationStage(phase)
+	if phase == mutationprotocol.CommitAdmission && !committed && !stopCommitRejected(err) {
 		return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "run_stop_commit_unconfirmed", "runtime.run_control", "stop", map[string]any{"stage": stage}, err)
 	}
 	if committed {
 		stage = "post_commit"
 	}
 	return runcontrol.StopFailure(stage, err)
+}
+
+func stopMutationStage(phase mutationprotocol.Phase) string {
+	switch phase {
+	case mutationprotocol.BeforeAttempt:
+		return "transaction_begin"
+	case mutationprotocol.AcquireFence:
+		return "activity_begin"
+	case mutationprotocol.DomainWrite:
+		return "transition"
+	case mutationprotocol.RevisionFinalize:
+		return "revision_finalize"
+	case mutationprotocol.ActivityFinalize:
+		return "activity_finalize"
+	case mutationprotocol.CommitAdmission:
+		return "commit"
+	case mutationprotocol.PostCommit:
+		return "post_commit"
+	default:
+		return "transaction_begin"
+	}
 }
 
 func stopCommitRejected(err error) bool {
@@ -78,16 +98,4 @@ func stopCommitAdmissionCanceled(err error) bool {
 		return stopCommitAdmissionCanceled(cause)
 	}
 	return false
-}
-
-func (s *RunLifecyclePostgresOwner) runStopMutationOutcome(ctx context.Context, effects *runforkrevision.Effects, operation func(context.Context, *sql.Tx, *authoractivity.Mutation) error) (bool, error) {
-	stage := "transaction_begin"
-	committed, err := s.runPrivateAuthorActivityMutationObserved(ctx, effects, operation, &stage)
-	return committed, classifyStopTransactionOutcome(stage, committed, err)
-}
-
-func (s *RunLifecycleSQLiteOwner) runStopMutationOutcome(ctx context.Context, effects *runforkrevision.Effects, operation func(context.Context, *sql.Tx, *authoractivity.Mutation) error) (bool, error) {
-	stage := "transaction_begin"
-	committed, err := s.runPrivateAuthorActivityMutationObserved(ctx, "sqlite run stop", effects, operation, &stage)
-	return committed, classifyStopTransactionOutcome(stage, committed, err)
 }

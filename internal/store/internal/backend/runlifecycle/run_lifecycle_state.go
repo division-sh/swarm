@@ -12,7 +12,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 const runLifecycleActiveStateSQLValues = "'" +
@@ -327,50 +327,46 @@ func requireStandingGenerationOriginRelation(
 func (s *RunLifecyclePostgresOwner) markRunTerminalTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromRequest(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
 func (s *RunLifecyclePostgresOwner) markForkSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromForkSource(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
 func (s *RunLifecycleSQLiteOwner) markForkSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromForkSource(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
 func (s *RunLifecyclePostgresOwner) completeRunTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	runID string,
 	endedAt time.Time,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
@@ -378,21 +374,20 @@ func (s *RunLifecyclePostgresOwner) completeRunTx(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
 func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	request terminalRunMutation,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if tx == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL terminal run lifecycle mutation requires transaction")
 	}
-	if story == nil {
-		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("terminal run lifecycle mutation requires private story ownership")
+	if attempt == nil {
+		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("terminal run lifecycle mutation requires attempt")
 	}
 	terminalizeDeliveries, err := request.terminalizesDeliveries()
 	if err != nil {
@@ -415,19 +410,16 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 		}
 		return current, runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if effects == nil {
-		return runtimerunlifecycle.Snapshot{}, "", errors.New("terminal run lifecycle mutation requires revision effects")
-	}
-	if err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).SyncCounters(ctx, request.RunID); err != nil {
+	if err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if terminalizeDeliveries {
-		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, request.RunID, "run_"+string(request.State)); err != nil {
+		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, attempt, request.RunID, "run_"+string(request.State)); err != nil {
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
 	if err := s.decisionCards.SupersedeRunTx(
-		ctx, tx, story, effects, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
+		ctx, attempt, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
 	); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
@@ -457,7 +449,7 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	if err := recordTerminalRunActivity(ctx, story, snapshot, request.Failure); err != nil {
+	if err := recordTerminalRunActivity(ctx, attempt, snapshot, request.Failure); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	return snapshot, runtimerunlifecycle.MutationApplied, nil
@@ -466,29 +458,27 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 func (s *RunLifecycleSQLiteOwner) markRunTerminalTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromRequest(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
 func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	request terminalRunMutation,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if tx == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle mutation requires transaction")
 	}
-	if story == nil {
-		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("terminal run lifecycle mutation requires private story ownership")
+	if attempt == nil {
+		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("terminal run lifecycle mutation requires attempt")
 	}
 	terminalizeDeliveries, err := request.terminalizesDeliveries()
 	if err != nil {
@@ -511,19 +501,16 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 		}
 		return current, runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if effects == nil {
-		return runtimerunlifecycle.Snapshot{}, "", errors.New("terminal run lifecycle mutation requires revision effects")
-	}
-	if err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).SyncCounters(ctx, request.RunID); err != nil {
+	if err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if terminalizeDeliveries {
-		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, request.RunID, "run_"+string(request.State)); err != nil {
+		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, attempt, request.RunID, "run_"+string(request.State)); err != nil {
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
 	if err := s.decisionCards.SupersedeRunTx(
-		ctx, tx, story, effects, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
+		ctx, attempt, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
 	); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
@@ -553,7 +540,7 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	if err := recordTerminalRunActivity(ctx, story, snapshot, request.Failure); err != nil {
+	if err := recordTerminalRunActivity(ctx, attempt, snapshot, request.Failure); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	return snapshot, runtimerunlifecycle.MutationApplied, nil
@@ -562,8 +549,7 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 func (s *RunLifecycleSQLiteOwner) completeRunTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	runID string,
 	endedAt time.Time,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
@@ -571,12 +557,12 @@ func (s *RunLifecycleSQLiteOwner) completeRunTx(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, attempt, mutation)
 }
 
 func recordTerminalRunActivity(
 	ctx context.Context,
-	story runtimeauthoractivity.Mutation,
+	attempt *mutationprotocol.Attempt,
 	snapshot runtimerunlifecycle.Snapshot,
 	failure *runtimefailures.Envelope,
 ) error {
@@ -595,10 +581,10 @@ func recordTerminalRunActivity(
 		OccurredAt: occurredAt, RunID: snapshot.RunID, Scope: scope, Failure: failure,
 		Projection: runtimeauthoractivity.Projection{SubjectType: "run", SubjectID: snapshot.RunID},
 	}
-	if story != nil {
-		return story.Record(ctx, draft)
+	if attempt != nil {
+		return attempt.Record(ctx, draft)
 	}
-	return fmt.Errorf("terminal run lifecycle activity requires private story ownership")
+	return fmt.Errorf("terminal run lifecycle activity requires attempt")
 }
 
 func marshalRunLifecycleFailure(failure *runtimefailures.Envelope) (any, error) {
@@ -623,18 +609,36 @@ func sameRunLifecycleFailure(left, right *runtimefailures.Envelope) bool {
 
 type TerminalRunMutation = terminalRunMutation
 
-func (s *RunLifecyclePostgresOwner) CompleteRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.completeRunTx(ctx, tx, story, effects, runID, endedAt)
+func withTerminalAttemptSQL(ctx context.Context, attempt *mutationprotocol.Attempt, write func(*sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	var snapshot runtimerunlifecycle.Snapshot
+	var disposition runtimerunlifecycle.MutationDisposition
+	err := attempt.WithSQL(ctx, func(_ context.Context, tx *sql.Tx) (err error) {
+		snapshot, disposition, err = write(tx)
+		return err
+	})
+	return snapshot, disposition, err
 }
 
-func (s *RunLifecycleSQLiteOwner) CompleteRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.completeRunTx(ctx, tx, story, effects, runID, endedAt)
+func (s *RunLifecyclePostgresOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.completeRunTx(ctx, tx, attempt, runID, endedAt)
+	})
 }
 
-func (s *RunLifecyclePostgresOwner) MarkRunTerminalStateTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, request)
+func (s *RunLifecycleSQLiteOwner) CompleteRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.completeRunTx(ctx, tx, attempt, runID, endedAt)
+	})
 }
 
-func (s *RunLifecycleSQLiteOwner) MarkRunTerminalStateTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.markRunTerminalStateTx(ctx, tx, story, effects, request)
+func (s *RunLifecyclePostgresOwner) MarkRunTerminalStateTx(ctx context.Context, attempt *mutationprotocol.Attempt, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.markRunTerminalStateTx(ctx, tx, attempt, request)
+	})
+}
+
+func (s *RunLifecycleSQLiteOwner) MarkRunTerminalStateTx(ctx context.Context, attempt *mutationprotocol.Attempt, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.markRunTerminalStateTx(ctx, tx, attempt, request)
+	})
 }

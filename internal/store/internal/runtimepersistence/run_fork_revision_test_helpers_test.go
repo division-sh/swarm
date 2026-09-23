@@ -131,7 +131,7 @@ func exerciseRunForkSessionExcludedWriters(t *testing.T, store *PostgresStore, r
 	if lease.SessionID != sessionID {
 		t.Fatalf("acquired session = %s, want %s", lease.SessionID, sessionID)
 	}
-	if err := store.IncrementTurn(ctx, identity, sessionID); err != nil {
+	if _, err := store.IncrementTurnOutcome(ctx, identity, sessionID); err != nil {
 		t.Fatalf("increment session turn: %v", err)
 	}
 	if err := store.AdoptSessionID(ctx, identity, "revision-writer", "provider-revision-writer"); err != nil {
@@ -146,7 +146,7 @@ func exerciseRunForkSessionExcludedWriters(t *testing.T, store *PostgresStore, r
 	}); err != nil {
 		t.Fatalf("update session watchdog: %v", err)
 	}
-	if err := store.Release(ctx, lease); err != nil {
+	if _, err := store.ReleaseOutcome(ctx, lease); err != nil {
 		t.Fatalf("release session lease: %v", err)
 	}
 }

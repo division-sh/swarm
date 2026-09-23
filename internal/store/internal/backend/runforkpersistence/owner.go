@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
@@ -19,9 +18,9 @@ import (
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -39,14 +38,13 @@ type rowQueryer interface {
 }
 
 type eventCommitOwner interface {
-	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	AppendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 }
 
 type conversationForkSourceReader interface {
 	LoadConversationForkSource(context.Context, string) (runtimerunfork.ConversationForkSource, error)
 }
 
-type runLifecycleCandidateHandoffReservation = storerunhandoff.CandidateHandoff
 type persistedAgentProjection = storeagent.PersistedAgentProjection
 
 var agentIdentityFields = storeagent.IdentityFields
@@ -73,6 +71,7 @@ type RunForkPostgresOwner struct {
 	conversations  conversationForkSourceReader
 	durableData    *storedurabledata.Owner
 	apiIdempotency *storeapiidempotency.PostgresOwner
+	candidates     *storerunhandoff.CandidateCoordinator
 }
 
 type RunForkSQLiteOwner struct {
@@ -90,6 +89,7 @@ type RunForkSQLiteOwner struct {
 	conversations  conversationForkSourceReader
 	durableData    *storedurabledata.Owner
 	apiIdempotency *storeapiidempotency.SQLiteOwner
+	candidates     *storerunhandoff.CandidateCoordinator
 }
 
 type lifecycleDiagnosticObservations interface {
@@ -123,8 +123,9 @@ func NewPostgres(
 	conversations conversationForkSourceReader,
 	durableData *storedurabledata.Owner,
 	apiIdempotency *storeapiidempotency.PostgresOwner,
+	candidates *storerunhandoff.CandidateCoordinator,
 ) (*RunForkPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil || candidates == nil {
 		return nil, errors.New("run-fork PostgreSQL owner dependencies are required")
 	}
 	return &RunForkPostgresOwner{
@@ -139,6 +140,7 @@ func NewPostgres(
 		conversations:             conversations,
 		durableData:               durableData,
 		apiIdempotency:            apiIdempotency,
+		candidates:                candidates,
 	}, nil
 }
 
@@ -154,9 +156,10 @@ func NewSQLite(
 	conversations conversationForkSourceReader,
 	durableData *storedurabledata.Owner,
 	apiIdempotency *storeapiidempotency.SQLiteOwner,
+	candidates *storerunhandoff.CandidateCoordinator,
 	now func() time.Time,
 ) (*RunForkSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil || conversations == nil || durableData == nil || apiIdempotency == nil || candidates == nil {
 		return nil, errors.New("run-fork SQLite owner dependencies are required")
 	}
 	if now == nil {
@@ -175,11 +178,8 @@ func NewSQLite(
 		conversations:           conversations,
 		durableData:             durableData,
 		apiIdempotency:          apiIdempotency,
+		candidates:              candidates,
 	}, nil
-}
-
-func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
-	return storerunhandoff.ReserveCandidateHandoff(ctx)
 }
 
 func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {

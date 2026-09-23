@@ -33,6 +33,8 @@ import (
 type directivePersistenceFault string
 
 const (
+	directiveFaultReserve         directivePersistenceFault = "reserve"
+	directiveFaultAdmit           directivePersistenceFault = "admit"
 	directiveFaultFinalizeFailure directivePersistenceFault = "finalize_failure"
 	directiveFaultRecordResult    directivePersistenceFault = "record_result"
 	directiveFaultFinalizeSuccess directivePersistenceFault = "finalize_success"
@@ -88,6 +90,30 @@ func (s *faultingDirectiveIntegrationStore) takeFault(fault directivePersistence
 	return s.mode, true
 }
 
+func (s *faultingDirectiveIntegrationStore) ReserveDirectiveOperation(ctx context.Context, req runtimeagentcontrol.ReserveDirectiveOperationRequest) (runtimeagentcontrol.DirectiveOperationReservation, error) {
+	mode, inject := s.takeFault(directiveFaultReserve)
+	if inject && mode == directiveFaultBeforeCommit {
+		return runtimeagentcontrol.DirectiveOperationReservation{}, errInjectedDirectivePersistence
+	}
+	reservation, err := s.directiveIntegrationStore.ReserveDirectiveOperation(ctx, req)
+	if err == nil && inject && mode == directiveFaultAfterCommit {
+		return reservation, errInjectedDirectivePersistence
+	}
+	return reservation, err
+}
+
+func (s *faultingDirectiveIntegrationStore) AdmitDirectiveExecution(ctx context.Context, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
+	mode, inject := s.takeFault(directiveFaultAdmit)
+	if inject && mode == directiveFaultBeforeCommit {
+		return runtimeagentcontrol.DirectiveExecutionAdmission{}, errInjectedDirectivePersistence
+	}
+	admission, err := s.directiveIntegrationStore.AdmitDirectiveExecution(ctx, req)
+	if err == nil && inject && mode == directiveFaultAfterCommit {
+		return admission, errInjectedDirectivePersistence
+	}
+	return admission, err
+}
+
 func (s *faultingDirectiveIntegrationStore) FinalizeDirectiveFailure(ctx context.Context, operationID, ownerID string, failure runtimefailures.Envelope, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
 	mode, inject := s.takeFault(directiveFaultFinalizeFailure)
 	if inject && mode == directiveFaultBeforeCommit {
@@ -95,7 +121,7 @@ func (s *faultingDirectiveIntegrationStore) FinalizeDirectiveFailure(ctx context
 	}
 	op, err := s.directiveIntegrationStore.FinalizeDirectiveFailure(ctx, operationID, ownerID, failure, now, ttl)
 	if err == nil && inject && mode == directiveFaultAfterCommit {
-		return runtimeagentcontrol.DirectiveOperation{}, errInjectedDirectivePersistence
+		return op, errInjectedDirectivePersistence
 	}
 	return op, err
 }
@@ -107,7 +133,7 @@ func (s *faultingDirectiveIntegrationStore) RecordDirectiveExecuted(ctx context.
 	}
 	op, err := s.directiveIntegrationStore.RecordDirectiveExecuted(ctx, operationID, ownerID, response, now)
 	if err == nil && inject && mode == directiveFaultAfterCommit {
-		return runtimeagentcontrol.DirectiveOperation{}, errInjectedDirectivePersistence
+		return op, errInjectedDirectivePersistence
 	}
 	return op, err
 }
@@ -119,7 +145,7 @@ func (s *faultingDirectiveIntegrationStore) FinalizeDirectiveSuccess(ctx context
 	}
 	op, err := s.directiveIntegrationStore.FinalizeDirectiveSuccess(ctx, operationID, now, ttl)
 	if err == nil && inject && mode == directiveFaultAfterCommit {
-		return runtimeagentcontrol.DirectiveOperation{}, errInjectedDirectivePersistence
+		return op, errInjectedDirectivePersistence
 	}
 	return op, err
 }
@@ -182,7 +208,11 @@ func TestDirectiveFailureFinalizationAcknowledgmentMatrix(t *testing.T) {
 				h.faults.setFault(directiveFaultFinalizeFailure, mode)
 
 				_, err := h.manager.SendDirective(h.workContext(t), h.request)
-				assertImmediateDirectiveFailure(t, err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveFailurePersistenceUnconfirmedDetail)
+				if mode == directiveFaultBeforeCommit {
+					assertImmediateDirectiveFailure(t, err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveFailurePersistenceUnconfirmedDetail)
+				} else {
+					assertImmediateDirectiveFailure(t, err, runtimeagentcontrol.ErrDirectiveExecutionFailed, runtimeagentcontrol.DirectiveBoardStepFailedDetail)
+				}
 				op := h.loadOperation(t)
 				if got := h.agent.calls.Load(); got != 1 {
 					t.Fatalf("BoardStep calls = %d, want 1", got)
@@ -203,6 +233,7 @@ func TestDirectiveFailureFinalizationAcknowledgmentMatrix(t *testing.T) {
 				} else {
 					assertDirectiveOperationFailure(t, op, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveBoardStepFailedDetail)
 					assertDirectiveReceipt(t, backend.db, op.DirectiveEventID, "error", op.Failure)
+					h.restartManager(t)
 					if _, err := h.manager.SendDirective(h.workContext(t), h.request); !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) {
 						t.Fatalf("same-key committed-failure replay = %v, want execution failed", err)
 					}
@@ -227,11 +258,11 @@ func TestDirectiveResultRecordingAcknowledgmentMatrix(t *testing.T) {
 					h := newDirectiveAmbiguityHarness(t, backend, &directiveAmbiguityAgent{id: "result-agent", response: "accepted"})
 					h.faults.setFault(directiveFaultRecordResult, mode)
 
-					_, err := h.manager.SendDirective(h.workContext(t), h.request)
-					assertImmediateDirectiveFailure(t, err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveResultPersistenceUnconfirmedDetail)
+					result, err := h.manager.SendDirective(h.workContext(t), h.request)
 					op := h.loadOperation(t)
-					assertDirectiveReceipt(t, backend.db, op.DirectiveEventID, "", nil)
 					if mode == directiveFaultBeforeCommit {
+						assertImmediateDirectiveFailure(t, err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveResultPersistenceUnconfirmedDetail)
+						assertDirectiveReceipt(t, backend.db, op.DirectiveEventID, "", nil)
 						assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationExecuting, false, false)
 						h.expireLease(t, op.OperationID)
 						if convergence == "startup" {
@@ -245,16 +276,20 @@ func TestDirectiveResultRecordingAcknowledgmentMatrix(t *testing.T) {
 						assertDirectiveOperationFailure(t, op, runtimeagentcontrol.DirectiveOperationIndeterminate, runtimeagentcontrol.DirectiveExecutionLeaseExpiredDetail)
 						assertDirectiveReceipt(t, backend.db, op.DirectiveEventID, "error", op.Failure)
 					} else {
-						assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationExecuted, true, false)
+						if err != nil || !result.OK || result.Response != "accepted" {
+							t.Fatalf("acknowledged result recording = %#v err=%v", result, err)
+						}
+						assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationSucceeded, true, false)
+						assertDirectiveSuccessSettlement(t, backend.db, op)
 						if convergence == "startup" {
+							h.restartManager(t)
 							if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); err != nil {
 								t.Fatalf("startup reconciliation: %v", err)
 							}
-						} else {
-							result, err := h.manager.SendDirective(h.workContext(t), h.request)
-							if err != nil || !result.OK || result.Response != "accepted" {
-								t.Fatalf("same-key result convergence = %#v err=%v", result, err)
-							}
+						}
+						replayed, err := h.manager.SendDirective(h.workContext(t), h.request)
+						if err != nil || !replayed.OK || replayed.OperationID != result.OperationID {
+							t.Fatalf("same-key result replay = %#v err=%v", replayed, err)
 						}
 						op = h.loadOperation(t)
 						assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationSucceeded, true, false)
@@ -278,18 +313,22 @@ func TestDirectiveSuccessFinalizationAcknowledgmentMatrix(t *testing.T) {
 					h := newDirectiveAmbiguityHarness(t, backend, &directiveAmbiguityAgent{id: "success-agent", response: "accepted"})
 					h.faults.setFault(directiveFaultFinalizeSuccess, mode)
 
-					_, err := h.manager.SendDirective(h.workContext(t), h.request)
-					assertImmediateDirectiveCompletionPending(t, err)
+					result, err := h.manager.SendDirective(h.workContext(t), h.request)
 					op := h.loadOperation(t)
 					if mode == directiveFaultBeforeCommit {
+						assertImmediateDirectiveCompletionPending(t, err)
 						assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationExecuted, true, false)
 						assertDirectiveReceipt(t, backend.db, op.DirectiveEventID, "", nil)
 						assertDirectiveProjection(t, backend.db, op.OperationID, false)
 					} else {
+						if err != nil || !result.OK || result.Response != "accepted" {
+							t.Fatalf("acknowledged success finalization = %#v err=%v", result, err)
+						}
 						assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationSucceeded, true, false)
 						assertDirectiveSuccessSettlement(t, backend.db, op)
 					}
 					if convergence == "startup" {
+						h.restartManager(t)
 						if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); err != nil {
 							t.Fatalf("startup reconciliation: %v", err)
 						}
@@ -452,11 +491,12 @@ func TestDirectiveOperationDatabaseEnforcesStateEvidenceEquivalence(t *testing.T
 }
 
 type directiveAmbiguityHarness struct {
-	backend directiveAmbiguityBackend
-	faults  *faultingDirectiveIntegrationStore
-	manager *runtimemanager.AgentManager
-	agent   *directiveAmbiguityAgent
-	request runtimeagentcontrol.SendDirectiveRequest
+	backend     directiveAmbiguityBackend
+	faults      *faultingDirectiveIntegrationStore
+	manager     *runtimemanager.AgentManager
+	agent       *directiveAmbiguityAgent
+	request     runtimeagentcontrol.SendDirectiveRequest
+	agentRecord runtimemanager.PersistedAgent
 }
 
 func (h *directiveAmbiguityHarness) workContext(t *testing.T) context.Context {
@@ -521,10 +561,11 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		t.Fatalf("register agent: %v", err)
 	}
 	return &directiveAmbiguityHarness{
-		backend: backend,
-		faults:  faults,
-		manager: manager,
-		agent:   agent,
+		backend:     backend,
+		faults:      faults,
+		manager:     manager,
+		agent:       agent,
+		agentRecord: rec,
 		request: runtimeagentcontrol.SendDirectiveRequest{
 			AgentID:        agent.id,
 			FlowInstance:   identity.FlowInstance(),
@@ -535,6 +576,33 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 			IdempotencyKey: uuid.NewString(),
 			RequestHash:    uuid.NewString(),
 		},
+	}
+}
+
+func (h *directiveAmbiguityHarness) restartManager(t *testing.T) {
+	t.Helper()
+	if err := h.manager.Shutdown(); err != nil {
+		t.Fatalf("shutdown directive manager before restart: %v", err)
+	}
+	bus, err := newStoreTestEventBus(t, h.faults, runtimebus.EventBusOptions{
+		PipelineObligations: pipelineObligationOwnerForFixture(h.backend.store),
+	})
+	if err != nil {
+		t.Fatalf("restart directive event bus: %v", err)
+	}
+	h.manager = ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		return h.agent, nil
+	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live,
+		WorkOwner:        storeTestWorkOwner(t),
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			EventExistence: h.faults, DirectiveOperations: h.faults, DirectiveTargets: h.faults,
+		},
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	}, h.faults))
+	materializationCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(), h.request.RunID)
+	if err := h.manager.MaterializeAdmittedAgentForExecution(materializationCtx, h.agentRecord); err != nil {
+		t.Fatalf("restart directive agent: %v", err)
 	}
 }
 

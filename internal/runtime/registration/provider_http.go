@@ -3,6 +3,7 @@ package registration
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -95,9 +96,16 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 		return ApplyResult{}, err
 	}
 	pending := &PendingApply{handle: handle}
-	response, raw, launched, err := e.executeProviderApply(ctx, prepared, handle)
+	response, raw, launched, launchErr, err := e.executeProviderApply(ctx, prepared, handle)
 	if err != nil {
 		if !launched {
+			if launchErr != nil {
+				return ApplyResult{}, errors.Join(launchErr, handle.Fail(
+					context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict,
+					"provider_registration_launch_dispatch_blocked", providerRegistrationSource, "dispatch",
+					map[string]any{"tool": strings.TrimSpace(toolID), "no_dispatch": true}, err,
+				))
+			}
 			return ApplyResult{}, handle.Fail(
 				ctx,
 				runtimeeffects.StateTerminalFailure,
@@ -109,19 +117,20 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 				err,
 			)
 		}
-		return ApplyResult{Pending: pending}, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_acknowledgment_lost", providerRegistrationSource, "dispatch", map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets))
+		return ApplyResult{Pending: pending}, errors.Join(launchErr, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_acknowledgment_lost", providerRegistrationSource, "dispatch", map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets)))
 	}
-	if err := handle.MarkResponseObserved(ctx, map[string]any{"status": response.StatusCode}); err != nil {
-		return ApplyResult{Pending: pending}, err
+	observationErr := handle.MarkResponseObserved(ctx, map[string]any{"status": response.StatusCode})
+	if observationErr != nil && !runtimeeffects.CommittedMutationPhase(observationErr, runtimeeffects.MutationObservation, handle.Attempt()) {
+		return ApplyResult{Pending: pending}, errors.Join(launchErr, observationErr)
 	}
 	pending.responseObserved = true
 	output, err := projectProviderResponse(toolID, tool, response, raw, secrets)
 	if err != nil {
-		return ApplyResult{Pending: pending}, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_response_unconfirmed", providerRegistrationSource, "validate_response", map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err)
+		return ApplyResult{Pending: pending}, errors.Join(launchErr, observationErr, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_response_unconfirmed", providerRegistrationSource, "validate_response", map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err))
 	}
 	// Provider acknowledgment is not authoritative registration state. Keep the
 	// durable attempt live until readback proves the exact callback intent.
-	return ApplyResult{Output: output, Pending: pending, Acknowledged: true}, nil
+	return ApplyResult{Output: output, Pending: pending, Acknowledged: true}, errors.Join(launchErr, observationErr)
 }
 
 func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
@@ -141,36 +150,45 @@ func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID str
 		return DeliveryResult{}, err
 	}
 	operationID := handle.Attempt().OperationID
-	response, raw, launched, err := e.executeProviderApply(ctx, prepared, handle)
+	response, raw, launched, launchErr, err := e.executeProviderApply(ctx, prepared, handle)
 	if err != nil {
 		if !launched {
+			if launchErr != nil {
+				return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, handle.Fail(
+					context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict,
+					"channel_confirmation_launch_dispatch_blocked", "channel_confirmation", "dispatch",
+					map[string]any{"tool": strings.TrimSpace(toolID), "no_dispatch": true}, err,
+				))
+			}
 			return DeliveryResult{OperationID: operationID}, handle.Fail(
 				ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable,
 				"channel_confirmation_prelaunch_rejected", "channel_confirmation", "dispatch",
 				map[string]any{"tool": strings.TrimSpace(toolID), "launch_rejected": true}, err,
 			)
 		}
-		return DeliveryResult{OperationID: operationID}, handle.Fail(
+		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, handle.Fail(
 			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
 			"channel_confirmation_acknowledgment_lost", "channel_confirmation", "dispatch",
 			map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets),
-		)
+		))
 	}
-	if err := handle.MarkResponseObserved(ctx, map[string]any{"status": response.StatusCode}); err != nil {
-		return DeliveryResult{OperationID: operationID}, err
+	observationErr := handle.MarkResponseObserved(ctx, map[string]any{"status": response.StatusCode})
+	if observationErr != nil && !runtimeeffects.CommittedMutationPhase(observationErr, runtimeeffects.MutationObservation, handle.Attempt()) {
+		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr)
 	}
 	output, err := projectProviderResponse(toolID, tool, response, raw, secrets)
 	if err != nil {
-		return DeliveryResult{OperationID: operationID}, handle.Fail(
+		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, handle.Fail(
 			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
 			"channel_confirmation_response_unconfirmed", "channel_confirmation", "validate_response",
 			map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err,
-		)
+		))
 	}
-	if err := handle.Succeed(ctx, map[string]any{"status": response.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(raw)}); err != nil {
-		return DeliveryResult{OperationID: operationID}, err
+	settleErr := handle.Succeed(ctx, map[string]any{"status": response.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(raw)})
+	if settleErr != nil && !runtimeeffects.CommittedMutationPhase(settleErr, runtimeeffects.MutationSettlement, handle.Attempt()) {
+		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, settleErr)
 	}
-	return DeliveryResult{OperationID: operationID, Output: output}, nil
+	return DeliveryResult{OperationID: operationID, Output: output}, errors.Join(launchErr, observationErr, settleErr)
 }
 
 func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause error) error {
@@ -178,13 +196,19 @@ func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause err
 		return fmt.Errorf("provider registration pending apply is missing")
 	}
 	if exact {
+		var observationErr error
 		if !p.responseObserved {
-			if err := p.handle.MarkResponseObserved(ctx, map[string]any{"authority": "provider_readback", "matched": true}); err != nil {
-				return err
+			observationErr = p.handle.MarkResponseObserved(ctx, map[string]any{"authority": "provider_readback", "matched": true})
+			if observationErr != nil && !runtimeeffects.CommittedMutationPhase(observationErr, runtimeeffects.MutationObservation, p.handle.Attempt()) {
+				return observationErr
 			}
 			p.responseObserved = true
 		}
-		return p.handle.Succeed(ctx, map[string]any{"authority": "provider_readback", "matched": true})
+		settleErr := p.handle.Succeed(ctx, map[string]any{"authority": "provider_readback", "matched": true})
+		if settleErr != nil && !runtimeeffects.CommittedMutationPhase(settleErr, runtimeeffects.MutationSettlement, p.handle.Attempt()) {
+			return errors.Join(observationErr, settleErr)
+		}
+		return nil
 	}
 	if cause == nil {
 		return fmt.Errorf("provider registration readback is not exact")
@@ -262,25 +286,45 @@ func (e HTTPExecutor) executeProviderRequest(ctx context.Context, prepared runti
 	return response, raw, nil
 }
 
-func (e HTTPExecutor) executeProviderApply(ctx context.Context, prepared runtimecontracts.PreparedToolHTTPRequest, handle *runtimeeffects.Handle) (*http.Response, []byte, bool, error) {
+func (e HTTPExecutor) executeProviderApply(ctx context.Context, prepared runtimecontracts.PreparedToolHTTPRequest, handle *runtimeeffects.Handle) (*http.Response, []byte, bool, error, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, prepared.Timeout())
 	defer cancel()
 	request, err := http.NewRequestWithContext(requestCtx, prepared.Method(), prepared.URL(), bytes.NewReader(prepared.Body()))
 	if err != nil {
-		return nil, nil, false, err
+		return nil, nil, false, nil, err
 	}
 	request.Header = prepared.Headers()
 	client := e.providerClient(prepared.Timeout())
-	if err := handle.MarkLaunched(ctx); err != nil {
-		return nil, nil, false, err
+	launchErr := handle.MarkLaunched(ctx)
+	if launchErr != nil {
+		if !runtimeeffects.CommittedMutationPhase(launchErr, runtimeeffects.MutationLaunch, handle.Attempt()) {
+			return nil, nil, false, nil, launchErr
+		}
+		if err := committedLaunchDispatchGate(ctx); err != nil {
+			return nil, nil, false, launchErr, err
+		}
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, nil, true, err
+		return nil, nil, true, launchErr, err
 	}
 	defer response.Body.Close()
 	raw, err := readProviderBody(response.Body)
-	return response, raw, true, err
+	return response, raw, true, launchErr, err
+}
+
+func committedLaunchDispatchGate(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("external effect dispatch canceled after launch marker: %w", err)
+	}
+	current, err := runtimeeffects.ProjectionCurrent(ctx)
+	if err != nil {
+		return fmt.Errorf("check external effect authority after launch marker: %w", err)
+	}
+	if !current {
+		return errors.New("external effect authority is no longer current after launch marker")
+	}
+	return nil
 }
 
 func (e HTTPExecutor) providerClient(timeout time.Duration) *http.Client {

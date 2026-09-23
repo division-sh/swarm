@@ -105,7 +105,7 @@ func (e *Executor) writeToolResultRelayFile(ctx context.Context, target *workspa
 		if err != nil {
 			return err
 		}
-		if err := attempt.MarkLaunched(ctx); err != nil {
+		if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 			return err
 		}
 		if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 )
 
@@ -276,12 +277,10 @@ func TestFanOutPublicationGroupPendingParentContenderPostgres(t *testing.T) {
 	awaitGroupProof(t, entered)
 	ctx, cancel := context.WithTimeout(f.ctx, 300*time.Millisecond)
 	defer cancel()
-	tx, err := f.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = selected.pipelinePostgresOwner.TerminalizePipelineObligationTx(ctx, tx, nil, f.events[0].ID(), pipelineobligation.DeadLetter("run_stopped", nil), time.Now())
-	_ = tx.Rollback()
+	result := mutationprotocol.RunPostgres(ctx, selected.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, selected.pipelinePostgresOwner.TerminalizePipelineObligationTx(txctx, attempt, f.events[0].ID(), pipelineobligation.DeadLetter("run_stopped", nil), time.Now())
+	})
+	err := result.Err()
 	releaseBarrier()
 	if claimErr := receiveGroupProof(t, done); claimErr != nil {
 		t.Fatal(claimErr)

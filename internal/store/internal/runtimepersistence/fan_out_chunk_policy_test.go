@@ -32,7 +32,7 @@ func TestFanOutRetrySQLPolicyAndRestartRecoveryBothStores(t *testing.T) {
 				if err != nil || !found || intent.NextChunkSize != budget {
 					t.Fatalf("claim budget%d: %+v found=%v err=%v", budget, intent, found, err)
 				}
-				if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: at, ObservedDuration: 0, Failure: fanOutRetryFailureForTest()}); err != nil {
+				if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: at, ObservedDuration: 0, Failure: fanOutRetryFailureForTest()}); err != nil {
 					t.Fatal(err)
 				}
 				var next int
@@ -125,7 +125,7 @@ func TestFanOutForkResetsOnlyOperationalBudgetBothStores(t *testing.T) {
 							t.Fatalf("operational source claim: found=%v err=%v", found, err)
 						}
 						if prefix == 0 {
-							if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
+							if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
 								t.Fatal(err)
 							}
 						}

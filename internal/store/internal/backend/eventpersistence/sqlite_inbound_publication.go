@@ -11,8 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
@@ -20,47 +20,44 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 	if err := command.Validate(); err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return runtimeinbound.CommitResult{}, err
-	}
-	defer handoff.Rollback()
 	request := command.Request.Normalized()
-	var result runtimeinbound.CommitResult
-	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite inbound publication", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
-		existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
-		if err != nil {
-			return err
-		}
-		if found {
-			if err := validateInboundPublicationRetry(request, existing); err != nil {
+	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite inbound publication", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeinbound.CommitResult, error) {
+		var result runtimeinbound.CommitResult
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
+			if err != nil {
 				return err
 			}
-			if err := validateSQLiteInboundPublicationIntegrityTx(txctx, tx, s.DeliverySQLiteOwner, &existing); err != nil {
+			if found {
+				if err := validateInboundPublicationRetry(request, existing); err != nil {
+					return err
+				}
+				if err := validateSQLiteInboundPublicationIntegrityTx(txctx, tx, s.DeliverySQLiteOwner, &existing); err != nil {
+					return err
+				}
+				result.Record = existing
+				return nil
+			}
+			if err := admitSQLiteInboundStandingTargetTx(txctx, s, tx, request); err != nil {
 				return err
 			}
-			result.Record = existing
+			if err := insertSQLiteInboundPublicationPreparedTx(txctx, tx, request); err != nil {
+				return err
+			}
+			result, err = commitInboundPublicationTx(txctx, attempt, s, s, command)
+			if err != nil {
+				return err
+			}
 			return nil
-		}
-		if err := admitSQLiteInboundStandingTargetTx(txctx, s, tx, request); err != nil {
-			return err
-		}
-		if err := insertSQLiteInboundPublicationPreparedTx(txctx, tx, request); err != nil {
-			return err
-		}
-		result, err = commitInboundPublicationTx(txctx, tx, story, effects, s, s, false, command, handoff)
-		if err != nil {
-			return err
-		}
-		return nil
+		})
+		return result, err
 	})
-	if !committed {
-		return runtimeinbound.CommitResult{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimeinbound.CommitResult{}, outcome.Err()
 	}
-	return result, errors.Join(err, handoff.Commit())
+	result.Acknowledged = true
+	return result, outcome.Err()
 }
 
 func (s *EventSQLiteOwner) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (runtimeinbound.Record, bool, error) {
@@ -302,7 +299,7 @@ func (s *EventSQLiteOwner) linkInboundPublicationEventTx(ctx context.Context, tx
 	return nil
 }
 
-func (s *EventSQLiteOwner) finalizeInboundPublicationTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request, outputCount int) (runtimeinbound.Record, error) {
+func (s *EventSQLiteOwner) finalizeInboundPublicationTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, request runtimeinbound.Request, outputCount int) (runtimeinbound.Record, error) {
 	var count, minOrdinal, maxOrdinal int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MIN(ordinal), -1), COALESCE(MAX(ordinal), -1) FROM inbound_publication_events WHERE publication_id = ?`, request.PublicationID).Scan(&count, &minOrdinal, &maxOrdinal); err != nil {
 		return runtimeinbound.Record{}, fmt.Errorf("validate sqlite inbound publication child cardinality: %w", err)
@@ -318,7 +315,7 @@ func (s *EventSQLiteOwner) finalizeInboundPublicationTx(ctx context.Context, tx 
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return runtimeinbound.Record{}, fmt.Errorf("prepared sqlite inbound publication %s was not finalized", request.PublicationID)
 	}
-	if err := s.RunLifecycleSQLiteOwner.SyncCountersTx(ctx, tx, nil, request.ResolvedRunID); err != nil {
+	if err := s.RunLifecycleSQLiteOwner.SyncCountersTx(ctx, attempt, request.ResolvedRunID); err != nil {
 		return runtimeinbound.Record{}, fmt.Errorf("synchronize sqlite inbound publication event count: %w", err)
 	}
 	record, found, err := loadSQLiteInboundPublicationTx(ctx, tx, request.Provider, request.EntityID, request.ProviderEventID)

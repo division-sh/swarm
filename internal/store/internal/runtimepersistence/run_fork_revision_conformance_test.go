@@ -26,7 +26,6 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -394,25 +393,18 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		t.Fatalf("begin delivery start: %v", err)
 	}
 	defer func() { _ = deliveryTx.Rollback() }()
-	deliveryTxCtx, err := authoractivityfixture.Begin(ctx, deliveryTx, authoractivityfixture.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin delivery author activity: %v", err)
-	}
-	story, ok := authoractivityfixture.Mutation(deliveryTxCtx)
-	if !ok {
-		t.Fatal("delivery author activity owner is unavailable")
-	}
-	snapshot, err := postgresDeliveryAdapter.SnapshotExact(deliveryTxCtx, deliveryTx, seedEvent, route)
-	if err != nil {
-		t.Fatalf("load delivery authority: %v", err)
-	}
+	deliveryTxCtx := ctx
 	deliveryEffects := runforkrevision.NewEffects()
-	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, deliveryEffects, story, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
-	if err != nil {
+	// This revision-lock proof needs only the in-progress delivery row, not a
+	// claim token. Stage it directly while the parent publication holds its lock.
+	if _, err := deliveryTx.ExecContext(deliveryTxCtx, `
+		UPDATE event_deliveries
+		SET status='in_progress', claim_version=claim_version+1,
+			current_attempt_version=claim_version+1, current_attempt_open=TRUE,
+			started_at=COALESCE(started_at, NOW()), updated_at=NOW()
+		WHERE delivery_id=$1::uuid
+	`, deliveryID); err != nil {
 		t.Fatalf("stage delivery start: %v", err)
-	}
-	if _, ok := result.Acquired(); !ok {
-		t.Fatalf("stage delivery start disposition = %s, want acquired", result.Disposition)
 	}
 	var deliveryBackendPID int
 	if err := deliveryTx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&deliveryBackendPID); err != nil {
@@ -646,12 +638,12 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin lifecycle source revision: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	requirePostgresRunFixtureInRawTxForTest(t, ctx, tx, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresSemanticEventRecordFixtureTx(t, ctx, tx, eventID, runID, "lifecycle.revision", events.EventProducerPlatform, "revision-test", "", "", now)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
@@ -800,16 +792,16 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 		t, runID, "revision-agent", "revision-flow/instance", uuid.NewString(), "revision-task",
 		runtimegenericschedule.AbsoluteDue(time.Now().Add(time.Hour)),
 	)
-	admitted, err := store.AdmitGenericSchedule(ctx, command)
-	if err != nil {
-		t.Fatalf("admit generic schedule: %v", err)
+	admitted, err := store.AdmitGenericScheduleOutcome(ctx, command)
+	if err != nil || !admitted.Acknowledged {
+		t.Fatalf("admit generic schedule: commit=%+v err=%v", admitted, err)
 	}
 	var admittedRevision int64
 	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&admittedRevision); err != nil {
 		t.Fatalf("load revision after admission: %v", err)
 	}
 	var admittedFact []byte
-	if err := db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='timers' AND fact_key=$2 AND revision=$3 AND present`, runID, admitted.Activation.ID, admittedRevision).Scan(&admittedFact); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='timers' AND fact_key=$2 AND revision=$3 AND present`, runID, admitted.Result.Activation.ID, admittedRevision).Scan(&admittedFact); err != nil {
 		t.Fatalf("load projected admission fact: %v", err)
 	}
 	var admission map[string]any
@@ -817,7 +809,7 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 		t.Fatalf("decode projected admission fact: %v", err)
 	}
 	for field, want := range map[string]string{
-		"schedule_key": command.ScheduleKey, "immutable_hash": admitted.Activation.ImmutableHash,
+		"schedule_key": command.ScheduleKey, "immutable_hash": admitted.Result.Activation.ImmutableHash,
 		"due_basis_kind": string(command.Due.Kind), "owner_kind": string(command.OwnerKind),
 		"owner_agent": command.OwnerID, "task_id": command.TaskID, "status": string(runtimegenericschedule.StatusActive),
 		"execution_mode": string(command.ExecutionMode),
@@ -827,10 +819,10 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 		}
 	}
 	cancel := runtimegenericschedule.CancelCommand{
-		ActivationID: admitted.Activation.ID, Cause: "test_cancel", CancelledAt: time.Now(),
+		ActivationID: admitted.Result.Activation.ID, Cause: "test_cancel", CancelledAt: time.Now(),
 	}
-	if _, err := store.CancelGenericSchedule(ctx, cancel); err != nil {
-		t.Fatalf("first cancellation: %v", err)
+	if cancelled, err := store.CancelGenericScheduleOutcome(ctx, cancel); err != nil || !cancelled.Acknowledged {
+		t.Fatalf("first cancellation: commit=%+v err=%v", cancelled, err)
 	}
 	var revision int64
 	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&revision); err != nil {
@@ -840,7 +832,7 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 		t.Fatalf("cancellation revision = %d, want after admission revision %d", revision, admittedRevision)
 	}
 	var cancelledFact []byte
-	if err := db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='timers' AND fact_key=$2 AND revision=$3 AND present`, runID, admitted.Activation.ID, revision).Scan(&cancelledFact); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='timers' AND fact_key=$2 AND revision=$3 AND present`, runID, admitted.Result.Activation.ID, revision).Scan(&cancelledFact); err != nil {
 		t.Fatalf("load projected cancellation fact: %v", err)
 	}
 	var cancellation map[string]any
@@ -853,8 +845,8 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 	if got, _ := cancellation["cancel_cause"].(string); got != cancel.Cause {
 		t.Fatalf("projected cancel cause = %q, want %q; fact=%s", got, cancel.Cause, cancelledFact)
 	}
-	if _, err := store.CancelGenericSchedule(ctx, cancel); err != nil {
-		t.Fatalf("duplicate cancellation: %v", err)
+	if cancelled, err := store.CancelGenericScheduleOutcome(ctx, cancel); err != nil || !cancelled.Acknowledged {
+		t.Fatalf("duplicate cancellation: commit=%+v err=%v", cancelled, err)
 	}
 	var afterDuplicate int64
 	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&afterDuplicate); err != nil {

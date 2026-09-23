@@ -14,23 +14,40 @@ import (
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
 func (s *DeadLetterPostgresOwner) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
+	_, err := s.RecordDeadLetterOutcome(ctx, rec)
+	return err
+}
+
+func (s *DeadLetterPostgresOwner) RecordDeadLetterOutcome(ctx context.Context, rec runtimedeadletters.Record) (runtimedeadletters.RecordOutcome, error) {
 	var err error
 	rec, _, err = normalizeDeadLetterRecord(rec)
 	if err != nil {
-		return err
+		return runtimedeadletters.RecordOutcome{}, err
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
-		return s.RecordDeadLetterTx(txctx, tx, story, effects, rec, true)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedeadletters.RecordOutcome{}, err
+	}
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := s.RecordDeadLetterTx(txctx, attempt, rec, true)
+		return struct{}{}, err
+	})
+	_, acknowledged := result.Value()
+	return runtimedeadletters.RecordOutcome{Acknowledged: acknowledged}, result.Err()
+}
+
+func (s *DeadLetterPostgresOwner) RecordDeadLetterTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record, requireActive bool) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return s.recordDeadLetterTx(ctx, tx, attempt, rec, requireActive)
 	})
 }
 
-func (s *DeadLetterPostgresOwner) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, rec runtimedeadletters.Record, requireActive bool) error {
+func (s *DeadLetterPostgresOwner) recordDeadLetterTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record, requireActive bool) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
@@ -51,10 +68,10 @@ func (s *DeadLetterPostgresOwner) RecordDeadLetterTx(ctx context.Context, tx *sq
 			return err
 		}
 	}
-	return s.insertPostgresDeadLetterTx(ctx, tx, effects, story, rec)
+	return s.insertPostgresDeadLetterTx(ctx, tx, attempt, rec)
 }
 
-func (s *DeadLetterPostgresOwner) insertPostgresDeadLetterTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record) error {
+func (s *DeadLetterPostgresOwner) insertPostgresDeadLetterTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record) error {
 	existing, found, err := loadStoredDeadLetterByIdentity(ctx, tx, rec, true)
 	if err != nil {
 		return err
@@ -69,17 +86,17 @@ func (s *DeadLetterPostgresOwner) insertPostgresDeadLetterTx(ctx context.Context
 	if err := validateDeadLetterSource(rec, source); err != nil {
 		return err
 	}
-	result, err := insertPostgresDeadLetterRecord(ctx, tx, effects, rec)
+	result, err := insertPostgresDeadLetterRecord(ctx, tx, attempt, rec)
 	if err != nil {
 		return err
 	}
 	if !result.Inserted {
 		return nil
 	}
-	return recordDeadLetterAuthorActivity(ctx, story, result.DeadLetterID, rec, source, deadLetterOccurredAt(rec.Timestamp))
+	return recordDeadLetterAuthorActivity(ctx, attempt, result.DeadLetterID, rec, source, deadLetterOccurredAt(rec.Timestamp))
 }
 
-func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, rec runtimedeadletters.Record) (runtimedeadletters.InsertResult, error) {
+func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record) (runtimedeadletters.InsertResult, error) {
 	if tx == nil {
 		return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter transaction is required")
 	}
@@ -114,7 +131,7 @@ func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, effects *pr
 		return runtimedeadletters.InsertResult{}, fmt.Errorf("read inserted dead letter rows: %w", err)
 	}
 	if rows > 0 {
-		if err := declareDeadLetterEffect(ctx, tx, effects, rec.OriginalEventID, deadLetterID); err != nil {
+		if err := declareDeadLetterEffect(ctx, tx, attempt, rec.OriginalEventID, deadLetterID); err != nil {
 			return runtimedeadletters.InsertResult{}, err
 		}
 		return runtimedeadletters.InsertResult{DeadLetterID: deadLetterID, Inserted: true}, nil
@@ -133,17 +150,34 @@ func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, effects *pr
 }
 
 func (s *DeadLetterSQLiteOwner) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
+	_, err := s.RecordDeadLetterOutcome(ctx, rec)
+	return err
+}
+
+func (s *DeadLetterSQLiteOwner) RecordDeadLetterOutcome(ctx context.Context, rec runtimedeadletters.Record) (runtimedeadletters.RecordOutcome, error) {
 	var err error
 	rec, _, err = normalizeDeadLetterRecord(rec)
 	if err != nil {
-		return err
+		return runtimedeadletters.RecordOutcome{}, err
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite record dead letter", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
-		return s.RecordDeadLetterTx(txctx, tx, story, effects, rec, true)
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedeadletters.RecordOutcome{}, err
+	}
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite record dead letter", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := s.RecordDeadLetterTx(txctx, attempt, rec, true)
+		return struct{}{}, err
+	})
+	_, acknowledged := result.Value()
+	return runtimedeadletters.RecordOutcome{Acknowledged: acknowledged}, result.Err()
+}
+
+func (s *DeadLetterSQLiteOwner) RecordDeadLetterTx(ctx context.Context, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record, requireActive bool) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return s.recordDeadLetterTx(ctx, tx, attempt, rec, requireActive)
 	})
 }
 
-func (s *DeadLetterSQLiteOwner) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, rec runtimedeadletters.Record, requireActive bool) error {
+func (s *DeadLetterSQLiteOwner) recordDeadLetterTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record, requireActive bool) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
@@ -167,10 +201,10 @@ func (s *DeadLetterSQLiteOwner) RecordDeadLetterTx(ctx context.Context, tx *sql.
 			return err
 		}
 	}
-	return s.insertSQLiteDeadLetterTx(ctx, tx, effects, story, rec)
+	return s.insertSQLiteDeadLetterTx(ctx, tx, attempt, rec)
 }
 
-func declareDeadLetterEffect(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, eventID, deadLetterID string) error {
+func declareDeadLetterEffect(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, eventID, deadLetterID string) error {
 	runID, err := privaterunforkrevision.RunIDForEvent(ctx, tx, eventID)
 	if err != nil {
 		return err
@@ -178,10 +212,10 @@ func declareDeadLetterEffect(ctx context.Context, tx *sql.Tx, effects *privateru
 	if runID == "" {
 		return nil
 	}
-	return effects.AddFact(runID, privaterunforkrevision.FamilyDeadLetters, deadLetterID)
+	return attempt.AddFact(runID, privaterunforkrevision.FamilyDeadLetters, deadLetterID)
 }
 
-func declareOutcomeDeadLetterEffects(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, deliveryID string, version int64) error {
+func declareOutcomeDeadLetterEffects(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, deliveryID string, version int64) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT CAST(e.run_id AS TEXT), CAST(dl.dead_letter_id AS TEXT)
 		FROM dead_letters dl JOIN events e ON e.event_id = dl.original_event_id
@@ -197,7 +231,7 @@ func declareOutcomeDeadLetterEffects(ctx context.Context, tx *sql.Tx, effects *p
 			return err
 		}
 		if runID.Valid && runID.String != "" {
-			if err := effects.AddFact(runID.String, privaterunforkrevision.FamilyDeadLetters, deadLetterID); err != nil {
+			if err := attempt.AddFact(runID.String, privaterunforkrevision.FamilyDeadLetters, deadLetterID); err != nil {
 				return err
 			}
 		}
@@ -205,7 +239,7 @@ func declareOutcomeDeadLetterEffects(ctx context.Context, tx *sql.Tx, effects *p
 	return rows.Err()
 }
 
-func (s *DeadLetterSQLiteOwner) insertSQLiteDeadLetterTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record) error {
+func (s *DeadLetterSQLiteOwner) insertSQLiteDeadLetterTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record) error {
 	rec, createdAt, err := normalizeDeadLetterRecord(rec)
 	if err != nil {
 		return err
@@ -224,17 +258,17 @@ func (s *DeadLetterSQLiteOwner) insertSQLiteDeadLetterTx(ctx context.Context, tx
 	if err := validateDeadLetterSource(rec, source); err != nil {
 		return err
 	}
-	insertResult, err := insertSQLiteDeadLetterRecord(ctx, tx, effects, rec, createdAt)
+	insertResult, err := insertSQLiteDeadLetterRecord(ctx, tx, attempt, rec, createdAt)
 	if err != nil {
 		return err
 	}
 	if !insertResult.Inserted {
 		return nil
 	}
-	return recordDeadLetterAuthorActivity(ctx, story, insertResult.DeadLetterID, rec, source, createdAt)
+	return recordDeadLetterAuthorActivity(ctx, attempt, insertResult.DeadLetterID, rec, source, createdAt)
 }
 
-func insertSQLiteDeadLetterRecord(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, rec runtimedeadletters.Record, createdAt time.Time) (runtimedeadletters.InsertResult, error) {
+func insertSQLiteDeadLetterRecord(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, rec runtimedeadletters.Record, createdAt time.Time) (runtimedeadletters.InsertResult, error) {
 	if tx == nil {
 		return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter transaction is required")
 	}
@@ -295,7 +329,7 @@ func insertSQLiteDeadLetterRecord(ctx context.Context, tx *sql.Tx, effects *priv
 		return runtimedeadletters.InsertResult{}, err
 	}
 	if inserted {
-		if err := declareDeadLetterEffect(ctx, tx, effects, rec.OriginalEventID, deadLetterID); err != nil {
+		if err := declareDeadLetterEffect(ctx, tx, attempt, rec.OriginalEventID, deadLetterID); err != nil {
 			return runtimedeadletters.InsertResult{}, err
 		}
 		return runtimedeadletters.InsertResult{DeadLetterID: deadLetterID, Inserted: true}, nil
@@ -497,7 +531,7 @@ func canonicalJSONEqual(left, right []byte) bool {
 	return leftErr == nil && rightErr == nil && string(leftCanonical) == string(rightCanonical)
 }
 
-func recordDeadLetterAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, deadLetterID string, rec runtimedeadletters.Record, source deadLetterAuthorActivitySource, occurredAt time.Time) error {
+func recordDeadLetterAuthorActivity(ctx context.Context, attempt *mutationprotocol.Attempt, deadLetterID string, rec runtimedeadletters.Record, source deadLetterAuthorActivitySource, occurredAt time.Time) error {
 	deadLetterID = strings.TrimSpace(deadLetterID)
 	if deadLetterID == "" {
 		return fmt.Errorf("dead letter author activity requires dead_letter_id")
@@ -523,10 +557,10 @@ func recordDeadLetterAuthorActivity(ctx context.Context, story runtimeauthoracti
 		},
 		Scope: occurrenceScope, Failure: &rec.Failure,
 	}
-	if story != nil {
-		return story.Record(ctx, draft)
+	if attempt != nil {
+		return attempt.Record(ctx, draft)
 	}
-	return fmt.Errorf("dead letter activity requires private story ownership")
+	return fmt.Errorf("dead letter activity requires private attempt ownership")
 }
 
 func deadLetterOccurredAt(raw string) time.Time {

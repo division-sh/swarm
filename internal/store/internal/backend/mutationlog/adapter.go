@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -22,12 +22,9 @@ type ActiveRunSourceOwner interface {
 	RequireActiveRunSource(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 }
 
-func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, rec runtimemutationlog.Record) error {
-	if tx == nil {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation log transaction is required")
-	}
-	if story == nil {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("author activity owner is required")
+func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, rec runtimemutationlog.Record) error {
+	if attempt == nil {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation attempt is required")
 	}
 	entityID := strings.TrimSpace(rec.EntityID)
 	domain := rec.Domain
@@ -74,7 +71,8 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 	}
 	mutationID := uuid.NewString()
 	occurredAt := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			mutation_id, run_id, entity_id, domain, path, old_value, new_value,
 			caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -83,41 +81,44 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 			$1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7::jsonb,
 			NULLIF($8, '')::uuid, $9, $10, NULLIF($11, ''), $12
 		)
-	`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
+		`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt)
+		return err
+	}); err != nil {
 		return err
 	}
-	if err := effects.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID); err != nil {
+	if err := attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID); err != nil {
 		return err
 	}
 	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
 	if err != nil || !admitted {
 		return err
 	}
-	return story.Record(ctx, draft)
+	return attempt.Record(ctx, draft)
 }
 
-func InsertEntityStateDiffWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
-	if story == nil {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("author activity owner is required")
+func InsertEntityStateDiff(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
+	if attempt == nil {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation attempt is required")
 	}
 	records, err := runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)
 	if err != nil {
 		return err
 	}
 	for _, record := range records {
-		if err := InsertWithStory(ctx, tx, runLifecycle, story, effects, record); err != nil {
+		if err := Insert(ctx, attempt, runLifecycle, record); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func InsertSQLiteWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, rec runtimemutationlog.Record) error {
-	if tx == nil {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation log transaction is required")
-	}
-	if story == nil {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("author activity owner is required")
+func InsertSQLite(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, rec runtimemutationlog.Record) error {
+	return insertSQLiteAt(ctx, attempt, runLifecycle, rec, time.Now().UTC())
+}
+
+func insertSQLiteAt(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, rec runtimemutationlog.Record, occurredAt time.Time) error {
+	if attempt == nil {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation attempt is required")
 	}
 	entityID := strings.TrimSpace(rec.EntityID)
 	domain := rec.Domain
@@ -161,36 +162,42 @@ func InsertSQLiteWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveR
 		causedByEvent = validUUIDString(inbound.ID())
 	}
 	mutationID := uuid.NewString()
-	occurredAt := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `
+	if occurredAt.IsZero() {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation occurred_at is required")
+	}
+	occurredAt = occurredAt.UTC()
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			mutation_id, run_id, entity_id, domain, path, old_value, new_value,
 			caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?)
-	`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
+		`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt)
+		return err
+	}); err != nil {
 		return err
 	}
-	if err := effects.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID); err != nil {
+	if err := attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID); err != nil {
 		return err
 	}
 	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
 	if err != nil || !admitted {
 		return err
 	}
-	return story.Record(ctx, draft)
+	return attempt.Record(ctx, draft)
 }
 
-func InsertSQLiteEntityStateDiffWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
-	if story == nil {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("author activity owner is required")
+func InsertSQLiteEntityStateDiff(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurredAt time.Time) error {
+	if attempt == nil {
+		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation attempt is required")
 	}
 	records, err := runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)
 	if err != nil {
 		return err
 	}
 	for _, record := range records {
-		if err := InsertSQLiteWithStory(ctx, tx, runLifecycle, story, effects, record); err != nil {
+		if err := insertSQLiteAt(ctx, attempt, runLifecycle, record, occurredAt); err != nil {
 			return err
 		}
 	}

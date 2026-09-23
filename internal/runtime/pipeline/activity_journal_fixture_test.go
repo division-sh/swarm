@@ -113,12 +113,12 @@ func (j pipelineTestActivityJournal) startTx(ctx context.Context, tx *sql.Tx, re
 	return actual, rows > 0, nil
 }
 
-func (j pipelineTestActivityJournal) CompleteActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (out ActivityAttemptRecord, err error) {
+func (j pipelineTestActivityJournal) CompleteActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (out ActivityAttemptRecord, committed bool, err error) {
 	record = NormalizeActivityAttemptRecord(record)
 	if err := ValidateActivityAttemptTerminal(record); err != nil {
-		return ActivityAttemptRecord{}, err
+		return ActivityAttemptRecord{}, false, err
 	}
-	err = j.store.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err = j.store.runInPipelineTransactionAcknowledged(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if err := j.requireActiveRun(txctx, record.RunID); err != nil {
 			return err
 		}
@@ -164,16 +164,16 @@ func (j pipelineTestActivityJournal) CompleteActivityAttempt(ctx context.Context
 		}
 		return nil
 	})
-	return
+	return out, committed, err
 }
 
-func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Context, record ActivityAttemptRecord) (out ActivityAttemptRecord, err error) {
+func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Context, record ActivityAttemptRecord) (out ActivityAttemptRecord, committed bool, err error) {
 	record = NormalizeActivityAttemptRecord(record)
 	record.Status = ActivityAttemptStatusUncertain
 	if err := ValidateActivityAttemptTerminal(record); err != nil {
-		return ActivityAttemptRecord{}, err
+		return ActivityAttemptRecord{}, false, err
 	}
-	err = j.store.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	committed, err = j.store.runInPipelineTransactionAcknowledged(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if err := j.requireActiveRun(txctx, record.RunID); err != nil {
 			return err
 		}
@@ -213,7 +213,7 @@ func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Co
 		}
 		return nil
 	})
-	return
+	return out, committed, err
 }
 
 func (j pipelineTestActivityJournal) LoadActivityAttempt(ctx context.Context, requestEventID string) (ActivityAttemptRecord, bool, error) {

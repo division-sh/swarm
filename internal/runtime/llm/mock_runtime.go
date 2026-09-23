@@ -86,12 +86,12 @@ func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt st
 	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		if lease != nil {
-			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+			err = releasePreProviderSessionLease(ctx, r.sessions, lease, agentID, r.events, err)
 		}
 		return nil, err
 	}
 	if resolved.Enabled() {
-		if err := r.sessions.Release(context.WithoutCancel(ctx), lease); err != nil {
+		if err := releasePreProviderSessionLease(ctx, r.sessions, lease, agentID, r.events, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -150,12 +150,14 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, session, r.lockOwner)
 	if err != nil {
 		if lease != nil {
-			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+			err = releasePreProviderSessionLease(ctx, r.sessions, lease, session.AgentID, r.events, err)
 		}
 		return nil, sessionAcquireFailure(err, session.AgentID)
 	}
 	if resolved.Enabled() {
-		defer func() { retErr = errors.Join(retErr, r.sessions.Release(context.WithoutCancel(ctx), lease)) }()
+		defer func() {
+			retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, session.AgentID, r.events, retErr)
+		}()
 		stopHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the mock session lease heartbeat failed", session.AgentID, session.ID, entityID, nil, heartbeatErr)
 		})
@@ -222,34 +224,35 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if err := bindCompletionProjection(dispatch, session, message, managed); err != nil {
 		return nil, err
 	}
-	settled, err := settleCompletionTurn(ctx, dispatch, targetID, turn, response, profile, usage, runtimeeffects.StateSettled, nil, map[string]any{
+	settled, settlementErr := settleCompletionTurn(ctx, dispatch, targetID, turn, response, profile, usage, runtimeeffects.StateSettled, nil, map[string]any{
 		"execution_mode": runtimeeffects.ExecutionModeMock, "module_digest": actor.Mock.Digest,
 	})
-	if err != nil {
-		return nil, err
+	if !settled.Committed {
+		return nil, unacknowledgedCompletionError(settlementErr)
 	}
+	handoffCtx := context.WithoutCancel(ctx)
 	if settled.Drained() {
-		return nil, nil
+		return nil, settlementErr
 	}
-	if err := requireCurrentProviderProjection(ctx, session.AgentID); err != nil {
-		return nil, err
+	if err := requireCurrentProviderProjection(handoffCtx, session.AgentID); err != nil {
+		return nil, errors.Join(settlementErr, err)
 	}
-	projected, err := projectCompletionContinuation(ctx, dispatch, session, response)
+	projected, err := projectCompletionContinuation(handoffCtx, dispatch, session, response)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(settlementErr, err)
 	}
 	if !projected {
+		if resolved.Enabled() {
+			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, resolved.Identity, session.ID, session.AgentID, r.events); err != nil {
+				return nil, errors.Join(settlementErr, err)
+			}
+		}
 		session.Messages = append(session.Messages, message, response.Message)
 		session.TurnCount++
 		session.ParseFailures = 0
-		if resolved.Enabled() {
-			if err := r.sessions.IncrementTurn(ctx, resolved.Identity, session.ID); err != nil {
-				return nil, err
-			}
-		}
-		r.persistConversation(ctx, session)
+		r.persistConversation(handoffCtx, session)
 	}
-	return response, nil
+	return response, settlementErr
 }
 
 func (r *MockRuntime) persistConversation(ctx context.Context, session *Session) {
@@ -326,8 +329,11 @@ func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, err
 	}
-	if err := attempt.MarkLaunched(heartbeatCtx); err != nil {
+	if err := attempt.MarkLaunched(heartbeatCtx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
+	}
+	if gateErr := completionInvocationGate(ctx, heartbeatCtx); gateErr != nil {
+		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, dispatch.noDispatchError(gateErr))
 	}
 	if execute == nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "mock_provider_executor_missing", "mock-python-adapter", "execute_completion", nil))
@@ -346,7 +352,7 @@ func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.
 	if err := waitMockPostToolTail(heartbeatCtx, actor.Mock, postToolRound); err != nil {
 		return nil, raw, estimatedMockUsage(request, raw, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
-	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); err != nil {
+	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return nil, raw, estimatedMockUsage(request, raw, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	response, usage, err := parseMockCompletionOutput(raw, request, tools, model)

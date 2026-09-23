@@ -95,21 +95,21 @@ func (o *fanOutFailureTestOwner) CommitFanOutChunk(_ context.Context, command Fa
 	return o.commit(command)
 }
 
-func (*fanOutFailureTestOwner) ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) error {
-	return fmt.Errorf("outer turn owns ordinary release")
+func (*fanOutFailureTestOwner) ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, fmt.Errorf("outer turn owns ordinary release")
 }
 
-func (o *fanOutFailureTestOwner) ReleaseFanOutRetryable(_ context.Context, release FanOutRetryableRelease) error {
+func (o *fanOutFailureTestOwner) ReleaseFanOutRetryable(_ context.Context, release FanOutRetryableRelease) (FanOutClaimSettlement, error) {
 	if err := release.Validate(); err != nil {
-		return err
+		return FanOutClaimSettlement{}, err
 	}
 	o.retryRelease = append(o.retryRelease, release)
-	return nil
+	return FanOutClaimSettlement{Acknowledged: true}, nil
 }
 
-func (o *fanOutFailureTestOwner) BlockFanOutClaim(_ context.Context, block FanOutBlockRequest) error {
+func (o *fanOutFailureTestOwner) BlockFanOutClaim(_ context.Context, block FanOutBlockRequest) (FanOutClaimSettlement, error) {
 	o.blocks = append(o.blocks, block)
-	return nil
+	return FanOutClaimSettlement{Acknowledged: true}, nil
 }
 
 func (*fanOutFailureTestOwner) CancelRunFanOut(context.Context, string, string, time.Time) error {

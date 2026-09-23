@@ -3582,7 +3582,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				},
 			},
 		},
-	}, eventBus, &runtimepipeline.PipelineCoordinator{})
+	}, eventBus, &runtimepipeline.PipelineCoordinator{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "cannot reconstruct its derived prompt without a semantic source") {
 		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
 	}
@@ -4046,7 +4046,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	if claimed.Snapshot.ActiveSessionID != "" {
 		t.Fatalf("in-progress source delivery active session = %q, want unbound #678 lineage case", claimed.Snapshot.ActiveSessionID)
 	}
-	storetest.InsertChildEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkPointEventID, sourceRunID, sourceEventID,
+	storetest.InsertUnrevisionedChildEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkPointEventID, sourceRunID, sourceEventID,
 		"item.received", eventtest.Producer(events.EventProducerAgent, "validation-coordinator"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), forkAt)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)

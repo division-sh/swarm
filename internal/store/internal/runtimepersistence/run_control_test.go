@@ -32,17 +32,17 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 		}
 	}
 
-	if _, err := pg.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()}); err != nil {
-		t.Fatalf("PauseRunControl: %v", err)
+	if outcome, err := pg.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+		t.Fatalf("PauseRunControl: outcome=%+v err=%v", outcome, err)
 	}
-	if _, err := pg.ContinueRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()}); err != nil {
-		t.Fatalf("ContinueRunControl: %v", err)
+	if outcome, err := pg.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()}); err != nil || !outcome.Acknowledged {
+		t.Fatalf("ContinueRunControl: outcome=%+v err=%v", outcome, err)
 	}
-	state, err := pg.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()})
+	state, err := pg.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatalf("StopRunControl: %v", err)
 	}
-	if state.Status != "cancelled" || state.ControlStatus != "stopped" || state.AbandonedDeliveries != 2 {
+	if !state.Acknowledged || state.State.Status != "cancelled" || state.State.ControlStatus != "stopped" || state.State.AbandonedDeliveries != 2 {
 		t.Fatalf("stop state = %+v, want cancelled/stopped/2", state)
 	}
 
@@ -100,8 +100,8 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 		t.Fatalf("stopped pipeline receipts = %d, want 1", receiptCount)
 	}
 
-	if _, err := pg.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID}); !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) {
-		t.Fatalf("repeat StopRunControl err = %v, want ErrAlreadyTerminal", err)
+	if outcome, err := pg.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID}); !errors.Is(err, runtimeruncontrol.ErrAlreadyTerminal) || outcome.Acknowledged {
+		t.Fatalf("repeat StopRunControl outcome=%+v err=%v, want unacknowledged ErrAlreadyTerminal", outcome, err)
 	}
 }
 
@@ -112,7 +112,7 @@ func TestPostgresStore_RunControlContinueRequiresOperatorPauseOwner(t *testing.T
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	requirePausedRunForTest(t, ctx, pg, runID, time.Now().UTC())
-	if _, err := pg.ContinueRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID}); !errors.Is(err, runtimeruncontrol.ErrNotPaused) {
-		t.Fatalf("ContinueRunControl without operator pause owner err = %v, want ErrNotPaused", err)
+	if outcome, err := pg.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID}); !errors.Is(err, runtimeruncontrol.ErrNotPaused) || outcome.Acknowledged {
+		t.Fatalf("ContinueRunControl without operator pause owner outcome=%+v err=%v, want unacknowledged ErrNotPaused", outcome, err)
 	}
 }

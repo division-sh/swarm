@@ -6,7 +6,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -161,25 +159,12 @@ func selectionFact(t *testing.T, label string) handlerselection.HandlerRuleSelec
 	return fact
 }
 
-func selectionEffects(t *testing.T, got *runforkrevision.Effects, runID string, ids ...string) {
-	t.Helper()
-	want := runforkrevision.NewEffects()
-	for _, id := range ids {
-		if err := want.AddFact(runID, runforkrevision.FamilyEventDeliveries, id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("effects differ from exact delivery keys %v", ids)
-	}
-}
-
 func TestHandlerSelectionCanonicalReadWriterBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db, a, probe := selectionWriterFixture(t, backend)
 			ctx := context.Background()
-			runID := uuid.NewString()
+
 			insertSelects := 1
 			noMatch, err := handlerselection.NoMatch(handlerselection.ContextRules)
 			if err != nil {
@@ -193,15 +178,13 @@ func TestHandlerSelectionCanonicalReadWriterBothStores(t *testing.T) {
 				}
 				defer tx.Rollback()
 				beforeSelects, beforeInserts := probe.counts()
-				effects := runforkrevision.NewEffects()
-				if err := a.persistHandlerRuleSelection(ctx, tx, effects, runID, id, fact); err != nil {
+				if err := a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact); err != nil {
 					t.Fatal(err)
 				}
 				selects, inserts := probe.counts()
 				if selects != beforeSelects+insertSelects || inserts != beforeInserts+1 {
 					t.Fatalf("insert SQL: selects=%d inserts=%d", selects-beforeSelects, inserts-beforeInserts)
 				}
-				selectionEffects(t, effects, runID, id)
 				if err := tx.Commit(); err != nil {
 					t.Fatal(err)
 				}
@@ -210,20 +193,16 @@ func TestHandlerSelectionCanonicalReadWriterBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer tx.Rollback()
-				effects = runforkrevision.NewEffects()
-				if err := a.persistHandlerRuleSelection(ctx, tx, effects, runID, id, fact); err != nil {
+				if err := a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact); err != nil {
 					t.Fatal(err)
 				}
 				afterSelects, afterInserts := probe.counts()
 				if afterSelects != selects+1 || afterInserts != inserts+1 {
 					t.Fatal("equal conflict must retain one fresh SELECT")
 				}
-				selectionEffects(t, effects, runID, id)
-				conflictEffects := runforkrevision.NewEffects()
-				if err := a.persistHandlerRuleSelection(ctx, tx, conflictEffects, runID, id, selectionFact(t, "contradiction")); !errors.Is(err, deliverylifecycle.ErrConflict) {
+				if err := a.persistHandlerRuleSelectionSQL(ctx, tx, id, selectionFact(t, "contradiction")); !errors.Is(err, deliverylifecycle.ErrConflict) {
 					t.Fatalf("conflict = %v", err)
 				}
-				selectionEffects(t, conflictEffects, runID)
 				persisted, err := a.handlerRuleSelection(ctx, tx, id)
 				if err != nil || !persisted.Equal(fact) {
 					t.Fatalf("canonical fact changed: %+v %v", persisted, err)
@@ -263,21 +242,17 @@ func TestHandlerSelectionCanonicalReadRollbackAndCorruptionBothStores(t *testing
 		t.Run(backend, func(t *testing.T) {
 			db, a, _ := selectionWriterFixture(t, backend)
 			ctx := context.Background()
-			runID, id := uuid.NewString(), uuid.NewString()
+			id := uuid.NewString()
 			fact := selectionFact(t, "retry")
-			effects := runforkrevision.NewEffects()
-			reset := effects.AttemptReset()
 			for attempt := 0; attempt < 2; attempt++ {
-				reset()
 				tx, err := db.BeginTx(ctx, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer tx.Rollback()
-				if err := a.persistHandlerRuleSelection(ctx, tx, effects, runID, id, fact); err != nil {
+				if err := a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact); err != nil {
 					t.Fatal(err)
 				}
-				selectionEffects(t, effects, runID, id)
 				if attempt == 0 {
 					if err := tx.Rollback(); err != nil {
 						t.Fatal(err)
@@ -298,11 +273,9 @@ func TestHandlerSelectionCanonicalReadRollbackAndCorruptionBothStores(t *testing
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
-			badEffects := runforkrevision.NewEffects()
-			if err := a.persistHandlerRuleSelection(ctx, tx, badEffects, runID, id, fact); err == nil || !strings.Contains(err.Error(), "hydrate delivery handler rule selection") {
+			if err := a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact); err == nil || !strings.Contains(err.Error(), "hydrate delivery handler rule selection") {
 				t.Fatalf("corrupt replay = %v", err)
 			}
-			selectionEffects(t, badEffects, runID)
 			if _, err := a.handlerRuleSelection(ctx, tx, uuid.NewString()); !errors.Is(err, sql.ErrNoRows) {
 				t.Fatalf("missing selection = %v", err)
 			}
@@ -321,14 +294,14 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 				db, a, probe := selectionWriterFixture(t, backend)
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
-				runID, id := uuid.NewString(), uuid.NewString()
+				id := uuid.NewString()
 				fact := selectionFact(t, "first")
 				tx, err := db.BeginTx(ctx, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer tx.Rollback()
-				if err := a.persistHandlerRuleSelection(ctx, tx, runforkrevision.NewEffects(), runID, id, fact); err != nil {
+				if err := a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact); err != nil {
 					t.Fatal(err)
 				}
 				entered := make(chan struct{})
@@ -340,7 +313,6 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 				if !equal {
 					other = selectionFact(t, "second")
 				}
-				effects := runforkrevision.NewEffects()
 				done := make(chan error, 1)
 				go func() {
 					tx, err := db.BeginTx(ctx, nil)
@@ -349,7 +321,7 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 						return
 					}
 					defer tx.Rollback()
-					err = a.persistHandlerRuleSelection(ctx, tx, effects, runID, id, other)
+					err = a.persistHandlerRuleSelectionSQL(ctx, tx, id, other)
 					if err == nil {
 						err = tx.Commit()
 					}
@@ -373,12 +345,10 @@ func TestHandlerSelectionCanonicalReadConcurrentBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					selectionEffects(t, effects, runID, id)
 				} else {
 					if !errors.Is(err, deliverylifecycle.ErrConflict) {
 						t.Fatalf("concurrent conflict = %v", err)
 					}
-					selectionEffects(t, effects, runID)
 				}
 				selects, inserts := probe.counts()
 				wantSelects := 2
@@ -421,24 +391,20 @@ func TestHandlerSelectionCanonicalReadSQLiteNativeBusyRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runID, rolledBackID, committedID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	rolledBackID, committedID := uuid.NewString(), uuid.NewString()
 	fact := selectionFact(t, "native-retry")
-	effects := runforkrevision.NewEffects()
-	reset := effects.AttemptReset()
 	attempts := 0
 	err = backend.RunTransaction(ctx, "selection canonical read native busy", func(ctx context.Context, tx *sql.Tx) error {
-		reset()
 		attempts++
 		id := committedID
 		if attempts == 1 {
 			id = rolledBackID
 		}
-		return a.persistHandlerRuleSelection(ctx, tx, effects, runID, id, fact)
+		return a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact)
 	})
 	if err != nil || attempts != 2 || busyCommits != 1 {
 		t.Fatalf("native retry attempts=%d busy=%d err=%v", attempts, busyCommits, err)
 	}
-	selectionEffects(t, effects, runID, committedID)
 	selects, inserts := probe.counts()
 	// SQLite preserves each insertion's post-trigger read plus the reader COUNT.
 	if selects != 3 || inserts != 2 {

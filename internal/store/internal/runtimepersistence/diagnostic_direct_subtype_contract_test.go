@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -88,30 +88,20 @@ func commitNamedDiagnosticContractEvent(ctx context.Context, fixture authorActiv
 	if err != nil {
 		return err
 	}
-	commit := func(store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx) error) error) error {
-		return run(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			story, err := eventFixtureStory(txctx)
-			if err != nil {
-				return err
-			}
-			_, err = (sqlPublishCommitter{tx: tx, store: store, story: story}).commitNamedEvent(
-				txctx, "diagnostic subtype contract proof", events.EventAdmissionDiagnosticDirect, expectedType,
-				runtimebus.CommitPublishRequest{
-					Event: admitted, RouteSettlement: testRouteSettlement(admitted.Event(), nil),
-					ReplayScope: runtimepipelineobligation.ScopeDirect,
-				},
-			)
-			return err
-		})
-	}
-	switch store := fixture.store.(type) {
-	case *PostgresStore:
-		return commit(store, store.runEventTransaction)
-	case *SQLiteRuntimeStore:
-		return commit(store, store.runEventTransaction)
-	default:
-		return fmt.Errorf("unsupported diagnostic subtype fixture store %T", fixture.store)
-	}
+	return runSelectedFixtureMutation(ctx, fixture.store, "diagnostic subtype contract proof", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		store, ok := fixture.store.(eventCommitTxStore)
+		if !ok {
+			return fmt.Errorf("unsupported diagnostic subtype fixture store %T", fixture.store)
+		}
+		_, err := (sqlPublishCommitter{attempt: attempt, store: store}).commitNamedEvent(
+			txctx, "diagnostic subtype contract proof", events.EventAdmissionDiagnosticDirect, expectedType,
+			runtimebus.CommitPublishRequest{
+				Event: admitted, RouteSettlement: testRouteSettlement(admitted.Event(), nil),
+				ReplayScope: runtimepipelineobligation.ScopeDirect,
+			},
+		)
+		return err
+	})
 }
 
 func assertEventRowAbsent(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string) {

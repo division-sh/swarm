@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
@@ -222,6 +223,9 @@ func (p *serveLifecyclePresenter) writeFailureContextLocked(out io.Writer) {
 		}
 		fmt.Fprintf(out, "  workspace                  %s\n", detail)
 	}
+	for _, notice := range p.notices {
+		fmt.Fprintf(out, "  recovery action            %s\n", serveLifecycleNoticeDetail(notice))
+	}
 }
 
 func (p *serveLifecyclePresenter) recordStore(selection storebackend.Selection) {
@@ -309,6 +313,20 @@ func (p *serveLifecyclePresenter) recordAbandonedWork(runs, deliveries, pipeline
 		kind = serveLifecycleNoticeActiveWorkCleared
 	}
 	p.notices = append(p.notices, serveLifecycleNotice{Kind: kind})
+}
+
+func recordServeAbandonOutcome(p *serveLifecyclePresenter, result runtimerunquiescence.Result, err error) error {
+	// A postcommit cleanup error must not erase the committed boot report.
+	if result.Acknowledged {
+		p.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
+	} else if err == nil {
+		if len(result.Runs) != 0 || len(result.Deliveries) != 0 || result.PipelineReceiptCount != 0 ||
+			result.SessionCount != 0 || result.TimerCount != 0 || len(result.TimerCancellations) != 0 {
+			return errors.New("serve abandonment returned work without commit acknowledgement")
+		}
+		p.recordAbandonedWork(0, 0, 0)
+	}
+	return err
 }
 
 func (p *serveLifecyclePresenter) recordClosedUnavailableWork() {

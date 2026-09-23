@@ -407,10 +407,11 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				EventType:     "generic.tick", EntityID: genericEntityID, Payload: semanticvalue.EmptyObject(),
 				RoutingSource: routingSource, Due: runtimegenericschedule.AbsoluteDue(dueAt), ExecutionMode: executionmode.Mock,
 			}
-			genericAdmission, err := selected.AdmitGenericSchedule(genericCtx, genericCommand)
-			if err != nil {
-				t.Fatalf("persist overdue generic schedule: %v", err)
+			genericCommit, err := selected.AdmitGenericScheduleOutcome(genericCtx, genericCommand)
+			if err != nil || !genericCommit.Acknowledged {
+				t.Fatalf("persist overdue generic schedule: commit=%+v err=%v", genericCommit, err)
 			}
+			genericAdmission := genericCommit.Result
 			time.Sleep(time.Until(dueAt) + 50*time.Millisecond)
 			countGenericEvents := func() int {
 				t.Helper()

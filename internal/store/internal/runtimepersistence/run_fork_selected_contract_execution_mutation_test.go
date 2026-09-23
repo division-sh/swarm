@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,7 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -221,23 +222,8 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 		laterEventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
 		semanticEventRecordFixtureEnvelope(entityID, ""), laterAt,
 	)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin later event transaction: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin later event story: %v", err)
-	}
-	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, tx, story, laterEvent, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")}); err != nil {
+	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, laterEvent, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")}); err != nil {
 		t.Fatalf("seed later event and delivery: %v", err)
-	}
-	if err := story.Finalize(ctx); err != nil {
-		t.Fatalf("finalize later event story: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit later event transaction: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -1703,56 +1689,10 @@ func seedCanonicalSelectedContractExecutionStoreSourceRawWithPayload(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := testAuthorActivityContextForBundle(hash)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: hash, Artifact: bundle.SourceArtifact})
-	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
-	selected.acceptCurrentSchemaForTest()
-	event := semanticEventRecordFixture(
-		eventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), payload,
-		semanticEventRecordFixtureEnvelope(entityID, ""), at,
-	)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin source fact transaction: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin source story transaction: %v", err)
-	}
-	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, selected, tx, story, event, routes); err != nil {
-		t.Fatalf("seed source event and delivery obligations: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4),
-			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Selected Store Entity"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4)
-	`, sourceRunID, entityID, eventID, at); err != nil {
-		t.Fatalf("seed mutations: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Selected Store Entity',
-			'pending', '{}'::jsonb, '{"name":"Selected Store Entity"}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
-		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-	if err := story.Finalize(ctx); err != nil {
-		t.Fatalf("finalize source story transaction: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit source facts: %v", err)
-	}
+	seedSelectedContractExecutionSourceWithRun(t, db, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID,
+		StartedAt: at.Add(-time.Minute), BundleHash: hash, Artifact: bundle.SourceArtifact,
+	}, entityID, eventID, at, routes, payload)
 }
 
 func seedSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
@@ -1780,39 +1720,33 @@ func seedSelectedContractExecutionStoreSourceRawWithPayload(t *testing.T, db *sq
 	seedSelectedContractExecutionSourceWithRun(t, db, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash}, entityID, eventID, at, routes, payload)
 }
 
-func seedDeclaredActivityExecutionSource(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time, source semanticview.Source) {
-	t.Helper()
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle.SourceArtifact == nil {
-		t.Fatal("declared activity source requires its actual artifact")
-	}
-	seedSelectedContractExecutionSourceWithRun(t, db, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash()}, entityID, eventID, at, []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("test-node")}, []byte(`{}`))
-}
-
 func seedSelectedContractExecutionSourceWithRun(t *testing.T, db *sql.DB, run semanticRunFixture, entityID, eventID string, at time.Time, routes []events.DeliveryRoute, payload []byte) {
 	t.Helper()
-	sourceRunID := run.RunID
+	event := semanticEventRecordFixture(
+		eventID, run.RunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), payload,
+		semanticEventRecordFixtureEnvelope(entityID, ""), at,
+	)
+	seedSelectedContractExecutionSourceWithEvent(t, db, run, entityID, event, at, routes, "flow-a/1")
+}
+
+func seedSelectedContractExecutionSourceWithEvent(t *testing.T, db *sql.DB, run semanticRunFixture, entityID string, event events.Event, at time.Time, routes []events.DeliveryRoute, flowInstance string, parents ...events.Event) {
+	t.Helper()
+	sourceRunID, eventID := run.RunID, event.ID()
 	ctx := testAuthorActivityContextForBundle(run.BundleHash)
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), run)
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	selected.acceptCurrentSchemaForTest()
-	event := semanticEventRecordFixture(
-		eventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), payload,
-		semanticEventRecordFixtureEnvelope(entityID, ""), at,
-	)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin source fact transaction: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin source story transaction: %v", err)
-	}
-	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, selected, tx, story, event, routes); err != nil {
-		t.Fatalf("seed source event and delivery obligations: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
+	if err := runSelectedFixtureMutation(ctx, selected, "selected-contract source facts", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		for _, parent := range parents {
+			if err := commitSemanticEventFixtureWithRoutesStoryTx(txctx, selected, attempt, parent, nil); err != nil {
+				return err
+			}
+		}
+		if err := commitSemanticEventFixtureWithRoutesStoryTx(txctx, selected, attempt, event, routes); err != nil {
+			return err
+		}
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if _, err := tx.ExecContext(txctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
@@ -1820,26 +1754,28 @@ func seedSelectedContractExecutionSourceWithRun(t *testing.T, db *sql.DB, run se
 			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4),
 			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Selected Store Entity"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
-		t.Fatalf("seed mutations: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
+				return fmt.Errorf("seed mutations: %w", err)
+			}
+			if _, err := tx.ExecContext(txctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Selected Store Entity',
+			$1::uuid, $2::uuid, $4, 'default', 'Selected Store Entity',
 			'pending', '{}'::jsonb, '{"name":"Selected Store Entity"}'::jsonb, '{}'::jsonb, 1,
 			$3, $3, $3
 		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-	if err := story.Finalize(ctx); err != nil {
-		t.Fatalf("finalize source story transaction: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
+	`, sourceRunID, entityID, at, flowInstance); err != nil {
+				return fmt.Errorf("seed entity_state: %w", err)
+			}
+			if err := attempt.AddWholeFamily(sourceRunID, runforkrevision.FamilyEntityMutations); err != nil {
+				return err
+			}
+			return attempt.AddWholeFamily(sourceRunID, runforkrevision.FamilyEntityMetadata)
+		})
+	}); err != nil {
 		t.Fatalf("commit source facts: %v", err)
 	}
 }

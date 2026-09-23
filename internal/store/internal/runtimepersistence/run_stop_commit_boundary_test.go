@@ -169,9 +169,9 @@ func TestRunStopCommitUncertaintyPreservesRealOutcomeBothStores(t *testing.T) {
 					}
 					return errors.Join(cause, tx.Rollback())
 				})
-				state, err := owner.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+				state, err := owner.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
 				failure, typed := runtimefailures.EnvelopeFromError(err)
-				if !errors.Is(err, cause) || !typed || failure.Class != runtimefailures.ClassOutcomeUncertain || failure.Detail.Code != "run_stop_commit_unconfirmed" || failure.Detail.Attributes["stage"] != "commit" || failure.Retryable || state.RunID != "" || calls.Load() != 1 {
+				if !errors.Is(err, cause) || !typed || failure.Class != runtimefailures.ClassOutcomeUncertain || failure.Detail.Code != "run_stop_commit_unconfirmed" || failure.Detail.Attributes["stage"] != "commit" || failure.Retryable || state.Acknowledged || state.State.RunID != "" || calls.Load() != 1 {
 					t.Fatalf("uncertain stop: state=%+v error=%v failure=%+v calls=%d", state, err, failure, calls.Load())
 				}
 				after := readStopCommitEvidence(t, db, fixture.runID)
@@ -183,8 +183,8 @@ func TestRunStopCommitUncertaintyPreservesRealOutcomeBothStores(t *testing.T) {
 					if after.status != "cancelled" || after.control != "stopped" || after.canceled != 1 || after.pending != 0 || after.revisions != before.revisions+1 || after.outcomes != before.outcomes {
 						t.Fatalf("unacknowledged real commit missing atomic evidence: before=%+v after=%+v", before, after)
 					}
-					if _, err := owner.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID}); !errors.Is(err, runcontrol.ErrAlreadyTerminal) {
-						t.Fatalf("uncertain committed stop repeated transition: %v", err)
+					if outcome, err := owner.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID}); !errors.Is(err, runcontrol.ErrAlreadyTerminal) || outcome.Acknowledged {
+						t.Fatalf("uncertain committed stop repeated transition: outcome=%+v err=%v", outcome, err)
 					}
 					if again := readStopCommitEvidence(t, db, fixture.runID); again != after {
 						t.Fatalf("terminal refusal changed committed evidence: before=%+v after=%+v", after, again)
@@ -226,9 +226,9 @@ func TestRunStopKnownCommitRejectionBothStores(t *testing.T) {
 				commitErr = tx.Commit()
 				return commitErr
 			})
-			state, err := owner.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+			state, err := owner.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
 			failure, ok := runtimefailures.EnvelopeFromError(err)
-			if calls != 1 || commitErr == nil || !errors.Is(err, commitErr) || !ok || failure.Class != runtimefailures.ClassInternalFailure || failure.Detail.Code != "run_stop_failed" || failure.Detail.Attributes["stage"] != "commit" || failure.Retryable || state.RunID != "" {
+			if calls != 1 || commitErr == nil || !errors.Is(err, commitErr) || !ok || failure.Class != runtimefailures.ClassInternalFailure || failure.Detail.Code != "run_stop_failed" || failure.Detail.Attributes["stage"] != "commit" || failure.Retryable || state.Acknowledged || state.State.RunID != "" {
 				t.Fatalf("known rejected commit: state=%+v error=%v failure=%+v calls=%d physical=%v", state, err, failure, calls, commitErr)
 			}
 			if backend == "postgres" {
@@ -276,7 +276,10 @@ func TestIssue2394StopCommitRaceBothStores(t *testing.T) {
 					}
 				})
 				stop := func() error {
-					_, err := owner.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+					outcome, err := owner.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+					if !outcome.Acknowledged && err == nil {
+						return errors.New("run stop was not acknowledged")
+					}
 					return err
 				}
 				var committed pipeline.CommittedFanOutChunk

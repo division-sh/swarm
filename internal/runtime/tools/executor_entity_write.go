@@ -17,6 +17,9 @@ import (
 	"github.com/google/uuid"
 )
 
+const entityFieldPostCommitErrorCode = "entity_field_write_post_commit_failure"
+const entityCreatePostCommitErrorCode = "entity_create_post_commit_failure"
+
 func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	store, source, payload, err := e.entityToolDependencies(input)
 	if err != nil {
@@ -83,7 +86,7 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName})
 	}
 
-	revision, err := store.SaveEntityField(ctx, EntityFieldUpdate{
+	result, err := store.SaveEntityField(ctx, EntityFieldUpdate{
 		RunID:        identity.RunID,
 		EntityID:     identity.EntityID,
 		FieldPath:    field.Path,
@@ -95,14 +98,35 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 			HandlerStep: "save_entity_field",
 		},
 	})
-	if err != nil {
+	if !result.Acknowledged {
+		if err == nil {
+			err = fmt.Errorf("entity field write was not acknowledged")
+		}
 		return nil, failures.WrapDetail("write_failed", "tool-executor", "exec_save_entity_field.update", map[string]any{"entity_id": entityID, "field": fieldName}, err)
 	}
-	return map[string]any{
+	response := map[string]any{
 		"entity_id": entityID,
 		"field":     field.Path,
-		"revision":  revision,
-	}, nil
+		"revision":  result.Revision,
+	}
+	if err != nil {
+		response["status"] = "committed_with_post_commit_error"
+		response["write_committed"] = true
+		response["retry_write"] = false
+		response["post_commit_error_code"] = entityFieldPostCommitErrorCode
+		if logger := e.runtimeLogSink(); logger != nil {
+			_ = logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
+				Level: "warn", Message: "Entity field write committed with a post-commit failure",
+				Component: "tool-executor", Action: "entity_field_write_post_commit_failure",
+				AgentID: strings.TrimSpace(actor.ID), EntityID: entityID,
+				Detail: map[string]any{
+					"field": field.Path, "revision": result.Revision,
+					"post_commit_error": err.Error(),
+				},
+			})
+		}
+	}
+	return response, nil
 }
 
 func entityJSONPathSegments(path string) ([]string, error) {
@@ -257,7 +281,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
 	}
 	now := time.Now().UTC()
-	if err := store.CreateEntity(ctx, EntityCreateRecord{
+	result, err := store.CreateEntity(ctx, EntityCreateRecord{
 		RunID:        runID,
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
@@ -271,14 +295,33 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 			ID:          "create_entity",
 			HandlerStep: "create_entity",
 		},
-	}); err != nil {
+	})
+	if !result.Acknowledged {
+		if err == nil {
+			err = fmt.Errorf("entity create was not acknowledged")
+		}
 		return nil, failures.WrapDetail("write_failed", "tool-executor", "exec_create_entity.insert", map[string]any{"entity_id": entityID}, err)
 	}
-	return map[string]any{
-		"entity_id":     entityID,
+	response := map[string]any{
+		"entity_id":     result.EntityID,
 		"current_state": currentState,
 		"created_at":    now.Format(time.RFC3339Nano),
-	}, nil
+	}
+	if err != nil {
+		response["status"] = "committed_with_post_commit_error"
+		response["write_committed"] = true
+		response["retry_write"] = false
+		response["post_commit_error_code"] = entityCreatePostCommitErrorCode
+		if logger := e.runtimeLogSink(); logger != nil {
+			_ = logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
+				Level: "warn", Message: "Entity create committed with a post-commit failure",
+				Component: "tool-executor", Action: entityCreatePostCommitErrorCode,
+				AgentID: strings.TrimSpace(actor.ID), EntityID: result.EntityID,
+				Detail: map[string]any{"post_commit_error": err.Error()},
+			})
+		}
+	}
+	return response, nil
 }
 
 func valuesEqual(left, right any) bool {

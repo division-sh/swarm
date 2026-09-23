@@ -20,19 +20,23 @@ import (
 
 type selectedScheduleStoreCase struct {
 	name string
-	open func(*testing.T) (runtimegenericschedule.Store, *sql.DB, context.Context)
+	open func(*testing.T) (selectedScheduleStore, *sql.DB, context.Context)
+}
+
+type selectedScheduleStore interface {
+	runtimegenericschedule.Store
 }
 
 func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 	return []selectedScheduleStoreCase{
-		{name: "sqlite", open: func(t *testing.T) (runtimegenericschedule.Store, *sql.DB, context.Context) {
+		{name: "sqlite", open: func(t *testing.T) (selectedScheduleStore, *sql.DB, context.Context) {
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 			runID := uuid.NewString()
 			ctx := selectedScheduleTestContext(t, runID)
 			seedSQLiteScheduleRun(t, store, ctx, runID)
 			return store, store.backend.ConstructionHandle(), ctx
 		}},
-		{name: "postgres", open: func(t *testing.T) (runtimegenericschedule.Store, *sql.DB, context.Context) {
+		{name: "postgres", open: func(t *testing.T) (selectedScheduleStore, *sql.DB, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
@@ -97,10 +101,11 @@ func testGlobalGenericScheduleCommand(key string, due runtimegenericschedule.Due
 
 func admitGenericScheduleFixture(t testing.TB, ctx context.Context, store runtimegenericschedule.Store, command runtimegenericschedule.AdmissionCommand) runtimegenericschedule.Activation {
 	t.Helper()
-	result, err := store.AdmitGenericSchedule(ctx, command)
-	if err != nil {
-		t.Fatalf("admit generic schedule fixture: %v", err)
+	commit, err := store.AdmitGenericScheduleOutcome(ctx, command)
+	if err != nil || !commit.Acknowledged {
+		t.Fatalf("admit generic schedule fixture: commit=%+v err=%v", commit, err)
 	}
+	result := commit.Result
 	if err := result.Validate(); err != nil {
 		t.Fatalf("validate admitted generic schedule fixture: %v", err)
 	}
@@ -109,14 +114,15 @@ func admitGenericScheduleFixture(t testing.TB, ctx context.Context, store runtim
 
 func cancelGenericScheduleFixture(t testing.TB, ctx context.Context, store runtimegenericschedule.Store, activation runtimegenericschedule.Activation, cause string, at time.Time) runtimegenericschedule.Activation {
 	t.Helper()
-	result, err := store.CancelGenericSchedule(ctx, runtimegenericschedule.CancelCommand{
+	commit, err := store.CancelGenericScheduleOutcome(ctx, runtimegenericschedule.CancelCommand{
 		ActivationID: activation.ID,
 		Cause:        cause,
 		CancelledAt:  at,
 	})
-	if err != nil {
-		t.Fatalf("cancel generic schedule fixture: %v", err)
+	if err != nil || !commit.Acknowledged {
+		t.Fatalf("cancel generic schedule fixture: commit=%+v err=%v", commit, err)
 	}
+	result := commit.Result
 	if result.Outcome != runtimegenericschedule.CancelChanged {
 		t.Fatalf("cancel generic schedule fixture outcome = %q, want cancelled", result.Outcome)
 	}

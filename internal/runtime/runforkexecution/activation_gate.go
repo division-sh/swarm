@@ -334,6 +334,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			}
 			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
+		defer func() { finalErr = errors.Join(finalErr, container.diagnostics.err()) }()
 		ctx = operation.Context()
 		published, err := container.Publish(ctx)
 		result.ExecutedEventCount = len(published)

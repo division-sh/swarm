@@ -8,19 +8,34 @@ import (
 	"time"
 
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 // AdvanceOccurrenceTx is called only by the named outer event-publication
 // transaction after durable event acceptance has succeeded.
 func AdvanceOccurrenceTx(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
 	command runtimegenericschedule.CommitCommand,
 ) (runtimegenericschedule.Activation, runtimegenericschedule.CommitOutcome, error) {
 	if err := command.Validate(); err != nil {
 		return runtimegenericschedule.Activation{}, "", err
 	}
+	if attempt == nil {
+		return runtimegenericschedule.Activation{}, "", errors.New("generic schedule occurrence advance requires mutation attempt")
+	}
+	var next runtimegenericschedule.Activation
+	var outcome runtimegenericschedule.CommitOutcome
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		next, outcome, err = advanceOccurrenceTx(ctx, tx, attempt, postgres, command)
+		return err
+	})
+	return next, outcome, err
+}
+
+func advanceOccurrenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.Activation, runtimegenericschedule.CommitOutcome, error) {
 	persisted, found, err := loadByIDTx(ctx, tx, dialectFor(postgres), command.Activation.ID, postgres)
 	if err != nil {
 		return runtimegenericschedule.Activation{}, "", err
@@ -89,12 +104,15 @@ func AdvanceOccurrenceTx(
 	if err := next.Validate(); err != nil {
 		return runtimegenericschedule.Activation{}, "", err
 	}
+	if err := addTimerEffect(attempt, next.Command.RunID, next.ID); err != nil {
+		return runtimegenericschedule.Activation{}, "", err
+	}
 	return next, runtimegenericschedule.CommitCommitted, nil
 }
 
-func LoadOccurrenceCommitStateTx(ctx context.Context, tx *sql.Tx, postgres bool, activationID string) (runtimegenericschedule.Activation, bool, error) {
-	if tx == nil {
-		return runtimegenericschedule.Activation{}, false, errors.New("generic schedule occurrence read requires transaction")
+func LoadOccurrenceCommitStateTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, activationID string) (runtimegenericschedule.Activation, bool, error) {
+	if attempt == nil {
+		return runtimegenericschedule.Activation{}, false, errors.New("generic schedule occurrence read requires mutation attempt")
 	}
-	return loadByIDTx(ctx, tx, dialectFor(postgres), activationID, postgres)
+	return LoadActivationTx(ctx, attempt, postgres, activationID)
 }

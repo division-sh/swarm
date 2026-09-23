@@ -1178,13 +1178,13 @@ func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
 	return out
 }
 
-func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) error {
+func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
 	for _, set := range sets {
 		if err := set.Identity.Validate(); err != nil {
-			return fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
+			return bus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
 		}
 	}
-	return nil
+	return bus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (s *replyConformanceStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {

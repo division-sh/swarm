@@ -51,19 +51,20 @@ func (r *rotationOutcomeRegistry) Rotate(ctx context.Context, id agentmemory.Ide
 	return lease, r.rotateErr
 }
 
-func (r *rotationOutcomeRegistry) Release(ctx context.Context, lease *sessions.Lease) error {
+func (r *rotationOutcomeRegistry) ReleaseOutcome(ctx context.Context, lease *sessions.Lease) (sessions.ReleaseResult, error) {
 	r.releases++
 	if r.releaseCancel != nil {
 		r.releaseCancel()
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		return sessions.ReleaseResult{}, err
 	}
 	// PostgreSQL release matches the exact active session, unlike the memory registry.
 	if r.committed != nil && lease.SessionID != r.committed.SessionID {
-		return errors.New("attempted predecessor release after committed rotation")
+		return sessions.ReleaseResult{}, errors.New("attempted predecessor release after committed rotation")
 	}
-	return errors.Join(r.Registry.Release(ctx, lease), r.releaseErr)
+	result, err := r.Registry.ReleaseOutcome(ctx, lease)
+	return result, errors.Join(err, r.releaseErr)
 }
 
 func TestSessionRotationRetainsAcknowledgedLeaseAndErrors(t *testing.T) {
@@ -83,7 +84,7 @@ func TestSessionRotationRetainsAcknowledgedLeaseAndErrors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := registry.Registry.Release(ctx, lease); err != nil {
+				if _, err := registry.Registry.ReleaseOutcome(ctx, lease); err != nil {
 					t.Fatal(err)
 				}
 				session := &Session{ID: lease.SessionID, ProviderSessionID: "provider-old", AgentID: identity.AgentID(), Memory: testMemory(), MemoryIdentity: identity, TurnCount: 1, ParseFailures: 1, Messages: []Message{{Role: "assistant", Content: "done"}}}
@@ -202,6 +203,9 @@ func TestSessionStartReleasesCommittedAcquireOnErrorOrCancellation(t *testing.T)
 				if result != nil || !errors.Is(err, cleanup) || phase == "handoff_error" && !errors.Is(err, failure) {
 					t.Fatalf("start result=%+v err=%v", result, err)
 				}
+				if phase == "canceled_after_acquire" && !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancellation was lost after acquired lease release: %v", err)
+				}
 				if registry.acquires != 1 || registry.releases != 1 || len(publisher.events) != 0 || len(publisher.marks) != 0 {
 					t.Fatalf("unexpected startup work: acquire=%d release=%d events=%d marks=%d", registry.acquires, registry.releases, len(publisher.events), len(publisher.marks))
 				}
@@ -210,5 +214,42 @@ func TestSessionStartReleasesCommittedAcquireOnErrorOrCancellation(t *testing.T)
 				}
 			})
 		}
+	}
+}
+
+func TestPrepareManagedSessionRetainsRotationAfterAcknowledgedReleaseError(t *testing.T) {
+	cleanup := errors.New("rotated lease release cleanup failed")
+	registry := &rotationOutcomeRegistry{Registry: sessions.NewInMemoryRegistry(time.Minute), releaseErr: cleanup}
+	identity := testMemoryIdentity("agent-1", "support/instance-1")
+	ctx := agentmemory.WithExecution(context.Background(), testMemory(), identity)
+	oldLease, err := registry.Registry.Acquire(ctx, identity, "worker-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Registry.ReleaseOutcome(ctx, oldLease); err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{
+		ID: oldLease.SessionID, AgentID: identity.AgentID(), Memory: testMemory(), MemoryIdentity: identity,
+		TurnCount: 1, Messages: []Message{{Role: "assistant", Content: "done"}},
+	}
+	publisher := &eventPublisherStub{}
+	if err := prepareManagedSessionForTurn(ctx, session, registry, "worker-1", 1, publisher); err != nil {
+		t.Fatalf("acknowledged rotated lease release aborted next turn: %v", err)
+	}
+	if registry.rotations != 1 || registry.releases != 1 || session.ID == oldLease.SessionID || session.ID != registry.committed.SessionID {
+		t.Fatalf("rotated session not retained: session=%+v rotations=%d releases=%d", session, registry.rotations, registry.releases)
+	}
+	var diagnosed bool
+	for _, entry := range publisher.runtimeLogs {
+		if entry.Action == "session_release_postcommit_failed" && entry.Failure != nil {
+			diagnosed = true
+		}
+	}
+	if !diagnosed {
+		t.Fatalf("release cleanup error not diagnosed: %+v", publisher.runtimeLogs)
+	}
+	if _, err := registry.Registry.Acquire(ctx, identity, "worker-2"); err != nil {
+		t.Fatalf("rotated session lease remained held: %v", err)
 	}
 }

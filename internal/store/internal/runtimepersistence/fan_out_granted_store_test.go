@@ -165,15 +165,15 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 					t.Fatalf("granted immutable source: count=%d err=%v", len(input.Items), err)
 				}
 				control := raw.(interface {
-					PauseRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
-					ContinueRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
-					StopRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
+					PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
+					ContinueRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
+					StopRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 				})
 				transition := runcontrol.TransitionRequest{RunID: fixture.runID, Now: time.Now().UTC(), Reason: "granted-store-test", ControlledBy: "test"}
 				switch fence {
 				case "pause":
-					if _, err := control.PauseRunControl(ctx, transition); err != nil {
-						t.Fatal(err)
+					if outcome, err := control.PauseRunControlOutcome(ctx, transition); err != nil || !outcome.Acknowledged {
+						t.Fatalf("pause outcome=%+v err=%v", outcome, err)
 					}
 					if _, err := owner.LoadFanOutEvaluation(ctx, claim); err != nil {
 						t.Fatalf("pause fenced admitted evaluation: %v", err)
@@ -184,14 +184,14 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 					if _, _, found, err := owner.ClaimFanOutIntent(ctx, request); err != nil || found {
 						t.Fatalf("pause admitted a new turn: found=%v err=%v", found, err)
 					}
-					if _, err := control.ContinueRunControl(ctx, transition); err != nil {
-						t.Fatal(err)
+					if outcome, err := control.ContinueRunControlOutcome(ctx, transition); err != nil || !outcome.Acknowledged {
+						t.Fatalf("continue outcome=%+v err=%v", outcome, err)
 					}
 					_, successor, found, err := owner.ClaimFanOutIntent(ctx, request)
 					if err != nil || !found {
 						t.Fatalf("continue did not readmit: %v %v", found, err)
 					}
-					if err := owner.ReleaseFanOutClaim(ctx, claim); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
+					if _, err := owner.ReleaseFanOutClaim(ctx, claim); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 						t.Fatalf("old release touched successor: %v", err)
 					}
 					if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(successor, 32, 32, time.Now().UTC())); err != nil {
@@ -216,8 +216,8 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				case "stop":
-					if _, err := control.StopRunControl(ctx, transition); err != nil {
-						t.Fatal(err)
+					if outcome, err := control.StopRunControlOutcome(ctx, transition); err != nil || !outcome.Acknowledged {
+						t.Fatalf("stop outcome=%+v err=%v", outcome, err)
 					}
 				case "full-grant":
 					evidence, err := grant.Evidence()
@@ -232,10 +232,10 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 				if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 32, time.Now().UTC())); err == nil {
 					t.Error("authority loss allowed publication")
 				}
-				if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err == nil {
+				if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err == nil {
 					t.Error("authority loss allowed retry")
 				}
-				if err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failures.Normalize(errors.New("invariant"), "runtime.fan_out", "test")}); err == nil {
+				if _, err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failures.Normalize(errors.New("invariant"), "runtime.fan_out", "test")}); err == nil {
 					t.Error("authority loss allowed permanent block")
 				}
 				if _, _, found, err := owner.ClaimFanOutIntent(ctx, request); found || (fence != "stop" && err == nil) {
@@ -243,11 +243,11 @@ func TestFanOutGrantedStoreAdmissionBothStores(t *testing.T) {
 				}
 				assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
 				if fence == "process-release" {
-					if err := owner.ReleaseFanOutClaim(ctx, claim); err == nil {
+					if _, err := owner.ReleaseFanOutClaim(ctx, claim); err == nil {
 						t.Fatal("cleanup mutated after retained process release")
 					}
 				} else if fence != "stop" {
-					if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+					if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 						t.Fatalf("exact cleanup after authority loss: %v", err)
 					}
 				}

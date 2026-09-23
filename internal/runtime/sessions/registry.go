@@ -18,9 +18,19 @@ import (
 
 type Registry interface {
 	Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*Lease, error)
-	Release(ctx context.Context, lease *Lease) error
+	ReleaseOutcome(ctx context.Context, lease *Lease) (ReleaseResult, error)
 	Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error)
-	IncrementTurn(ctx context.Context, identity agentmemory.Identity, sessionID string) error
+	IncrementTurnOutcome(ctx context.Context, identity agentmemory.Identity, sessionID string) (TurnIncrementResult, error)
+}
+
+type ReleaseResult struct {
+	// Acknowledged means the lease was cleared even if postcommit work failed.
+	Acknowledged bool
+}
+
+type TurnIncrementResult struct {
+	// Acknowledged means the turn count advanced even if postcommit work failed.
+	Acknowledged bool
 }
 
 type Resetter interface {
@@ -264,9 +274,9 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, identity agentmemory.Id
 	}, nil
 }
 
-func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
+func (sr *InMemoryRegistry) ReleaseOutcome(_ context.Context, lease *Lease) (ReleaseResult, error) {
 	if lease == nil {
-		return errors.New("nil lease")
+		return ReleaseResult{}, errors.New("nil lease")
 	}
 
 	sr.mu.Lock()
@@ -275,16 +285,16 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 	key := registryKey(lease.Identity)
 	rec, ok := sr.byKey[key]
 	if !ok {
-		return fmt.Errorf("session for agent %s not found", lease.Identity.AgentID())
+		return ReleaseResult{}, fmt.Errorf("session for agent %s not found", lease.Identity.AgentID())
 	}
 	if rec.LockOwner != lease.LockOwner {
-		return fmt.Errorf("lease owner mismatch: have=%s want=%s", rec.LockOwner, lease.LockOwner)
+		return ReleaseResult{}, fmt.Errorf("lease owner mismatch: have=%s want=%s", rec.LockOwner, lease.LockOwner)
 	}
 
 	rec.LockOwner = ""
 	rec.LockExpiresAt = time.Time{}
 	rec.LastUsedAt = time.Now()
-	return nil
+	return ReleaseResult{Acknowledged: true}, nil
 }
 
 func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error) {
@@ -369,27 +379,27 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 	}, nil
 }
 
-func (sr *InMemoryRegistry) IncrementTurn(ctx context.Context, identity agentmemory.Identity, sessionID string) error {
+func (sr *InMemoryRegistry) IncrementTurnOutcome(ctx context.Context, identity agentmemory.Identity, sessionID string) (TurnIncrementResult, error) {
 	identity = identity.Normalize()
 	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
-		return err
+		return TurnIncrementResult{}, err
 	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "increment_turn"); err != nil {
-		return err
+		return TurnIncrementResult{}, err
 	}
 	key := registryKey(identity)
 	if rec, ok := sr.byKey[key]; ok {
 		if rec.SessionID != sessionID {
-			return fmt.Errorf("session mismatch: have=%s want=%s", rec.SessionID, sessionID)
+			return TurnIncrementResult{}, fmt.Errorf("session mismatch: have=%s want=%s", rec.SessionID, sessionID)
 		}
 		rec.TurnCount++
 		rec.LastUsedAt = time.Now()
-		return nil
+		return TurnIncrementResult{Acknowledged: true}, nil
 	}
-	return fmt.Errorf("session for agent %s not found", identity.AgentID())
+	return TurnIncrementResult{}, fmt.Errorf("session for agent %s not found", identity.AgentID())
 }
 
 func (sr *InMemoryRegistry) requireCurrentLifecycleLocked(ctx context.Context, identity agentidentity.Identity, operation string) error {

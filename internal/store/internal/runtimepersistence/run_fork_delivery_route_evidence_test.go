@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -337,48 +338,43 @@ func proveRouteEvidenceRollback(t testing.TB, ctx context.Context, fixture autho
 	if baseline <= before {
 		t.Fatal("rollback fixture event must be committed independently")
 	}
-	sentinel := errors.New("rollback after complete route revision capture")
+	sentinel := errors.New("rollback after delivery route write")
 	postgres := fixture.dialect == "postgres"
-	operation := func(txctx context.Context, tx *sql.Tx) error {
+	operation := func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		adapter, dialect := sqliteDeliveryAdapter, deliveryadapter.DialectSQLite
 		if postgres {
 			adapter, dialect = postgresDeliveryAdapter, deliveryadapter.DialectPostgres
 		}
-		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, dialect, event.RunID())
+		var authority runtimedelivery.ExecutionAuthority
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var authorityErr error
+			authority, authorityErr = deliveryFixtureAuthorityForRun(txctx, tx, dialect, event.RunID())
+			return authorityErr
+		})
 		if err != nil {
 			return err
 		}
-		effects, err := runforkrevision.ForRun(event.RunID(), runforkrevision.FamilyEventDeliveries)
-		if err != nil {
+		if _, err := adapter.CommitInitial(txctx, attempt, rollbackEvent.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
 			return err
-		}
-		if _, err := adapter.CommitInitial(txctx, tx, effects, rollbackEvent.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
-			return err
-		}
-		results, err := finalizeRunForkRevisionMatrix(txctx, tx, postgres, effects)
-		if err != nil {
-			return err
-		}
-		result := results[event.RunID()]
-		if !result.Changed || result.Revision != baseline+1 {
-			t.Fatalf("rollback transaction did not capture delivery revision: %#v", result)
 		}
 		deliveryID, err := runtimedelivery.DeliveryID(rollbackEvent.ID(), route)
 		if err != nil {
 			return err
 		}
-		assertRouteEvidenceEqual(t, routeEvidenceSnapshot(t, txctx, tx, event.RunID(), deliveryID, result.Revision).Route, route)
-		return sentinel
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var rows int
+			if err := tx.QueryRowContext(txctx, `SELECT COUNT(*) FROM event_deliveries WHERE delivery_id=$1`, deliveryID).Scan(&rows); err != nil {
+				return err
+			}
+			if rows != 1 {
+				return fmt.Errorf("rollback fixture delivery rows=%d, want 1", rows)
+			}
+			return sentinel
+		})
 	}
-	var err error
-	switch selected := fixture.store.(type) {
-	case *PostgresStore:
-		err = selected.runEventTransaction(ctx, operation)
-	case *SQLiteRuntimeStore:
-		err = selected.runEventTransaction(ctx, operation)
-	}
+	err := runSelectedFixtureMutation(ctx, fixture.store, "rollback delivery route", operation)
 	if !errors.Is(err, sentinel) {
-		t.Fatalf("rollback transaction error = %v, want injected post-capture failure", err)
+		t.Fatalf("rollback transaction error = %v, want injected post-write failure", err)
 	}
 	assertDeliveryRouteEqualityCommitCounts(t, ctx, fixture, rollbackEvent.ID(), 1, 0)
 	if got := routeEvidenceHead(t, ctx, fixture.db, event.RunID()); got != baseline {

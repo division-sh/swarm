@@ -16,46 +16,43 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	gaterouteadapter "github.com/division-sh/swarm/internal/store/internal/backend/gateroute"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func commitWorkflowEngineState(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *revisionEffects,
 	record runtimepipeline.WorkflowEngineStateRecord,
 ) error {
-	if tx == nil {
-		return fmt.Errorf("workflow engine state commit requires private transaction")
-	}
 	if err := record.Validate(); err != nil {
 		return err
 	}
-	if postgres {
-		if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if postgres {
+			if err := requirePostgresRunActive(ctx, tx, record.Identity.RunID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.Identity.RunID+":"+record.Identity.Route.InstancePath); err != nil {
+				return fmt.Errorf("lock workflow engine state route: %w", err)
+			}
+			return commitPostgresWorkflowEngineState(ctx, tx, attempt, record)
+		}
+		if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.Identity.RunID+":"+record.Identity.Route.InstancePath); err != nil {
-			return fmt.Errorf("lock workflow engine state route: %w", err)
+		if err := commitSQLiteWorkflowEngineState(ctx, tx, record); err != nil {
+			return err
 		}
-		return commitPostgresWorkflowEngineState(ctx, tx, effects, record)
-	}
-	if err := requireSQLiteRunActive(ctx, tx, record.Identity.RunID); err != nil {
-		return err
-	}
-	if err := commitSQLiteWorkflowEngineState(ctx, tx, record); err != nil {
-		return err
-	}
-	return effects.AddFact(record.Identity.RunID, privaterunforkrevision.FamilyEntityMetadata, record.EntityID)
+		return attempt.AddFact(record.Identity.RunID, privaterunforkrevision.FamilyEntityMetadata, record.EntityID)
+	})
 }
 
-func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimepipeline.WorkflowEngineStateRecord) error {
+func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record runtimepipeline.WorkflowEngineStateRecord) error {
 	var storedRunID, storedEntityID string
 	if record.Transition.CreatesState() {
 		result, err := tx.ExecContext(ctx, `
@@ -92,7 +89,7 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, effects 
 			record.EnteredStageAt, record.CreatedAt).Scan(&storedRunID, &storedEntityID); err != nil {
 			return fmt.Errorf("insert workflow engine entity state: %w", err)
 		}
-		return effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)
+		return attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)
 	}
 	err := tx.QueryRowContext(ctx, `
 		UPDATE entity_state
@@ -121,7 +118,7 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, effects 
 	if err != nil {
 		return fmt.Errorf("update workflow engine entity state: %w", err)
 	}
-	if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
+	if err := attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
 		return err
 	}
 	if record.Transition == runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
@@ -379,11 +376,9 @@ func loadWorkflowEngineStateProjection(
 
 func commitWorkflowEngineMutationLog(
 	ctx context.Context,
-	tx *sql.Tx,
-	story *privateauthoractivity.Mutation,
+	attempt *mutationprotocol.Attempt,
 	store eventCommitTxStore,
 	postgres bool,
-	effects *revisionEffects,
 	record runtimepipeline.WorkflowEngineStateRecord,
 	before runtimemutationlog.EntityStateProjection,
 ) error {
@@ -396,32 +391,35 @@ func commitWorkflowEngineMutationLog(
 		handlerStep = "create"
 	}
 	writer := runtimemutationlog.Writer{Type: "platform", ID: "workflow_engine", HandlerStep: handlerStep}
-	if postgres {
-		selected, ok := store.(*PipelinePostgresOwner)
-		if !ok {
-			return fmt.Errorf("workflow engine PostgreSQL mutation requires PostgreSQL selected store")
-		}
-		return privatemutationlog.InsertEntityStateDiffWithStory(
-			ctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, before, after, writer, record.UpdatedAt)
+}
+
+func insertWorkflowEngineStateDiff(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurredAt time.Time) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if postgres {
+			selected, ok := store.(*PipelinePostgresOwner)
+			if !ok {
+				return fmt.Errorf("workflow engine PostgreSQL mutation requires PostgreSQL selected store")
+			}
+			return privatemutationlog.InsertEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			}), runtimeAuthorActivityMutation(story), effects,
-			record.EntityID, before, after, writer,
-		)
-	}
-	_, ok := store.(*PipelineSQLiteOwner)
-	if !ok {
-		return fmt.Errorf("workflow engine SQLite mutation requires SQLite selected store")
-	}
-	return storeentity.InsertSQLiteEntityStateDiff(ctx, runtimeAuthorActivityMutation(story), tx, effects, record.Identity.RunID, record.EntityID, before, after, writer, record.UpdatedAt)
+			}), entityID, before, after, writer)
+		}
+		selected, ok := store.(*PipelineSQLiteOwner)
+		if !ok {
+			return fmt.Errorf("workflow engine SQLite mutation requires SQLite selected store")
+		}
+		return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+			return selected.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
+		}), entityID, before, after, writer, occurredAt)
+	})
 }
 
 func commitWorkflowEngineInitialValues(
 	ctx context.Context,
-	tx *sql.Tx,
-	story *privateauthoractivity.Mutation,
+	attempt *mutationprotocol.Attempt,
 	store eventCommitTxStore,
 	postgres bool,
-	effects *revisionEffects,
 	record runtimepipeline.WorkflowEngineStateRecord,
 	before runtimemutationlog.EntityStateProjection,
 ) (runtimemutationlog.EntityStateProjection, error) {
@@ -454,17 +452,7 @@ func commitWorkflowEngineInitialValues(
 		next.Fields = copyWorkflowEngineProjectionMap(adjusted.Fields)
 		next.Fields[field] = initial[field]
 		writer := runtimemutationlog.Writer{Type: "platform", ID: "entity_initial_value", HandlerStep: "create_entity"}
-		if postgres {
-			selected, ok := store.(*PipelinePostgresOwner)
-			if !ok {
-				return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("workflow engine initial values require PostgreSQL selected store")
-			}
-			if err := privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-				return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			}), runtimeAuthorActivityMutation(story), effects, record.EntityID, adjusted, next, writer); err != nil {
-				return runtimemutationlog.EntityStateProjection{}, err
-			}
-		} else if err := storeentity.InsertSQLiteEntityStateDiff(ctx, runtimeAuthorActivityMutation(story), tx, effects, record.Identity.RunID, record.EntityID, adjusted, next, writer, record.UpdatedAt); err != nil {
+		if err := insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, adjusted, next, writer, record.UpdatedAt); err != nil {
 			return runtimemutationlog.EntityStateProjection{}, err
 		}
 		adjusted = next
@@ -484,202 +472,171 @@ func commitWorkflowEngineMutation(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
-	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
-	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
-	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
-	requestCandidate func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error),
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation],
+	candidateWriter mutationprotocol.CandidateWriter,
 	command runtimepipeline.WorkflowEngineMutationCommand,
 ) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 	}
-	handoff, err := reserve(ctx)
-	if err != nil {
-		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
-	}
-	defer handoff.Rollback()
-	result := runtimepipeline.CommittedWorkflowEngineMutation{
-		Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications)),
-		PostCommit:   command.PostCommit,
-	}
 	entityless := !command.EntitylessTarget.Empty()
-	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
-		result = runtimepipeline.CommittedWorkflowEngineMutation{
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
+		result := runtimepipeline.CommittedWorkflowEngineMutation{
 			Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications)),
 			PostCommit:   command.PostCommit,
 		}
-		if runID := strings.TrimSpace(command.GateRouteAdmissionRunID); runID != "" {
-			if postgres {
-				err = gaterouteadapter.RequirePostgres(txctx, tx, runID)
-			} else {
-				err = gaterouteadapter.RequireSQLite(txctx, tx, runID)
-			}
-			if err != nil {
-				return err
-			}
-		}
-		var before runtimemutationlog.EntityStateProjection
-		if entityless {
-			if postgres {
-				err = requirePostgresRunActive(txctx, tx, command.EntitylessRunID)
-			} else {
-				err = requireSQLiteRunActive(txctx, tx, command.EntitylessRunID)
-			}
-			if err != nil {
-				return err
-			}
-		} else {
-			before, err = loadWorkflowEngineStateProjection(txctx, tx, postgres, command.State)
-			if err != nil {
-				return err
-			}
-			if err := commitWorkflowEngineState(txctx, tx, postgres, effects, command.State); err != nil {
-				return err
-			}
-		}
-		if !entityless && command.RouteRetirement != nil {
-			sets := []runtimebus.FlowInstanceRouteRecordSet{{Identity: command.RouteRetirement.Identity}}
-			if _, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, sets); err != nil {
-				return fmt.Errorf("retire terminal workflow route: %w", err)
-			}
-			retirement := *command.RouteRetirement
-			result.RouteRetirement = &retirement
-		}
-		runtimeStory := runtimeAuthorActivityMutation(story)
-		if !entityless {
-			before, err = commitWorkflowEngineInitialValues(txctx, tx, story, store, postgres, effects, command.State, before)
-			if err != nil {
-				return err
-			}
-			result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeStory, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, effects, command.Lifecycle)
-			if err != nil {
-				return err
-			}
-			if command.Lifecycle.RequestCompletionCandidate {
-				candidate, err := requestCandidate(txctx, tx, command.State.Identity.RunID)
+		var err error
+		err = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if runID := strings.TrimSpace(command.GateRouteAdmissionRunID); runID != "" {
+				if postgres {
+					err = gaterouteadapter.RequirePostgres(txctx, tx, runID)
+				} else {
+					err = gaterouteadapter.RequireSQLite(txctx, tx, runID)
+				}
 				if err != nil {
 					return err
 				}
-				if err := prepare(handoff, candidate); err != nil {
+			}
+			var before runtimemutationlog.EntityStateProjection
+			if entityless {
+				if postgres {
+					err = requirePostgresRunActive(txctx, tx, command.EntitylessRunID)
+				} else {
+					err = requireSQLiteRunActive(txctx, tx, command.EntitylessRunID)
+				}
+				if err != nil {
+					return err
+				}
+			} else {
+				before, err = loadWorkflowEngineStateProjection(txctx, tx, postgres, command.State)
+				if err != nil {
+					return err
+				}
+				if err := commitWorkflowEngineState(txctx, attempt, postgres, command.State); err != nil {
 					return err
 				}
 			}
-			if err := commitWorkflowEngineMutationLog(txctx, tx, story, store, postgres, effects, command.State, before); err != nil {
-				return err
+			if !entityless && command.RouteRetirement != nil {
+				sets := []runtimebus.FlowInstanceRouteRecordSet{{Identity: command.RouteRetirement.Identity}}
+				if _, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, sets); err != nil {
+					return fmt.Errorf("retire terminal workflow route: %w", err)
+				}
+				retirement := *command.RouteRetirement
+				result.RouteRetirement = &retirement
 			}
-			for index, proposed := range command.ProposedEffects {
-				if err := store.workflowDecisionLifecycleOwner().InsertProposedEffectTx(txctx, runtimeStory, tx, proposed.Card, proposed.Continuation); err != nil {
-					return fmt.Errorf("commit workflow engine proposed effect %d: %w", index, err)
+			if !entityless {
+				before, err = commitWorkflowEngineInitialValues(txctx, attempt, store, postgres, command.State, before)
+				if err != nil {
+					return err
+				}
+				result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, attempt, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
+				if err != nil {
+					return err
+				}
+				if command.Lifecycle.RequestCompletionCandidate {
+					if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.State.Identity.RunID, nil); err != nil {
+						return err
+					}
+				}
+				if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, command.State, before); err != nil {
+					return err
+				}
+				for index, proposed := range command.ProposedEffects {
+					if err := store.workflowDecisionLifecycleOwner().InsertProposedEffectTx(txctx, attempt, proposed.Card, proposed.Continuation); err != nil {
+						return fmt.Errorf("commit workflow engine proposed effect %d: %w", index, err)
+					}
 				}
 			}
-		}
-		if command.FanOutIntent != nil {
-			runID := command.State.Identity.RunID
-			fields := command.State.Fields
-			triggerEventID := command.FanOutIntent.Capsule.Lineage.ParentEventID
-			createdAt := command.State.UpdatedAt
-			if entityless {
-				runID = command.EntitylessRunID
-				fields = nil
-				triggerEventID = command.FanOutIntent.Source.EventID
-				createdAt = time.Now().UTC()
+			if command.FanOutIntent != nil {
+				runID := command.State.Identity.RunID
+				fields := command.State.Fields
+				triggerEventID := command.FanOutIntent.Capsule.Lineage.ParentEventID
+				createdAt := command.State.UpdatedAt
+				if entityless {
+					runID = command.EntitylessRunID
+					fields = nil
+					triggerEventID = command.FanOutIntent.Source.EventID
+					createdAt = time.Now().UTC()
+				}
+				if err := commitFanOutIntentTx(txctx, attempt, postgres, *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
+					return err
+				}
+				if command.FanOutBarrier != nil {
+					if err := commitFanOutBarrierRegistrationTx(txctx, attempt, postgres, *command.FanOutBarrier); err != nil {
+						return err
+					}
+				}
 			}
-			if err := commitFanOutIntentTx(txctx, tx, postgres, effects, *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
-				return err
+			for index, value := range command.Publications {
+				plan, ok := value.(runtimebus.EnginePublicationPlan)
+				if !ok {
+					return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
+				}
+				publication, err := plan.PublicationCommandForMutation(command.State, command.Lifecycle)
+				if err != nil {
+					return err
+				}
+				committed, err := store.commitPublicationTx(txctx, attempt, publication)
+				if err != nil {
+					return fmt.Errorf("commit workflow engine publication %d: %w", index, err)
+				}
+				evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+				if err != nil {
+					return err
+				}
+				result.Publications = append(result.Publications, evidence)
 			}
-			if command.FanOutBarrier != nil {
-				if err := commitFanOutBarrierRegistrationTx(txctx, tx, postgres, effects, *command.FanOutBarrier); err != nil {
+			if command.FanOutBarrierCompletion != nil {
+				runID := command.State.Identity.RunID
+				updatedAt := command.State.UpdatedAt
+				if entityless {
+					runID = command.EntitylessRunID
+					updatedAt = time.Now().UTC()
+				}
+				if err := commitFanOutBarrierCompletionTx(txctx, attempt, postgres, runID, *command.FanOutBarrierCompletion, updatedAt); err != nil {
 					return err
 				}
 			}
-		}
-		for index, value := range command.Publications {
-			plan, ok := value.(runtimebus.EnginePublicationPlan)
-			if !ok {
-				return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
+			if success := command.DeliverySuccess; success != nil {
+				if _, err := store.SettleWorkflowNodeSuccessTx(
+					txctx,
+					attempt,
+					success.Claim,
+					append([]string(nil), success.SideEffects...),
+					success.Duration,
+					success.RuleSelection,
+				); err != nil {
+					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
+				}
+				if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {
+					return err
+				}
+				claim := success.Claim
+				result.DeliverySuccess = &claim
 			}
-			publication, err := plan.PublicationCommandForMutation(command.State, command.Lifecycle)
-			if err != nil {
-				return err
-			}
-			committed, err := store.commitPublicationTx(txctx, tx, story, effects, publication, handoff)
-			if err != nil {
-				return fmt.Errorf("commit workflow engine publication %d: %w", index, err)
-			}
-			evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
-			if err != nil {
-				return err
-			}
-			result.Publications = append(result.Publications, evidence)
-		}
-		if command.FanOutBarrierCompletion != nil {
-			runID := command.State.Identity.RunID
-			updatedAt := command.State.UpdatedAt
-			if entityless {
-				runID = command.EntitylessRunID
-				updatedAt = time.Now().UTC()
-			}
-			if err := commitFanOutBarrierCompletionTx(txctx, tx, postgres, effects, runID, *command.FanOutBarrierCompletion, updatedAt); err != nil {
-				return err
-			}
-		}
-		if success := command.DeliverySuccess; success != nil {
-			if _, err := store.SettleWorkflowNodeSuccessTx(
-				txctx,
-				tx,
-				runtimeStory,
-				effects,
-				success.Claim,
-				append([]string(nil), success.SideEffects...),
-				success.Duration,
-				success.RuleSelection,
-			); err != nil {
-				return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
-			}
-			candidate, err := requestCandidate(txctx, tx, success.Claim.RunID())
-			if err != nil {
-				return err
-			}
-			if err := prepare(handoff, candidate); err != nil {
-				return err
-			}
-			claim := success.Claim
-			result.DeliverySuccess = &claim
-		}
-		return nil
+			return nil
+		})
+		return result, err
 	})
+	result, committed := outcome.Value()
 	if !committed {
-		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		return runtimepipeline.CommittedWorkflowEngineMutation{}, outcome.Err()
 	}
 	result.Committed = true
 	result.Lifecycle.Committed = true
-	return result, errors.Join(err, result.Validate(), handoff.Commit())
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
-	effects := newRevisionEffects()
-	return commitWorkflowEngineMutation(ctx, s, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
-	}, reserveRunLifecycleCandidateHandoff, func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-		return reservation.Prepare(s.runLifecycleCandidates, result)
-	}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-		return requestPostgresCompletionCandidateTx(ctx, tx, runID, nil, false)
-	}, command)
+	return commitWorkflowEngineMutation(ctx, s, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
+	}, s.RunLifecyclePostgresOwner, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
-	effects := newRevisionEffects()
-	return commitWorkflowEngineMutation(ctx, s, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite workflow engine mutation", effects, fn)
-	}, reserveRunLifecycleCandidateHandoff, func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-		return reservation.Prepare(s.runLifecycleCandidates, result)
-	}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-		return requestSQLiteCompletionCandidateTx(ctx, tx, runID, nil, s.now(), false)
-	}, command)
+	return commitWorkflowEngineMutation(ctx, s, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite workflow engine mutation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
+	}, s.RunLifecycleSQLiteOwner, command)
 }
 
 var _ runtimepipeline.WorkflowEngineMutationOwner = (*PipelinePostgresOwner)(nil)

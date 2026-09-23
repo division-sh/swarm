@@ -119,7 +119,7 @@ func TestAcknowledgedDecisionRouteWinsBeforeCorruptScopeQuarantineOnSQLiteAndPos
 			if err != nil {
 				t.Fatalf("ClaimEvent: %v", err)
 			}
-			if err := owner.MarkDecisionProcessed(fixture.ctx, work.Claim); err != nil {
+			if _, err := owner.MarkDecisionProcessed(fixture.ctx, work.Claim); err != nil {
 				t.Fatalf("MarkDecisionProcessed: %v", err)
 			}
 			if err := owner.Release(fixture.ctx, work.Claim); err != nil {

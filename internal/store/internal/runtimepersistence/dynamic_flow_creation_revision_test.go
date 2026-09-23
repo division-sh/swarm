@@ -125,7 +125,7 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if string(gotPlan) != string(wantPlan) || !replaced.TopologyReadyAt.IsZero() {
 					t.Fatalf("replacement was not complete or retained old topology readiness: got=%s want=%s readiness=%v", gotPlan, wantPlan, replaced.TopologyReadyAt)
 				}
-				if err := f.workflow.MarkDynamicFlowRuntimeTopologyReady(ctx, desired, time.Now().UTC()); err != nil {
+				if committed, err := f.workflow.MarkDynamicFlowRuntimeTopologyReady(ctx, desired, time.Now().UTC()); err != nil || !committed.Acknowledged {
 					t.Fatalf("revised topology: %v", err)
 				}
 				if oldPublished {

@@ -106,8 +106,17 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		return managedExecutionActivation{}, err
 	}
 	if rt.deliveryStore != nil {
-		if err := rt.deliveryStore.ActivateDeliveryAuthority(ctx, deliveryAuthority); err != nil {
-			return managedExecutionActivation{}, fmt.Errorf("activate delivery execution authority: %w", err)
+		commit, activationErr := rt.deliveryStore.ActivateDeliveryAuthorityOutcome(ctx, deliveryAuthority)
+		if !commit.Acknowledged {
+			if activationErr == nil {
+				activationErr = fmt.Errorf("delivery execution authority activation was not acknowledged")
+			}
+			return managedExecutionActivation{}, fmt.Errorf("activate delivery execution authority: %w", activationErr)
+		}
+		if activationErr != nil && rt.Logger != nil {
+			handleRuntimeLogPersistenceError("delivery-continuation", "authority_activation_postcommit_failed", rt.Logger.Warn(
+				context.WithoutCancel(ctx), "delivery-continuation", "authority_activation_postcommit_failed", nil, activationErr,
+			))
 		}
 		coordinator, err := runtimedeliverycontinuation.New(
 			rt.deliveryStore,

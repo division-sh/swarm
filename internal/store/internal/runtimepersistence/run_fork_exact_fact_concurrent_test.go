@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
@@ -55,10 +56,7 @@ func TestRunForkExactFactsConcurrentBothStores(t *testing.T) {
 							finished.err = ctx.Err()
 							return
 						}
-						effects := runforkrevision.NewEffects()
-						reset := effects.AttemptReset()
-						operation := func(ctx context.Context, tx *sql.Tx) error {
-							reset()
+						operation := func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 							for order := range fixtures {
 								i := order
 								if worker == 1 {
@@ -70,34 +68,42 @@ func TestRunForkExactFactsConcurrentBothStores(t *testing.T) {
 									dialect = authoractivityfixture.DialectPostgres
 								}
 								event := eventtest.ExistingRunRootIngress(ids[worker][i], events.EventType("matrix.event"), "exact-concurrent", "", json.RawMessage(`{"matrix":true}`), 0, f.runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, f.at.Add(time.Second))
-								if err := eventfixture.Insert(ctx, tx, dialect, event); err != nil {
-									return err
-								}
-								if err := effects.AddFacts(f.runID, refs[worker][i]); err != nil {
-									return err
+								if err := eventfixture.Insert(ctx, attempt, dialect, event); err != nil {
+									return struct{}{}, err
 								}
 							}
 							select {
 							case written <- worker:
 							case <-ctx.Done():
-								return ctx.Err()
+								return struct{}{}, ctx.Err()
 							}
 							select {
 							case <-finalize:
 							case <-ctx.Done():
-								return ctx.Err()
+								return struct{}{}, ctx.Err()
 							}
-							var err error
-							finished.result, err = finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, effects)
-							return err
+							return struct{}{}, nil
 						}
 						switch selected := s.selected.(type) {
 						case *PostgresStore:
-							finished.committed, finished.err = selected.backend.RunTransactionOutcome(ctx, operation)
+							outcome := mutationprotocol.RunPostgres(ctx, selected.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, selected.runLifecycleCandidates, operation)
+							finished.committed, finished.err = outcome.Acknowledged(), outcome.Err()
 						case *SQLiteRuntimeStore:
-							finished.committed, finished.err = selected.backend.RunTransactionOutcome(ctx, "concurrent exact facts", operation)
+							outcome := mutationprotocol.RunSQLite(ctx, selected.backend, "concurrent exact facts", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, selected.runLifecycleCandidates, operation)
+							finished.committed, finished.err = outcome.Acknowledged(), outcome.Err()
 						default:
 							finished.err = fmt.Errorf("unsupported selected store %T", selected)
+						}
+						if finished.err == nil && finished.committed {
+							finished.result = make(map[string]runforkrevision.Result, len(fixtures))
+							for i, fixture := range fixtures {
+								var revision int64
+								if err := s.db.QueryRowContext(ctx, `SELECT revision FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present`, fixture.runID, ids[worker][i]).Scan(&revision); err != nil {
+									finished.err = err
+									return
+								}
+								finished.result[fixture.runID] = runforkrevision.Result{Changed: true, Revision: revision}
+							}
 						}
 					}(worker)
 				}

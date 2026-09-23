@@ -318,7 +318,7 @@ func (s *TokenSource) CompleteAuthCode(ctx context.Context, req CompleteAuthCode
 		values.Set("code_verifier", strings.TrimSpace(record.PKCEVerifier))
 	}
 	updated, err := s.exchange(ctx, record, values)
-	if err != nil {
+	if err != nil && !committedCredentialExchange(updated, err) {
 		return s.markFailure(ctx, record, err, req.Code)
 	}
 	updated.Status = StatusConnected
@@ -330,7 +330,7 @@ func (s *TokenSource) CompleteAuthCode(ctx context.Context, req CompleteAuthCode
 	if err := s.Store.Put(ctx, updated); err != nil {
 		return Record{}, err
 	}
-	return updated, nil
+	return updated, err
 }
 
 func (s *TokenSource) ConnectClientCredentials(ctx context.Context, req ClientCredentialsRequest) (Record, error) {
@@ -369,7 +369,7 @@ func (s *TokenSource) ConnectClientCredentials(ctx context.Context, req ClientCr
 		values.Set("scope", strings.Join(record.Scopes, " "))
 	}
 	updated, err := s.exchange(ctx, record, values)
-	if err != nil {
+	if err != nil && !committedCredentialExchange(updated, err) {
 		return s.markFailure(ctx, record, err)
 	}
 	updated.Status = StatusConnected
@@ -377,7 +377,7 @@ func (s *TokenSource) ConnectClientCredentials(ctx context.Context, req ClientCr
 	if err := s.Store.Put(ctx, updated); err != nil {
 		return Record{}, err
 	}
-	return updated, nil
+	return updated, err
 }
 
 func (s *TokenSource) ConnectGitHubAppInstallation(ctx context.Context, req GitHubAppInstallationRequest) (Record, error) {
@@ -404,7 +404,7 @@ func (s *TokenSource) ConnectGitHubAppInstallation(ctx context.Context, req GitH
 		return Record{}, fmt.Errorf("managed credential %q private_key is invalid: %w", record.Key, err)
 	}
 	updated, err := s.exchangeGitHubAppInstallation(ctx, record, record.InstallationID)
-	if err != nil {
+	if err != nil && !committedCredentialExchange(updated, err) {
 		return s.markFailure(ctx, record, err)
 	}
 	updated.Status = StatusConnected
@@ -413,7 +413,7 @@ func (s *TokenSource) ConnectGitHubAppInstallation(ctx context.Context, req GitH
 	if err := s.Store.Put(ctx, updated); err != nil {
 		return Record{}, err
 	}
-	return updated, nil
+	return updated, err
 }
 
 func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (string, Record, error) {
@@ -444,24 +444,26 @@ func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (
 	}
 	if strings.TrimSpace(record.AccessToken) == "" || s.shouldRefresh(record) {
 		record, err = s.refresh(ctx, record)
-		if err != nil {
+		refreshErr := err
+		if err != nil && !committedCredentialExchange(record, err) {
 			return "", record, err
 		}
 		if err := GrantTypeCovers(record.GrantType, req.GrantType); err != nil {
-			return "", record, fmt.Errorf("managed credential %q grant-type-insufficient: %w", record.Key, err)
+			return "", record, errors.Join(refreshErr, fmt.Errorf("managed credential %q grant-type-insufficient: %w", record.Key, err))
 		}
 		if err := ensureScopes(record.Scopes, req.Scopes); err != nil {
-			return "", record, fmt.Errorf("managed credential %q scope-insufficient: %w", record.Key, err)
+			return "", record, errors.Join(refreshErr, fmt.Errorf("managed credential %q scope-insufficient: %w", record.Key, err))
 		}
 		if err := managedcredentialmodel.GrantModelCovers(record.GrantModel, req.GrantModel); err != nil {
-			return "", record, fmt.Errorf("managed credential %q grant-model-insufficient: %w", record.Key, err)
+			return "", record, errors.Join(refreshErr, fmt.Errorf("managed credential %q grant-model-insufficient: %w", record.Key, err))
 		}
 		if err := managedcredentialmodel.TokenRequestProfileCovers(record.TokenRequest, req.TokenRequest); err != nil {
-			return "", record, fmt.Errorf("managed credential %q token-request-insufficient: %w", record.Key, err)
+			return "", record, errors.Join(refreshErr, fmt.Errorf("managed credential %q token-request-insufficient: %w", record.Key, err))
 		}
 		if err := ensureInstallationSelection(record, req.InstallationID); err != nil {
-			return "", record, err
+			return "", record, errors.Join(refreshErr, err)
 		}
+		return record.AccessToken, record, refreshErr
 	}
 	return record.AccessToken, record, nil
 }
@@ -475,10 +477,10 @@ func (s *TokenSource) Refresh(ctx context.Context, key string) (string, Record, 
 		return "", Record{}, fmt.Errorf("missing managed credential %q", strings.TrimSpace(key))
 	}
 	record, err = s.refresh(ctx, record)
-	if err != nil {
+	if err != nil && !committedCredentialExchange(record, err) {
 		return "", record, err
 	}
-	return record.AccessToken, record, nil
+	return record.AccessToken, record, err
 }
 
 func (s *TokenSource) refresh(ctx context.Context, record Record) (Record, error) {
@@ -498,7 +500,7 @@ func (s *TokenSource) refresh(ctx context.Context, record Record) (Record, error
 		}
 	case GrantGitHubAppInstallation:
 		updated, err := s.exchangeGitHubAppInstallation(ctx, record, record.InstallationID)
-		if err != nil {
+		if err != nil && !committedCredentialExchange(updated, err) {
 			return s.markFailure(ctx, record, err)
 		}
 		updated.Status = StatusConnected
@@ -507,13 +509,13 @@ func (s *TokenSource) refresh(ctx context.Context, record Record) (Record, error
 		if err := s.Store.Put(ctx, updated); err != nil {
 			return Record{}, err
 		}
-		return updated, nil
+		return updated, err
 	default:
 		err := fmt.Errorf("managed credential %q has unsupported grant_type %q", record.Key, record.GrantType)
 		return s.markFailure(ctx, record, err)
 	}
 	updated, err := s.exchange(ctx, record, values)
-	if err != nil {
+	if err != nil && !committedCredentialExchange(updated, err) {
 		return s.markFailure(ctx, record, err)
 	}
 	updated.Status = StatusConnected
@@ -522,7 +524,39 @@ func (s *TokenSource) refresh(ctx context.Context, record Record) (Record, error
 	if err := s.Store.Put(ctx, updated); err != nil {
 		return Record{}, err
 	}
-	return updated, nil
+	return updated, err
+}
+
+type committedCredentialExchangeError struct{ cause error }
+
+func (e *committedCredentialExchangeError) Error() string { return e.cause.Error() }
+func (e *committedCredentialExchangeError) Unwrap() error { return e.cause }
+
+func committedCredentialExchange(record Record, err error) bool {
+	var committed *committedCredentialExchangeError
+	return strings.TrimSpace(record.AccessToken) != "" && errors.As(err, &committed)
+}
+
+func credentialExchangeError(launchErr, settleErr error) error {
+	err := errors.Join(launchErr, settleErr)
+	if err == nil {
+		return nil
+	}
+	return &committedCredentialExchangeError{cause: err}
+}
+
+func committedCredentialLaunchGate(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("managed credential dispatch canceled after launch marker: %w", err)
+	}
+	current, err := runtimeeffects.ProjectionCurrent(ctx)
+	if err != nil {
+		return fmt.Errorf("check managed credential authority after launch marker: %w", err)
+	}
+	if !current {
+		return errors.New("managed credential authority is no longer current after launch marker")
+	}
+	return nil
 }
 
 func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Values) (Record, error) {
@@ -561,12 +595,20 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 	if err != nil {
 		return Record{}, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
-		return Record{}, err
+	launchErr := attempt.MarkLaunched(ctx)
+	if launchErr != nil {
+		if !runtimeeffects.CommittedMutationPhase(launchErr, runtimeeffects.MutationLaunch, attempt.Attempt()) {
+			return Record{}, launchErr
+		}
+		if gateErr := committedCredentialLaunchGate(ctx); gateErr != nil {
+			return Record{}, errors.Join(launchErr, attempt.Fail(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure,
+				runtimefailures.ClassLifecycleConflict, "managed_credential_launch_dispatch_blocked", "managed-credentials", "exchange",
+				map[string]any{"credential_key": record.Key, "no_dispatch": true}, gateErr))
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "stage": "transport"}, err)
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "stage": "transport"}, err))
 	}
 	defer resp.Body.Close()
 	var body struct {
@@ -580,7 +622,7 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 		Message      string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "stage": "decode"}, err)
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "stage": "decode"}, err))
 	}
 	if resp.StatusCode >= 400 {
 		msg := strings.TrimSpace(body.Error)
@@ -592,12 +634,12 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 		} else if desc := strings.TrimSpace(body.Message); desc != "" {
 			msg += ": " + desc
 		}
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_status_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "status": resp.StatusCode}, fmt.Errorf("%s", msg))
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_status_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key, "status": resp.StatusCode}, fmt.Errorf("%s", msg)))
 	}
 	access := strings.TrimSpace(body.AccessToken)
 	if access == "" {
 		err := fmt.Errorf("token endpoint did not return access_token")
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_result_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key}, err)
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_result_outcome_unconfirmed", "managed-credentials", "exchange", map[string]any{"credential_key": record.Key}, err))
 	}
 	updated := record
 	updated.AccessToken = access
@@ -615,10 +657,11 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 	if body.ExpiresIn > 0 {
 		updated.ExpiresAt = s.now().Add(time.Duration(body.ExpiresIn) * time.Second).UTC()
 	}
-	if err := attempt.Succeed(ctx, map[string]any{"credential_key": record.Key, "status": resp.StatusCode}); err != nil {
-		return Record{}, err
+	settleErr := attempt.Succeed(ctx, map[string]any{"credential_key": record.Key, "status": resp.StatusCode})
+	if settleErr != nil && !runtimeeffects.CommittedMutationPhase(settleErr, runtimeeffects.MutationSettlement, attempt.Attempt()) {
+		return Record{}, errors.Join(launchErr, settleErr)
 	}
-	return updated, nil
+	return updated, credentialExchangeError(launchErr, settleErr)
 }
 
 func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record Record, installationID string) (Record, error) {
@@ -660,13 +703,21 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 	if err != nil {
 		return Record{}, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
-		return Record{}, err
+	launchErr := attempt.MarkLaunched(ctx)
+	if launchErr != nil {
+		if !runtimeeffects.CommittedMutationPhase(launchErr, runtimeeffects.MutationLaunch, attempt.Attempt()) {
+			return Record{}, launchErr
+		}
+		if gateErr := committedCredentialLaunchGate(ctx); gateErr != nil {
+			return Record{}, errors.Join(launchErr, attempt.Fail(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure,
+				runtimefailures.ClassLifecycleConflict, "managed_credential_launch_dispatch_blocked", "managed-credentials", "exchange_github_app",
+				map[string]any{"credential_key": record.Key, "no_dispatch": true}, gateErr))
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		redacted := fmt.Errorf("%s", RedactString(err.Error(), jwt))
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "stage": "transport"}, redacted)
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "stage": "transport"}, redacted))
 	}
 	defer resp.Body.Close()
 	var body struct {
@@ -676,7 +727,7 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 		Message   string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "stage": "decode"}, err)
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_request_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "stage": "decode"}, err))
 	}
 	if resp.StatusCode >= 400 {
 		msg := strings.TrimSpace(body.Error)
@@ -686,12 +737,12 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 		if msg == "" {
 			msg = fmt.Sprintf("github installation token endpoint returned status %d", resp.StatusCode)
 		}
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_status_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "status": resp.StatusCode}, fmt.Errorf("%s", RedactString(msg, jwt)))
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_status_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key, "status": resp.StatusCode}, fmt.Errorf("%s", RedactString(msg, jwt))))
 	}
 	token := strings.TrimSpace(body.Token)
 	if token == "" {
 		err := fmt.Errorf("github installation token endpoint did not return token")
-		return Record{}, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_result_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key}, err)
+		return Record{}, errors.Join(launchErr, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "managed_credential_result_outcome_unconfirmed", "managed-credentials", "exchange_github_app", map[string]any{"credential_key": record.Key}, err))
 	}
 	updated := record
 	updated.AccessToken = token
@@ -706,10 +757,11 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 		}
 		updated.ExpiresAt = parsed.UTC()
 	}
-	if err := attempt.Succeed(ctx, map[string]any{"credential_key": record.Key, "status": resp.StatusCode}); err != nil {
-		return Record{}, err
+	settleErr := attempt.Succeed(ctx, map[string]any{"credential_key": record.Key, "status": resp.StatusCode})
+	if settleErr != nil && !runtimeeffects.CommittedMutationPhase(settleErr, runtimeeffects.MutationSettlement, attempt.Attempt()) {
+		return Record{}, errors.Join(launchErr, settleErr)
 	}
-	return updated, nil
+	return updated, credentialExchangeError(launchErr, settleErr)
 }
 
 func (s *TokenSource) githubAppJWT(record Record) (string, error) {
@@ -856,18 +908,29 @@ func (s *TokenSource) markFailure(ctx context.Context, record Record, cause erro
 			if cause == nil {
 				cause = fmt.Errorf("managed credential %q refresh failed", record.Key)
 			}
-			return record, fmt.Errorf(
+			return record, redactedCredentialFailure(cause, fmt.Sprintf(
 				"managed credential %q refresh failed: %s; persist refresh_failed state: %s",
 				record.Key,
 				RedactString(cause.Error(), secrets...),
 				RedactString(err.Error(), secrets...),
-			)
+			))
 		}
 	}
 	if cause == nil {
 		cause = fmt.Errorf("managed credential %q refresh failed", record.Key)
 	}
-	return record, fmt.Errorf("managed credential %q refresh failed: %s", record.Key, RedactString(cause.Error(), secrets...))
+	return record, redactedCredentialFailure(cause, fmt.Sprintf("managed credential %q refresh failed: %s", record.Key, RedactString(cause.Error(), secrets...)))
+}
+
+func redactedCredentialFailure(cause error, message string) error {
+	visible := errors.New(message)
+	var committed *runtimeeffects.PostCommitMutationError
+	if !errors.As(cause, &committed) {
+		return visible
+	}
+	return errors.Join(visible, &runtimeeffects.PostCommitMutationError{
+		Phase: committed.Phase, OperationID: committed.OperationID, AttemptID: committed.AttemptID,
+	})
 }
 
 func (s *TokenSource) shouldRefresh(record Record) bool {

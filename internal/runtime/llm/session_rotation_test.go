@@ -19,10 +19,10 @@ func TestPrepareManagedSessionRotatesExactCompletedRootBeforeNextFrame(t *testin
 		t.Fatal(err)
 	}
 	oldSessionID := lease.SessionID
-	if err := registry.IncrementTurn(ctx, identity, oldSessionID); err != nil {
+	if _, err := registry.IncrementTurnOutcome(ctx, identity, oldSessionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Release(ctx, lease); err != nil {
+	if _, err := registry.ReleaseOutcome(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
 	session := &Session{
@@ -40,7 +40,7 @@ func TestPrepareManagedSessionRotatesExactCompletedRootBeforeNextFrame(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = registry.Release(context.Background(), current) }()
+	defer func() { _, _ = registry.ReleaseOutcome(context.Background(), current) }()
 	if current.SessionID != session.ID || current.RetriesFromSessionID != oldSessionID {
 		t.Fatalf("current lease=%#v session=%#v", current, session)
 	}
@@ -54,7 +54,7 @@ func TestPrepareManagedSessionRejectsStaleSessionWithoutRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.Release(ctx, lease); err != nil {
+	if _, err := registry.ReleaseOutcome(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
 	session := &Session{
@@ -68,7 +68,7 @@ func TestPrepareManagedSessionRejectsStaleSessionWithoutRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = registry.Release(context.Background(), current) }()
+	defer func() { _, _ = registry.ReleaseOutcome(context.Background(), current) }()
 	if current.SessionID != lease.SessionID || session.ID != "stale-session" {
 		t.Fatalf("stale preparation mutated current=%#v session=%#v", current, session)
 	}

@@ -841,19 +841,19 @@ type recordingRuntimeContextRunControlStore struct {
 	continueCalls int
 }
 
-func (s *recordingRuntimeContextRunControlStore) StopRunControl(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *recordingRuntimeContextRunControlStore) StopRunControlOutcome(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error) {
 	s.stopCalls++
-	return runtimeruncontrol.State{RunID: req.RunID, Status: runtimeruncontrol.StatusCancelled, ControlStatus: runtimeruncontrol.StatusStopped}, nil
+	return runtimeruncontrol.StoreTransition{State: runtimeruncontrol.State{RunID: req.RunID, Status: runtimeruncontrol.StatusCancelled, ControlStatus: runtimeruncontrol.StatusStopped}, Acknowledged: true}, nil
 }
 
-func (s *recordingRuntimeContextRunControlStore) PauseRunControl(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *recordingRuntimeContextRunControlStore) PauseRunControlOutcome(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error) {
 	s.pauseCalls++
-	return runtimeruncontrol.State{RunID: req.RunID, Status: runtimeruncontrol.StatusPaused, ControlStatus: runtimeruncontrol.StatusPaused}, nil
+	return runtimeruncontrol.StoreTransition{State: runtimeruncontrol.State{RunID: req.RunID, Status: runtimeruncontrol.StatusPaused, ControlStatus: runtimeruncontrol.StatusPaused}, Acknowledged: true}, nil
 }
 
-func (s *recordingRuntimeContextRunControlStore) ContinueRunControl(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *recordingRuntimeContextRunControlStore) ContinueRunControlOutcome(_ context.Context, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error) {
 	s.continueCalls++
-	return runtimeruncontrol.State{RunID: req.RunID, Status: runtimeruncontrol.StatusRunning, ControlStatus: runtimeruncontrol.StatusRunning}, nil
+	return runtimeruncontrol.StoreTransition{State: runtimeruncontrol.State{RunID: req.RunID, Status: runtimeruncontrol.StatusRunning, ControlStatus: runtimeruncontrol.StatusRunning}, Acknowledged: true}, nil
 }
 
 func (*recordingRuntimeContextRunControlStore) RunDispatchBlocked(context.Context, string) (bool, error) {

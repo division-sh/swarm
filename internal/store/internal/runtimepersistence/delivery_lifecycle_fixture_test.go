@@ -15,7 +15,7 @@ import (
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func postgresDeliveryFixtureStore(db *sql.DB) *PostgresStore {
@@ -61,21 +61,7 @@ func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	route = canonicalDeliveryFixtureRoute(t, event.RunID(), route)
 	store := postgresDeliveryFixtureStore(db)
-	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, event.RunID())
-		if err != nil {
-			return err
-		}
-		effects, err := runforkrevision.ForRun(event.RunID(), runforkrevision.FamilyEventDeliveries)
-		if err != nil {
-			return err
-		}
-		if _, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, effects, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
-			return err
-		}
-		_, err = runforkrevision.FinalizePostgres(txctx, tx, effects)
-		return err
-	}); err != nil {
+	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("commit delivery fixture %s/%s: %v", eventID, route.Recipient.ID(), err)
 	}
 	return event
@@ -192,39 +178,34 @@ func testEntitylessNodeDeliveryRoute(nodeID string) events.DeliveryRoute {
 
 func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) error {
 	route = canonicalDeliveryFixtureRouteValue(event.RunID(), route)
+	return runDeliveryFixtureAttempt(ctx, store, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		adapter, dialect := sqliteDeliveryAdapter, deliveryadapter.DialectSQLite
+		if _, ok := store.(*PostgresStore); ok {
+			adapter, dialect = postgresDeliveryAdapter, deliveryadapter.DialectPostgres
+		}
+		var authority runtimedelivery.ExecutionAuthority
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			authority, err = deliveryFixtureAuthorityForRun(txctx, tx, dialect, event.RunID())
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		_, err = adapter.CommitInitial(txctx, attempt, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
+		return err
+	})
+}
+
+func runDeliveryFixtureAttempt(ctx context.Context, store deliveryFixtureStore, write func(context.Context, *mutationprotocol.Attempt) error) error {
+	apply := func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, write(txctx, attempt)
+	}
 	switch selected := store.(type) {
 	case *PostgresStore:
-		return selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, event.RunID())
-			if err != nil {
-				return err
-			}
-			effects, err := runforkrevision.ForRun(event.RunID(), runforkrevision.FamilyEventDeliveries)
-			if err != nil {
-				return err
-			}
-			if _, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, effects, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
-				return err
-			}
-			_, err = runforkrevision.FinalizePostgres(txctx, tx, effects)
-			return err
-		})
+		return mutationprotocol.RunPostgres(ctx, selected.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, selected.runLifecycleCandidates, apply).Err()
 	case *SQLiteRuntimeStore:
-		return selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			authority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectSQLite, event.RunID())
-			if err != nil {
-				return err
-			}
-			effects, err := runforkrevision.ForRun(event.RunID(), runforkrevision.FamilyEventDeliveries)
-			if err != nil {
-				return err
-			}
-			if _, err = sqliteDeliveryAdapter.CommitInitial(txctx, tx, effects, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
-				return err
-			}
-			_, err = runforkrevision.FinalizeSQLite(txctx, tx, effects)
-			return err
-		})
+		return mutationprotocol.RunSQLite(ctx, selected.backend, "delivery fixture", mutationprotocol.Story, mutationprotocol.Ordinary, nil, selected.runLifecycleCandidates, apply).Err()
 	default:
 		return fmt.Errorf("delivery fixture store %T is unsupported", store)
 	}

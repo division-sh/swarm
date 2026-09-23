@@ -473,7 +473,7 @@ func TestRunControlContinueCommittedRecoveryOutcomeParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture, later := newControllerContinuationFixture(t, backend)
 			runStore := fixture.store.(runtimeruncontrol.Store)
-			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+			if _, err := runStore.PauseRunControlOutcome(fixture.ctx, runtimeruncontrol.TransitionRequest{
 				RunID:        fixture.event.RunID(),
 				Reason:       "continuation proof",
 				ControlledBy: "test",
@@ -502,7 +502,7 @@ func TestRunControlContinueCommittedRecoveryOutcomeParity(t *testing.T) {
 			}
 			assertRetryReleaseReplayable(t, fixture, fixture.event.ID())
 
-			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+			if _, err := runStore.PauseRunControlOutcome(fixture.ctx, runtimeruncontrol.TransitionRequest{
 				RunID:        fixture.event.RunID(),
 				Reason:       "failed recovery proof",
 				ControlledBy: "test",
@@ -540,7 +540,7 @@ func TestRunControlContinueCommittedRecoveryOutcomeParity(t *testing.T) {
 				t.Fatalf("committed continue after recovery failure: blocked=%v err=%v", blocked, err)
 			}
 
-			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+			if _, err := runStore.PauseRunControlOutcome(fixture.ctx, runtimeruncontrol.TransitionRequest{
 				RunID:        fixture.event.RunID(),
 				Reason:       "cancelled recovery proof",
 				ControlledBy: "test",
@@ -597,7 +597,7 @@ func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *t
 			}
 			runStore := fixture.store.(runtimeruncontrol.Store)
 			pausedAt := fixture.event.CreatedAt().Add(time.Second)
-			if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+			if _, err := runStore.PauseRunControlOutcome(fixture.ctx, runtimeruncontrol.TransitionRequest{
 				RunID:        fixture.event.RunID(),
 				Reason:       "decision-route continuation proof",
 				ControlledBy: "test",
@@ -791,7 +791,7 @@ func TestControllerCancellationBetweenBatchesAbandonsCursorOnSQLiteAndPostgres(t
 					}
 				case "run_continue":
 					runStore := fixture.store.(runtimeruncontrol.Store)
-					if _, err := runStore.PauseRunControl(fixture.ctx, runtimeruncontrol.TransitionRequest{
+					if _, err := runStore.PauseRunControlOutcome(fixture.ctx, runtimeruncontrol.TransitionRequest{
 						RunID:        fixture.event.RunID(),
 						Reason:       "cancellation proof",
 						ControlledBy: "test",

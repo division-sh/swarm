@@ -3,13 +3,13 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -28,45 +28,51 @@ func TestLLMPostgresConcurrentFirstAuditInsertCapturesBothOwners(t *testing.T) {
 		return runtimellm.AgentTurnRecord{SessionID: sessionID, RunID: run, Identity: identity,
 			AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(), Memory: agentmemory.PlatformDefault()}
 	}
-	a, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
+	runMutation := func(write func(context.Context, *mutationprotocol.Attempt) error) error {
+		return mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates,
+			func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, write(txctx, attempt)
+			}).Err()
 	}
-	defer a.Rollback()
-	b, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer b.Rollback()
-	var aPID, bPID int
-	if err := a.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&aPID); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&bPID); err != nil {
-		t.Fatal(err)
-	}
-	aEffects := runforkrevision.NewEffects()
-	if err := store.lLMPostgresOwner.EnsureCompletionTurnMemoryTx(ctx, a, aEffects, record(first.runID)); err != nil {
-		t.Fatal(err)
-	}
+	aStarted := make(chan int, 1)
+	bStarted := make(chan int, 1)
+	releaseA := make(chan struct{})
+	aFinished := make(chan error, 1)
 	finished := make(chan error, 1)
 	go func() {
-		effects := runforkrevision.NewEffects()
-		if err := store.lLMPostgresOwner.EnsureCompletionTurnMemoryTx(ctx, b, effects, record(next.runID)); err != nil {
-			finished <- err
-			return
-		}
-		results, err := runforkrevision.FinalizePostgres(ctx, b, effects)
-		if err != nil {
-			finished <- err
-			return
-		}
-		if len(results) != 2 || !results[first.runID].Changed || !results[next.runID].Changed {
-			finished <- fmt.Errorf("concurrent first-insert lost prior/resulting owner: %+v", results)
-			return
-		}
-		finished <- b.Commit()
+		aFinished <- runMutation(func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+			var pid int
+			if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return tx.QueryRowContext(txctx, `SELECT pg_backend_pid()`).Scan(&pid)
+			}); err != nil {
+				return err
+			}
+			if err := store.lLMPostgresOwner.EnsureCompletionTurnMemoryTx(txctx, attempt, record(first.runID)); err != nil {
+				return err
+			}
+			aStarted <- pid
+			select {
+			case <-releaseA:
+				return nil
+			case <-txctx.Done():
+				return txctx.Err()
+			}
+		})
 	}()
+	aPID := <-aStarted
+	go func() {
+		finished <- runMutation(func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+			var pid int
+			if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return tx.QueryRowContext(txctx, `SELECT pg_backend_pid()`).Scan(&pid)
+			}); err != nil {
+				return err
+			}
+			bStarted <- pid
+			return store.lLMPostgresOwner.EnsureCompletionTurnMemoryTx(txctx, attempt, record(next.runID))
+		})
+	}()
+	bPID := <-bStarted
 	// Wait on the actual unique-insert lock, not a timing guess or a hook. B's
 	// preceding SELECT saw no committed audit; A is still its uncommitted writer.
 	ticker := time.NewTicker(10 * time.Millisecond)
@@ -89,10 +95,8 @@ func TestLLMPostgresConcurrentFirstAuditInsertCapturesBothOwners(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	if _, err := runforkrevision.FinalizePostgres(ctx, a, aEffects); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.Commit(); err != nil {
+	close(releaseA)
+	if err := <-aFinished; err != nil {
 		t.Fatal(err)
 	}
 	select {

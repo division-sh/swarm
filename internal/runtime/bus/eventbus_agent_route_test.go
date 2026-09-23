@@ -56,25 +56,13 @@ func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim run
 	s.binds++
 	s.bindFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	s.mu.Unlock()
-	tx, err := s.db.BeginTx(ctx, nil)
+	var snapshot runtimedelivery.Snapshot
+	err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		var err error
+		snapshot, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
+		return err
+	}).Err()
 	if err != nil {
-		return runtimedelivery.Snapshot{}, err
-	}
-	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		_ = tx.Rollback()
-		return runtimedelivery.Snapshot{}, err
-	}
-	snapshot, err := s.adapter.BindAgentSession(ctx, tx, claim, sessionID)
-	if err != nil {
-		_ = tx.Rollback()
-		return runtimedelivery.Snapshot{}, err
-	}
-	if err := authoractivityfixture.Finalize(ctx); err != nil {
-		_ = tx.Rollback()
-		return runtimedelivery.Snapshot{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
 	return snapshot, nil
@@ -92,6 +80,24 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 		`CREATE TABLE runs (
 			run_id TEXT PRIMARY KEY,
 			bundle_hash TEXT
+		)`,
+		`CREATE TABLE run_fork_revision_heads (
+			run_id TEXT PRIMARY KEY,
+			last_revision INTEGER NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP
+		)`,
+		`CREATE TABLE run_fork_revisions (
+			run_id TEXT,
+			revision INTEGER,
+			recorded_at TIMESTAMP
+		)`,
+		`CREATE TABLE run_fork_fact_revisions (
+			run_id TEXT,
+			revision INTEGER,
+			family TEXT,
+			fact_key TEXT,
+			fact TEXT,
+			present BOOLEAN
 		)`,
 		`CREATE TABLE events (
 			event_class TEXT NOT NULL,
@@ -113,6 +119,8 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			chain_depth INTEGER NOT NULL,
 			produced_by TEXT NOT NULL,
 			produced_by_type TEXT NOT NULL,
+			handler_node TEXT,
+			idempotency_key TEXT,
 			source_event_id TEXT,
 			created_at TIMESTAMP NOT NULL,
 			routing_source_kind TEXT NOT NULL,
@@ -258,20 +266,20 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route events.DeliveryRoute) {
 	t.Helper()
 	ctx := context.Background()
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash) VALUES (?, ?) ON CONFLICT (run_id) DO NOTHING`, runID, s.authority.SourceArtifact().BundleHash()); err != nil {
+		t.Fatalf("seed exact handoff run: %v", err)
+	}
 	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
+	if err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectSQLite, evt)
+	}).Err(); err != nil {
 		t.Fatalf("seed exact handoff event: %v", err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin exact handoff obligation: %v", err)
-	}
-	if _, err := s.adapter.CommitInitial(ctx, tx, eventID, runID, []events.DeliveryRoute{route}, s.authority); err != nil {
-		_ = tx.Rollback()
+	if err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		_, err := s.adapter.CommitInitial(ctx, attempt, eventID, runID, []events.DeliveryRoute{route}, s.authority)
+		return err
+	}).Err(); err != nil {
 		t.Fatalf("commit exact handoff obligation: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit exact handoff transaction: %v", err)
 	}
 }
 
@@ -300,31 +308,21 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 		runtimeauthoractivity.BundleScope("exact-claim-runtime", "exact-claim-bundle"),
 	)
 	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	tx, err := s.db.BeginTx(ctx, nil)
+	var claimed runtimedelivery.ClaimedObligation
+	err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		result, err := s.adapter.ClaimExactResult(ctx, attempt, s.authority, evt, route, runtimedelivery.DefaultLeaseTTL)
+		if err != nil {
+			return err
+		}
+		var ok bool
+		claimed, ok = result.Acquired()
+		if !ok {
+			return fmt.Errorf("claim exact delivery disposition = %s", result.Disposition)
+		}
+		return nil
+	}).Err()
 	if err != nil {
-		t.Fatalf("begin exact delivery claim: %v", err)
-	}
-	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("begin exact claim author activity: %v", err)
-	}
-	result, err := s.adapter.ClaimExactResult(ctx, tx, s.authority, evt, route, runtimedelivery.DefaultLeaseTTL)
-	if err != nil {
-		_ = tx.Rollback()
 		t.Fatalf("claim exact delivery: %v", err)
-	}
-	claimed, ok := result.Acquired()
-	if !ok {
-		_ = tx.Rollback()
-		t.Fatalf("claim exact delivery disposition = %s", result.Disposition)
-	}
-	if err := authoractivityfixture.Finalize(ctx); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("finalize exact claim author activity: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit exact delivery claim: %v", err)
 	}
 	return claimed.Claim
 }

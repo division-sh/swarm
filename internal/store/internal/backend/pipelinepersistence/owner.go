@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -20,14 +19,12 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storereplycontext "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -37,60 +34,40 @@ import (
 	"github.com/google/uuid"
 )
 
-type CompletionCandidateRequester interface {
-	RequestCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time, *runhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error)
-}
-
-type revisionEffects = privaterunforkrevision.Effects
-
-func newRevisionEffects() *revisionEffects { return privaterunforkrevision.NewEffects() }
-
-func addTimerRevisionEffects(effects *revisionEffects, runID, timerID string) error {
-	return effects.AddFact(runID, privaterunforkrevision.FamilyTimers, timerID)
-}
-
 type EventCommitOwner interface {
-	CommitFanOutPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission, *runhandoff.CandidateHandoff) (runtimebus.CommittedPublication, error)
-	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, *revisionEffects, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
-	CommitPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, runtimebus.PublicationCommand, *runhandoff.CandidateHandoff) (runtimebus.CommittedPublication, error)
+	CommitFanOutPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error)
+	AppendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	CommitPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 }
 
 type eventCommitTxStore interface {
-	commitFanOutPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission, *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error)
-	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, authoractivity.Mutation, *revisionEffects, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	commitFanOutPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error)
+	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
-	CommitInitialDeliveryObligationsTx(context.Context, *sql.Tx, *revisionEffects, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
-	CommitInitialPipelineScopeTx(context.Context, *sql.Tx, *revisionEffects, string, runtimepipelineobligation.CommittedScope) error
-	CommitInitialPipelineDispositionTx(context.Context, *sql.Tx, *revisionEffects, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
-	RecordDeadLetterTx(context.Context, *sql.Tx, authoractivity.Mutation, *revisionEffects, runtimedeadletters.Record, bool) error
-	createReplyContextTx(context.Context, *sql.Tx, *revisionEffects, runtimereplycontext.Record) error
-	claimReplyContextTx(context.Context, *sql.Tx, *revisionEffects, runtimereplycontext.ClaimCommand) error
-	CommitFlowInstanceActivationsTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
+	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
+	CommitInitialPipelineScopeTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope) error
+	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
+	RecordDeadLetterTx(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error
+	createReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
+	claimReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
+	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
 	workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner
 	genericScheduleTxOwner() GenericScheduleTxOwner
-	commitPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, runtimebus.PublicationCommand, *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error)
-	SettleWorkflowNodeSuccessTx(context.Context, *sql.Tx, authoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
+	commitPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
+	SettleWorkflowNodeSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
 }
 
 type GenericScheduleTxOwner interface {
-	AdmitTx(context.Context, *sql.Tx, *revisionEffects, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
-	CancelAdmissionTx(context.Context, *sql.Tx, *revisionEffects, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
-	LoadActivationTx(context.Context, *sql.Tx, string) (runtimegenericschedule.Activation, bool, error)
-	CancelActivationTx(context.Context, *sql.Tx, *revisionEffects, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)
+	AdmitTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
+	CancelAdmissionTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
+	LoadActivationTx(context.Context, *mutationprotocol.Attempt, string) (runtimegenericschedule.Activation, bool, error)
+	CancelActivationTx(context.Context, *mutationprotocol.Attempt, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)
 }
 
-type runLifecycleCandidateHandoffReservation = runhandoff.CandidateHandoff
 type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
 
 func (fn activeRunSourceOwnerFunc) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	return fn(ctx, runID)
-}
-
-func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) authoractivity.Mutation {
-	if story == nil {
-		return nil
-	}
-	return story
 }
 
 func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -99,18 +76,6 @@ func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) err
 
 func requireSQLiteRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
 	return storerunstate.RequireSQLiteActiveTx(ctx, tx, runID)
-}
-
-func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
-	return runhandoff.ReserveCandidateHandoff(ctx)
-}
-
-func requestPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, _ bool) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return storerunlifecycle.RequestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt)
-}
-
-func requestSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, now time.Time, _ bool) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return storerunlifecycle.RequestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, now)
 }
 
 func jsonRawMessageValue(raw any) json.RawMessage {
@@ -153,7 +118,7 @@ type PipelinePostgresOwner struct {
 
 	backend                *postgresbackend.Backend
 	requireCurrent         func() error
-	candidateRequests      CompletionCandidateRequester
+	candidateRequests      mutationprotocol.CandidateWriter
 	runLifecycleCandidates *runhandoff.CandidateCoordinator
 	workflowEntityQueries  *storeworkflowentityquery.Postgres
 	workflowRoutes         *storeworkflowroute.Postgres
@@ -174,7 +139,7 @@ type PipelineSQLiteOwner struct {
 
 	backend                *sqlitebackend.Backend
 	requireCurrent         func() error
-	candidateRequests      CompletionCandidateRequester
+	candidateRequests      mutationprotocol.CandidateWriter
 	runLifecycleCandidates *runhandoff.CandidateCoordinator
 	workflowEntityQueries  *storeworkflowentityquery.SQLite
 	workflowRoutes         *storeworkflowroute.SQLite
@@ -229,7 +194,7 @@ func (s *PipelineSQLiteOwner) genericScheduleTxOwner() GenericScheduleTxOwner {
 }
 
 type SelectedForkCommitTxOwner interface {
-	CommitSelectedForkTx(context.Context, *sql.Tx, authoractivity.Mutation, *revisionEffects, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
+	CommitSelectedForkTx(context.Context, *mutationprotocol.Attempt, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 
 func (s *PipelinePostgresOwner) BindSelectedForkWriter(owner SelectedForkCommitTxOwner) error {
@@ -298,69 +263,6 @@ func (s *PipelineSQLiteOwner) now() time.Time {
 	return s.nowFn().UTC()
 }
 
-func (s *PipelineSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx) error) error {
-	_, err := s.runRuntimeMutationOutcome(ctx, label, effects, operation)
-	return err
-}
-
-func (s *PipelineSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	resetEffects := effects.AttemptReset()
-	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		resetEffects()
-		if err := operation(txctx, tx); err != nil {
-			return err
-		}
-		_, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects)
-		return err
-	})
-}
-
-func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, operation)
-	return err
-}
-
-func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		if err := story.Finalize(txctx); err != nil {
-			return err
-		}
-		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
-		return err
-	})
-}
-
-func (s *PipelineSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, effects, operation)
-	return err
-}
-
-func (s *PipelineSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-	return s.runRuntimeMutationOutcome(ctx, label, effects, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
 func (s *PipelinePostgresOwner) workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner {
 	return s.DecisionPostgresOwner
 }
@@ -369,42 +271,42 @@ func (s *PipelineSQLiteOwner) workflowDecisionLifecycleOwner() workflowDecisionL
 	return s.DecisionSQLiteOwner
 }
 
-func (s *PipelinePostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story authoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
-	return s.events.AppendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
+func (s *PipelinePostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.events.AppendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 }
 
-func (s *PipelineSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story authoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
-	return s.events.AppendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
+func (s *PipelineSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.events.AppendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 }
 
-func (s *PipelinePostgresOwner) commitPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-	return s.events.CommitPublicationTx(ctx, tx, story, effects, command, handoff)
+func (s *PipelinePostgresOwner) commitPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return s.events.CommitPublicationTx(ctx, attempt, command)
 }
 
-func (s *PipelineSQLiteOwner) commitPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-	return s.events.CommitPublicationTx(ctx, tx, story, effects, command, handoff)
+func (s *PipelineSQLiteOwner) commitPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return s.events.CommitPublicationTx(ctx, attempt, command)
 }
 
-func (s *PipelinePostgresOwner) commitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-	return s.events.CommitFanOutPublicationTx(ctx, tx, story, effects, command, projection, handoff)
+func (s *PipelinePostgresOwner) commitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error) {
+	return s.events.CommitFanOutPublicationTx(ctx, attempt, command, projection)
 }
 
-func (s *PipelineSQLiteOwner) commitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-	return s.events.CommitFanOutPublicationTx(ctx, tx, story, effects, command, projection, handoff)
+func (s *PipelineSQLiteOwner) commitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error) {
+	return s.events.CommitFanOutPublicationTx(ctx, attempt, command, projection)
 }
 
-func (s *PipelinePostgresOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimereplycontext.Record) error {
-	return s.ReplyPostgresOwner.CreateWithinTransaction(ctx, tx, effects, record)
+func (s *PipelinePostgresOwner) createReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplyPostgresOwner.CreateWithinTransaction(ctx, attempt, record)
 }
 
-func (s *PipelineSQLiteOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimereplycontext.Record) error {
-	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, tx, effects, record)
+func (s *PipelineSQLiteOwner) createReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, attempt, record)
 }
 
-func (s *PipelinePostgresOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, command runtimereplycontext.ClaimCommand) error {
-	return s.ReplyPostgresOwner.ClaimWithinTransaction(ctx, tx, effects, command)
+func (s *PipelinePostgresOwner) claimReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
+	return s.ReplyPostgresOwner.ClaimWithinTransaction(ctx, attempt, command)
 }
 
-func (s *PipelineSQLiteOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, command runtimereplycontext.ClaimCommand) error {
-	return s.ReplySQLiteOwner.ClaimWithinTransaction(ctx, tx, effects, command)
+func (s *PipelineSQLiteOwner) claimReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
+	return s.ReplySQLiteOwner.ClaimWithinTransaction(ctx, attempt, command)
 }

@@ -30,13 +30,10 @@ import (
 	runcontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
-
-var errStopAfterSelectedForkCommit = errors.New("test stop after selected-fork materialization commit")
 
 type terminalUnwindProbe struct {
 	mode   string
@@ -339,16 +336,49 @@ func TestStageTimerTerminalJoinsAgentsWithoutJoiningItsCallbackBothStores(t *tes
 	}
 }
 
-type stopAfterSelectedForkCommit struct {
-	forkexecution.SelectedContractForkLifecycle
-}
-
-func (s stopAfterSelectedForkCommit) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
-	result, err := s.SelectedContractForkLifecycle.MaterializeRunForkForSelectedContractExecution(ctx, req)
+func stageCatalogSelectedContractFork(
+	t testing.TB,
+	ctx context.Context,
+	store forkexecution.SelectedContractForkLifecycle,
+	owner forkexecution.SelectedContractExecutionOwner,
+	loader forkexecution.SelectedContractSourceLoader,
+	selection runfork.RunForkContractSelection,
+	options forkexecution.SelectedContractAgentRuntimeOptions,
+	sourceRunID, eventID string,
+) runfork.RunForkMaterialization {
+	t.Helper()
+	prepared, err := owner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
+		SourceRunID: sourceRunID, At: eventID, AllowSourceFreeze: true,
+		SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+	})
 	if err != nil {
-		return result, err
+		t.Fatalf("prepare selected fork for direct staging: %v", err)
 	}
-	return result, errStopAfterSelectedForkCommit
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Errorf("close directly staged selected fork preparation: %v", err)
+		}
+	}()
+	request, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatalf("project directly staged selected fork request: %v", err)
+	}
+	commitCtx := runtimecorrelation.WithSourceArtifactFact(ctx, request.SourceArtifactFact)
+	materialized, err := store.MaterializeRunForkForSelectedContractExecution(commitCtx, request)
+	if err != nil {
+		t.Fatalf("direct selected fork materialization: %v", err)
+	}
+	binding := materialized.SelectedContractBinding
+	if materialized.ForkRunID == "" || materialized.SourceRunID != request.SourceRunID || materialized.ForkPoint.EventID != request.At ||
+		binding == nil || binding.BindingID == "" || binding.ForkRunID != materialized.ForkRunID ||
+		binding.SourceRunID != request.SourceRunID || binding.ForkEventID != request.At || binding.ContractSelection != request.ContractSelection {
+		t.Fatalf("directly staged selected fork returned inexact binding: %+v", materialized)
+	}
+	stored, found, err := store.LoadRunForkSelectedContractBinding(commitCtx, materialized.ForkRunID)
+	if err != nil || !found || !reflect.DeepEqual(stored, *binding) {
+		t.Fatalf("directly staged selected binding readback = %+v found=%t err=%v; want %+v", stored, found, err, *binding)
+	}
+	return materialized
 }
 
 func TestSelectedForkFlowOwnedReadinessBothStoresInitial(t *testing.T) {
@@ -407,7 +437,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						path := "worker-flow/worker-001"
 						entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
 						ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
-						if _, err := selected.PauseRunControl(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "readiness matrix", ControlledBy: "cataloge2e"}); err != nil {
+						if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "readiness matrix", ControlledBy: "cataloge2e"}); err != nil {
 							t.Fatal(err)
 						}
 						eventName := "worker.inspect"
@@ -467,19 +497,18 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								hostile: declarations == 0 && frontier == "activity", hostileLoop: frontier == "activity_loop" || frontier == "activity_loop_rule", rejectFinal: frontier == "activity_rejected",
 							})
 						}
+						var result forkexecution.SelectedContractExecutionResult
 						if stage == "staged" {
-							executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, stopAfterSelectedForkCommit{forkStore})
+							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, event.ID())
+						} else {
+							result, err = forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
+								SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
+								Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+							})
 						}
-						result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-							SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
-							Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
-						})
 						forkRun := result.Materialization.ForkRunID
 						refused := stage == "staged" && frontier != "agent"
 						if stage == "staged" {
-							if !errors.Is(err, errStopAfterSelectedForkCommit) || forkRun == "" {
-								t.Fatalf("stage: %#v %v", result, err)
-							}
 							beforeActivation := selectedForkReadinessSnapshot(t, ctx, h, forkRun, owner.Route)
 							attempts := 1
 							if refused {

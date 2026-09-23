@@ -695,7 +695,7 @@ func publishCatalogTrigger(t testing.TB, h *runtimeHarness, step catalogTriggerS
 
 func pauseCatalogRun(t testing.TB, h *runtimeHarness) {
 	t.Helper()
-	if _, err := h.pg.PauseRunControl(h.ctx, runtimeruncontrol.TransitionRequest{
+	if _, err := h.pg.PauseRunControlOutcome(h.ctx, runtimeruncontrol.TransitionRequest{
 		RunID:        catalogRuntimeRunID,
 		Reason:       "tier12_runtime_fork_fixture_boundary",
 		ControlledBy: "cataloge2e",

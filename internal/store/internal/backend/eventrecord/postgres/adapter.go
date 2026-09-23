@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -101,12 +102,13 @@ func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.
 	return orderRecords(ordered, loaded)
 }
 
-func Insert(ctx context.Context, q RowQueryer, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
+func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record eventrecord.Record) (bool, error) {
 	if err := record.Validate(); err != nil {
 		return false, fmt.Errorf("append event record: %w", err)
 	}
 	var storedEventID, storedRunID string
-	err := q.QueryRowContext(ctx, `
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
@@ -123,12 +125,13 @@ func Insert(ctx context.Context, q RowQueryer, effects *runforkrevision.Effects,
 		) ON CONFLICT (event_id) DO NOTHING
 		RETURNING event_id::text, COALESCE(run_id::text, '')
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
-		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
-		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
-		record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
-		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt,
-		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin)).Scan(&storedEventID, &storedRunID)
+			record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
+			record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
+			record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
+			record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt,
+			record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
+			string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin)).Scan(&storedEventID, &storedRunID)
+	})
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -138,11 +141,7 @@ func Insert(ctx context.Context, q RowQueryer, effects *runforkrevision.Effects,
 	// UUID columns may preserve a different spelling than the admitted input.
 	// Exact effects must name the physical row without rewriting event payloads.
 	if storedRunID != "" {
-		ref, err := runforkrevision.NewFactRef(runforkrevision.FamilyEvents, storedEventID)
-		if err != nil {
-			return false, err
-		}
-		if err := effects.AddFacts(storedRunID, ref); err != nil {
+		if err := attempt.AddFact(storedRunID, runforkrevision.FamilyEvents, storedEventID); err != nil {
 			return false, err
 		}
 	}

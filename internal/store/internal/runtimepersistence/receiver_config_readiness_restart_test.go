@@ -82,14 +82,14 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 					creation := *changed.CreationEvent
 					creation.Payload = []byte(strings.ReplaceAll(string(creation.Payload), "7.0", "7"))
 					changed.CreationEvent = &creation
-					if err := f.workflows.MarkDynamicFlowRuntimeTopologyReady(f.ctx, changed, req.OccurredAt); err == nil {
+					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReady(f.ctx, changed, req.OccurredAt); err == nil {
 						t.Fatal("topology CAS accepted a substituted numeric kind")
 					}
 					stored, _, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, plan.Readiness.RunID, plan.Identity.Route())
 					if err != nil || !stored.TopologyReadyAt.IsZero() {
 						t.Fatalf("rejected topology CAS mutated readiness: %#v err=%v", stored, err)
 					}
-					if err := f.workflows.MarkDynamicFlowRuntimeTopologyReady(f.ctx, plan.Readiness, req.OccurredAt); err != nil {
+					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReady(f.ctx, plan.Readiness, req.OccurredAt); err != nil {
 						t.Fatal(err)
 					}
 					event := eventtest.PersistedChildForProducer(creation.EventID, events.EventType(creation.EventType), eventtest.Producer(events.EventProducerPlatform, "flow-instance-activator"), "", creation.Payload, 0, creation.RunID, creation.ParentEventID,
@@ -162,7 +162,7 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 	}
 }
 
-func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testing.T, publisher pipeline.DynamicFlowRuntimeCreationOccurrencePublisher) receiverConfigActivationFixture {
+func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testing.T, publisher pipeline.DynamicFlowRuntimeCreationOccurrencePublisher, workflowOverride ...*readinessPostcommitFaultWorkflow) receiverConfigActivationFixture {
 	t.Helper()
 	fact, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -176,7 +176,7 @@ func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testi
 	}
 	f.bus = &sqliteFlowActivationBus{}
 	f.workflows = configureAgentFixtureFlowLifecycle(t, f.store, f.bus, f.bundle)
-	f.manager = ownStoreTestAgentManager(t, manager.NewAgentManagerWithOptions(f.bus, nil, manager.AgentManagerOptions{
+	options := manager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live, BaseContext: f.ctx, SourceArtifactFact: fact,
 		SemanticSource: semanticview.Wrap(f.bundle), WorkflowInstances: f.workflows, LLMBackend: "anthropic",
 		DeliveryStore: f.store, WorkOwner: storeTestWorkOwner(t),
@@ -185,7 +185,11 @@ func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testi
 			RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, RouteRetirer: f.bus,
 			CreationPublisher: publisher,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
-	}, f.store))
+	}
+	if len(workflowOverride) != 0 {
+		options.WorkflowInstances = workflowOverride[0]
+	}
+	f.manager = ownStoreTestAgentManager(t, manager.NewAgentManagerWithOptions(f.bus, nil, options, f.store))
 	admission, err := agenttopology.StaticAdmission(sourceSet.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)

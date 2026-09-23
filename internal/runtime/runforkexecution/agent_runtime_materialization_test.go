@@ -528,7 +528,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner: executionOwner, LoadedSource: loaded,
 		Prepared: prepared, AgentRuntime: agents, Admission: executionAdmission,
-	}, eventBus, &runtimepipeline.PipelineCoordinator{})
+	}, eventBus, &runtimepipeline.PipelineCoordinator{}, nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)
 	}

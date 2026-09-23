@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
@@ -47,17 +48,13 @@ var _ runtimereplycontext.Store = (*ReplyPostgresOwner)(nil)
 var _ runtimereplycontext.Store = (*ReplySQLiteOwner)(nil)
 
 func (s *ReplyPostgresOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		effects := runforkrevision.NewEffects()
-		if err := s.CreateWithinTransaction(txctx, tx, effects, record); err != nil {
-			return err
-		}
-		_, err := runforkrevision.FinalizePostgres(txctx, tx, effects)
-		return err
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, s.CreateWithinTransaction(txctx, attempt, record)
 	})
+	return result.Err()
 }
 
-func createPostgresReplyContext(ctx context.Context, db *sql.Tx, effects *runforkrevision.Effects, record runtimereplycontext.Record) error {
+func createPostgresReplyContext(ctx context.Context, db *sql.Tx, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
 	record = record.Normalized()
 	if err := record.Validate(); err != nil {
 		return err
@@ -97,31 +94,29 @@ func createPostgresReplyContext(ctx context.Context, db *sql.Tx, effects *runfor
 		return fmt.Errorf("create reply context rows: %w", err)
 	}
 	if rows == 1 {
-		return effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)
+		return attempt.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)
 	}
 	existing, loadErr := loadPostgresReplyContext(ctx, db, record.ID, false)
 	if err := resolveReplyContextCreateConflict(record, existing, loadErr); err != nil {
 		return err
 	}
-	return effects.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)
+	return attempt.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)
 }
 
-func (s *ReplyPostgresOwner) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record runtimereplycontext.Record) error {
-	return createPostgresReplyContext(ctx, tx, effects, record)
-}
-
-func (s *ReplySQLiteOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
-	return s.backend.RunTransaction(ctx, "sqlite reply context create", func(txctx context.Context, tx *sql.Tx) error {
-		effects := runforkrevision.NewEffects()
-		if err := s.CreateWithinTransaction(txctx, tx, effects, record); err != nil {
-			return err
-		}
-		_, err := runforkrevision.FinalizeSQLite(txctx, tx, effects)
-		return err
+func (s *ReplyPostgresOwner) CreateWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return createPostgresReplyContext(ctx, tx, attempt, record)
 	})
 }
 
-func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, effects *runforkrevision.Effects, record runtimereplycontext.Record) error {
+func (s *ReplySQLiteOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite reply context create", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, s.CreateWithinTransaction(txctx, attempt, record)
+	})
+	return result.Err()
+}
+
+func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
 	record = record.Normalized()
 	if err := record.Validate(); err != nil {
 		return err
@@ -155,17 +150,19 @@ func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, effects *runfor
 		return fmt.Errorf("create sqlite reply context rows: %w", err)
 	}
 	if rows == 1 {
-		return effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)
+		return attempt.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)
 	}
 	existing, loadErr := loadSQLiteReplyContext(ctx, db, record.ID)
 	if err := resolveReplyContextCreateConflict(record, existing, loadErr); err != nil {
 		return err
 	}
-	return effects.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)
+	return attempt.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)
 }
 
-func (s *ReplySQLiteOwner) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record runtimereplycontext.Record) error {
-	return createSQLiteReplyContextTx(ctx, tx, effects, record)
+func (s *ReplySQLiteOwner) CreateWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return createSQLiteReplyContextTx(ctx, tx, attempt, record)
+	})
 }
 
 func resolveReplyContextCreateConflict(record, existing runtimereplycontext.Record, loadErr error) error {
@@ -205,22 +202,27 @@ func loadSQLiteReplyContext(ctx context.Context, db replyContextSQL, id string) 
 }
 
 func (s *ReplyPostgresOwner) ClaimReplyContext(ctx context.Context, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
-	var record runtimereplycontext.Record
-	var outcome runtimereplycontext.ClaimOutcome
-	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		record, outcome, err = claimPostgresReplyContext(txctx, tx, id, replyEventID)
+	type claimResult struct {
+		record  runtimereplycontext.Record
+		outcome runtimereplycontext.ClaimOutcome
+	}
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (claimResult, error) {
+		var value claimResult
+		err := attempt.WithSQL(txctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			value.record, value.outcome, err = claimPostgresReplyContext(ctx, tx, id, replyEventID)
+			return err
+		})
 		if err != nil {
-			return err
+			return claimResult{}, err
 		}
-		effects := runforkrevision.NewEffects()
-		if err := effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID); err != nil {
-			return err
-		}
-		_, err = runforkrevision.FinalizePostgres(txctx, tx, effects)
-		return err
+		return value, attempt.AddFact(value.record.RunID, runforkrevision.FamilyReplyContexts, value.record.ID)
 	})
-	return record, outcome, err
+	value, ok := result.Value()
+	if !ok {
+		return runtimereplycontext.Record{}, "", result.Err()
+	}
+	return value.record, value.outcome, result.Err()
 }
 
 func claimPostgresReplyContext(ctx context.Context, tx *sql.Tx, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
@@ -232,25 +234,30 @@ func claimPostgresReplyContext(ctx context.Context, tx *sql.Tx, id, replyEventID
 }
 
 func (s *ReplySQLiteOwner) ClaimReplyContext(ctx context.Context, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
-	var record runtimereplycontext.Record
-	var outcome runtimereplycontext.ClaimOutcome
-	err := s.backend.RunTransaction(ctx, "sqlite reply context claim", func(txctx context.Context, tx *sql.Tx) error {
-		loaded, err := loadSQLiteReplyContext(txctx, tx, id)
+	type claimResult struct {
+		record  runtimereplycontext.Record
+		outcome runtimereplycontext.ClaimOutcome
+	}
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite reply context claim", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (claimResult, error) {
+		var value claimResult
+		err := attempt.WithSQL(txctx, func(ctx context.Context, tx *sql.Tx) error {
+			loaded, err := loadSQLiteReplyContext(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			value.record, value.outcome, err = claimLoadedReplyContextTx(ctx, tx, loaded, replyEventID, false)
+			return err
+		})
 		if err != nil {
-			return err
+			return claimResult{}, err
 		}
-		record, outcome, err = claimLoadedReplyContextTx(txctx, tx, loaded, replyEventID, false)
-		if err != nil {
-			return err
-		}
-		effects := runforkrevision.NewEffects()
-		if err := effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID); err != nil {
-			return err
-		}
-		_, err = runforkrevision.FinalizeSQLite(txctx, tx, effects)
-		return err
+		return value, attempt.AddFact(value.record.RunID, runforkrevision.FamilyReplyContexts, value.record.ID)
 	})
-	return record, outcome, err
+	value, ok := result.Value()
+	if !ok {
+		return runtimereplycontext.Record{}, "", result.Err()
+	}
+	return value.record, value.outcome, result.Err()
 }
 
 func claimLoadedReplyContextTx(ctx context.Context, db *sql.Tx, record runtimereplycontext.Record, replyEventID string, postgres bool) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
@@ -308,34 +315,42 @@ func claimLoadedReplyContextTx(ctx context.Context, db *sql.Tx, record runtimere
 	return record.Normalized(), runtimereplycontext.ClaimAccepted, nil
 }
 
-func (s *ReplyPostgresOwner) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, command runtimereplycontext.ClaimCommand) error {
+func (s *ReplyPostgresOwner) ClaimWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
 	command = command.Normalized()
 	if err := command.Validate(); err != nil {
 		return err
 	}
-	loaded, err := loadPostgresReplyContext(ctx, tx, command.Expected.ID, true)
-	if err != nil {
+	var loaded runtimereplycontext.Record
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		loaded, err = loadPostgresReplyContext(ctx, tx, command.Expected.ID, true)
+		if err != nil {
+			return err
+		}
+		return commitExpectedReplyContextClaim(ctx, tx, loaded, command, true)
+	}); err != nil {
 		return err
 	}
-	if err := commitExpectedReplyContextClaim(ctx, tx, loaded, command, true); err != nil {
-		return err
-	}
-	return effects.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)
+	return attempt.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)
 }
 
-func (s *ReplySQLiteOwner) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, command runtimereplycontext.ClaimCommand) error {
+func (s *ReplySQLiteOwner) ClaimWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
 	command = command.Normalized()
 	if err := command.Validate(); err != nil {
 		return err
 	}
-	loaded, err := loadSQLiteReplyContext(ctx, tx, command.Expected.ID)
-	if err != nil {
+	var loaded runtimereplycontext.Record
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		loaded, err = loadSQLiteReplyContext(ctx, tx, command.Expected.ID)
+		if err != nil {
+			return err
+		}
+		return commitExpectedReplyContextClaim(ctx, tx, loaded, command, false)
+	}); err != nil {
 		return err
 	}
-	if err := commitExpectedReplyContextClaim(ctx, tx, loaded, command, false); err != nil {
-		return err
-	}
-	return effects.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)
+	return attempt.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)
 }
 
 func commitExpectedReplyContextClaim(ctx context.Context, tx *sql.Tx, loaded runtimereplycontext.Record, command runtimereplycontext.ClaimCommand, postgres bool) error {

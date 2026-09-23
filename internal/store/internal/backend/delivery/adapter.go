@@ -22,6 +22,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	. "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -86,7 +87,13 @@ const (
 	providerOriginRecoveryAlreadyTerminal
 )
 
-func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, eventID, runID string, routes []events.DeliveryRoute, authority ExecutionAuthority) ([]DurableHandoffProof, error) {
+func (a *Adapter) CommitInitial(ctx context.Context, attempt *mutationprotocol.Attempt, eventID, runID string, routes []events.DeliveryRoute, authority ExecutionAuthority) ([]DurableHandoffProof, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) ([]DurableHandoffProof, error) {
+		return a.commitInitialTx(ctx, tx, attempt, eventID, runID, routes, authority)
+	})
+}
+
+func (a *Adapter) commitInitialTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, eventID, runID string, routes []events.DeliveryRoute, authority ExecutionAuthority) ([]DurableHandoffProof, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("delivery initial commit transaction is required")
 	}
@@ -122,7 +129,7 @@ func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, effects *privat
 		if err != nil {
 			return nil, err
 		}
-		proof, err := a.insertExactObligation(ctx, tx, effects, obligation)
+		proof, err := a.insertExactObligation(ctx, tx, attempt, obligation)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +141,13 @@ func (a *Adapter) CommitInitial(ctx context.Context, tx *sql.Tx, effects *privat
 // ActivateNormalAuthority is the crash/replacement handoff for nonterminal
 // normal-runtime work in one exact bundle source. Startup ownership fences the
 // predecessor before this selected-store operation is invoked.
-func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, authority ExecutionAuthority) error {
+func (a *Adapter) ActivateNormalAuthority(ctx context.Context, attempt *mutationprotocol.Attempt, authority ExecutionAuthority) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return a.activateNormalAuthorityTx(ctx, tx, attempt, authority)
+	})
+}
+
+func (a *Adapter) activateNormalAuthorityTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, authority ExecutionAuthority) error {
 	if tx == nil {
 		return fmt.Errorf("delivery authority activation transaction is required")
 	}
@@ -221,10 +234,10 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, effec
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("activate normal delivery execution authority: %w", err)
 	}
-	return declareAuthorityDeliveryRuns(ctx, tx, authority, effects)
+	return declareAuthorityDeliveryRuns(ctx, tx, authority, attempt)
 }
 
-func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, obligation Obligation) (DurableHandoffProof, error) {
+func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, obligation Obligation) (DurableHandoffProof, error) {
 	target, deliveryContext, projection, connectClaim, materialization, err := encodeRoute(obligation.Route())
 	if err != nil {
 		return DurableHandoffProof{}, err
@@ -325,13 +338,19 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, effects
 	if inserted == 0 && (record.Status != StatusPending || record.RetryCount != 0 || record.ClaimVersion != 0) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: delivery obligation replay conflicts with existing lifecycle", ErrConflict)
 	}
-	if err := effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
+	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
 		return DurableHandoffProof{}, err
 	}
 	return AdmitDurableHandoffProof(obligation.DeliveryID(), obligation.EventID(), events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()), obligation.Authority())
 }
 
-func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
+func (a *Adapter) ClaimExactResult(ctx context.Context, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (ClaimResult, error) {
+		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL)
+	})
+}
+
+func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
 	if tx == nil {
 		return ClaimResult{}, fmt.Errorf("delivery claim transaction is required")
 	}
@@ -411,7 +430,7 @@ func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, effects *pri
 		result.Snapshot = snapshotAt(record, now)
 		return result, nil
 	}
-	claimed, err := a.claimLocked(ctx, tx, effects, story, record, leaseTTL)
+	claimed, err := a.claimLocked(ctx, tx, attempt, record, leaseTTL)
 	if err != nil {
 		return ClaimResult{}, err
 	}
@@ -671,7 +690,13 @@ func (a *Adapter) PipelineHandoffIncomplete(ctx context.Context, q queryer, even
 
 // CommitPipelineHandoff records the durable transition from event-level
 // processing to executable delivery continuation ownership.
-func (a *Adapter) CommitPipelineHandoff(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, eventID string) error {
+func (a *Adapter) CommitPipelineHandoff(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return a.commitPipelineHandoffTx(ctx, tx, attempt, eventID)
+	})
+}
+
+func (a *Adapter) commitPipelineHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, eventID string) error {
 	if tx == nil {
 		return errors.New("delivery continuation handoff transaction is required")
 	}
@@ -702,7 +727,7 @@ func (a *Adapter) CommitPipelineHandoff(ctx context.Context, tx *sql.Tx, effects
 		if err := rows.Scan(&runID, &deliveryID); err != nil {
 			return err
 		}
-		if err := effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID); err != nil {
+		if err := attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID); err != nil {
 			return err
 		}
 	}
@@ -756,7 +781,7 @@ func (a *Adapter) SnapshotExact(ctx context.Context, q queryer, event events.Eve
 	return a.Snapshot(ctx, q, deliveryID)
 }
 
-func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
+func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = DefaultLeaseTTL
 	}
@@ -780,7 +805,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, effects *privater
 	token := uuid.NewString()
 	version := record.ClaimVersion + 1
 	expiresAt := now.Add(leaseTTL)
-	if err := a.insertAttempt(ctx, tx, effects, record.RunID, record.DeliveryID, version, token, now, expiresAt); err != nil {
+	if err := a.insertAttempt(ctx, tx, attempt, record.RunID, record.DeliveryID, version, token, now, expiresAt); err != nil {
 		return ClaimedObligation{}, err
 	}
 	query := `
@@ -810,7 +835,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, effects *privater
 		return ClaimedObligation{}, fmt.Errorf("%w: delivery claim lost compare-and-set", ErrConflict)
 	}
 	if record.Status == StatusInProgress {
-		if err := a.expireAttempt(ctx, tx, effects, record, now); err != nil {
+		if err := a.expireAttempt(ctx, tx, attempt, record, now); err != nil {
 			return ClaimedObligation{}, err
 		}
 	}
@@ -822,16 +847,22 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, effects *privater
 	if err != nil {
 		return ClaimedObligation{}, err
 	}
-	if err := a.recordTransition(ctx, story, claimed, "in_progress", nil, now); err != nil {
+	if err := a.recordTransition(ctx, attempt, claimed, "in_progress", nil, now); err != nil {
 		return ClaimedObligation{}, err
 	}
-	if err := effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
+	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
 		return ClaimedObligation{}, err
 	}
 	return ClaimedObligation{Snapshot: claimed.Snapshot, Claim: claim}, nil
 }
 
-func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim Claim, sessionID string) (Snapshot, error) {
+func (a *Adapter) BindAgentSession(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, sessionID string) (Snapshot, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
+		return a.bindAgentSessionTx(ctx, tx, attempt, claim, sessionID)
+	})
+}
+
+func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, sessionID string) (Snapshot, error) {
 	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery session binding requires a current claim")
 	}
@@ -898,14 +929,20 @@ func (a *Adapter) BindAgentSession(ctx context.Context, tx *sql.Tx, effects *pri
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery session binding lost claim", ErrConflict)
 	}
-	if err := effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
+	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	return updated.Snapshot, err
 }
 
-func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
+func (a *Adapter) RenewClaim(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
+		return a.renewClaimTx(ctx, tx, attempt, claim, leaseTTL)
+	})
+}
+
+func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
 	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery claim renewal requires a current claim")
 	}
@@ -973,16 +1010,18 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, effects *privateru
 			return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
 		}
 	}
-	if err := effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
+	if err := attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	return updated.Snapshot, err
 }
 
-func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, claim Claim, sideEffects []string, duration time.Duration, selection handlerselection.HandlerRuleSelectionFact) (Snapshot, error) {
-	return a.settle(ctx, tx, effects, story, claim, Settlement{
-		Disposition: "success", SideEffects: sideEffects, Duration: duration, RuleSelection: handlerselection.Resolved(selection),
+func (a *Adapter) SettleSuccess(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, sideEffects []string, duration time.Duration, selection handlerselection.HandlerRuleSelectionFact) (Snapshot, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
+		return a.settle(ctx, tx, attempt, claim, Settlement{
+			Disposition: "success", SideEffects: sideEffects, Duration: duration, RuleSelection: handlerselection.Resolved(selection),
+		})
 	})
 }
 
@@ -1091,7 +1130,7 @@ func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql
 	return providerOriginRecoveryAlreadyTerminal, nil
 }
 
-func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim Claim) (bool, error) {
+func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim) (bool, error) {
 	disposition, err := a.providerOriginRecoveryDisposition(ctx, tx, claim)
 	if err != nil {
 		return false, err
@@ -1150,10 +1189,10 @@ func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx,
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return false, fmt.Errorf("%w: provider origin recovery lost delivery lifecycle owner", ErrConflict)
 	}
-	return false, effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())
+	return false, attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())
 }
 
-func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, claim Claim, settlement Settlement) (Snapshot, error) {
+func (a *Adapter) SettleFailure(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement) (Snapshot, error) {
 	if settlement.Disposition != FailureRetry && settlement.Disposition != FailureDeadLetter {
 		return Snapshot{}, fmt.Errorf("delivery failure disposition %q is invalid", settlement.Disposition)
 	}
@@ -1163,10 +1202,12 @@ func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, effects *privat
 	if settlement.Disposition == FailureDeadLetter && strings.TrimSpace(settlement.ReasonCode) == "" {
 		return Snapshot{}, fmt.Errorf("terminal delivery failure requires a reason code")
 	}
-	return a.settle(ctx, tx, effects, story, claim, settlement)
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
+		return a.settle(ctx, tx, attempt, claim, settlement)
+	})
 }
 
-func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, claim Claim, settlement Settlement) (Snapshot, error) {
+func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement) (Snapshot, error) {
 	if tx == nil {
 		return Snapshot{}, fmt.Errorf("delivery settlement transaction is required")
 	}
@@ -1226,7 +1267,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, effects *privaterunfor
 		if err != nil {
 			return Snapshot{}, err
 		}
-		if err := a.persistHandlerRuleSelection(ctx, tx, effects, record.RunID, claim.DeliveryID(), fact); err != nil {
+		if err := a.persistHandlerRuleSelection(ctx, tx, attempt, record.RunID, claim.DeliveryID(), fact); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -1263,23 +1304,30 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, effects *privaterunfor
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery settlement lost claim", ErrConflict)
 	}
-	if err := effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
+	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
 		return Snapshot{}, err
 	}
-	if err := a.completeAttempt(ctx, tx, effects, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now); err != nil {
+	if err := a.completeAttempt(ctx, tx, attempt, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := a.recordTransition(ctx, story, updated, transition, effectiveFailure, now); err != nil {
+	if err := a.recordTransition(ctx, attempt, updated, transition, effectiveFailure, now); err != nil {
 		return Snapshot{}, err
 	}
 	return snapshotAt(updated, now), nil
 }
 
-func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID, deliveryID string, fact handlerselection.HandlerRuleSelectionFact) error {
+func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string, fact handlerselection.HandlerRuleSelectionFact) error {
+	if err := a.persistHandlerRuleSelectionSQL(ctx, tx, deliveryID, fact); err != nil {
+		return err
+	}
+	return attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)
+}
+
+func (a *Adapter) persistHandlerRuleSelectionSQL(ctx context.Context, tx *sql.Tx, deliveryID string, fact handlerselection.HandlerRuleSelectionFact) error {
 	var flowPath, family, semanticPath any
 	if ref := fact.Ref(); ref.Valid() {
 		flowPath = ref.Flow().String()
@@ -1310,7 +1358,7 @@ func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, e
 	if !persisted.Equal(fact) {
 		return fmt.Errorf("%w: delivery handler rule selection contradicts the canonical fact", ErrConflict)
 	}
-	return effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)
+	return nil
 }
 
 // handlerRuleSelection is private to immutable insertion/equality admission.
@@ -1336,7 +1384,7 @@ func (a *Adapter) handlerRuleSelection(ctx context.Context, tx *sql.Tx, delivery
 	return persisted, nil
 }
 
-func (a *Adapter) persistTerminalizationRuleSelection(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID, deliveryID string) error {
+func (a *Adapter) persistTerminalizationRuleSelection(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string) error {
 	final, err := FinalSelection(StatusDeadLetter, handlerselection.NotReached())
 	if err != nil {
 		return err
@@ -1345,7 +1393,7 @@ func (a *Adapter) persistTerminalizationRuleSelection(ctx context.Context, tx *s
 	if err != nil {
 		return err
 	}
-	return a.persistHandlerRuleSelection(ctx, tx, effects, runID, deliveryID, fact)
+	return a.persistHandlerRuleSelection(ctx, tx, attempt, runID, deliveryID, fact)
 }
 
 func (a *Adapter) retryExhaustedFailure(ctx context.Context, tx *sql.Tx, record deliveryRecord, claim Claim, current *runtimefailures.Envelope) (*runtimefailures.Envelope, error) {
@@ -2267,7 +2315,13 @@ func (a *Adapter) ActiveSnapshots(ctx context.Context, q queryer) ([]Snapshot, e
 	return out, nil
 }
 
-func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, runID, reason string) ([]Terminalization, error) {
+func (a *Adapter) TerminalizeRun(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string) ([]Terminalization, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) ([]Terminalization, error) {
+		return a.terminalizeRunTx(ctx, tx, attempt, runID, reason)
+	})
+}
+
+func (a *Adapter) terminalizeRunTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, reason string) ([]Terminalization, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("delivery run terminalization transaction is required")
 	}
@@ -2303,10 +2357,10 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, effects *priva
 	if err != nil {
 		return nil, err
 	}
-	return a.terminalizeDeliveries(ctx, tx, effects, story, ids, reason, failure)
+	return a.terminalizeDeliveries(ctx, tx, attempt, ids, reason, failure)
 }
 
-func (a *Adapter) terminalizeDeliveries(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story runtimeauthoractivity.Mutation, ids []string, reason string, failure runtimefailures.Envelope) ([]Terminalization, error) {
+func (a *Adapter) terminalizeDeliveries(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, ids []string, reason string, failure runtimefailures.Envelope) ([]Terminalization, error) {
 	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -2336,10 +2390,10 @@ func (a *Adapter) terminalizeDeliveries(ctx context.Context, tx *sql.Tx, effects
 		} else if affected, _ := result.RowsAffected(); affected != 1 {
 			return nil, fmt.Errorf("%w: run terminalization lost delivery claim fence", ErrConflict)
 		}
-		if err := effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, id); err != nil {
+		if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, id); err != nil {
 			return nil, err
 		}
-		if err := a.persistTerminalizationRuleSelection(ctx, tx, effects, record.RunID, id); err != nil {
+		if err := a.persistTerminalizationRuleSelection(ctx, tx, attempt, record.RunID, id); err != nil {
 			return nil, err
 		}
 		if record.claimToken != "" && record.ClaimVersion > 0 {
@@ -2347,18 +2401,18 @@ func (a *Adapter) terminalizeDeliveries(ctx context.Context, tx *sql.Tx, effects
 			if err != nil {
 				return nil, err
 			}
-			if err := a.closeAttemptForTerminalization(ctx, tx, effects, claim, reason, &failure, now); err != nil {
+			if err := a.closeAttemptForTerminalization(ctx, tx, attempt, claim, reason, &failure, now); err != nil {
 				return nil, err
 			}
 		}
-		if err := a.insertTerminalizedAttempt(ctx, tx, effects, record.RunID, id, version, reason, &failure, now); err != nil {
+		if err := a.insertTerminalizedAttempt(ctx, tx, attempt, record.RunID, id, version, reason, &failure, now); err != nil {
 			return nil, err
 		}
 		updated, err := a.loadByID(ctx, tx, id, false)
 		if err != nil {
 			return nil, err
 		}
-		if err := a.recordTransition(ctx, story, updated, "terminalized", &failure, now); err != nil {
+		if err := a.recordTransition(ctx, attempt, updated, "terminalized", &failure, now); err != nil {
 			return nil, err
 		}
 		out = append(out, Terminalization{Previous: record.Snapshot, Current: updated.Snapshot})
@@ -2381,7 +2435,7 @@ func parentTerminalizationFailure(reason string) (runtimefailures.Envelope, erro
 	return failure, nil
 }
 
-func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim Claim, reason string, failure *runtimefailures.Envelope, now time.Time) error {
+func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, reason string, failure *runtimefailures.Envelope, now time.Time) error {
 	failureRaw, err := encodeFailure(failure)
 	if err != nil {
 		return err
@@ -2408,10 +2462,10 @@ func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return fmt.Errorf("%w: delivery attempt is stale during parent terminalization", ErrConflict)
 	}
-	return effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())
+	return attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())
 }
 
-func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID, deliveryID string, version int64, reason string, failure *runtimefailures.Envelope, now time.Time) error {
+func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string, version int64, reason string, failure *runtimefailures.Envelope, now time.Time) error {
 	token := uuid.NewString()
 	failureRaw, err := encodeFailure(failure)
 	if err != nil {
@@ -2434,10 +2488,10 @@ func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, eff
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record terminalized delivery attempt: %w", err)
 	}
-	if err := effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID); err != nil {
+	if err := attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID); err != nil {
 		return err
 	}
-	return a.insertOutcome(ctx, tx, effects, deliveryID, version, "terminalized", reason, failure, nil, 0, now)
+	return a.insertOutcome(ctx, tx, attempt, deliveryID, version, "terminalized", reason, failure, nil, 0, now)
 }
 
 func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
@@ -2458,7 +2512,7 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 	return record, now, nil
 }
 
-func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
+func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
 	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE)`
 	args := []any{deliveryID, version, token, startedAt, expiresAt}
 	if a.dialect == DialectSQLite {
@@ -2467,10 +2521,10 @@ func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, effects *privat
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record delivery claim attempt: %w", err)
 	}
-	return effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)
+	return attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)
 }
 
-func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, record deliveryRecord, now time.Time) error {
+func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record deliveryRecord, now time.Time) error {
 	if record.claimToken == "" || record.ClaimVersion <= 0 {
 		return fmt.Errorf("%w: expired in-progress delivery has no current claim", ErrConflict)
 	}
@@ -2486,10 +2540,10 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, effects *privat
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return fmt.Errorf("%w: expired delivery attempt is missing", ErrConflict)
 	}
-	return effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)
+	return attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)
 }
 
-func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
+func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
 	failureRaw, err := encodeFailure(failure)
 	if err != nil {
 		return err
@@ -2521,13 +2575,13 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, effects *priv
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return fmt.Errorf("%w: delivery attempt is stale", ErrConflict)
 	}
-	if err := effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
+	if err := attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
 		return err
 	}
-	return a.insertOutcome(ctx, tx, effects, claim.DeliveryID(), claim.Version(), outcome, reason, failure, sideEffects, duration, now)
+	return a.insertOutcome(ctx, tx, attempt, claim.DeliveryID(), claim.Version(), outcome, reason, failure, sideEffects, duration, now)
 }
 
-func (a *Adapter) insertOutcome(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, deliveryID string, version int64, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
+func (a *Adapter) insertOutcome(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, deliveryID string, version int64, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
 	failureRaw, err := encodeFailure(failure)
 	if err != nil {
 		return err
@@ -2546,10 +2600,10 @@ func (a *Adapter) insertOutcome(ctx context.Context, tx *sql.Tx, effects *privat
 	}
 	// Outcomes are joined into dead-letter history, including diagnostics that
 	// existed before this outcome was recorded.
-	return declareOutcomeDeadLetterEffects(ctx, tx, effects, deliveryID, version)
+	return declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)
 }
 
-func (a *Adapter) recordTransition(ctx context.Context, story runtimeauthoractivity.Mutation, record deliveryRecord, transition string, failure *runtimefailures.Envelope, occurredAt time.Time) error {
+func (a *Adapter) recordTransition(ctx context.Context, attempt *mutationprotocol.Attempt, record deliveryRecord, transition string, failure *runtimefailures.Envelope, occurredAt time.Time) error {
 	currentScope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !ok || strings.TrimSpace(currentScope.RuntimeInstanceID) == "" {
 		return fmt.Errorf("delivery lifecycle transition requires exact runtime instance scope")
@@ -2563,10 +2617,10 @@ func (a *Adapter) recordTransition(ctx context.Context, story runtimeauthoractiv
 	var summary string
 	var found bool
 	var err error
-	if story == nil {
-		return fmt.Errorf("delivery transition requires private story ownership")
+	if attempt == nil {
+		return fmt.Errorf("delivery transition requires private attempt ownership")
 	}
-	summary, found, err = story.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
+	summary, found, err = attempt.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
 	if err != nil {
 		return fmt.Errorf("load delivery source author-safe summary: %w", err)
 	}
@@ -2588,7 +2642,7 @@ func (a *Adapter) recordTransition(ctx context.Context, story runtimeauthoractiv
 		Scope:             transitionScope,
 		AuthorSafeSummary: summary, Failure: runtimefailures.CloneEnvelope(failure),
 	}
-	err = story.Record(ctx, draft)
+	err = attempt.Record(ctx, draft)
 	if err != nil {
 		return fmt.Errorf("record delivery lifecycle activity: %w", err)
 	}

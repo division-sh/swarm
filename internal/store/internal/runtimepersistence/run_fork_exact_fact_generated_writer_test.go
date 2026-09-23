@@ -22,7 +22,7 @@ func TestRunForkExactFactsEntityIDSpellingsBothStores(t *testing.T) {
 				t.Run(spelling, func(t *testing.T) {
 					selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
 					owner := selected.(interface {
-						CreateEntity(context.Context, tools.EntityCreateRecord) error
+						CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
 					})
 					canonical := uuid.NewString()
 					input := canonical
@@ -31,7 +31,8 @@ func TestRunForkExactFactsEntityIDSpellingsBothStores(t *testing.T) {
 					} else if spelling == "compact" {
 						input = strings.ReplaceAll(canonical, "-", "")
 					}
-					if err := owner.CreateEntity(ctx, tools.EntityCreateRecord{RunID: runID, EntityID: input, FlowInstance: "exact-spelling/receiver", EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: time.Now().UTC(), Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}}); err != nil {
+					created, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{RunID: runID, EntityID: input, FlowInstance: "exact-spelling/receiver", EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: time.Now().UTC(), Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}})
+					if err != nil {
 						t.Fatalf("actual CreateEntity(%s, %q): %v", spelling, input, err)
 					}
 					var actualRun, actualEntity string
@@ -41,6 +42,9 @@ func TestRunForkExactFactsEntityIDSpellingsBothStores(t *testing.T) {
 					wantEntity := input
 					if backend == "postgres" {
 						wantEntity = canonical
+					}
+					if !created.Acknowledged || created.EntityID != wantEntity {
+						t.Fatalf("created coordinate = %+v, want acknowledged %q", created, wantEntity)
 					}
 					if actualRun != runID || actualEntity != wantEntity {
 						t.Fatalf("stored coordinate=(%s,%s), want=(%s,%s)", actualRun, actualEntity, runID, wantEntity)
@@ -243,13 +247,13 @@ func TestRunForkExactFactsGeneratedWriterIDsBothStores(t *testing.T) {
 				selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
 				owner := selected.(interface {
 					pipeline.WorkflowEngineMutationOwner
-					CreateEntity(context.Context, tools.EntityCreateRecord) error
+					CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
 				})
 				s := exactFactStore{db: db, postgres: backend == "postgres"}
 				entityID, flowID := uuid.NewString(), "exact-generated-"+uuid.NewString()
 				instance := flowID + "/receiver"
 				at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				if err := owner.CreateEntity(ctx, tools.EntityCreateRecord{RunID: runID, EntityID: entityID, FlowInstance: instance, EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: at, Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}}); err != nil {
+				if _, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{RunID: runID, EntityID: entityID, FlowInstance: instance, EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: at, Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}}); err != nil {
 					t.Fatal(err)
 				}
 				initial := assertActualMutationLedger(t, ctx, s, runID, entityID)

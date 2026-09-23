@@ -28,8 +28,8 @@ import (
 
 type activityTimestampJournal interface {
 	StartActivityAttempt(context.Context, runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error)
-	CompleteActivityAttempt(context.Context, runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error)
-	MarkActivityAttemptUncertain(context.Context, runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error)
+	CompleteActivityAttempt(context.Context, runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error)
+	MarkActivityAttemptUncertain(context.Context, runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error)
 	LoadActivityAttempt(context.Context, string) (runtimepipeline.ActivityAttemptRecord, bool, error)
 }
 
@@ -375,9 +375,9 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 			record.ResultPayload[generation.RevisionField] = generation.RevisionID
 		}
 		if status == "uncertain" {
-			record, err = journal.MarkActivityAttemptUncertain(ctx, record)
+			record, _, err = journal.MarkActivityAttemptUncertain(ctx, record)
 		} else {
-			record, err = journal.CompleteActivityAttempt(ctx, record)
+			record, _, err = journal.CompleteActivityAttempt(ctx, record)
 		}
 		if err != nil {
 			t.Fatalf("canonical journal terminal write: %v", err)

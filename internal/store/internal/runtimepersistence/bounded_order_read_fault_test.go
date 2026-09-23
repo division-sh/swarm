@@ -4,20 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/lib/pq"
 )
-
-const boundedOrderLockRead = `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`
-
-// The real ordering row is locked before the server notice cancels the caller.
-// Only this exact read is decorated; its native value and lock are retained.
-const boundedOrderFaultRead = `WITH locked AS MATERIALIZED (
-	SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE
-)
-SELECT bounded_writer_stop_read(last_sequence) FROM locked`
 
 type boundedOrderReadProbe struct {
 	graceful pipelineGracefulProbe
@@ -44,9 +36,10 @@ type boundedOrderReadConn struct {
 }
 
 func (c *boundedOrderReadConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	if c.order.armed.Load() && query == boundedOrderLockRead {
+	if c.order.armed.Load() && strings.Contains(query, "FROM runs") && strings.Contains(query, "run_id = ANY($1::uuid[])") && strings.Contains(query, "FOR UPDATE") {
 		c.order.queries.Add(1)
-		query = boundedOrderFaultRead
+		query = `WITH locked (run_id, bundle_hash, status) AS MATERIALIZED (` + query + `)
+			SELECT run_id, bundle_hash, status FROM locked WHERE bounded_writer_stop_read(1) = 1`
 	}
 	return c.pipelineGracefulConn.QueryContext(ctx, query, args)
 }

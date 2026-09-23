@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -108,11 +109,13 @@ func LoadMany(ctx context.Context, q Queryer, eventIDs []string) ([]eventrecord.
 	return orderRecords(ordered, loaded)
 }
 
-func Insert(ctx context.Context, exec Execer, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
+func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record eventrecord.Record) (bool, error) {
 	if err := record.Validate(); err != nil {
 		return false, fmt.Errorf("append sqlite event record: %w", err)
 	}
-	result, err := exec.ExecContext(ctx, `
+	var result sql.Result
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		result, err = tx.ExecContext(ctx, `
 		INSERT INTO events (
 			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
 			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
@@ -123,12 +126,14 @@ func Insert(ctx context.Context, exec Execer, effects *runforkrevision.Effects, 
 		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
 		ON CONFLICT(event_id) DO NOTHING
 	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
-		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
-		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
-		record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
-		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
-		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
+			record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
+			record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
+			record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
+			record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
+			record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
+			string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
+		return err
+	})
 	if err != nil {
 		return false, fmt.Errorf("append sqlite event record: %w", err)
 	}
@@ -137,11 +142,7 @@ func Insert(ctx context.Context, exec Execer, effects *runforkrevision.Effects, 
 		return false, fmt.Errorf("append sqlite event record: read affected rows: %w", err)
 	}
 	if rows == 1 && record.RunID != "" {
-		ref, err := runforkrevision.NewFactRef(runforkrevision.FamilyEvents, record.EventID)
-		if err != nil {
-			return false, err
-		}
-		if err := effects.AddFacts(record.RunID, ref); err != nil {
+		if err := attempt.AddFact(record.RunID, runforkrevision.FamilyEvents, record.EventID); err != nil {
 			return false, err
 		}
 	}

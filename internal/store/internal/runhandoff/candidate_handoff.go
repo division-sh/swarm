@@ -71,38 +71,6 @@ func ReserveCandidateHandoff(ctx context.Context) (*CandidateHandoff, error) {
 	return &CandidateHandoff{lease: lease, ctx: detached}, nil
 }
 
-// WithCandidateHandoffOutcome settles live notification after acknowledged
-// COMMIT even when the transaction owner also reports a cleanup failure.
-func WithCandidateHandoffOutcome(ctx context.Context, fn func(*CandidateHandoff) (bool, error)) (bool, error) {
-	handoff, err := ReserveCandidateHandoff(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer handoff.Rollback()
-	committed, err := fn(handoff)
-	if !committed {
-		return false, err
-	}
-	return true, errors.Join(err, handoff.Commit())
-}
-
-// WithCandidateHandoffOutcomeResult exposes results only after acknowledged
-// COMMIT. An independent postcommit error never erases that durable result.
-func WithCandidateHandoffOutcomeResult[T any](ctx context.Context, fn func(*CandidateHandoff) (T, bool, error)) (T, error) {
-	var result T
-	committed, err := WithCandidateHandoffOutcome(ctx, func(handoff *CandidateHandoff) (bool, error) {
-		var acknowledged bool
-		var err error
-		result, acknowledged, err = fn(handoff)
-		return acknowledged, err
-	})
-	if !committed {
-		var zero T
-		return zero, err
-	}
-	return result, err
-}
-
 func (r *CandidateHandoff) Prepare(
 	sinks *CandidateCoordinator,
 	result runtimerunlifecycle.CandidateRequestResult,

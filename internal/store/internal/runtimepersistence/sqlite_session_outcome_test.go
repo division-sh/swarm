@@ -52,7 +52,7 @@ func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
 				case "rotate":
 					lease, err = store.Rotate(ctx, identity, fixture.leaseHolder, runtimesessions.RotationMetadata{RetryReason: "outcome-proof"})
 				case "release":
-					err = store.Release(ctx, &runtimesessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder})
+					_, err = store.ReleaseOutcome(ctx, &runtimesessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder})
 				case "adopt":
 					err = store.AdoptSessionID(ctx, identity, fixture.leaseHolder, "provider-outcome")
 				case "reset":

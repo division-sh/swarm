@@ -169,12 +169,16 @@ func IsDynamicFlowRuntimeReadinessObservationConflict(err error) bool {
 // DynamicFlowRuntimeReadinessPersistence owns the complete selected-store
 // readiness projection. Runtime consumers receive only typed records and
 // named mutations; transaction and query authority remain private.
+type DynamicFlowRuntimeTopologyReadyResult struct {
+	Acknowledged bool
+}
+
 type DynamicFlowRuntimeReadinessPersistence interface {
 	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error)
-	MarkDynamicFlowRuntimeTopologyReady(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) error
+	MarkDynamicFlowRuntimeTopologyReady(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) (DynamicFlowRuntimeTopologyReadyResult, error)
 }
 
 type DynamicFlowRuntimeReadinessPersistenceRecord struct {

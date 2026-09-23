@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
@@ -370,30 +371,18 @@ func appendAdmittedBoundaryFixture(ctx context.Context, selected any, event even
 	}
 	defer release()
 	var outcome runtimebus.EventAppendOutcome
-	switch store := selected.(type) {
-	case *PostgresStore:
-		err = store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			story, storyErr := eventFixtureStory(txctx)
-			if storyErr != nil {
-				return storyErr
-			}
-			var appendErr error
-			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, tx, story, admitted, testRouteSettlement(admitted.Event(), nil))
-			return appendErr
-		})
-	case *SQLiteRuntimeStore:
-		err = store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			story, storyErr := eventFixtureStory(txctx)
-			if storyErr != nil {
-				return storyErr
-			}
-			var appendErr error
-			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, tx, story, admitted, testRouteSettlement(admitted.Event(), nil))
-			return appendErr
-		})
-	default:
-		err = fmt.Errorf("unsupported run-disposition fixture store %T", selected)
-	}
+	err = runSelectedFixtureMutation(ctx, selected, "run disposition event append", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var appendErr error
+		switch store := selected.(type) {
+		case *PostgresStore:
+			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, attempt, admitted, testRouteSettlement(admitted.Event(), nil))
+		case *SQLiteRuntimeStore:
+			outcome, appendErr = store.AppendAdmittedEventTxOutcome(txctx, attempt, admitted, testRouteSettlement(admitted.Event(), nil))
+		default:
+			return fmt.Errorf("unsupported run-disposition fixture store %T", selected)
+		}
+		return appendErr
+	})
 	return admitted, outcome, err
 }
 

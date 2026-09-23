@@ -11,8 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -22,15 +22,15 @@ import (
 // activateRunForkForSelectedContractExecution below.
 type runForkSelectedContractActivationPort struct {
 	requireCurrent func() error
-	runMutation    func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error)
+	runMutation    func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
 	loadLineage    func(context.Context, *sql.Tx, string) (runForkActivationLineage, error)
 	lockFrontier   func(context.Context, *sql.Tx, *runForkActivationLineage) error
 	plan           func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	deliveries     *storedelivery.Adapter
 	ensureState    func(context.Context, *sql.Tx, string, []string, semanticview.Source) error
-	transition     func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runLifecycleCandidateHandoffReservation, runtimerunlifecycle.ActiveTransitionRequest) error
+	transition     func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) error
 	diverge        func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
-	freeze         func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects, runForkActivationLineage, time.Time, bool, *runLifecycleCandidateHandoffReservation) error
+	freeze         func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool) error
 	now            func() time.Time
 }
 
@@ -50,17 +50,8 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	if err := port.requireCurrent(); err != nil {
 		return runfork.RunForkActivation{}, err
 	}
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return runfork.RunForkActivation{}, err
-	}
-	defer handoff.Rollback()
-
 	var divergence *runfork.RunForkSelectedContractBranchDivergence
-	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
+	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		divergence = nil
 		lineage, err := port.loadLineage(txctx, tx, forkRunID)
 		if err != nil {
@@ -141,7 +132,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 
 		now := port.now().UTC()
 		if len(sourceAdvancedFacts) > 0 {
-			if err := port.transition(txctx, tx, story, handoff, runtimerunlifecycle.ActiveTransitionRequest{RunID: lineage.ForkRunID, State: runtimerunlifecycle.StateRunning}); err != nil {
+			if err := port.transition(txctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{RunID: lineage.ForkRunID, State: runtimerunlifecycle.StateRunning}); err != nil {
 				return fmt.Errorf("activate selected-contract branch fork run lifecycle: %w", err)
 			}
 			value := runfork.RunForkSelectedContractBranchDivergence{
@@ -159,13 +150,13 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			if err := port.diverge(txctx, tx, value); err != nil {
 				return err
 			}
-			if err := recordRunForkActivationAuthorActivity(txctx, story, lineage, now); err != nil {
+			if err := recordRunForkActivationAuthorActivity(txctx, attempt, lineage, now); err != nil {
 				return err
 			}
 			divergence = &value
 			return nil
 		}
-		return port.freeze(txctx, tx, story, effects, lineage, now, req.AllowSourceFreeze, handoff)
+		return port.freeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze)
 	})
 	if !committed {
 		return result, err
@@ -180,24 +171,19 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		result.SourceRunStatus = runfork.RunForkSourceFrozenStatus
 		result.SourceFrozen = true
 	}
-	return result, errors.Join(err, handoff.Commit())
+	return result, err
 }
 
 func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runForkSelectedContractActivationPort {
 	return runForkSelectedContractActivationPort{
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
-			return s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sql.Tx) error {
-				story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-				if err != nil {
-					return err
-				}
-				effects := runforkrevision.NewEffects()
-				if err := operation(ctx, tx, story, effects); err != nil {
-					return err
-				}
-				return finalizeRunForkAuthorActivityTransaction(ctx, tx, story, effects)
+		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
+			result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+					return operation(txctx, tx, attempt)
+				})
 			})
+			return result.Acknowledged(), result.Err()
 		},
 		loadLineage: func(ctx context.Context, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
 			return loadRunForkActivationLineage(ctx, s.RunLifecyclePostgresOwner, tx, forkRunID)
@@ -208,8 +194,8 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 		},
 		deliveries:  postgresDeliveryAdapter,
 		ensureState: s.ensureRunForkSelectedContractExecutionForkState,
-		transition: func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, handoff *runLifecycleCandidateHandoffReservation, req runtimerunlifecycle.ActiveTransitionRequest) error {
-			_, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, tx, story, handoff, req)
+		transition: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.ActiveTransitionRequest) error {
+			_, err := s.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, attempt, req)
 			return err
 		},
 		diverge: insertRunForkSelectedContractBranchDivergence,
@@ -221,25 +207,16 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkSelectedContractActivationPort {
 	return runForkSelectedContractActivationPort{
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
+		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
 			if err := s.requireCurrentSchema(); err != nil {
 				return false, err
 			}
-			return s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract fork activation", func(txctx context.Context, tx *sql.Tx) error {
-				story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-				if err != nil {
-					return err
-				}
-				effects := runforkrevision.NewEffects()
-				if err := operation(txctx, tx, story, effects); err != nil {
-					return err
-				}
-				if err := story.Finalize(txctx); err != nil {
-					return err
-				}
-				_, err = runforkrevision.FinalizeSQLite(txctx, tx, effects)
-				return err
+			result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected-contract fork activation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+					return operation(txctx, tx, attempt)
+				})
 			})
+			return result.Acknowledged(), result.Err()
 		},
 		loadLineage: func(ctx context.Context, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
 			return loadSQLiteRunForkActivationLineage(ctx, s.RunLifecycleSQLiteOwner, tx, forkRunID)
@@ -250,8 +227,8 @@ func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkS
 		},
 		deliveries:  sqliteDeliveryAdapter,
 		ensureState: s.ensureSQLiteRunForkSelectedContractExecutionForkState,
-		transition: func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, handoff *runLifecycleCandidateHandoffReservation, req runtimerunlifecycle.ActiveTransitionRequest) error {
-			_, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, tx, story, handoff, req)
+		transition: func(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimerunlifecycle.ActiveTransitionRequest) error {
+			_, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, attempt, req)
 			return err
 		},
 		diverge: insertSQLiteRunForkSelectedContractBranchDivergence,

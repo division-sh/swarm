@@ -17,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -170,12 +169,7 @@ func publicationBatchFixture(t *testing.T, postgres bool) (*sql.DB, *publication
 		if err != nil {
 			t.Fatal(err)
 		}
-		if postgres {
-			_, err = eventrecordpostgres.Insert(ctx, db, runforkrevision.NewEffects(), record)
-		} else {
-			_, err = eventrecordsqlite.Insert(ctx, db, runforkrevision.NewEffects(), record)
-		}
-		if err != nil {
+		if err := insertPublicationBatchEventFixture(ctx, db, record); err != nil {
 			t.Fatal(err)
 		}
 		key := g.claim.Key
@@ -185,6 +179,28 @@ func publicationBatchFixture(t *testing.T, postgres bool) (*sql.DB, *publication
 		members = append(members, &publicationGroupMember{ordinal: ordinal, event: event})
 	}
 	return db, g, members
+}
+
+func insertPublicationBatchEventFixture(ctx context.Context, db *sql.DB, record eventrecord.Record) error {
+	jsonValue := func(raw []byte) any {
+		if len(raw) == 0 {
+			return nil
+		}
+		return string(raw)
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO events (
+		event_class,event_id,run_id,event_name,task_id,entity_id,flow_instance,scope,payload,payload_bytes,
+		payload_schema_bundle_hash,payload_schema_flow_id,payload_schema_event_key,payload_schema_digest,payload_schema_class,
+		execution_mode,chain_depth,produced_by,produced_by_type,source_event_id,created_at,
+		routing_source_kind,routing_source_authority,source_route,target_route,target_set,route_settlement,
+		operator_reference_event_id,inherited_fan_out_origin
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+		record.Class, record.EventID, nullableText(record.RunID), record.EventName, nullableText(record.TaskID), nullableText(record.EntityID), nullableText(record.FlowInstance), record.Scope,
+		jsonValue(record.Payload), record.Payload, record.PayloadSchemaBundleHash, nullableText(record.PayloadSchemaFlowID), record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass,
+		record.ExecutionMode, record.ChainDepth, record.ProducedBy, record.ProducedByType, nullableText(record.SourceEventID), record.CreatedAt,
+		record.RoutingSourceKind, nullableText(record.RoutingSourceAuthority), jsonValue(record.SourceRoute), jsonValue(record.TargetRoute), jsonValue(record.TargetSet), jsonValue(record.RouteSettlement),
+		nullableText(record.OperatorReferencedEventID), jsonValue(record.InheritedFanOutOrigin))
+	return err
 }
 
 func TestPublicationGroupBatchNativeDifferentialBothStores(t *testing.T) {

@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -32,7 +34,8 @@ func TestRunForkExactEventWriterPreservesAdmittedUUIDSpellingsBothStores(t *test
 				case "run_compact":
 					f.runID = strings.ReplaceAll(f.runID, "-", "")
 				}
-				requireRunFixtureForTest(t, testAuthorActivityContext(), s.selected, semanticRunFixture{
+				ctx := testAuthorActivityContext()
+				requireRunFixtureForTest(t, ctx, s.selected, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: f.runID, StartedAt: f.at,
 				})
 				event := eventtest.RunCreatingRootIngress(id, "revision.spelling", "gateway", "uuid-spelling", []byte(`{"value":1}`), 0, f.runID, "", events.EventEnvelope{}, f.at)
@@ -51,70 +54,78 @@ func TestRunForkExactEventWriterPreservesAdmittedUUIDSpellingsBothStores(t *test
 				if record.EventID != id || record.RunID != f.runID {
 					t.Fatalf("admission rewrote input UUID: event=%q/%q run=%q/%q", record.EventID, id, record.RunID, f.runID)
 				}
-				exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-					effects := runforkrevision.NewEffects()
-					var inserted bool
-					var err error
-					if s.postgres {
-						inserted, err = eventrecordpostgres.Insert(ctx, tx, effects, record)
-					} else {
-						inserted, err = eventrecordsqlite.Insert(ctx, tx, effects, record)
-					}
-					if err != nil || !inserted {
-						t.Fatalf("actual event-record insert: inserted=%t err=%v", inserted, err)
-					}
-					var storedID, storedRunID string
-					if err := tx.QueryRowContext(ctx, `SELECT CAST(event_id AS TEXT), CAST(run_id AS TEXT) FROM events WHERE event_id=$1`, id).Scan(&storedID, &storedRunID); err != nil {
-						t.Fatal(err)
-					}
-					wantStored, wantStoredRun := id, f.runID
-					if s.postgres {
-						wantStored = uuid.MustParse(id).String()
-						wantStoredRun = uuid.MustParse(f.runID).String()
-					}
-					if storedID != wantStored || storedRunID != wantStoredRun {
-						t.Fatalf("unexpected persisted UUID: event=%q/%q run=%q/%q", storedID, wantStored, storedRunID, wantStoredRun)
-					}
-					whole, err := runforkrevision.ForRun(storedRunID, runforkrevision.FamilyEvents)
+				type proof struct {
+					storedID, storedRunID string
+					oracleLedger          []exactLedgerRow
+				}
+				committed := runExactFactProtocol(ctx, s, func(ctx context.Context, attempt *mutationprotocol.Attempt) (proof, error) {
+					inserted, err := insertExactSpellingEvent(ctx, s.postgres, attempt, record)
 					if err != nil {
-						t.Fatal(err)
+						return proof{}, err
 					}
-					// Same inserted row and prior ledger; roll back only the oracle's
-					// finalization so the actual writer's effects remain untouched.
-					mustExecRunForkRevisionMatrix(t, ctx, tx, `SAVEPOINT spelling_oracle`)
-					want, err := finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, whole)
-					if err != nil {
-						t.Fatalf("whole-capture control: %v", err)
+					if !inserted {
+						return proof{}, fmt.Errorf("actual event-record insert was a no-op")
 					}
-					wantLedger := exactLedger(t, ctx, tx, storedRunID)
-					if len(wantLedger) != 1 || wantLedger[0].Key != storedID || !wantLedger[0].Present {
-						t.Fatalf("whole control did not capture actual persisted event: %+v", wantLedger)
-					}
-					t.Logf("admission+insert+whole capture PASS: event_input=%q stored=%q run_input=%q stored=%q ledger_key=%q", id, storedID, f.runID, storedRunID, wantLedger[0].Key)
-					mustExecRunForkRevisionMatrix(t, ctx, tx, `ROLLBACK TO SAVEPOINT spelling_oracle`)
-					mustExecRunForkRevisionMatrix(t, ctx, tx, `RELEASE SAVEPOINT spelling_oracle`)
-					got, err := finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, effects)
-					if err != nil {
-						t.Fatalf("actual event writer exact capture rejected admitted UUID input=%q stored=%q after whole control passed: %v", id, storedID, err)
-					}
-					if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(exactLedger(t, ctx, tx, storedRunID), wantLedger) {
-						t.Fatalf("exact writer capture differs from whole control: exact=%+v whole=%+v", got, want)
-					}
-					duplicateEffects := runforkrevision.NewEffects()
-					if s.postgres {
-						inserted, err = eventrecordpostgres.Insert(ctx, tx, duplicateEffects, record)
-					} else {
-						inserted, err = eventrecordsqlite.Insert(ctx, tx, duplicateEffects, record)
-					}
-					if err != nil || inserted {
-						t.Fatalf("duplicate insert: inserted=%t err=%v", inserted, err)
-					}
-					duplicateResults, err := finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, duplicateEffects)
-					if err != nil || len(duplicateResults) != 0 || !reflect.DeepEqual(exactLedger(t, ctx, tx, storedRunID), wantLedger) {
-						t.Fatalf("duplicate insert contributed effects: results=%+v err=%v", duplicateResults, err)
-					}
+					var out proof
+					err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+						if err := tx.QueryRowContext(ctx, `SELECT CAST(event_id AS TEXT), CAST(run_id AS TEXT) FROM events WHERE event_id=$1`, id).Scan(&out.storedID, &out.storedRunID); err != nil {
+							return err
+						}
+						wantID, wantRunID := id, f.runID
+						if s.postgres {
+							wantID, wantRunID = uuid.MustParse(id).String(), uuid.MustParse(f.runID).String()
+						}
+						if out.storedID != wantID || out.storedRunID != wantRunID {
+							return fmt.Errorf("persisted UUID event=%q/%q run=%q/%q", out.storedID, wantID, out.storedRunID, wantRunID)
+						}
+						whole, err := runforkrevision.ForRun(out.storedRunID, runforkrevision.FamilyEvents)
+						if err != nil {
+							return err
+						}
+						mustExecRunForkRevisionMatrix(t, ctx, tx, `SAVEPOINT spelling_oracle`)
+						if _, err := finalizeRunForkRevisionMatrix(ctx, tx, s.postgres, whole); err != nil {
+							return fmt.Errorf("whole-capture control: %w", err)
+						}
+						out.oracleLedger = exactLedger(t, ctx, tx, out.storedRunID)
+						mustExecRunForkRevisionMatrix(t, ctx, tx, `ROLLBACK TO SAVEPOINT spelling_oracle`)
+						mustExecRunForkRevisionMatrix(t, ctx, tx, `RELEASE SAVEPOINT spelling_oracle`)
+						if len(out.oracleLedger) != 1 || out.oracleLedger[0].Key != out.storedID || !out.oracleLedger[0].Present {
+							return fmt.Errorf("whole control did not capture actual event: %+v", out.oracleLedger)
+						}
+						return nil
+					})
+					return out, err
 				})
+				out, acknowledged := committed.Value()
+				if !acknowledged || committed.Err() != nil {
+					t.Fatalf("exact event write: acknowledged=%v err=%v", acknowledged, committed.Err())
+				}
+				assertExactSpellingLedger(t, s, out.storedRunID, out.oracleLedger)
+				duplicate := runExactFactProtocol(ctx, s, func(ctx context.Context, attempt *mutationprotocol.Attempt) (bool, error) {
+					return insertExactSpellingEvent(ctx, s.postgres, attempt, record)
+				})
+				inserted, acknowledged := duplicate.Value()
+				if !acknowledged || duplicate.Err() != nil || inserted {
+					t.Fatalf("duplicate insert: acknowledged=%v inserted=%v err=%v", acknowledged, inserted, duplicate.Err())
+				}
+				assertExactSpellingLedger(t, s, out.storedRunID, out.oracleLedger)
 			})
+		}
+	})
+}
+
+func insertExactSpellingEvent(ctx context.Context, postgres bool, attempt *mutationprotocol.Attempt, record eventrecord.Record) (bool, error) {
+	if postgres {
+		return eventrecordpostgres.Insert(ctx, attempt, record)
+	}
+	return eventrecordsqlite.Insert(ctx, attempt, record)
+}
+
+func assertExactSpellingLedger(t *testing.T, s exactFactStore, runID string, want []exactLedgerRow) {
+	t.Helper()
+	exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
+		if got := exactLedger(t, ctx, tx, runID); !reflect.DeepEqual(got, want) {
+			t.Fatalf("actual protocol capture differs from whole control: exact=%+v whole=%+v", got, want)
 		}
 	})
 }

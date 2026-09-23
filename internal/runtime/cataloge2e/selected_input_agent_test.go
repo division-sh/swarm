@@ -19,7 +19,7 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, root, backend, true)
 			h.seedInitialState(pipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
-			if _, err := runScopedCatalogStore(t, h).PauseRunControl(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "pending root agent input", ControlledBy: "cataloge2e"}); err != nil {
+			if _, err := runScopedCatalogStore(t, h).PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "pending root agent input", ControlledBy: "cataloge2e"}); err != nil {
 				t.Fatal(err)
 			}
 			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "task.ready", Payload: map[string]any{}}, 10*time.Second, true); err != nil {

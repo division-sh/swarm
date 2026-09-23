@@ -197,10 +197,11 @@ func (turn *servingMatrixTurn) BeginFanOutPublicationGroup(ctx context.Context, 
 	return group, err
 }
 
-func (turn *servingMatrixTurn) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+func (turn *servingMatrixTurn) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {
 	turn.cleanup = append(turn.cleanup, claim)
-	turn.cleanupErr = turn.FanOutObligationOwner.ReleaseFanOutClaim(ctx, claim)
-	return turn.cleanupErr
+	settlement, err := turn.FanOutObligationOwner.ReleaseFanOutClaim(ctx, claim)
+	turn.cleanupErr = err
+	return settlement, err
 }
 
 func waitServingMatrixHeld(t *testing.T, p *servingMatrixProbe) *servingMatrixTurn {

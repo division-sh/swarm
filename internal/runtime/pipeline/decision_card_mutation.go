@@ -186,6 +186,7 @@ func (c DecisionCardMutationCommand) Validate() error {
 }
 
 type CommittedDecisionCardMutation struct {
+	Acknowledged   bool
 	Completion     apiidempotency.Completion
 	Kind           DecisionCardMutationKind
 	Outcome        decisioncard.DecisionOutcome
@@ -263,6 +264,11 @@ func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, l
 	if err != nil {
 		return nil, err
 	}
+	committed, err := lease.Commit(ctx, command)
+	return pc.finishDecisionCardMutation(ctx, committed, err, plans)
+}
+
+func (pc *PipelineCoordinator) finishDecisionCardMutation(ctx context.Context, committed CommittedDecisionCardMutation, commitErr error, plans []runtimeengine.DurablePublicationPlan) (json.RawMessage, error) {
 	planner, _ := pc.bus.(EnginePublicationPlanner)
 	release := func(values []runtimeengine.DurablePublicationPlan) error {
 		if planner == nil || len(values) == 0 {
@@ -270,39 +276,45 @@ func (pc *PipelineCoordinator) commitDecisionCardMutation(ctx context.Context, l
 		}
 		return planner.ReleaseEnginePublications(context.WithoutCancel(ctx), values)
 	}
-	committed, err := lease.Commit(ctx, command)
-	if err != nil {
-		return nil, errors.Join(err, release(plans))
+	if !committed.Acknowledged {
+		if commitErr == nil {
+			commitErr = errors.New("decision-card mutation was not acknowledged")
+		}
+		return nil, errors.Join(commitErr, release(plans))
 	}
-	if err := committed.Validate(); err != nil {
-		return nil, errors.Join(err, release(plans))
-	}
+	response := append(json.RawMessage(nil), committed.Completion.Response...)
+	validationErr := committed.Validate()
 	if committed.HasPublication {
+		if committed.Publication == nil {
+			return response, errors.Join(commitErr, validationErr)
+		}
+		if err := committed.Publication.ValidateCommittedDurablePublication(); err != nil {
+			return response, errors.Join(commitErr, validationErr, err)
+		}
 		chosenID := committed.Publication.CommittedDurablePublicationEventID()
-		unused := make([]runtimeengine.DurablePublicationPlan, 0, len(plans)-1)
+		unused := make([]runtimeengine.DurablePublicationPlan, 0, len(plans))
 		for _, plan := range plans {
 			if plan.DurablePublicationEventID() != chosenID {
 				unused = append(unused, plan)
 			}
 		}
-		if err := release(unused); err != nil {
-			return nil, err
-		}
+		postCommitErr := release(unused)
 		if planner == nil {
-			return nil, fmt.Errorf("decision-card mutation requires the publication planner")
+			return response, errors.Join(commitErr, validationErr, postCommitErr, fmt.Errorf("decision-card mutation requires the publication planner"))
 		}
 		if err := planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); err != nil {
-			return nil, err
+			return response, errors.Join(commitErr, validationErr, postCommitErr, err)
 		}
 		dispatcher := pc.bus.EngineDispatcher()
 		if dispatcher == nil {
-			return nil, fmt.Errorf("decision-card mutation requires the post-commit dispatcher")
+			return response, errors.Join(commitErr, validationErr, postCommitErr, fmt.Errorf("decision-card mutation requires the post-commit dispatcher"))
 		}
 		if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{committed.Publication.CommittedDurablePublicationIntent()}); err != nil {
-			return nil, err
+			return response, errors.Join(commitErr, validationErr, postCommitErr, err)
 		}
+		return response, errors.Join(commitErr, validationErr, postCommitErr)
 	}
-	return append(json.RawMessage(nil), committed.Completion.Response...), nil
+	return response, errors.Join(commitErr, validationErr)
 }
 
 // ProjectCompletion runs inside the domain transaction, after the store has

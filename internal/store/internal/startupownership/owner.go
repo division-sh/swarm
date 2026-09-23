@@ -18,6 +18,7 @@ import (
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -328,13 +329,14 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 }
 
 func (s *postgresSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	var result runtimemanager.AgentLifecycleTransitionResult
-	err := s.lease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		result, err = s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, tx, req)
-		return err
+	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
+		return s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, attempt, req)
 	})
-	return result, err
+	result, ok := commit.Value()
+	if !ok {
+		return runtimemanager.AgentLifecycleTransitionResult{}, commit.Err()
+	}
+	return result, commit.Err()
 }
 
 func (s *postgresSession) Release(ctx context.Context) error {
@@ -528,13 +530,14 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 }
 
 func (s *sqliteSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	var result runtimemanager.AgentLifecycleTransitionResult
-	err := s.owner.backend.RunTransaction(ctx, "commit retained agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
-		result, err = s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, tx, req)
-		return err
+	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "commit retained agent lifecycle transition", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
+		return s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, attempt, req)
 	})
-	return result, err
+	result, ok := commit.Value()
+	if !ok {
+		return runtimemanager.AgentLifecycleTransitionResult{}, commit.Err()
+	}
+	return result, commit.Err()
 }
 
 func (s *sqliteSession) Release(ctx context.Context) error {

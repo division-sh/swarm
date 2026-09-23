@@ -10,9 +10,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -97,8 +96,10 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 }
 
 func insertMutationLogPrivateAdapter(ctx context.Context, selected *PostgresStore, record runtimemutationlog.Record) error {
-	return selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return privatemutationlog.InsertWithStory(txctx, tx, postgresActiveRunSourceOwner(selected, tx), story, privaterunforkrevision.NewEffects(), record)
+	return runSelectedFixtureMutation(ctx, selected, "test mutation log adapter", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			return privatemutationlog.Insert(txctx, attempt, postgresActiveRunSourceOwner(selected, tx), record)
+		})
 	})
 }
 

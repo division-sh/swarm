@@ -7,12 +7,13 @@ import (
 
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/mutationlogfixture"
 )
 
 func insertWorkflowCreateEntityInitialValueMutations(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *eventfixture.Attempt,
 	runLifecycle runtimerunlifecycle.OperationOwner,
 	entityID string,
 	before, after runtimemutationlog.EntityStateProjection,
@@ -41,7 +42,7 @@ func insertWorkflowCreateEntityInitialValueMutations(
 		if hadOld {
 			continue
 		}
-		if err := mutationlogfixture.Insert(ctx, tx, runLifecycle, runtimemutationlog.Record{
+		if err := mutationlogfixture.Insert(ctx, attempt, runLifecycle, runtimemutationlog.Record{
 			EntityID:    entityID,
 			Domain:      runtimemutationlog.DomainAuthoredField,
 			Path:        field,

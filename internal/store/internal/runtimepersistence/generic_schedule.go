@@ -6,14 +6,6 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 )
 
-func (s *PostgresStore) AdmitGenericSchedule(ctx context.Context, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
-	return s.genericSchedulePostgresOwner.AdmitGenericSchedule(ctx, command)
-}
-
-func (s *SQLiteRuntimeStore) AdmitGenericSchedule(ctx context.Context, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
-	return s.genericScheduleSQLiteOwner.AdmitGenericSchedule(ctx, command)
-}
-
 func (s *PostgresStore) LoadGenericScheduleActivation(ctx context.Context, activationID string) (runtimegenericschedule.Activation, bool, error) {
 	return s.genericSchedulePostgresOwner.LoadGenericScheduleActivation(ctx, activationID)
 }
@@ -44,14 +36,6 @@ func (s *PostgresStore) CommitGenericScheduleOccurrence(ctx context.Context, com
 
 func (s *SQLiteRuntimeStore) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
 	return s.pipelineSQLiteOwner.CommitGenericScheduleOccurrence(ctx, command)
-}
-
-func (s *PostgresStore) CancelGenericSchedule(ctx context.Context, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
-	return s.genericSchedulePostgresOwner.CancelGenericSchedule(ctx, command)
-}
-
-func (s *SQLiteRuntimeStore) CancelGenericSchedule(ctx context.Context, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
-	return s.genericScheduleSQLiteOwner.CancelGenericSchedule(ctx, command)
 }
 
 func (s *PostgresStore) ClaimGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (bool, error) {

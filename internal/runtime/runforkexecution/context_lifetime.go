@@ -60,28 +60,33 @@ func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*
 	return op, nil
 }
 
-func (o SelectedContractExecutionOwner) materializePrepared(ctx context.Context, p *PreparedSelectedFork) (runfork.RunForkMaterialization, error) {
+func (o SelectedContractExecutionOwner) materializePrepared(ctx context.Context, p *PreparedSelectedFork) (runfork.RunForkMaterialization, bool, error) {
 	req, err := p.MaterializationRequest()
 	if err != nil {
-		return runfork.RunForkMaterialization{}, err
+		return runfork.RunForkMaterialization{}, false, err
 	}
 	contexts := o.ports.contexts
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
 	entry := contexts.entries[p.operation]
 	if contexts.retired || entry == nil || entry.retiring || entry.binding.BindingID != "" {
-		return runfork.RunForkMaterialization{}, errors.New("selected materialization requires its admitted preparation")
+		return runfork.RunForkMaterialization{}, false, errors.New("selected materialization requires its admitted preparation")
 	}
 	// Publish the concrete binding under the same admission lock as stop/reset.
 	// Those consumers cannot observe a committed fork with an unregistered owner.
 	result, err := o.ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, req)
-	if result.SelectedContractBinding != nil {
-		entry.binding = *result.SelectedContractBinding
+	if err != nil {
+		committed, ok := isolatedSelectedForkMaterializationCommit(err)
+		if !ok {
+			return runfork.RunForkMaterialization{}, false, err
+		}
+		result = committed
 	}
-	if err == nil && (entry.binding.BindingID == "" || entry.binding.ForkRunID != result.ForkRunID) {
-		err = errors.New("selected materialization returned no exact binding")
+	if bindingErr := requireExactSelectedForkMaterialization(req, result); bindingErr != nil {
+		return runfork.RunForkMaterialization{}, false, errors.Join(err, bindingErr)
 	}
-	return result, err
+	entry.binding = *result.SelectedContractBinding
+	return result, true, err
 }
 
 func (o SelectedContractExecutionOwner) requirePreparationProcess(ctx context.Context, supplied startupownership.ProcessCapability) error {

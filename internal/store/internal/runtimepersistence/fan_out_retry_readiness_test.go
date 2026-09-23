@@ -21,7 +21,7 @@ func TestFanOutRetryWaitYieldsPreservesRestartAndCancelsOnBothStores(t *testing.
 				t.Fatalf("first claim: %+v found=%v err=%v", claim, found, err)
 			}
 			before := time.Now().UTC()
-			if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: before.Add(-time.Hour), Failure: fanOutRetryFailureForTest()}); err != nil {
+			if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: before.Add(-time.Hour), Failure: fanOutRetryFailureForTest()}); err != nil {
 				t.Fatal(err)
 			}
 			var rawDue, rawObserved any
@@ -54,7 +54,7 @@ func TestFanOutRetryWaitYieldsPreservesRestartAndCancelsOnBothStores(t *testing.
 			if err != nil || !found || intent.NextChunkSize != 16 || intent.Retry != nil || claim.Key.ElementRef.SemanticPath != old.semanticPath {
 				t.Fatalf("due retry did not resume exact reduced range: intent=%+v found=%v err=%v", intent, found, err)
 			}
-			if err := restarted.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
+			if _, err := restarted.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
 				t.Fatal(err)
 			}
 			if err := restarted.CancelRunFanOut(ctx, old.runID, "run_stopped", time.Now().UTC()); err != nil {

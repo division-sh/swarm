@@ -9,8 +9,7 @@ import (
 	"time"
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func (s *RunLifecyclePostgresOwner) RegisterCompletionCandidateSink(
@@ -35,38 +34,24 @@ func (s *RunLifecycleSQLiteOwner) RegisterCompletionCandidateSink(
 	return s.runLifecycleCandidates.Register(ctx, scope, sink)
 }
 
-func (s *RunLifecyclePostgresOwner) RequestCompletionCandidateTx(
+// WriteCompletionCandidateTx performs only the durable request. The mutation
+// protocol owns the matching attempt-local handoff reservation.
+func (s *RunLifecyclePostgresOwner) WriteCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	runID string,
 	dueAt *time.Time,
-	handoff *CandidateHandoff,
 ) (runtimerunlifecycle.CandidateRequestResult, error) {
-	result, err := requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false)
-	if err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	if err := handoff.Prepare(s.runLifecycleCandidates, result); err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	return result, nil
+	return requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false)
 }
 
-func (s *RunLifecycleSQLiteOwner) RequestCompletionCandidateTx(
+func (s *RunLifecycleSQLiteOwner) WriteCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	runID string,
 	dueAt *time.Time,
-	handoff *CandidateHandoff,
 ) (runtimerunlifecycle.CandidateRequestResult, error) {
-	result, err := requestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, s.now(), false)
-	if err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	if err := handoff.Prepare(s.runLifecycleCandidates, result); err != nil {
-		return runtimerunlifecycle.CandidateRequestResult{}, err
-	}
-	return result, nil
+	return requestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, s.now(), false)
 }
 
 func (s *RunLifecyclePostgresOwner) RequestCompletionCandidate(
@@ -76,24 +61,21 @@ func (s *RunLifecyclePostgresOwner) RequestCompletionCandidate(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	handoff, err := ReserveCandidateHandoff(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer handoff.Rollback()
 	var dueAt *time.Time
 	if request.Timing == runtimerunlifecycle.CandidateAt {
 		dueAt = &request.DueAt
 	}
-	var result runtimerunlifecycle.CandidateRequestResult
-	committed, err := s.runPostgresRuntimeMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		result, err = s.RequestCompletionCandidateTx(txctx, tx, request.RunID, dueAt, handoff)
-		return err
-	})
-	if !committed {
+	if err := s.requireCurrentSchema(); err != nil {
 		return "", err
 	}
-	return result.Disposition, errors.Join(err, handoff.Commit())
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CandidateRequestResult, error) {
+		return attempt.RequestCompletion(txctx, s, request.RunID, dueAt)
+	})
+	value, acknowledged := result.Value()
+	if !acknowledged {
+		return "", result.Err()
+	}
+	return value.Disposition, result.Err()
 }
 
 func (s *RunLifecycleSQLiteOwner) RequestCompletionCandidate(
@@ -103,27 +85,21 @@ func (s *RunLifecycleSQLiteOwner) RequestCompletionCandidate(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	handoff, err := ReserveCandidateHandoff(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer handoff.Rollback()
 	var dueAt *time.Time
 	if request.Timing == runtimerunlifecycle.CandidateAt {
 		dueAt = &request.DueAt
 	}
-	var result runtimerunlifecycle.CandidateRequestResult
-	committed, err := s.runRuntimeMutationOutcome(ctx, "sqlite request completion candidate", func(txctx context.Context, tx *sql.Tx) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
-		result, err = s.RequestCompletionCandidateTx(txctx, tx, request.RunID, dueAt, handoff)
-		return err
-	})
-	if !committed {
+	if err := s.requireCurrentSchema(); err != nil {
 		return "", err
 	}
-	return result.Disposition, errors.Join(err, handoff.Commit())
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite request completion candidate", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CandidateRequestResult, error) {
+		return attempt.RequestCompletion(txctx, s, request.RunID, dueAt)
+	})
+	value, acknowledged := result.Value()
+	if !acknowledged {
+		return "", result.Err()
+	}
+	return value.Disposition, result.Err()
 }
 
 func requestPostgresCompletionCandidateTx(
@@ -465,18 +441,23 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 	if err := candidate.Validate(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
-	var outcome runtimerunlifecycle.CompletionResult
-	effects := privaterunforkrevision.NewEffects()
-	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		var err error
-		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, effects, candidate, catalog)
-		return err
-	})
-	if !committed {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CompletionResult, error) {
+		var outcome runtimerunlifecycle.CompletionResult
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog)
+			return err
+		})
+		return outcome, err
+	})
+	outcome, committed := result.Value()
+	if !committed {
+		return runtimerunlifecycle.CompletionResult{}, result.Err()
+	}
 	outcome.Committed = true
-	return outcome, err
+	return outcome, result.Err()
 }
 
 func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
@@ -487,25 +468,29 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 	if err := candidate.Validate(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
-	var outcome runtimerunlifecycle.CompletionResult
-	effects := privaterunforkrevision.NewEffects()
-	committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite execute run completion candidate", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		var err error
-		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, effects, candidate, catalog)
-		return err
-	})
-	if !committed {
+	if err := s.requireCurrentSchema(); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite execute run completion candidate", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CompletionResult, error) {
+		var outcome runtimerunlifecycle.CompletionResult
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog)
+			return err
+		})
+		return outcome, err
+	})
+	outcome, committed := result.Value()
+	if !committed {
+		return runtimerunlifecycle.CompletionResult{}, result.Err()
+	}
 	outcome.Committed = true
-	return outcome, err
+	return outcome, result.Err()
 }
 
 func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story *privateauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.TerminalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
@@ -592,7 +577,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
-		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow)
+		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, candidate.RunID, selectedNow)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance fan-out delivery barriers: %w", err)
 		}
@@ -618,7 +603,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 			return runtimerunlifecycle.CompletionResult{}, errors.New("new fan-out barrier completion did not block run completion")
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, story, effects, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil
@@ -649,8 +634,7 @@ func (s *RunLifecyclePostgresOwner) finishBlockedPostgresCandidate(
 func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story *privateauthoractivity.Mutation,
-	effects *privaterunforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.TerminalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
@@ -738,7 +722,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
-		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow)
+		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, attempt, candidate.RunID, selectedNow)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance sqlite fan-out delivery barriers: %w", err)
 		}
@@ -764,7 +748,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 			return runtimerunlifecycle.CompletionResult{}, errors.New("new sqlite fan-out barrier completion did not block run completion")
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, story, effects, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, attempt, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil

@@ -2,30 +2,27 @@ package pipelinepersistence
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type humanTaskExpiryTxOwner interface {
-	ExpireHumanTasksTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, time.Time, int) ([]events.Event, error)
+	ExpireHumanTasksTx(context.Context, *mutationprotocol.Attempt, time.Time, int) ([]events.Event, error)
 }
 
 func commitHumanTaskExpirations(
 	ctx context.Context,
 	store eventCommitTxStore,
 	decisions humanTaskExpiryTxOwner,
-	postgres bool,
-	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskExpiry, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskExpiry],
 	command runtimepipeline.HumanTaskExpiryCommand,
 ) (runtimepipeline.CommittedHumanTaskExpiry, error) {
 	if err := command.Validate(); err != nil {
@@ -39,51 +36,48 @@ func commitHumanTaskExpirations(
 		}
 		plans[index] = plan
 	}
-	result := runtimepipeline.CommittedHumanTaskExpiry{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(plans))}
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		expired, err := decisions.ExpireHumanTasksTx(txctx, runtimeAuthorActivityMutation(story), tx, command.ObservedAt, command.Limit)
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskExpiry, error) {
+		result := runtimepipeline.CommittedHumanTaskExpiry{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(plans))}
+		expired, err := decisions.ExpireHumanTasksTx(txctx, attempt, command.ObservedAt, command.Limit)
 		if err != nil {
-			return err
+			return runtimepipeline.CommittedHumanTaskExpiry{}, err
 		}
 		if len(expired) != len(plans) {
-			return fmt.Errorf("human-task expiry authority changed before commit: due=%d planned=%d", len(expired), len(plans))
+			return runtimepipeline.CommittedHumanTaskExpiry{}, fmt.Errorf("human-task expiry authority changed before commit: due=%d planned=%d", len(expired), len(plans))
 		}
 		for index, plan := range plans {
 			if strings.TrimSpace(expired[index].ID()) != strings.TrimSpace(plan.DurablePublicationEventID()) {
-				return fmt.Errorf("human-task expiry authority changed before commit at index %d", index)
+				return runtimepipeline.CommittedHumanTaskExpiry{}, fmt.Errorf("human-task expiry authority changed before commit at index %d", index)
 			}
-			committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), nil)
+			committed, err := store.commitPublicationTx(txctx, attempt, plan.PublicationCommand())
 			if err != nil {
-				return fmt.Errorf("commit human-task expiry publication %d: %w", index, err)
+				return runtimepipeline.CommittedHumanTaskExpiry{}, fmt.Errorf("commit human-task expiry publication %d: %w", index, err)
 			}
 			evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 			if err != nil {
-				return err
+				return runtimepipeline.CommittedHumanTaskExpiry{}, err
 			}
 			result.Publications = append(result.Publications, evidence)
 		}
-		return nil
+		return result, nil
 	})
-	if err != nil {
-		return runtimepipeline.CommittedHumanTaskExpiry{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.CommittedHumanTaskExpiry{}, outcome.Err()
 	}
-	if err := result.Validate(); err != nil {
-		return runtimepipeline.CommittedHumanTaskExpiry{}, err
-	}
-	return result, nil
+	result.Acknowledged = true
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
 func (s *PipelinePostgresOwner) CommitHumanTaskExpirations(ctx context.Context, command runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
-	effects := newRevisionEffects()
-	return commitHumanTaskExpirations(ctx, s, s.DecisionPostgresOwner, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	return commitHumanTaskExpirations(ctx, s, s.DecisionPostgresOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskExpiry, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskExpiry] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitHumanTaskExpirations(ctx context.Context, command runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
-	effects := newRevisionEffects()
-	return commitHumanTaskExpirations(ctx, s, s.DecisionSQLiteOwner, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task expiry", effects, fn)
+	return commitHumanTaskExpirations(ctx, s, s.DecisionSQLiteOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskExpiry, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskExpiry] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite human-task expiry", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, command)
 }
 

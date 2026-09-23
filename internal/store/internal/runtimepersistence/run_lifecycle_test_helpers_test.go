@@ -16,9 +16,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -33,38 +30,6 @@ type runLifecycleFixtureMutation interface {
 	CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
 	TransitionActiveRun(context.Context, runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error)
 	MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
-}
-
-type postgresRunLifecycleFixtureMutation struct {
-	storerunlifecycle.TransactionMutation
-}
-
-func (m postgresRunLifecycleFixtureMutation) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return m.Create(ctx, request)
-}
-
-func (m postgresRunLifecycleFixtureMutation) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return m.TransitionActive(ctx, request)
-}
-
-func (m postgresRunLifecycleFixtureMutation) MarkTerminalRun(ctx context.Context, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return m.MarkTerminal(ctx, request)
-}
-
-type sqliteRunLifecycleFixtureMutation struct {
-	storerunlifecycle.TransactionMutation
-}
-
-func (m sqliteRunLifecycleFixtureMutation) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return m.Create(ctx, request)
-}
-
-func (m sqliteRunLifecycleFixtureMutation) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return m.TransitionActive(ctx, request)
-}
-
-func (m sqliteRunLifecycleFixtureMutation) MarkTerminalRun(ctx context.Context, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return m.MarkTerminal(ctx, request)
 }
 
 type semanticRunFixture struct {
@@ -274,111 +239,6 @@ func materializeRunFixtureInCurrentMutationForTest(
 		return err
 	default:
 		return fmt.Errorf("semantic run fixture state %q is unsupported", fixture.State)
-	}
-}
-
-func requireRunFixtureInCurrentMutationForTest(
-	t testing.TB,
-	ctx context.Context,
-	owner runLifecycleFixtureMutation,
-	fixture semanticRunFixture,
-) {
-	t.Helper()
-	if fixture.State == "" {
-		fixture.State = runtimerunlifecycle.StateRunning
-	}
-	if fixture.BundleHash == "" {
-		fixture.BundleHash = sourceartifactfixture.BundleHash
-	}
-	ctx, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash)
-	if err != nil {
-		t.Fatalf("construct semantic run fixture context: %v", err)
-	}
-	if fixture.State == runtimerunlifecycle.StateCompleted {
-		t.Fatal("completed semantic run fixtures require the selected-store owner")
-	}
-	if err := materializeRunFixtureInCurrentMutationForTest(ctx, owner, fixture, source); err != nil {
-		t.Fatalf("materialize semantic run fixture %s in current mutation: %v", fixture.RunID, err)
-	}
-}
-
-func requirePostgresRunFixtureTxForTest(
-	t testing.TB,
-	ctx context.Context,
-	tx *sql.Tx,
-	fixture semanticRunFixture,
-) {
-	t.Helper()
-	story, ok := authoractivityfixture.Mutation(ctx)
-	if !ok {
-		t.Fatal("semantic PostgreSQL run fixture requires private story ownership")
-	}
-	requireRunFixtureInCurrentMutationForTest(
-		t,
-		ctx,
-		postgresRunLifecycleFixtureMutation{storerunlifecycle.NewPostgresTransactionMutation(nil, tx, story, privaterunforkrevision.NewEffects())},
-		fixture,
-	)
-}
-
-func requirePostgresRunFixtureInRawTxForTest(
-	t testing.TB,
-	ctx context.Context,
-	tx *sql.Tx,
-	fixture semanticRunFixture,
-) {
-	t.Helper()
-	txctx, err := authoractivityfixture.Begin(
-		ctx,
-		tx,
-		authoractivityfixture.DialectPostgres,
-	)
-	if err != nil {
-		t.Fatalf("begin semantic run fixture author activity: %v", err)
-	}
-	requirePostgresRunFixtureTxForTest(t, txctx, tx, fixture)
-	if err := authoractivityfixture.Finalize(txctx); err != nil {
-		t.Fatalf("finalize semantic run fixture author activity: %v", err)
-	}
-}
-
-func requireSQLiteRunFixtureTxForTest(
-	t testing.TB,
-	ctx context.Context,
-	tx *sql.Tx,
-	fixture semanticRunFixture,
-) {
-	t.Helper()
-	story, ok := authoractivityfixture.Mutation(ctx)
-	if !ok {
-		t.Fatal("semantic SQLite run fixture requires private story ownership")
-	}
-	requireRunFixtureInCurrentMutationForTest(
-		t,
-		ctx,
-		sqliteRunLifecycleFixtureMutation{storerunlifecycle.NewSQLiteTransactionMutation(nil, tx, story, privaterunforkrevision.NewEffects())},
-		fixture,
-	)
-}
-
-func requireSQLiteRunFixtureInRawTxForTest(
-	t testing.TB,
-	ctx context.Context,
-	tx *sql.Tx,
-	fixture semanticRunFixture,
-) {
-	t.Helper()
-	txctx, err := authoractivityfixture.Begin(
-		ctx,
-		tx,
-		authoractivityfixture.DialectSQLite,
-	)
-	if err != nil {
-		t.Fatalf("begin SQLite semantic run fixture author activity: %v", err)
-	}
-	requireSQLiteRunFixtureTxForTest(t, txctx, tx, fixture)
-	if err := authoractivityfixture.Finalize(txctx); err != nil {
-		t.Fatalf("finalize SQLite semantic run fixture author activity: %v", err)
 	}
 }
 

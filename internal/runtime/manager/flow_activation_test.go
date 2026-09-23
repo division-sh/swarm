@@ -312,6 +312,20 @@ type flowActivationTestCommitter struct {
 	routes    FlowInstanceRouteContextInstaller
 }
 
+type flowActivationOutcomeCommitter struct {
+	base         FlowInstanceActivationCommitter
+	acknowledged bool
+	err          error
+}
+
+func (o flowActivationOutcomeCommitter) CommitFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	if !o.acknowledged {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, o.err
+	}
+	committed, err := o.base.CommitFlowInstanceActivation(ctx, plan)
+	return committed, errors.Join(err, o.err)
+}
+
 func (o flowActivationTestCommitter) CommitFlowInstanceActivation(
 	ctx context.Context,
 	plan runtimepipeline.FlowInstanceActivationPlan,
@@ -330,13 +344,14 @@ func (o flowActivationTestCommitter) CommitFlowInstanceActivation(
 	if result != runtimepipeline.WorkflowInitialMaterializationCreated && result != runtimepipeline.WorkflowInitialMaterializationAlreadyExists {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("unknown test flow activation result %d", result)
 	}
-	if err := o.routes.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+	staged, err := o.routes.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: runtimeflowidentity.RunScopedFlowInstance{RunID: plan.Readiness.RunID, Route: plan.Identity.Route()}, ActivationVariables: plan.ActivationVariables,
-	}); err != nil {
+	})
+	if !staged.Acknowledged || err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
 	return runtimepipeline.CommittedFlowInstanceActivation{
-		Plan: plan, Created: result == runtimepipeline.WorkflowInitialMaterializationCreated,
+		Plan: plan, Created: result == runtimepipeline.WorkflowInitialMaterializationCreated, Acknowledged: true,
 	}, nil
 }
 
@@ -761,13 +776,13 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 	_ context.Context,
 	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	readyAt time.Time,
-) error {
+) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
 	normalized, err := expected.Normalized()
 	if err != nil {
-		return err
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
 	}
 	if s.topologyMarkErr != nil {
-		return s.topologyMarkErr
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, s.topologyMarkErr
 	}
 	if hook := s.beforeTopologyMark; hook != nil {
 		s.beforeTopologyMark = nil
@@ -778,21 +793,21 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 	item, ok := s.readiness[key]
 	if !ok || !item.Eligible() {
 		s.readinessMu.Unlock()
-		return fmt.Errorf("readiness not found")
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, fmt.Errorf("readiness not found")
 	}
 	actualJSON, err := json.Marshal(item.Plan)
 	if err != nil {
 		s.readinessMu.Unlock()
-		return err
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
 	}
 	expectedJSON, err := json.Marshal(normalized)
 	if err != nil {
 		s.readinessMu.Unlock()
-		return err
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, err
 	}
 	if string(actualJSON) != string(expectedJSON) {
 		s.readinessMu.Unlock()
-		return fmt.Errorf("readiness plan changed")
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, fmt.Errorf("readiness plan changed")
 	}
 	if item.TopologyReadyAt.IsZero() {
 		item.TopologyReadyAt = readyAt
@@ -806,7 +821,7 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 		s.afterTopologyMark = nil
 		hook(normalized)
 	}
-	return nil
+	return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{Acknowledged: true}, nil
 }
 
 func (b *flowActivationTestBus) CommitDynamicFlowRuntimeCreationOccurrence(
@@ -1051,8 +1066,8 @@ func (unavailableFlowActivationPipelineObligations) CloseScan(context.Context, r
 	return errors.New("flow activation fixture has no pipeline obligations")
 }
 
-func (unavailableFlowActivationPipelineObligations) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {
-	return errors.New("flow activation fixture has no pipeline obligations")
+func (unavailableFlowActivationPipelineObligations) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) (runtimepipelineobligation.SettlementOutcome, error) {
+	return runtimepipelineobligation.SettlementOutcome{}, errors.New("flow activation fixture has no pipeline obligations")
 }
 
 func (unavailableFlowActivationPipelineObligations) Settle(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
@@ -1111,19 +1126,19 @@ func (b *flowActivationTestBus) AddFlowInstanceRoute(req runtimebus.FlowInstance
 func (b *flowActivationSemanticRouteBus) StageFlowInstanceRouteContext(
 	_ context.Context,
 	req runtimebus.FlowInstanceRouteMaterializationRequest,
-) error {
+) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	if b == nil || b.durable == nil {
-		return errors.New("semantic durable route table is required")
+		return runtimebus.FlowInstanceRouteTopologyResult{}, errors.New("semantic durable route table is required")
 	}
 	req = req.Normalized()
 	if err := b.durable.AddFlowInstanceRoute(req); err != nil {
-		return err
+		return runtimebus.FlowInstanceRouteTopologyResult{}, err
 	}
 	if b.durableRoutes == nil {
 		b.durableRoutes = map[string][]runtimebus.FlowInstanceRouteRecord{}
 	}
 	b.durableRoutes[req.Identity.Key()] = b.durable.MaterializedRoutes(req.Identity)
-	return nil
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (b *flowActivationSemanticRouteBus) PublishPersistedFlowInstanceRoute(
@@ -1167,27 +1182,28 @@ func (b *flowActivationSemanticRouteBus) VerifyFlowInstanceRoute(
 	return nil
 }
 
-func (b *flowActivationTestBus) StageFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+func (b *flowActivationTestBus) StageFlowInstanceRouteContext(ctx context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	req = req.Normalized()
 	if b.addErr != nil {
-		return b.addErr
+		return runtimebus.FlowInstanceRouteTopologyResult{}, b.addErr
 	}
 	if b.stageRoute != nil {
 		if err := b.stageRoute(req); err != nil {
-			return err
+			return runtimebus.FlowInstanceRouteTopologyResult{}, err
 		}
 	}
 	if b.routeStore == nil {
-		return nil
+		return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 	}
 	identity := req.Identity
-	return b.routeStore.UpsertFlowInstanceRoute(ctx, runtimebus.FlowInstanceRouteRecord{
+	err := b.routeStore.UpsertFlowInstanceRoute(ctx, runtimebus.FlowInstanceRouteRecord{
 		Identity:       identity,
 		EventPattern:   identity.Route.InstancePath + "/task.started",
 		SubscriberType: "agent",
 		SubscriberID:   "reviewer-" + identity.Route.InstanceID,
 		SourceFlow:     identity.Route.ScopeKey,
 	})
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: err == nil}, err
 }
 
 func (b *flowActivationTestBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
@@ -1230,7 +1246,8 @@ func (b *flowActivationTestBus) AddFlowInstanceRouteContext(ctx context.Context,
 		return b.addErr
 	}
 	if _, transactional := runtimepipelinefixture.SQLTx(ctx); transactional {
-		if err := b.StageFlowInstanceRouteContext(ctx, req); err != nil {
+		staged, err := b.StageFlowInstanceRouteContext(ctx, req)
+		if !staged.Acknowledged || err != nil {
 			return err
 		}
 		if !runtimepipelinefixture.QueuePostCommitAction(ctx, func(context.Context) {
@@ -1240,7 +1257,8 @@ func (b *flowActivationTestBus) AddFlowInstanceRouteContext(ctx context.Context,
 		}
 		return nil
 	}
-	if err := b.StageFlowInstanceRouteContext(ctx, req); err != nil {
+	staged, err := b.StageFlowInstanceRouteContext(ctx, req)
+	if !staged.Acknowledged || err != nil {
 		return err
 	}
 	return b.PublishPersistedFlowInstanceRoute(req)
@@ -1698,6 +1716,46 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	cfg, _ := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
 	if got := strings.TrimSpace(cfg.EntityID); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
 		t.Fatalf("agent entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
+	}
+}
+
+func TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness(t *testing.T) {
+	for _, standing := range []bool{false, true} {
+		for _, acknowledged := range []bool{false, true} {
+			t.Run(fmt.Sprintf("standing=%t/acknowledged=%t", standing, acknowledged), func(t *testing.T) {
+				bus := &flowActivationTestBus{}
+				commitErr := errors.New("commit cleanup failed")
+				readinessErr := errors.New("readiness finalization failed")
+				instances := &flowActivationTestInstanceStore{topologyMarkErr: readinessErr}
+				am := newFlowActivationManager(t, bus, instances)
+				bundle := testFlowBundle(t, "")
+				req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+				ctx := testAuthorActivityContext(context.Background())
+				setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+				am.roles.FlowActivation = flowActivationOutcomeCommitter{
+					base: am.roles.FlowActivation, acknowledged: acknowledged, err: commitErr,
+				}
+				var err error
+				if standing {
+					created, finish, prepareErr := am.PrepareStandingFlowInstance(ctx, req)
+					err = prepareErr
+					if created != acknowledged || finish != nil {
+						t.Fatalf("standing result: created=%t finish=%v err=%v", created, finish != nil, err)
+					}
+				} else {
+					err = am.ActivateFlowInstance(ctx, req)
+				}
+				if !errors.Is(err, commitErr) {
+					t.Fatalf("commit error lost: %v", err)
+				}
+				if errors.Is(err, readinessErr) != acknowledged {
+					t.Fatalf("readiness finalization mismatch: acknowledged=%t err=%v", acknowledged, err)
+				}
+				if (len(instances.creates) == 1) != acknowledged {
+					t.Fatalf("durable activation mismatch: acknowledged=%t creates=%d", acknowledged, len(instances.creates))
+				}
+			})
+		}
 	}
 }
 

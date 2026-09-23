@@ -18,8 +18,8 @@ var runInsertPattern = regexp.MustCompile(`(?is)INSERT\s+INTO\s+runs\s*\(([^)]*)
 func TestRepositoryRunCreationHasCanonicalOwnersOnly(t *testing.T) {
 	root := repositoryRootForBundleIdentityTest(t)
 	wantOwners := map[string]bool{
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go": false,
-		"internal/testutil/runlifecyclefixture/fixture.go":                               false,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go": false,
+		"internal/testutil/runlifecyclefixture/fixture.go":                       false,
 	}
 	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -77,7 +77,7 @@ func TestRepositoryRunInsertFixturesHaveExplicitCanonicalIdentity(t *testing.T) 
 			return nil
 		}
 		rel := repositoryRelativePath(t, root, path)
-		if rel == "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go" {
+		if rel == "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go" {
 			return nil
 		}
 		source := readRepositoryFile(t, path)

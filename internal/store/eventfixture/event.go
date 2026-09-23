@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
@@ -48,12 +48,11 @@ func eventFacts(
 	}, nil
 }
 
-type Executor interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
+type RowQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func Load(ctx context.Context, q Executor, dialect authoractivityfixture.Dialect, eventID string) (event events.Event, err error) {
+func Load(ctx context.Context, q RowQueryer, dialect authoractivityfixture.Dialect, eventID string) (event events.Event, err error) {
 	if q == nil {
 		return event, fmt.Errorf("canonical event fixture requires a database")
 	}
@@ -82,9 +81,9 @@ func Load(ctx context.Context, q Executor, dialect authoractivityfixture.Dialect
 	return admitted.Event(), nil
 }
 
-func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Dialect, event events.Event) error {
-	if exec == nil {
-		return fmt.Errorf("canonical event fixture requires a database")
+func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect, event events.Event) error {
+	if attempt == nil {
+		return fmt.Errorf("canonical event fixture requires a mutation attempt")
 	}
 	event, err := BindPayload(event)
 	if err != nil {
@@ -106,14 +105,11 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 		return err
 	}
 	var inserted bool
-	// This fixture seeds intentionally unrevisioned state. History-aware tests
-	// use the selected-store fixture owner that finalizes its enclosing mutation.
-	effects := runforkrevision.NewEffects()
 	switch dialect {
 	case authoractivityfixture.DialectPostgres:
-		inserted, err = eventrecordpostgres.Insert(ctx, exec, effects, record)
+		inserted, err = eventrecordpostgres.Insert(ctx, attempt, record)
 	case authoractivityfixture.DialectSQLite:
-		inserted, err = eventrecordsqlite.Insert(ctx, exec, effects, record)
+		inserted, err = eventrecordsqlite.Insert(ctx, attempt, record)
 	default:
 		return fmt.Errorf("canonical event fixture dialect %q is unsupported", dialect)
 	}
@@ -127,12 +123,15 @@ func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Di
 		existing eventrecord.Record
 		found    bool
 	)
-	switch dialect {
-	case authoractivityfixture.DialectPostgres:
-		existing, found, err = eventrecordpostgres.Load(ctx, exec, record.EventID)
-	case authoractivityfixture.DialectSQLite:
-		existing, found, err = eventrecordsqlite.Load(ctx, exec, record.EventID)
-	}
+	err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		switch dialect {
+		case authoractivityfixture.DialectPostgres:
+			existing, found, err = eventrecordpostgres.Load(ctx, tx, record.EventID)
+		case authoractivityfixture.DialectSQLite:
+			existing, found, err = eventrecordsqlite.Load(ctx, tx, record.EventID)
+		}
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -180,7 +179,7 @@ func fixtureSettlement(event events.Event) (events.RouteSettlement, error) {
 
 func ExistingRunRoot(
 	ctx context.Context,
-	db Executor,
+	attempt *mutationprotocol.Attempt,
 	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
@@ -198,12 +197,12 @@ func ExistingRunRoot(
 	if err != nil {
 		return event, err
 	}
-	return event, Insert(ctx, db, dialect, event)
+	return event, Insert(ctx, attempt, dialect, event)
 }
 
 func Child(
 	ctx context.Context,
-	db *sql.DB,
+	attempt *mutationprotocol.Attempt,
 	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
@@ -225,24 +224,24 @@ func Child(
 	if err != nil {
 		return event, err
 	}
-	return event, Insert(ctx, db, dialect, event)
+	return event, Insert(ctx, attempt, dialect, event)
 }
 
 func DiagnosticDirect(
 	ctx context.Context,
-	db *sql.DB,
+	attempt *mutationprotocol.Attempt,
 	dialect authoractivityfixture.Dialect,
 	eventID string,
 	producerID string,
 	payload []byte,
 	createdAt time.Time,
 ) (event events.Event, err error) {
-	return DiagnosticDirectForRun(ctx, db, dialect, eventID, "", "", producerID, payload, createdAt)
+	return DiagnosticDirectForRun(ctx, attempt, dialect, eventID, "", "", producerID, payload, createdAt)
 }
 
 func DiagnosticDirectForRun(
 	ctx context.Context,
-	db *sql.DB,
+	attempt *mutationprotocol.Attempt,
 	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
@@ -277,5 +276,5 @@ func DiagnosticDirectForRun(
 	if err != nil {
 		return event, err
 	}
-	return event, Insert(ctx, db, dialect, event)
+	return event, Insert(ctx, attempt, dialect, event)
 }

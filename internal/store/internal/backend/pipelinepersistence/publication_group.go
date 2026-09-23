@@ -19,10 +19,9 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
 
 // Singleton operations take the same group-first path as segment operations.
@@ -668,6 +667,13 @@ func (g *publicationGroup) Settle(ctx context.Context, requests []pipelineobliga
 	if len(members) == 0 {
 		return out, nil
 	}
+	if g.postgres != nil {
+		if err := g.postgres.requireCurrentSchema(); err != nil {
+			return out, err
+		}
+	} else if err := g.sqlite.requireCurrentSchema(); err != nil {
+		return out, err
+	}
 	locked := append([]*publicationGroupMember(nil), members...)
 	sort.Slice(locked, func(i, j int) bool { return locked[i].event.ID() < locked[j].event.ID() })
 	for _, member := range locked {
@@ -683,56 +689,45 @@ func (g *publicationGroup) Settle(ctx context.Context, requests []pipelineobliga
 			return out, err
 		}
 	}
-	handoff, err := runhandoff.ReserveCandidateHandoff(ctx)
-	if err != nil {
-		return out, err
-	}
-	defer handoff.Rollback()
 	dispositions := make(map[int]pipelineobligation.Disposition)
 	for i, member := range members {
 		dispositions[member.ordinal] = requests[i].Disposition
 	}
 	sort.Slice(members, func(i, j int) bool { return members[i].ordinal < members[j].ordinal })
-	effects := newRevisionEffects()
-	operation := func(ctx context.Context, tx *sql.Tx) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
-		transactiontest.Mark(ctx, transactiontest.PipelineSettlement)
-		if err := g.admitSettlementTx(ctx, tx); err != nil {
-			return err
-		}
-		for _, member := range members {
-			if err := g.current(member); err != nil {
+	operation := func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(ctx, transactiontest.PipelineSettlement)
+			if err := g.admitSettlementTx(ctx, tx); err != nil {
 				return err
 			}
-		}
-		if err := g.validateCommittedMembersTx(ctx, tx, members); err != nil {
-			return err
-		}
-		for _, member := range members {
-			candidates, now := g.candidatesAndClock()
-			if err := settlePipelineMemberTx(ctx, tx, g.postgres != nil, now(), member.claim, dispositions[member.ordinal], effects, candidates, handoff); err != nil {
+			for _, member := range members {
+				if err := g.current(member); err != nil {
+					return err
+				}
+			}
+			if err := g.validateCommittedMembersTx(ctx, tx, members); err != nil {
 				return err
 			}
-		}
-		return nil
-	}
-	var committed bool
-	if g.postgres != nil {
-		committed, err = postgresbackend.RunAuthorityTransactionOutcome(ctx, g.session, func(ctx context.Context, tx *sql.Tx) error {
-			if err := operation(ctx, tx); err != nil {
-				return err
+			for _, member := range members {
+				candidates, now := g.candidatesAndClock()
+				if err := settlePipelineMemberTx(ctx, attempt, g.postgres != nil, now(), member.claim, dispositions[member.ordinal], candidates); err != nil {
+					return err
+				}
 			}
-			_, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects)
-			return err
+			return nil
 		})
+		return struct{}{}, err
+	}
+	var outcome mutationprotocol.Result[struct{}]
+	if g.postgres != nil {
+		outcome = mutationprotocol.RunRetainedPostgres(ctx, g.session, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, g.postgres.runLifecycleCandidates, operation)
 	} else {
-		committed, err = g.sqlite.runRuntimeMutationOutcome(ctx, "settle fan-out publication segment", effects, operation)
+		outcome = mutationprotocol.RunSQLite(ctx, g.sqlite.backend, "settle fan-out publication segment", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, g.sqlite.runLifecycleCandidates, operation)
 	}
-	if !committed {
-		return out, err
+	if !outcome.Acknowledged() {
+		return out, outcome.Err()
 	}
+	err = outcome.Err()
 	for _, member := range members {
 		out.Results = append(out.Results, pipelineobligation.PublicationSettlementResult{Claim: member.claim, Outcome: pipelineobligation.CommittedSettlement(dispositions[member.ordinal].Successful())})
 		if g.postgres != nil {
@@ -744,14 +739,14 @@ func (g *publicationGroup) Settle(ctx context.Context, requests []pipelineobliga
 			err = errors.Join(err, g.sqlite.releaseSQLitePipelineClaimLocked(member.claim, member.state))
 		}
 	}
-	return out, errors.Join(err, handoff.Commit())
+	return out, err
 }
 
-func (g *publicationGroup) candidatesAndClock() (CompletionCandidateRequester, func() time.Time) {
+func (g *publicationGroup) candidatesAndClock() (mutationprotocol.CandidateWriter, func() time.Time) {
 	if g.postgres != nil {
-		return g.postgres.candidateRequests, func() time.Time { return time.Now().UTC() }
+		return g.postgres.RunLifecyclePostgresOwner, func() time.Time { return time.Now().UTC() }
 	}
-	return g.sqlite.candidateRequests, g.sqlite.now
+	return g.sqlite.RunLifecycleSQLiteOwner, g.sqlite.now
 }
 
 var _ pipelineobligation.PublicationGroup = (*publicationGroup)(nil)

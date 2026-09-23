@@ -30,7 +30,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 			selected := runScopedCatalogStore(t, h)
 			if !publicationFrontier {
-				if _, err := selected.PauseRunControl(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "receiver dependency fork", ControlledBy: "cataloge2e"}); err != nil {
+				if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "receiver dependency fork", ControlledBy: "cataloge2e"}); err != nil {
 					t.Fatal(err)
 				}
 			}

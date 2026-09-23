@@ -20,62 +20,53 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
 type eventCommitTxStore interface {
-	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
-	CommitInitialDeliveryObligationsTx(context.Context, *sql.Tx, *revisionEffects, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
-	CommitInitialPipelineScopeTx(context.Context, *sql.Tx, *revisionEffects, string, runtimepipelineobligation.CommittedScope) error
-	CommitInitialPipelineDispositionTx(context.Context, *sql.Tx, *revisionEffects, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
-	RecordDeadLetterTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedeadletters.Record, bool) error
-	createReplyContextTx(context.Context, *sql.Tx, *revisionEffects, runtimereplycontext.Record) error
-	claimReplyContextTx(context.Context, *sql.Tx, *revisionEffects, runtimereplycontext.ClaimCommand) error
+	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
+	CommitInitialPipelineScopeTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope) error
+	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
+	RecordDeadLetterTx(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error
+	createReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
+	claimReplyContextTx(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
 	PrepareDynamicFlowCreationOccurrenceCommitTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) (bool, error)
-	CommitFlowInstanceActivationsTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
+	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
 	ReplaceFlowInstanceRouteTopologyTx(context.Context, *sql.Tx, []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error)
 	MarkDynamicFlowCreationOccurrenceCommittedTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error
 }
 
-func (s *EventPostgresOwner) CommitDirectiveEventTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+func (s *EventPostgresOwner) CommitDirectiveEventTx(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	settlement, err := events.NewNoDeliverySettlement(events.EventWriteDirectiveDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return (sqlPublishCommitter{tx: tx, store: s, story: story, effects: effects}).commitNamedEvent(ctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
+	return (sqlPublishCommitter{attempt: attempt, store: s}).commitNamedEvent(ctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
 		Event: admitted, RouteSettlement: settlement, ReplayScope: runtimepipelineobligation.ScopeDirect,
 	})
 }
 
-func (s *EventSQLiteOwner) CommitDirectiveEventTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+func (s *EventSQLiteOwner) CommitDirectiveEventTx(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	settlement, err := events.NewNoDeliverySettlement(events.EventWriteDirectiveDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return (sqlPublishCommitter{tx: tx, store: s, story: story, effects: effects}).commitNamedEvent(ctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
+	return (sqlPublishCommitter{attempt: attempt, store: s}).commitNamedEvent(ctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
 		Event: admitted, RouteSettlement: settlement, ReplayScope: runtimepipelineobligation.ScopeDirect,
 	})
 }
 
 type sqlPublishCommitter struct {
-	tx      *sql.Tx
+	attempt *mutationprotocol.Attempt
 	store   eventCommitTxStore
-	story   runtimeauthoractivity.Mutation
-	effects *revisionEffects
-}
-
-func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {
-	if story == nil {
-		return nil
-	}
-	return story
 }
 
 func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation string, class events.EventAdmissionClass, eventType events.EventType, req runtimebus.CommitPublishRequest) (runtimebus.EventAppendOutcome, error) {
-	if c.tx == nil || c.store == nil {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s event commit transaction is required", operation)
+	if c.attempt == nil || c.store == nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s event commit attempt is required", operation)
 	}
 	if err := events.ValidateNamedEvent(req.Event, class, eventType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
@@ -83,7 +74,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := req.ValidatePreparedEvent(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, c.story, c.effects, req.Event, req.RouteSettlement)
+	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -109,36 +100,38 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 
 func (c sqlPublishCommitter) commitInitialSideEffectEvidence(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) ([]runtimedelivery.DurableHandoffProof, error) {
 	for _, record := range req.ReplyCreations {
-		if err := c.store.createReplyContextTx(ctx, c.tx, c.effects, record); err != nil {
+		if err := c.store.createReplyContextTx(ctx, c.attempt, record); err != nil {
 			return nil, fmt.Errorf("commit reply context creation: %w", err)
 		}
 	}
 	for _, claim := range req.ReplyClaims {
-		if err := c.store.claimReplyContextTx(ctx, c.tx, c.effects, claim); err != nil {
+		if err := c.store.claimReplyContextTx(ctx, c.attempt, claim); err != nil {
 			return nil, fmt.Errorf("commit reply context claim: %w", err)
 		}
 	}
 	if requirePublicationClaim {
-		if err := c.store.RequirePipelinePublicationClaimTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim); err != nil {
+		if err := c.attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return c.store.RequirePipelinePublicationClaimTx(ctx, tx, req.Event.ID(), req.PipelineClaim)
+		}); err != nil {
 			return nil, fmt.Errorf("executable event commit requires its current publication claim: %w", err)
 		}
 	}
 	proofs, err := c.store.CommitInitialDeliveryObligationsTx(
-		ctx, c.tx, c.effects, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes, req.DeliveryAuthority,
+		ctx, c.attempt, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes, req.DeliveryAuthority,
 	)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.store.CommitInitialPipelineScopeTx(ctx, c.tx, c.effects, req.Event.ID(), req.ReplayScope); err != nil {
+	if err := c.store.CommitInitialPipelineScopeTx(ctx, c.attempt, req.Event.ID(), req.ReplayScope); err != nil {
 		return nil, err
 	}
 	if req.Disposition != nil {
-		if err := c.store.CommitInitialPipelineDispositionTx(ctx, c.tx, c.effects, req.Event.ID(), req.PipelineClaim, *req.Disposition); err != nil {
+		if err := c.store.CommitInitialPipelineDispositionTx(ctx, c.attempt, req.Event.ID(), req.PipelineClaim, *req.Disposition); err != nil {
 			return nil, err
 		}
 	}
 	if req.DeadLetter != nil {
-		if err := c.store.RecordDeadLetterTx(ctx, c.tx, c.story, c.effects, *req.DeadLetter, true); err != nil {
+		if err := c.store.RecordDeadLetterTx(ctx, c.attempt, *req.DeadLetter, true); err != nil {
 			return nil, err
 		}
 	}
@@ -177,9 +170,7 @@ func validateSelectedForkCommitRequest(req runtimebus.CommitSelectedForkEventReq
 
 func commitSelectedForkEvent(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	attempt *mutationprotocol.Attempt,
 	store eventCommitTxStore,
 	insertLineage func(context.Context, *sql.Tx, runfork.RunForkSelectedContractExecutionLineage) error,
 	req runtimebus.CommitSelectedForkEventRequest,
@@ -188,9 +179,9 @@ func commitSelectedForkEvent(
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	result := runtimebus.CommittedSelectedForkEvent{}
-	committer := sqlPublishCommitter{tx: tx, store: store, story: story, effects: effects}
+	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	var err error
-	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, tx, story, effects, req.Commit.Event, req.Commit.RouteSettlement)
+	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, attempt, req.Commit.Event, req.Commit.RouteSettlement)
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
@@ -200,7 +191,9 @@ func commitSelectedForkEvent(
 	if result.AppendOutcome != runtimebus.EventAppendInserted {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("selected-fork operation returned invalid append outcome")
 	}
-	if err := insertLineage(ctx, tx, req.Lineage); err != nil {
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return insertLineage(ctx, tx, req.Lineage)
+	}); err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(ctx, req.Commit, true)
@@ -210,24 +203,24 @@ func commitSelectedForkEvent(
 	return result, result.Validate()
 }
 
-func (s *EventPostgresOwner) CommitSelectedForkTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
+func (s *EventPostgresOwner) CommitSelectedForkTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
 	if s.runFork == nil {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("event PostgreSQL run-fork owner is required")
 	}
-	return commitSelectedForkEvent(ctx, tx, story, effects, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(ctx, attempt, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
 }
 
-func (s *EventSQLiteOwner) CommitSelectedForkTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
+func (s *EventSQLiteOwner) CommitSelectedForkTx(ctx context.Context, attempt *mutationprotocol.Attempt, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
 	if s.runFork == nil {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("event SQLite run-fork owner is required")
 	}
-	return commitSelectedForkEvent(ctx, tx, story, effects, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(ctx, attempt, s, s.runFork.InsertSelectedForkExecutionLineageTx, req)
 }
 
 func commitPublication(
 	ctx context.Context,
 	store eventCommitTxStore,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) (bool, error),
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimebus.CommittedPublication, error)) mutationprotocol.Result[runtimebus.CommittedPublication],
 	command runtimebus.PublicationCommand,
 ) (runtimebus.CommittedPublication, error) {
 	var err error
@@ -235,29 +228,18 @@ func commitPublication(
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	_, postgres := store.(*EventPostgresOwner)
-	result, err := withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, bool, error) {
-		result := runtimebus.CommittedPublication{}
-		committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-			if err := handoff.ResetAttempt(); err != nil {
-				return err
-			}
-			var err error
-			result, err = commitPublicationTx(txctx, tx, story, effects, store, postgres, command, handoff)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-		return result, committed, err
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedPublication, error) {
+		return commitPublicationTx(txctx, attempt, store, command)
 	})
-	if err != nil {
-		return result, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimebus.CommittedPublication{}, outcome.Err()
 	}
+	result.Acknowledged = true
 	if err := result.Validate(); err != nil {
-		return result, fmt.Errorf("validate committed publication: %w", err)
+		return result, errors.Join(outcome.Err(), fmt.Errorf("validate committed publication: %w", err))
 	}
-	return result, nil
+	return result, outcome.Err()
 }
 
 func publicationCommitContext(ctx context.Context, command runtimebus.PublicationCommand) (context.Context, error) {
@@ -339,8 +321,9 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	if err != nil {
 		return result, err
 	}
-	result, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedAPIEventPublication, bool, error) {
-		committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
+	outcome := runPostgresEventMutationResult(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
+		var result runtimebus.CommittedAPIEventPublication
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var plan *storedurabledata.RunCreationPlan
 			if command.RunCreation != nil {
 				prepared, prepareErr := storedurabledata.PrepareRunCreationTx(s.durableData, txctx, tx, *command.RunCreation)
@@ -372,7 +355,7 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 					return commitErr
 				}
 			}
-			committed, commitErr := commitPublicationTx(txctx, tx, story, effects, s, true, command.Publication, handoff)
+			committed, commitErr := commitPublicationTx(txctx, attempt, s, command.Publication)
 			if commitErr != nil {
 				return commitErr
 			}
@@ -402,12 +385,15 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 			}
 			return nil
 		})
-		return result, committed, err
-	})
-	if err != nil {
 		return result, err
+	})
+	var acknowledged bool
+	result, acknowledged = outcome.Value()
+	if !acknowledged {
+		return result, outcome.Err()
 	}
-	return result, result.Validate()
+	result.Acknowledged = true
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
 func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, command runtimebus.APIEventPublicationCommand) (result runtimebus.CommittedAPIEventPublication, err error) {
@@ -429,11 +415,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 	if err != nil {
 		return result, err
 	}
-	result, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedAPIEventPublication, bool, error) {
-		committed, err := s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite API event publication commit", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-			if err := handoff.ResetAttempt(); err != nil {
-				return err
-			}
+	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite API event publication commit", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedAPIEventPublication, error) {
+		var result runtimebus.CommittedAPIEventPublication
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var plan *storedurabledata.RunCreationPlan
 			if command.RunCreation != nil {
 				prepared, prepareErr := storedurabledata.PrepareRunCreationTx(s.durableData, txctx, tx, *command.RunCreation)
@@ -465,7 +449,7 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 					return commitErr
 				}
 			}
-			committed, commitErr := commitPublicationTx(txctx, tx, story, effects, s, false, command.Publication, handoff)
+			committed, commitErr := commitPublicationTx(txctx, attempt, s, command.Publication)
 			if commitErr != nil {
 				return commitErr
 			}
@@ -495,12 +479,15 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 			}
 			return nil
 		})
-		return result, committed, err
-	})
-	if err != nil {
 		return result, err
+	})
+	var acknowledged bool
+	result, acknowledged = outcome.Value()
+	if !acknowledged {
+		return result, outcome.Err()
 	}
-	return result, result.Validate()
+	result.Acknowledged = true
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
 func bindRunCreationCompletion(completion apiidempotency.Completion, record runtimedata.RunCreationOperationRecord) (apiidempotency.Completion, error) {
@@ -525,27 +512,33 @@ func bindRunCreationCompletion(completion apiidempotency.Completion, record runt
 
 func commitPublicationTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	story *privateauthoractivity.Mutation,
-	effects *revisionEffects,
+	attempt *mutationprotocol.Attempt,
 	store eventCommitTxStore,
-	postgres bool,
 	command runtimebus.PublicationCommand,
-	handoff *runLifecycleCandidateHandoffReservation,
 ) (runtimebus.CommittedPublication, error) {
-	if tx == nil || story == nil {
-		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit requires private transaction and story owners")
+	if attempt == nil {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit requires a mutation attempt")
 	}
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	return commitValidatedPublicationTx(ctx, tx, story, effects, store, postgres, command, handoff)
+	return commitValidatedPublicationTx(ctx, attempt, store, command)
 }
 
 func commitValidatedPublicationTx(
-	ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects,
-	store eventCommitTxStore, postgres bool, command runtimebus.PublicationCommand,
-	handoff *runLifecycleCandidateHandoffReservation,
+	ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, command runtimebus.PublicationCommand,
+) (runtimebus.CommittedPublication, error) {
+	var result runtimebus.CommittedPublication
+	err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var writeErr error
+		result, writeErr = commitValidatedPublicationSQL(txctx, tx, attempt, store, command)
+		return writeErr
+	})
+	return result, err
+}
+
+func commitValidatedPublicationSQL(
+	ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, command runtimebus.PublicationCommand,
 ) (runtimebus.CommittedPublication, error) {
 	if command.HasAuthorScope {
 		ctx = runtimeauthoractivity.WithScope(ctx, command.AuthorScope)
@@ -563,7 +556,7 @@ func commitValidatedPublicationTx(
 		}
 	}
 	request := command.Commit
-	committer := sqlPublishCommitter{tx: tx, store: store, story: runtimeAuthorActivityMutation(story), effects: effects}
+	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	creationAlreadyCommitted := false
 	var err error
 	if command.DynamicFlowCreation != nil {
@@ -572,7 +565,7 @@ func commitValidatedPublicationTx(
 			return runtimebus.CommittedPublication{}, err
 		}
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, committer.story, effects, request.Event, request.RouteSettlement)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
@@ -581,7 +574,7 @@ func commitValidatedPublicationTx(
 		if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
 			return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")
 		}
-		result.Activations, err = store.CommitFlowInstanceActivationsTx(ctx, tx, story, effects, command.Activations)
+		result.Activations, err = store.CommitFlowInstanceActivationsTx(ctx, attempt, command.Activations)
 		if err != nil {
 			return runtimebus.CommittedPublication{}, err
 		}
@@ -604,7 +597,7 @@ func commitValidatedPublicationTx(
 				return runtimebus.CommittedPublication{}, loadErr
 			}
 			if standalone {
-				if _, err := selected.RequestCompletionCandidateTx(ctx, tx, request.Event.Event().RunID(), nil, handoff); err != nil {
+				if _, err := attempt.RequestCompletion(ctx, selected.RunLifecyclePostgresOwner, request.Event.Event().RunID(), nil); err != nil {
 					return runtimebus.CommittedPublication{}, err
 				}
 			}
@@ -615,7 +608,7 @@ func commitValidatedPublicationTx(
 				return runtimebus.CommittedPublication{}, loadErr
 			}
 			if standalone {
-				if _, err := selected.RequestCompletionCandidateTx(ctx, tx, request.Event.Event().RunID(), nil, handoff); err != nil {
+				if _, err := attempt.RequestCompletion(ctx, selected.RunLifecycleSQLiteOwner, request.Event.Event().RunID(), nil); err != nil {
 					return runtimebus.CommittedPublication{}, err
 				}
 			}
@@ -624,7 +617,7 @@ func commitValidatedPublicationTx(
 	if command.DynamicFlowCreation != nil && creationAlreadyCommitted {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow readiness is complete without its creation event")
 	}
-	result.Activations, err = store.CommitFlowInstanceActivationsTx(ctx, tx, story, effects, command.Activations)
+	result.Activations, err = store.CommitFlowInstanceActivationsTx(ctx, attempt, command.Activations)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
@@ -644,29 +637,29 @@ func commitValidatedPublicationTx(
 	return result, nil
 }
 
-func (s *EventPostgresOwner) CommitPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-	return commitPublicationTx(ctx, tx, story, effects, s, true, command, handoff)
+func (s *EventPostgresOwner) CommitPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return commitPublicationTx(ctx, attempt, s, command)
 }
 
-func (s *EventSQLiteOwner) CommitPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, command runtimebus.PublicationCommand, handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-	return commitPublicationTx(ctx, tx, story, effects, s, false, command, handoff)
+func (s *EventSQLiteOwner) CommitPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return commitPublicationTx(ctx, attempt, s, command)
 }
 
 func (s *EventPostgresOwner) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	return commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, fn)
+	return commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (runtimebus.CommittedPublication, error)) mutationprotocol.Result[runtimebus.CommittedPublication] {
+		return runPostgresEventMutationResult(ctx, s, true, fn)
 	}, command)
 }
 
 func (s *EventSQLiteOwner) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	return commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite publication commit", fn)
+	return commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (runtimebus.CommittedPublication, error)) mutationprotocol.Result[runtimebus.CommittedPublication] {
+		return runSQLiteEventMutationResult(ctx, s, "sqlite publication commit", true, fn)
 	}, command)
 }
 
-func commitRuntimeLogEventTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	if tx == nil {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log transaction is required")
+func commitRuntimeLogEventTx(ctx context.Context, store eventCommitTxStore, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	if attempt == nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log mutation attempt is required")
 	}
 	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformRuntimeLog); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log operation: %w", err)
@@ -675,33 +668,17 @@ func commitRuntimeLogEventTx(ctx context.Context, store eventCommitTxStore, tx *
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return store.appendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
-}
-
-func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	outcome := runtimebus.EventAppendOutcomeUnknown
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-		var err error
-		outcome, err = commitRuntimeLogEventTx(txctx, store, tx, runtimeAuthorActivityMutation(story), effects, admitted)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	return outcome, nil
+	return store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 }
 
 func (s *EventPostgresOwner) CommitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return commitRuntimeLogEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, fn)
-	}, admitted)
+	return runPostgresEventMutation(ctx, s, false, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.EventAppendOutcome, error) {
+		return commitRuntimeLogEventTx(ctx, s, attempt, admitted)
+	})
 }
 
 func (s *EventSQLiteOwner) CommitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return commitRuntimeLogEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite runtime-log event commit", fn)
-	}, admitted)
+	return runSQLiteEventMutation(ctx, s, "sqlite runtime-log event commit", false, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.EventAppendOutcome, error) {
+		return commitRuntimeLogEventTx(ctx, s, attempt, admitted)
+	})
 }

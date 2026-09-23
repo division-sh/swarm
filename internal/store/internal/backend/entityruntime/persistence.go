@@ -10,11 +10,11 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	privatemutationprotocol "github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
@@ -23,64 +23,6 @@ import (
 
 var _ runtimetools.EntityPersistence = (*EntityPostgresOwner)(nil)
 var _ runtimetools.EntityPersistence = (*EntitySQLiteOwner)(nil)
-
-type entityRunSourceOwner func(context.Context, string) (runtimecorrelation.SourceArtifactFact, error)
-
-func (fn entityRunSourceOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-	return fn(ctx, runID)
-}
-
-func postgresEntityRunSourceOwner(tx *sql.Tx) entityRunSourceOwner {
-	return func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-		return storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
-	}
-}
-
-func (s *EntityPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("entity postgres owner is required")
-	}
-	if err := s.schemaGuard(); err != nil {
-		return err
-	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
-func (s *EntitySQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("entity sqlite owner is required")
-	}
-	if err := s.schemaGuard(); err != nil {
-		return err
-	}
-	resetEffects := effects.AttemptReset()
-	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		resetEffects()
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
 
 func (s *EntityPostgresOwner) LoadEntityState(ctx context.Context, identity runtimetools.EntityIdentity) (map[string]any, bool, error) {
 	if s == nil || s.backend == nil {
@@ -168,35 +110,41 @@ func (s *EntitySQLiteOwner) QueryEntityStates(ctx context.Context, query runtime
 	return ScanToolEntityRows(rows)
 }
 
-func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtimetools.EntityFieldUpdate) (int, error) {
+func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtimetools.EntityFieldUpdate) (runtimetools.EntityFieldWriteResult, error) {
 	if s == nil || s.backend == nil {
-		return 0, fmt.Errorf("postgres entity persistence store is required")
+		return runtimetools.EntityFieldWriteResult{}, fmt.Errorf("postgres entity persistence store is required")
 	}
 	runID, entityID, segments, valueJSON, err := normalizeToolEntityFieldUpdate(update)
 	if err != nil {
-		return 0, err
+		return runtimetools.EntityFieldWriteResult{}, err
 	}
-	var revision int
-	effects := privaterunforkrevision.NewEffects()
-	err = s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := storerunstate.RequirePostgresActiveTx(txctx, tx, runID); err != nil {
-			return err
-		}
-		pathArray := pq.Array(segments)
-		var oldValue []byte
-		if err := tx.QueryRowContext(txctx, `
+	if s.schemaGuard == nil {
+		return runtimetools.EntityFieldWriteResult{}, fmt.Errorf("entity postgres owner is required")
+	}
+	if err := s.schemaGuard(); err != nil {
+		return runtimetools.EntityFieldWriteResult{}, err
+	}
+	result := privatemutationprotocol.RunPostgres[int](ctx, s.backend, privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (int, error) {
+		var revision int
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := storerunstate.RequirePostgresActiveTx(txctx, tx, runID); err != nil {
+				return err
+			}
+			pathArray := pq.Array(segments)
+			var oldValue []byte
+			if err := tx.QueryRowContext(txctx, `
 		SELECT COALESCE(COALESCE(fields, '{}'::jsonb) #> $3::text[], 'null'::jsonb)
 		FROM entity_state
 		WHERE run_id = $1::uuid
 		  AND entity_id = $2::uuid
 		FOR UPDATE
 	`, runID, entityID, pathArray).Scan(&oldValue); err != nil {
-			if err == sql.ErrNoRows {
-				return fmt.Errorf("entity not found: %s", entityID)
+				if err == sql.ErrNoRows {
+					return fmt.Errorf("entity not found: %s", entityID)
+				}
+				return fmt.Errorf("load postgres entity field: %w", err)
 			}
-			return fmt.Errorf("load postgres entity field: %w", err)
-		}
-		if err := tx.QueryRowContext(txctx, `
+			if err := tx.QueryRowContext(txctx, `
 		UPDATE entity_state
 		SET
 			fields = jsonb_set(COALESCE(fields, '{}'::jsonb), $2::text[], $3::jsonb, true),
@@ -206,106 +154,126 @@ func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtim
 		  AND run_id = $4::uuid
 		RETURNING revision
 	`, entityID, pathArray, string(valueJSON), runID).Scan(&revision); err != nil {
-			return fmt.Errorf("update postgres entity field: %w", err)
-		}
-		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, effects, entityID, runtimemutationlog.EntityStateProjection{
-			Fields: map[string]any{update.FieldPath: toolNullableJSONBytes(oldValue)},
-		}, runtimemutationlog.EntityStateProjection{
-			Fields: map[string]any{update.FieldPath: json.RawMessage(valueJSON)},
-		}, MutationWriter(update.Writer)); err != nil {
-			return fmt.Errorf("record postgres entity mutation: %w", err)
-		}
-		return nil
+				return fmt.Errorf("update postgres entity field: %w", err)
+			}
+			if err := insertPostgresEntityStateDiff(txctx, mutation, tx, entityID, runtimemutationlog.EntityStateProjection{
+				Fields: map[string]any{update.FieldPath: toolNullableJSONBytes(oldValue)},
+			}, runtimemutationlog.EntityStateProjection{
+				Fields: map[string]any{update.FieldPath: json.RawMessage(valueJSON)},
+			}, MutationWriter(update.Writer)); err != nil {
+				return fmt.Errorf("record postgres entity mutation: %w", err)
+			}
+			return nil
+		})
+		return revision, err
 	})
-	if err != nil {
-		return 0, err
-	}
-	return revision, nil
+	return committedEntityFieldRevision(result)
 }
 
-func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimetools.EntityFieldUpdate) (int, error) {
+func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimetools.EntityFieldUpdate) (runtimetools.EntityFieldWriteResult, error) {
 	if s == nil || s.backend == nil {
-		return 0, fmt.Errorf("sqlite entity persistence store is required")
+		return runtimetools.EntityFieldWriteResult{}, fmt.Errorf("sqlite entity persistence store is required")
 	}
 	runID, entityID, segments, valueJSON, err := normalizeToolEntityFieldUpdate(update)
 	if err != nil {
-		return 0, err
+		return runtimetools.EntityFieldWriteResult{}, err
 	}
-	var revision int
-	effects := privaterunforkrevision.NewEffects()
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite entity field update", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, runID); err != nil {
-			return err
-		}
-		var fieldsRaw any
-		if err := tx.QueryRowContext(txctx, `
+	if s.schemaGuard == nil {
+		return runtimetools.EntityFieldWriteResult{}, fmt.Errorf("entity sqlite owner is required")
+	}
+	if err := s.schemaGuard(); err != nil {
+		return runtimetools.EntityFieldWriteResult{}, err
+	}
+	result := privatemutationprotocol.RunSQLite[int](ctx, s.backend, "sqlite entity field update", privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (int, error) {
+		var revision int
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, runID); err != nil {
+				return err
+			}
+			var fieldsRaw any
+			if err := tx.QueryRowContext(txctx, `
 			SELECT COALESCE(fields, '{}')
 			FROM entity_state
 			WHERE run_id = ? AND entity_id = ?
 		`, runID, entityID).Scan(&fieldsRaw); err != nil {
-			if err == sql.ErrNoRows {
-				return fmt.Errorf("entity not found: %s", entityID)
+				if err == sql.ErrNoRows {
+					return fmt.Errorf("entity not found: %s", entityID)
+				}
+				return fmt.Errorf("load sqlite entity fields: %w", err)
 			}
-			return fmt.Errorf("load sqlite entity fields: %w", err)
-		}
-		fields, err := DecodeJSONMap(fieldsRaw)
-		if err != nil {
-			return fmt.Errorf("decode sqlite entity fields: %w", err)
-		}
-		oldValue, _ := toolPathValue(fields, segments)
-		newValue, err := toolDecodeJSONValue(valueJSON)
-		if err != nil {
-			return fmt.Errorf("decode sqlite entity field value: %w", err)
-		}
-		toolSetPath(fields, segments, newValue)
-		fieldsJSON, err := json.Marshal(fields)
-		if err != nil {
-			return fmt.Errorf("marshal sqlite entity fields: %w", err)
-		}
-		now := s.now()
-		if _, err := tx.ExecContext(txctx, `
+			fields, err := DecodeJSONMap(fieldsRaw)
+			if err != nil {
+				return fmt.Errorf("decode sqlite entity fields: %w", err)
+			}
+			oldValue, _ := toolPathValue(fields, segments)
+			newValue, err := toolDecodeJSONValue(valueJSON)
+			if err != nil {
+				return fmt.Errorf("decode sqlite entity field value: %w", err)
+			}
+			toolSetPath(fields, segments, newValue)
+			fieldsJSON, err := json.Marshal(fields)
+			if err != nil {
+				return fmt.Errorf("marshal sqlite entity fields: %w", err)
+			}
+			now := s.now()
+			if _, err := tx.ExecContext(txctx, `
 			UPDATE entity_state
 			SET fields = ?, revision = revision + 1, updated_at = ?
 			WHERE run_id = ? AND entity_id = ?
 		`, string(fieldsJSON), now, runID, entityID); err != nil {
-			return fmt.Errorf("update sqlite entity field: %w", err)
-		}
-		if err := tx.QueryRowContext(txctx, `
+				return fmt.Errorf("update sqlite entity field: %w", err)
+			}
+			if err := tx.QueryRowContext(txctx, `
 			SELECT revision
 			FROM entity_state
 			WHERE run_id = ? AND entity_id = ?
 		`, runID, entityID).Scan(&revision); err != nil {
-			return fmt.Errorf("load sqlite entity revision: %w", err)
-		}
-		if err := InsertSQLiteEntityStateDiff(txctx, story, tx, effects, runID, entityID, runtimemutationlog.EntityStateProjection{
-			Fields: map[string]any{update.FieldPath: oldValue},
-		}, runtimemutationlog.EntityStateProjection{
-			Fields: map[string]any{update.FieldPath: newValue},
-		}, MutationWriter(update.Writer), now); err != nil {
-			return fmt.Errorf("record sqlite entity mutation: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-	return revision, nil
+				return fmt.Errorf("load sqlite entity revision: %w", err)
+			}
+			if err := insertSQLiteEntityStateDiffAttempt(txctx, mutation, tx, runID, entityID, runtimemutationlog.EntityStateProjection{
+				Fields: map[string]any{update.FieldPath: oldValue},
+			}, runtimemutationlog.EntityStateProjection{
+				Fields: map[string]any{update.FieldPath: newValue},
+			}, MutationWriter(update.Writer), now); err != nil {
+				return fmt.Errorf("record sqlite entity mutation: %w", err)
+			}
+			return nil
+		})
+		return revision, err
+	})
+	return committedEntityFieldRevision(result)
 }
 
-func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools.EntityCreateRecord) error {
+func committedEntityFieldRevision(result privatemutationprotocol.Result[int]) (runtimetools.EntityFieldWriteResult, error) {
+	revision, acknowledged := result.Value()
+	if !acknowledged {
+		return runtimetools.EntityFieldWriteResult{}, result.Err()
+	}
+	return runtimetools.EntityFieldWriteResult{Revision: revision, Acknowledged: true}, result.Err()
+}
+
+func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error) {
 	if s == nil || s.backend == nil {
-		return fmt.Errorf("postgres entity persistence store is required")
+		return runtimetools.EntityCreateResult{}, fmt.Errorf("postgres entity persistence store is required")
 	}
 	rec, fields, err := normalizeToolEntityCreateRecord(rec)
 	if err != nil {
-		return err
+		return runtimetools.EntityCreateResult{}, err
 	}
-	effects := privaterunforkrevision.NewEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := storerunstate.RequirePostgresActiveTx(txctx, tx, rec.RunID); err != nil {
-			return err
-		}
-		var storedRunID, storedEntityID string
-		if err := tx.QueryRowContext(txctx, `
+	if s.schemaGuard == nil {
+		return runtimetools.EntityCreateResult{}, fmt.Errorf("entity postgres owner is required")
+	}
+	if err := s.schemaGuard(); err != nil {
+		return runtimetools.EntityCreateResult{}, err
+	}
+	result := privatemutationprotocol.RunPostgres[string](ctx, s.backend, privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (string, error) {
+		var storedEntityID string
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := storerunstate.RequirePostgresActiveTx(txctx, tx, rec.RunID); err != nil {
+				return err
+			}
+			var storedRunID string
+			if err := tx.QueryRowContext(txctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, bookkeeping, accumulator, revision,
@@ -318,35 +286,44 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 		)
 		RETURNING run_id::text, entity_id::text
 	`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, rec.Name, rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt).Scan(&storedRunID, &storedEntityID); err != nil {
-			return fmt.Errorf("insert postgres entity: %w", err)
-		}
-		if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
-			return err
-		}
-		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, effects, storedEntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-			CurrentState: rec.CurrentState,
-			Fields:       fields,
-		}, MutationWriter(rec.Writer)); err != nil {
-			return fmt.Errorf("record postgres entity create mutation: %w", err)
-		}
-		return nil
+				return fmt.Errorf("insert postgres entity: %w", err)
+			}
+			if err := mutation.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
+				return err
+			}
+			if err := insertPostgresEntityStateDiff(txctx, mutation, tx, storedEntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+				CurrentState: rec.CurrentState,
+				Fields:       fields,
+			}, MutationWriter(rec.Writer)); err != nil {
+				return fmt.Errorf("record postgres entity create mutation: %w", err)
+			}
+			return nil
+		})
+		return storedEntityID, err
 	})
+	return committedEntityCreate(result)
 }
 
-func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.EntityCreateRecord) error {
+func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error) {
 	if s == nil || s.backend == nil {
-		return fmt.Errorf("sqlite entity persistence store is required")
+		return runtimetools.EntityCreateResult{}, fmt.Errorf("sqlite entity persistence store is required")
 	}
 	rec, fields, err := normalizeToolEntityCreateRecord(rec)
 	if err != nil {
-		return err
+		return runtimetools.EntityCreateResult{}, err
 	}
-	effects := privaterunforkrevision.NewEffects()
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite entity create", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, rec.RunID); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(txctx, `
+	if s.schemaGuard == nil {
+		return runtimetools.EntityCreateResult{}, fmt.Errorf("entity sqlite owner is required")
+	}
+	if err := s.schemaGuard(); err != nil {
+		return runtimetools.EntityCreateResult{}, err
+	}
+	result := privatemutationprotocol.RunSQLite[string](ctx, s.backend, "sqlite entity create", privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (string, error) {
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, rec.RunID); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, name,
 				current_state, gates, fields, bookkeeping, accumulator, revision,
@@ -354,20 +331,31 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 			)
 			VALUES (?, ?, ?, ?, ?, ?, '{}', ?, '{}', '{}', 1, ?, ?, ?)
 		`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, sqliteNullString(rec.Name),
-			rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt, rec.CreatedAt, rec.CreatedAt); err != nil {
-			return fmt.Errorf("insert sqlite entity: %w", err)
-		}
-		if err := effects.AddFact(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, rec.EntityID); err != nil {
-			return err
-		}
-		if err := InsertSQLiteEntityStateDiff(txctx, story, tx, effects, rec.RunID, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-			CurrentState: rec.CurrentState,
-			Fields:       fields,
-		}, MutationWriter(rec.Writer), rec.CreatedAt); err != nil {
-			return fmt.Errorf("record sqlite entity create mutation: %w", err)
-		}
-		return nil
+				rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt, rec.CreatedAt, rec.CreatedAt); err != nil {
+				return fmt.Errorf("insert sqlite entity: %w", err)
+			}
+			if err := mutation.AddFact(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, rec.EntityID); err != nil {
+				return err
+			}
+			if err := insertSQLiteEntityStateDiffAttempt(txctx, mutation, tx, rec.RunID, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+				CurrentState: rec.CurrentState,
+				Fields:       fields,
+			}, MutationWriter(rec.Writer), rec.CreatedAt); err != nil {
+				return fmt.Errorf("record sqlite entity create mutation: %w", err)
+			}
+			return nil
+		})
+		return rec.EntityID, err
 	})
+	return committedEntityCreate(result)
+}
+
+func committedEntityCreate(result privatemutationprotocol.Result[string]) (runtimetools.EntityCreateResult, error) {
+	entityID, acknowledged := result.Value()
+	if !acknowledged {
+		return runtimetools.EntityCreateResult{}, result.Err()
+	}
+	return runtimetools.EntityCreateResult{EntityID: entityID, Acknowledged: true}, result.Err()
 }
 
 func toolEntitySelectSQL(where string) string {
@@ -784,10 +772,87 @@ func toolSetPath(fields map[string]any, segments []string, value any) {
 	current[segments[len(segments)-1]] = value
 }
 
-func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, createdAt time.Time) error {
-	if story == nil {
-		return fmt.Errorf("entity mutation story owner is required")
+func insertPostgresEntityStateDiff(ctx context.Context, mutation *privatemutationprotocol.Attempt, tx *sql.Tx, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
+	records, err := runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)
+	if err != nil {
+		return err
 	}
+	for _, rec := range records {
+		if strings.TrimSpace(rec.EntityID) == "" || strings.TrimSpace(rec.WriterType) == "" || strings.TrimSpace(rec.WriterID) == "" {
+			return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, writer_type, and writer_id are required")
+		}
+		if err := runtimemutationlog.ValidateDomainPath(rec.Domain, rec.Path); err != nil {
+			return err
+		}
+		runID, err := runtimecurrentstate.RequireRunID(ctx)
+		if err != nil {
+			return runtimemutationlog.ErrInvalidMutationLogWriter(err.Error())
+		}
+		runFact, err := storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
+		if err != nil {
+			return err
+		}
+		contextFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+		if !ok {
+			return fmt.Errorf("mutation log bundle source fact is required")
+		}
+		if !runFact.Matches(contextFact) {
+			return fmt.Errorf("mutation log bundle source fact does not match active run")
+		}
+		oldValue, err := toolJSONSQLArg(rec.OldValue)
+		if err != nil {
+			return err
+		}
+		newValue, err := toolJSONSQLArg(rec.NewValue)
+		if err != nil {
+			return err
+		}
+		causedByEvent := ""
+		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+			causedByEvent = nullUUIDString(inbound.ID())
+		}
+		mutationID := uuid.NewString()
+		occurredAt := time.Now().UTC()
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO entity_mutations (
+				mutation_id, run_id, entity_id, domain, path, old_value, new_value,
+				caused_by_event, writer_type, writer_id, handler_step, created_at
+			)
+			VALUES (
+				$1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7::jsonb,
+				NULLIF($8, '')::uuid, $9, $10, NULLIF($11, ''), $12
+			)
+		`, mutationID, runID, strings.TrimSpace(rec.EntityID), string(rec.Domain), strings.TrimSpace(rec.Path), oldValue, newValue,
+			causedByEvent, strings.TrimSpace(rec.WriterType), strings.TrimSpace(rec.WriterID), strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
+			return err
+		}
+		if err := mutation.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
+			return err
+		}
+		draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
+		if err != nil {
+			return err
+		}
+		if admitted {
+			if err := mutation.Record(ctx, draft); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func insertSQLiteEntityStateDiffAttempt(ctx context.Context, mutation *privatemutationprotocol.Attempt, tx *sql.Tx, runID string, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, createdAt time.Time) error {
+	return insertSQLiteEntityStateDiff(ctx, tx, runID, entityID, before, after, writer, createdAt, mutation.AddFact, mutation.Record)
+}
+
+func InsertSQLiteEntityStateDiff(ctx context.Context, mutation *privatemutationprotocol.Attempt, runID string, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, createdAt time.Time) error {
+	return mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return insertSQLiteEntityStateDiffAttempt(ctx, mutation, tx, runID, entityID, before, after, writer, createdAt)
+	})
+}
+
+func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, runID string, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, createdAt time.Time, addFact func(string, privaterunforkrevision.Family, string) error, record func(context.Context, runtimeauthoractivity.Draft) error) error {
 	records, err := runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)
 	if err != nil {
 		return err
@@ -819,7 +884,7 @@ func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivit
 			sqliteNullUUID(causedByEvent), rec.WriterType, rec.WriterID, sqliteNullString(rec.HandlerStep), createdAt.UTC()); err != nil {
 			return fmt.Errorf("insert sqlite entity mutation: %w", err)
 		}
-		if err := effects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
+		if err := addFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
 			return err
 		}
 		draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, createdAt)
@@ -827,7 +892,7 @@ func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivit
 			return err
 		}
 		if admitted {
-			if err := story.Record(ctx, draft); err != nil {
+			if err := record(ctx, draft); err != nil {
 				return err
 			}
 		}
@@ -841,6 +906,11 @@ func toolJSONSQLArg(value any) (any, error) {
 	}
 	switch typed := value.(type) {
 	case json.RawMessage:
+		if len(typed) == 0 {
+			return nil, nil
+		}
+		return string(typed), nil
+	case []byte:
 		if len(typed) == 0 {
 			return nil, nil
 		}

@@ -73,6 +73,7 @@ type selectedContractForkLocalRuntimeContainer struct {
 	authority         runtimeeffects.Authority
 	admission         managedexecution.Admission
 	runtimeInstanceID string
+	diagnostics       *selectedForkCommitDiagnostics
 }
 
 func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req publishSelectedContractForkEventsRequest) (out selectedContractForkLocalRuntimeContainer, finalErr error) {
@@ -218,7 +219,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
-	container := selectedContractForkLocalRuntimeContainer{proof: proof, req: req, ports: ports}
+	container := selectedContractForkLocalRuntimeContainer{proof: proof, req: req, ports: ports, diagnostics: &selectedForkCommitDiagnostics{}}
 	if err != nil {
 		return container, err
 	}
@@ -296,7 +297,20 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	}
 	sourceEvents, err := c.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents, req.OriginalLoopCarriage)
 	if err != nil {
-		return nil, err
+		sourceRunID, forkRunID, committed, ok := isolatedSelectedForkSourceEventsCommit(err)
+		if !ok {
+			return nil, err
+		}
+		if sourceRunID != req.SourceRunID || forkRunID != req.ForkRunID {
+			return nil, errors.Join(err, errors.New("selected-contract source event commit scope differs from admitted fork"))
+		}
+		sourceEvents = committed
+	}
+	if scopeErr := requireExactSelectedForkSourceEvents(req.SourceEvents, sourceEvents); scopeErr != nil {
+		return nil, errors.Join(err, scopeErr)
+	}
+	if err != nil {
+		c.diagnostics.add(err)
 	}
 	root, err := semanticview.AdmitRootExecutionCoordinate(req.LoadedSource.Source, req.ForkRunID)
 	if err != nil {
@@ -404,7 +418,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			}
 		}
 	}()
-	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus, pipeline)
+	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus, pipeline, c.diagnostics)
 	if err != nil {
 		return nil, err
 	}

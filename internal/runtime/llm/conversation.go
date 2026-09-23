@@ -165,9 +165,21 @@ func (c *Conversation) RunForkChat(ctx context.Context, input string) (response 
 	if msg.Content == "" {
 		return nil, errors.New("fork-chat input is required")
 	}
-	defer func() { retErr = errors.Join(retErr, c.releaseInvocationState(ctx)) }()
+	defer func() {
+		retErr = errors.Join(retErr, c.releaseInvocationState(ctx))
+		if retErr != nil && response != nil && response.forkChatCompletionAcknowledged && len(response.ToolCalls) == 0 {
+			retErr = &AcknowledgedForkChatCompletionError{cause: retErr}
+		}
+	}()
 	return c.stepForkChat(ctx, msg)
 }
+
+// AcknowledgedForkChatCompletionError retains a cleanup error after the
+// selected store has acknowledged the assistant completion.
+type AcknowledgedForkChatCompletionError struct{ cause error }
+
+func (e *AcknowledgedForkChatCompletionError) Error() string { return e.cause.Error() }
+func (e *AcknowledgedForkChatCompletionError) Unwrap() error { return e.cause }
 
 func (c *Conversation) releaseInvocationState(ctx context.Context) error {
 	runtime, ok := c.runtime.(interface {
@@ -260,16 +272,17 @@ func (c *Conversation) stepForkChat(ctx context.Context, msg Message) (*Response
 		return nil, err
 	}
 	resp, err := c.continueForkChatOnce(ctx, msg)
-	if err != nil {
+	if err != nil && (resp == nil || !resp.forkChatCompletionAcknowledged) {
 		return resp, err
 	}
 	if resp == nil {
 		return nil, nil
 	}
 	if c.toolExecutor == nil || len(resp.ToolCalls) == 0 {
-		return resp, nil
+		return resp, err
 	}
-	return c.resolveToolCalls(ctx, resp)
+	resolved, resolveErr := c.resolveToolCalls(ctx, resp)
+	return resolved, errors.Join(err, resolveErr)
 }
 
 func (c *Conversation) ensureSession(ctx context.Context) error {
@@ -370,8 +383,12 @@ func (c *Conversation) continueForkChatOnce(ctx context.Context, msg Message) (*
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "fork_chat_runtime_boundary_missing", "llm-conversation", "dispatch_turn", nil)
 	}
-	resp, err := runtime.ContinueForkChatSession(ctx, c.Session, call)
-	if err != nil {
+	settlementCtx, settlementObservation := runtimeeffects.WithCompletionSettlementObserver(ctx)
+	resp, err := runtime.ContinueForkChatSession(settlementCtx, c.Session, call)
+	if resp != nil && settlementObservation().Disposition == runtimeeffects.CompletionSettlementCurrent {
+		resp.forkChatCompletionAcknowledged = true
+	}
+	if err != nil && (resp == nil || !resp.forkChatCompletionAcknowledged) {
 		return resp, err
 	}
 	if resp == nil {
@@ -379,11 +396,13 @@ func (c *Conversation) continueForkChatOnce(ctx context.Context, msg Message) (*
 	}
 	c.Messages = append(c.Messages, msg, resp.Message)
 	c.TurnCount++
-	return resp, nil
+	return resp, err
 }
 
-func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) (*Response, error) {
+func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) (result *Response, retErr error) {
 	resp := initial
+	var cleanupErr error
+	defer func() { retErr = errors.Join(cleanupErr, retErr) }()
 	rounds := c.maxToolRounds
 	if rounds <= 0 {
 		rounds = defaultMaxToolRounds
@@ -457,7 +476,10 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 			next, err = c.continueForkChatOnce(ctx, toolMsg)
 		}
 		if err != nil {
-			return next, err
+			if c.kind != conversationForkChat || next == nil || !next.forkChatCompletionAcknowledged {
+				return next, err
+			}
+			cleanupErr = errors.Join(cleanupErr, err)
 		}
 		if next == nil {
 			return nil, nil

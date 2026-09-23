@@ -8,14 +8,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
@@ -56,22 +55,23 @@ func (s *EventSQLiteOwner) ensureEventPayloadAdmission(ctx context.Context, admi
 	return restored, nil
 }
 
-func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	if tx == nil {
-		outcome := runtimebus.EventAppendOutcomeUnknown
-		err := s.runPrivateAuthorActivityMutation(ctx, "sqlite append admitted event", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-			var err error
-			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), effects, admitted, settlement)
-			return err
-		})
-		return outcome, err
+	if attempt == nil {
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event append mutation attempt is required")
 	}
-	if story == nil {
-		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("persisted event author activity mutation is required")
-	}
+	var outcome runtimebus.EventAppendOutcome
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var writeErr error
+		outcome, writeErr = s.appendEventSpec(ctx, tx, attempt, admitted, settlement)
+		return writeErr
+	})
+	return outcome, err
+}
+
+func (s *EventSQLiteOwner) appendEventSpec(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	admitted, err := s.ensureEventPayloadAdmission(ctx, admitted)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -95,7 +95,7 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 	var ensureErr error
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunCreateAuthorized:
-		ensureErr = s.ensureActiveRunRow(ctx, tx, story, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
+		ensureErr = s.ensureActiveRunRow(ctx, tx, attempt, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
 	case events.AdmittedRunRequireActive:
 		ensureErr = storerunstate.RequireSQLiteActiveTx(ctx, tx, wantIdentity.RunID)
 		if ensureErr == nil {
@@ -120,7 +120,7 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 	if err := requireEventOwnedReferences(ctx, tx, false, wantIdentity); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	inserted, err := eventrecordsqlite.Insert(ctx, tx, effects, wantIdentity)
+	inserted, err := eventrecordsqlite.Insert(ctx, attempt, wantIdentity)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -139,27 +139,27 @@ func (s *EventSQLiteOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx 
 		return runtimebus.EventAppendExactDuplicate, s.validateDuplicatePublicationTx(ctx, tx, existingIdentity)
 	}
 	if admitted.RunDisposition() != events.AdmittedRunless {
-		if err := s.RunLifecycleSQLiteOwner.SyncCountersTx(ctx, tx, story, wantIdentity.RunID); err != nil {
+		if err := s.RunLifecycleSQLiteOwner.SyncCountersTx(ctx, attempt, wantIdentity.RunID); err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 	}
-	if err := storeactivityjournal.RecordPersistedEvent(ctx, story, s, admitted, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
+	if err := storeactivityjournal.RecordPersistedEvent(ctx, attempt, s, admitted, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	if err := storeactivityjournal.RecordNoDeliveryWarning(ctx, story, admitted, settlement); err != nil {
+	if err := storeactivityjournal.RecordNoDeliveryWarning(ctx, attempt, admitted, settlement); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	return runtimebus.EventAppendInserted, nil
 }
 
-func (s *EventSQLiteOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventSQLiteOwner) AppendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	if admitted.Event().AdmissionClass() == events.EventAdmissionInheritedFanOut {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("inherited fan-out origin requires named chunk publication")
 	}
-	return s.appendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
+	return s.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 }
 
-func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, triggerEventID, triggerEventType string, now time.Time) error {
+func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, triggerEventID, triggerEventType string, now time.Time) error {
 	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
@@ -168,7 +168,7 @@ func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, s
 	if err != nil {
 		return fmt.Errorf("ensure active sqlite run row origin: %w", err)
 	}
-	_, err = s.RunLifecycleSQLiteOwner.CreateRunTx(ctx, tx, story, runtimerunlifecycle.CreateRequest{
+	_, err = s.RunLifecycleSQLiteOwner.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(now),
 	})
 	if err != nil {

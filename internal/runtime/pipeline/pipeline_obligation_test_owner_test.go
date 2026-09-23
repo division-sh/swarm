@@ -47,16 +47,16 @@ func (unavailablePipelineTestFanOutOwner) CommitFanOutChunk(context.Context, Fan
 	return CommittedFanOutChunk{}, errPipelineTestObligationUnavailable
 }
 
-func (unavailablePipelineTestFanOutOwner) ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) error {
-	return errPipelineTestObligationUnavailable
+func (unavailablePipelineTestFanOutOwner) ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, errPipelineTestObligationUnavailable
 }
 
-func (unavailablePipelineTestFanOutOwner) ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) error {
-	return errPipelineTestObligationUnavailable
+func (unavailablePipelineTestFanOutOwner) ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, errPipelineTestObligationUnavailable
 }
 
-func (unavailablePipelineTestFanOutOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) error {
-	return errPipelineTestObligationUnavailable
+func (unavailablePipelineTestFanOutOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, errPipelineTestObligationUnavailable
 }
 
 func (unavailablePipelineTestFanOutOwner) CancelRunFanOut(context.Context, string, string, time.Time) error {
@@ -87,8 +87,8 @@ func (unavailablePipelineTestObligationOwner) CloseScan(context.Context, runtime
 	return errPipelineTestObligationUnavailable
 }
 
-func (unavailablePipelineTestObligationOwner) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {
-	return errPipelineTestObligationUnavailable
+func (unavailablePipelineTestObligationOwner) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) (runtimepipelineobligation.SettlementOutcome, error) {
+	return runtimepipelineobligation.SettlementOutcome{}, errPipelineTestObligationUnavailable
 }
 
 func (unavailablePipelineTestObligationOwner) Settle(context.Context, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
@@ -189,7 +189,9 @@ func (*unavailablePipelineTestHumanTaskExpiry) CommitHumanTaskExpirations(contex
 
 type unavailablePipelineTestDecisionCardMutations struct{ DecisionCardMutationOwner }
 type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
-type unavailablePipelineTestDeadLetters struct{ runtimedeadletters.Recorder }
+type unavailablePipelineTestDeadLetters struct {
+	runtimedeadletters.AcknowledgedRecorder
+}
 type unavailablePipelineTestRunLifecycle struct {
 	runtimerunlifecycle.OperationOwner
 }

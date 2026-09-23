@@ -20,7 +20,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -168,11 +168,11 @@ func TestPostgresGenericScheduleOccurrenceUsesDatabaseClockAcrossPrepareAndCommi
 		t, runID, entityID, "postgres-clock-domain", runtimegenericschedule.AbsoluteDue(databaseNow.UTC()),
 	)
 	command.EventType = "test.node_emitted"
-	admitted, err := selected.AdmitGenericSchedule(ctx, command)
-	if err != nil {
-		t.Fatal(err)
+	admitted, err := selected.AdmitGenericScheduleOutcome(ctx, command)
+	if err != nil || !admitted.Acknowledged {
+		t.Fatalf("admit schedule: commit=%+v err=%v", admitted, err)
 	}
-	wakeup, err := admitted.Activation.Wakeup()
+	wakeup, err := admitted.Result.Activation.Wakeup()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,8 +180,8 @@ func TestPostgresGenericScheduleOccurrenceUsesDatabaseClockAcrossPrepareAndCommi
 	if err != nil || prepared.Outcome != runtimegenericschedule.PrepareReady {
 		t.Fatalf("prepare skewed occurrence = %#v, %v", prepared, err)
 	}
-	if !prepared.Occurrence.AdmittedAt.Before(admitted.Activation.AdmittedAt) {
-		t.Fatalf("occurrence admission %s used process clock %s", prepared.Occurrence.AdmittedAt, admitted.Activation.AdmittedAt)
+	if !prepared.Occurrence.AdmittedAt.Before(admitted.Result.Activation.AdmittedAt) {
+		t.Fatalf("occurrence admission %s used process clock %s", prepared.Occurrence.AdmittedAt, admitted.Result.Activation.AdmittedAt)
 	}
 	payload, err := json.Marshal(map[string]any{})
 	if err != nil {
@@ -244,43 +244,43 @@ func TestGenericScheduleAdmissionReplayConflictAndCancellationOnBothStores(t *te
 				runtimegenericschedule.DelayDue(10*time.Minute),
 			)
 
-			created, err := store.AdmitGenericSchedule(ctx, command)
-			if err != nil {
-				t.Fatalf("create activation: %v", err)
+			created, err := store.AdmitGenericScheduleOutcome(ctx, command)
+			if err != nil || !created.Acknowledged {
+				t.Fatalf("create activation: commit=%+v err=%v", created, err)
 			}
-			if created.Outcome != runtimegenericschedule.AdmissionCreated || !created.Activation.AdmittedAt.Equal(base) || !created.Activation.InitialDueAt.Equal(base.Add(10*time.Minute)) {
+			if created.Result.Outcome != runtimegenericschedule.AdmissionCreated || !created.Result.Activation.AdmittedAt.Equal(base) || !created.Result.Activation.InitialDueAt.Equal(base.Add(10*time.Minute)) {
 				t.Fatalf("created activation = %#v", created)
 			}
-			if created.Activation.Command.ExecutionMode != executionmode.Live {
-				t.Fatalf("created execution mode = %q, want live", created.Activation.Command.ExecutionMode)
+			if created.Result.Activation.Command.ExecutionMode != executionmode.Live {
+				t.Fatalf("created execution mode = %q, want live", created.Result.Activation.Command.ExecutionMode)
 			}
-			loaded, found, err := store.LoadGenericScheduleActivation(ctx, created.Activation.ID)
+			loaded, found, err := store.LoadGenericScheduleActivation(ctx, created.Result.Activation.ID)
 			if err != nil || !found || loaded.Command.ExecutionMode != executionmode.Live {
 				t.Fatalf("execution mode readback = found:%v activation:%#v err:%v", found, loaded, err)
 			}
 
 			clock = base.Add(24 * time.Hour)
-			replayed, err := store.AdmitGenericSchedule(ctx, command)
-			if err != nil {
-				t.Fatalf("exact replay: %v", err)
+			replayed, err := store.AdmitGenericScheduleOutcome(ctx, command)
+			if err != nil || !replayed.Acknowledged {
+				t.Fatalf("exact replay: commit=%+v err=%v", replayed, err)
 			}
-			if replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.ID != created.Activation.ID ||
-				!replayed.Activation.AdmittedAt.Equal(created.Activation.AdmittedAt) || !replayed.Activation.CurrentDueAt.Equal(created.Activation.CurrentDueAt) {
+			if replayed.Result.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Result.Activation.ID != created.Result.Activation.ID ||
+				!replayed.Result.Activation.AdmittedAt.Equal(created.Result.Activation.AdmittedAt) || !replayed.Result.Activation.CurrentDueAt.Equal(created.Result.Activation.CurrentDueAt) {
 				t.Fatalf("clock-independent replay = %#v, want %#v", replayed, created)
 			}
 
 			conflict := command
 			conflict.EventType = "schedule.changed_timer"
-			if _, err := store.AdmitGenericSchedule(ctx, conflict); !runtimegenericschedule.IsConflict(err) {
+			if _, err := store.AdmitGenericScheduleOutcome(ctx, conflict); !runtimegenericschedule.IsConflict(err) {
 				t.Fatalf("changed-content replay error = %v, want typed conflict", err)
 			}
 			modeConflict := command
 			modeConflict.ExecutionMode = executionmode.Mock
-			if _, err := store.AdmitGenericSchedule(ctx, modeConflict); !runtimegenericschedule.IsConflict(err) {
+			if _, err := store.AdmitGenericScheduleOutcome(ctx, modeConflict); !runtimegenericschedule.IsConflict(err) {
 				t.Fatalf("changed-mode replay error = %v, want typed conflict", err)
 			}
 
-			wakeup, err := created.Activation.Wakeup()
+			wakeup, err := created.Result.Activation.Wakeup()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -288,18 +288,18 @@ func TestGenericScheduleAdmissionReplayConflictAndCancellationOnBothStores(t *te
 			if err != nil || !claimed {
 				t.Fatalf("claim active wakeup = %v, %v", claimed, err)
 			}
-			cancelled, err := store.CancelGenericSchedule(ctx, runtimegenericschedule.CancelCommand{
-				ActivationID: created.Activation.ID, Cause: "operator_cancelled", CancelledAt: clock,
+			cancelled, err := store.CancelGenericScheduleOutcome(ctx, runtimegenericschedule.CancelCommand{
+				ActivationID: created.Result.Activation.ID, Cause: "operator_cancelled", CancelledAt: clock,
 			})
-			if err != nil || cancelled.Outcome != runtimegenericschedule.CancelChanged || cancelled.Activation.Status != runtimegenericschedule.StatusCancelled {
+			if err != nil || !cancelled.Acknowledged || cancelled.Result.Outcome != runtimegenericschedule.CancelChanged || cancelled.Result.Activation.Status != runtimegenericschedule.StatusCancelled {
 				t.Fatalf("cancel result = %#v, %v", cancelled, err)
 			}
 			claimed, err = store.ClaimGenericScheduleWakeup(ctx, wakeup)
 			if err != nil || claimed {
 				t.Fatalf("claim cancelled wakeup = %v, %v", claimed, err)
 			}
-			replayed, err = store.AdmitGenericSchedule(ctx, command)
-			if err != nil || replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.Status != runtimegenericschedule.StatusCancelled {
+			replayed, err = store.AdmitGenericScheduleOutcome(ctx, command)
+			if err != nil || !replayed.Acknowledged || replayed.Result.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Result.Activation.Status != runtimegenericschedule.StatusCancelled {
 				t.Fatalf("terminal exact replay = %#v, %v", replayed, err)
 			}
 		})
@@ -319,12 +319,12 @@ func TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothS
 					)
 					command.ExecutionMode = mode
 
-					created, err := store.AdmitGenericSchedule(ctx, command)
-					if err != nil || created.Outcome != runtimegenericschedule.AdmissionCreated {
+					created, err := store.AdmitGenericScheduleOutcome(ctx, command)
+					if err != nil || !created.Acknowledged || created.Result.Outcome != runtimegenericschedule.AdmissionCreated {
 						t.Fatalf("create %s activation = %#v, %v", mode, created, err)
 					}
-					replayed, err := store.AdmitGenericSchedule(ctx, command)
-					if err != nil || replayed.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Activation.ID != created.Activation.ID {
+					replayed, err := store.AdmitGenericScheduleOutcome(ctx, command)
+					if err != nil || !replayed.Acknowledged || replayed.Result.Outcome != runtimegenericschedule.AdmissionExactReplay || replayed.Result.Activation.ID != created.Result.Activation.ID {
 						t.Fatalf("exact %s replay = %#v, %v", mode, replayed, err)
 					}
 
@@ -345,7 +345,7 @@ func TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothS
 					default:
 						t.Fatalf("unsupported selected store %T", store)
 					}
-					loaded, found, err := reconstructed.LoadGenericScheduleActivation(ctx, created.Activation.ID)
+					loaded, found, err := reconstructed.LoadGenericScheduleActivation(ctx, created.Result.Activation.ID)
 					if err != nil || !found || loaded.Command.ExecutionMode != mode {
 						t.Fatalf("reconstructed %s readback = found:%v activation:%#v err:%v", mode, found, loaded, err)
 					}
@@ -356,7 +356,7 @@ func TestGenericScheduleExecutionModeSurvivesReplayAndStoreReconstructionOnBothS
 					} else {
 						changedMode.ExecutionMode = executionmode.Live
 					}
-					if _, err := reconstructed.AdmitGenericSchedule(ctx, changedMode); !runtimegenericschedule.IsConflict(err) {
+					if _, err := reconstructed.AdmitGenericScheduleOutcome(ctx, changedMode); !runtimegenericschedule.IsConflict(err) {
 						t.Fatalf("%s-to-%s replay error = %v, want typed conflict", mode, changedMode.ExecutionMode, err)
 					}
 				})
@@ -431,7 +431,7 @@ func TestGenericScheduleConcurrentAdmissionHasOneImmutableWinnerOnBothStores(t *
 				runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
 			)
 			type outcome struct {
-				result runtimegenericschedule.AdmissionResult
+				result runtimegenericschedule.AdmissionCommit
 				err    error
 			}
 			const callers = 8
@@ -441,7 +441,7 @@ func TestGenericScheduleConcurrentAdmissionHasOneImmutableWinnerOnBothStores(t *
 			for range callers {
 				go func() {
 					start.Wait()
-					result, err := store.AdmitGenericSchedule(ctx, command)
+					result, err := store.AdmitGenericScheduleOutcome(ctx, command)
 					results <- outcome{result: result, err: err}
 				}()
 			}
@@ -450,16 +450,16 @@ func TestGenericScheduleConcurrentAdmissionHasOneImmutableWinnerOnBothStores(t *
 			created := 0
 			for range callers {
 				out := <-results
-				if out.err != nil {
-					t.Fatalf("concurrent admission: %v", out.err)
+				if out.err != nil || !out.result.Acknowledged {
+					t.Fatalf("concurrent admission: commit=%+v err=%v", out.result, out.err)
 				}
 				if activationID == "" {
-					activationID = out.result.Activation.ID
+					activationID = out.result.Result.Activation.ID
 				}
-				if out.result.Activation.ID != activationID {
-					t.Fatalf("concurrent activation IDs differ: %q vs %q", out.result.Activation.ID, activationID)
+				if out.result.Result.Activation.ID != activationID {
+					t.Fatalf("concurrent activation IDs differ: %q vs %q", out.result.Result.Activation.ID, activationID)
 				}
-				if out.result.Outcome == runtimegenericschedule.AdmissionCreated {
+				if out.result.Result.Outcome == runtimegenericschedule.AdmissionCreated {
 					created++
 				}
 			}
@@ -473,31 +473,54 @@ func TestGenericScheduleConcurrentAdmissionHasOneImmutableWinnerOnBothStores(t *
 func admitGenericScheduleInRollbackTransaction(
 	ctx context.Context,
 	selected runtimegenericschedule.Store,
-	db *sql.DB,
 	command runtimegenericschedule.AdmissionCommand,
 	now time.Time,
 ) (runtimegenericschedule.AdmissionResult, error) {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return runtimegenericschedule.AdmissionResult{}, err
-	}
-	defer tx.Rollback()
+	rollback := errors.New("generic schedule fixture rollback")
+	var admitted runtimegenericschedule.AdmissionResult
 	switch store := selected.(type) {
 	case *PostgresStore:
 		store.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time { return now })
-		return store.genericSchedulePostgresOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
+		result := mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.AdmissionResult, error) {
+			var err error
+			admitted, err = store.genericSchedulePostgresOwner.AdmitTx(txctx, attempt, command)
+			if err != nil {
+				return runtimegenericschedule.AdmissionResult{}, err
+			}
+			return admitted, rollback
+		})
+		if !errors.Is(result.Err(), rollback) {
+			return runtimegenericschedule.AdmissionResult{}, fmt.Errorf("postgres rollback admission missed deliberate abort: %v", result.Err())
+		}
+		if result.Acknowledged() {
+			return runtimegenericschedule.AdmissionResult{}, errors.New("postgres rollback admission was acknowledged")
+		}
 	case *SQLiteRuntimeStore:
 		store.genericScheduleSQLiteOwner.SetNowFnForTest(func() time.Time { return now })
-		return store.genericScheduleSQLiteOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
+		result := mutationprotocol.RunSQLite(ctx, store.backend, "sqlite generic schedule rollback fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.AdmissionResult, error) {
+			var err error
+			admitted, err = store.genericScheduleSQLiteOwner.AdmitTx(txctx, attempt, command)
+			if err != nil {
+				return runtimegenericschedule.AdmissionResult{}, err
+			}
+			return admitted, rollback
+		})
+		if !errors.Is(result.Err(), rollback) {
+			return runtimegenericschedule.AdmissionResult{}, fmt.Errorf("sqlite rollback admission missed deliberate abort: %v", result.Err())
+		}
+		if result.Acknowledged() {
+			return runtimegenericschedule.AdmissionResult{}, errors.New("sqlite rollback admission was acknowledged")
+		}
 	default:
 		return runtimegenericschedule.AdmissionResult{}, fmt.Errorf("unsupported selected store %T", selected)
 	}
+	return admitted, nil
 }
 
 func TestGenericScheduleAdmissionRollbackAckLossAndDueBasisReplayOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db, ctx := tc.open(t)
+			selected, _, ctx := tc.open(t)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			base := time.Date(2026, 8, 9, 12, 7, 0, 0, time.UTC)
 			clock := base
@@ -507,7 +530,7 @@ func TestGenericScheduleAdmissionRollbackAckLossAndDueBasisReplayOnBothStores(t 
 				t, runID, "rollback-agent", "rollback/instance", uuid.NewString(), "rollback-key",
 				runtimegenericschedule.DelayDue(5*time.Minute),
 			)
-			rolledBack, err := admitGenericScheduleInRollbackTransaction(ctx, selected, db, rolledBackCommand, base)
+			rolledBack, err := admitGenericScheduleInRollbackTransaction(ctx, selected, rolledBackCommand, base)
 			if err != nil || rolledBack.Outcome != runtimegenericschedule.AdmissionCreated {
 				t.Fatalf("rollback transaction admission = %#v, %v", rolledBack, err)
 			}
@@ -528,34 +551,34 @@ func TestGenericScheduleAdmissionRollbackAckLossAndDueBasisReplayOnBothStores(t 
 						t, runID, "basis-agent", "basis/instance", uuid.NewString(), "basis-"+dueCase.name,
 						dueCase.due,
 					)
-					created, err := selected.AdmitGenericSchedule(ctx, command)
-					if err != nil {
-						t.Fatalf("create %s activation: %v", dueCase.name, err)
+					created, err := selected.AdmitGenericScheduleOutcome(ctx, command)
+					if err != nil || !created.Acknowledged {
+						t.Fatalf("create %s activation: commit=%+v err=%v", dueCase.name, created, err)
 					}
 					wantDue, err := dueCase.due.FirstDue(base)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if !created.Activation.InitialDueAt.Equal(wantDue) {
-						t.Fatalf("%s first due = %s, want %s", dueCase.name, created.Activation.InitialDueAt, wantDue)
+					if !created.Result.Activation.InitialDueAt.Equal(wantDue) {
+						t.Fatalf("%s first due = %s, want %s", dueCase.name, created.Result.Activation.InitialDueAt, wantDue)
 					}
 
 					// The first response is intentionally discarded to model commit success
 					// with acknowledgment loss at the public admission boundary.
 					clock = base.Add(72 * time.Hour)
-					replayed, err := selected.AdmitGenericSchedule(ctx, command)
-					if err != nil || replayed.Outcome != runtimegenericschedule.AdmissionExactReplay {
+					replayed, err := selected.AdmitGenericScheduleOutcome(ctx, command)
+					if err != nil || !replayed.Acknowledged || replayed.Result.Outcome != runtimegenericschedule.AdmissionExactReplay {
 						t.Fatalf("%s acknowledgment-loss retry = %#v, %v", dueCase.name, replayed, err)
 					}
-					if replayed.Activation.ID != created.Activation.ID ||
-						!replayed.Activation.AdmittedAt.Equal(created.Activation.AdmittedAt) ||
-						!replayed.Activation.InitialDueAt.Equal(created.Activation.InitialDueAt) ||
-						!replayed.Activation.CurrentDueAt.Equal(created.Activation.CurrentDueAt) {
+					if replayed.Result.Activation.ID != created.Result.Activation.ID ||
+						!replayed.Result.Activation.AdmittedAt.Equal(created.Result.Activation.AdmittedAt) ||
+						!replayed.Result.Activation.InitialDueAt.Equal(created.Result.Activation.InitialDueAt) ||
+						!replayed.Result.Activation.CurrentDueAt.Equal(created.Result.Activation.CurrentDueAt) {
 						t.Fatalf("%s retry reminted activation facts: created=%#v replay=%#v", dueCase.name, created, replayed)
 					}
 					changed := command
 					changed.Due = runtimegenericschedule.DelayDue(99 * time.Minute)
-					if _, err := selected.AdmitGenericSchedule(ctx, changed); !runtimegenericschedule.IsConflict(err) {
+					if _, err := selected.AdmitGenericScheduleOutcome(ctx, changed); !runtimegenericschedule.IsConflict(err) {
 						t.Fatalf("%s changed due basis error = %v, want conflict", dueCase.name, err)
 					}
 					clock = base
@@ -566,8 +589,8 @@ func TestGenericScheduleAdmissionRollbackAckLossAndDueBasisReplayOnBothStores(t 
 }
 
 type genericScheduleRunControlStore interface {
-	PauseRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
-	StopRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
+	PauseRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
+	StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 }
 
 func transitionGenericScheduleRun(t *testing.T, selected any, runID string, stop bool) {
@@ -579,13 +602,14 @@ func transitionGenericScheduleRun(t *testing.T, selected any, runID string, stop
 	request := runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "generic schedule conformance", ControlledBy: "test", Now: time.Now().UTC()}
 	ctx := authorGenericScheduleConsumerContext(runID)
 	var err error
+	var outcome runtimeruncontrol.StoreTransition
 	if stop {
-		_, err = owner.StopRunControl(ctx, request)
+		outcome, err = owner.StopRunControlOutcome(ctx, request)
 	} else {
-		_, err = owner.PauseRunControl(ctx, request)
+		outcome, err = owner.PauseRunControlOutcome(ctx, request)
 	}
-	if err != nil {
-		t.Fatalf("transition generic schedule run %s stop=%v: %v", runID, stop, err)
+	if err != nil || !outcome.Acknowledged {
+		t.Fatalf("transition generic schedule run %s stop=%v: outcome=%+v err=%v", runID, stop, outcome, err)
 	}
 }
 
@@ -599,19 +623,19 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 				t, runID, "state-agent", "state/instance", uuid.NewString(), "running",
 				runtimegenericschedule.AbsoluteDue(dueAt),
 			)
-			active, err := selected.AdmitGenericSchedule(ctx, activeCommand)
-			if err != nil {
-				t.Fatalf("running admission: %v", err)
+			active, err := selected.AdmitGenericScheduleOutcome(ctx, activeCommand)
+			if err != nil || !active.Acknowledged {
+				t.Fatalf("running admission: commit=%+v err=%v", active, err)
 			}
 
 			transitionGenericScheduleRun(t, selected, runID, false)
 			pausedCommand := activeCommand
 			pausedCommand.ScheduleKey = "paused"
 			pausedCommand.TaskID = "paused"
-			if _, err := selected.AdmitGenericSchedule(ctx, pausedCommand); err != nil {
-				t.Fatalf("paused admission: %v", err)
+			if paused, err := selected.AdmitGenericScheduleOutcome(ctx, pausedCommand); err != nil || !paused.Acknowledged {
+				t.Fatalf("paused admission: commit=%+v err=%v", paused, err)
 			}
-			wakeup, err := active.Activation.Wakeup()
+			wakeup, err := active.Result.Activation.Wakeup()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -628,7 +652,7 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 			terminalCommand := activeCommand
 			terminalCommand.ScheduleKey = "terminal-rejected"
 			terminalCommand.TaskID = "terminal-rejected"
-			if _, err := selected.AdmitGenericSchedule(ctx, terminalCommand); err == nil {
+			if _, err := selected.AdmitGenericScheduleOutcome(ctx, terminalCommand); err == nil {
 				t.Fatal("terminal run admitted a new generic schedule")
 			}
 
@@ -636,7 +660,7 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 			missingCommand.RunID = uuid.NewString()
 			missingCommand.ScheduleKey = "missing-rejected"
 			missingCommand.TaskID = "missing-rejected"
-			if _, err := selected.AdmitGenericSchedule(ctx, missingCommand); err == nil {
+			if _, err := selected.AdmitGenericScheduleOutcome(ctx, missingCommand); err == nil {
 				t.Fatal("missing run admitted a generic schedule")
 			}
 
@@ -647,7 +671,7 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 				ExecutionMode: executionmode.Live,
 				Due:           runtimegenericschedule.EveryDue(time.Hour), TaskID: "global-only",
 			}
-			if admitted, err := selected.AdmitGenericSchedule(context.Background(), global); err != nil || admitted.Activation.Command.RunID != "" {
+			if admitted, err := selected.AdmitGenericScheduleOutcome(context.Background(), global); err != nil || !admitted.Acknowledged || admitted.Result.Activation.Command.RunID != "" {
 				t.Fatalf("global admission = %#v, %v", admitted, err)
 			}
 		})
@@ -691,25 +715,25 @@ func TestGenericScheduleReplyContextReplayConflictAndRecurringRejectionOnBothSto
 				t.Fatalf("seed reply context: %v", err)
 			}
 			command.ReplyContext = reply.ID
-			created, err := selected.AdmitGenericSchedule(ctx, command)
-			if err != nil {
-				t.Fatalf("reply-context admission: %v", err)
+			created, err := selected.AdmitGenericScheduleOutcome(ctx, command)
+			if err != nil || !created.Acknowledged {
+				t.Fatalf("reply-context admission: commit=%+v err=%v", created, err)
 			}
-			replayed, err := selected.AdmitGenericSchedule(ctx, command)
-			if err != nil || replayed.Outcome != runtimegenericschedule.AdmissionExactReplay ||
-				replayed.Activation.Command.ReplyContext != command.ReplyContext {
+			replayed, err := selected.AdmitGenericScheduleOutcome(ctx, command)
+			if err != nil || !replayed.Acknowledged || replayed.Result.Outcome != runtimegenericschedule.AdmissionExactReplay ||
+				replayed.Result.Activation.Command.ReplyContext != command.ReplyContext {
 				t.Fatalf("reply-context replay = %#v, %v", replayed, err)
 			}
 			conflict := command
 			conflict.ReplyContext = uuid.NewString()
-			if _, err := selected.AdmitGenericSchedule(ctx, conflict); !runtimegenericschedule.IsConflict(err) {
+			if _, err := selected.AdmitGenericScheduleOutcome(ctx, conflict); !runtimegenericschedule.IsConflict(err) {
 				t.Fatalf("changed reply context error = %v, want conflict", err)
 			}
 			recurring := command
 			recurring.ScheduleKey = "reply-recurring"
 			recurring.TaskID = "reply-recurring"
 			recurring.Due = runtimegenericschedule.EveryDue(time.Hour)
-			if _, err := selected.AdmitGenericSchedule(ctx, recurring); err == nil {
+			if _, err := selected.AdmitGenericScheduleOutcome(ctx, recurring); err == nil {
 				t.Fatal("recurring reply-context schedule was admitted")
 			}
 			active, err := selected.ListActiveGenericScheduleActivations(ctx)
@@ -721,7 +745,7 @@ func TestGenericScheduleReplyContextReplayConflictAndRecurringRejectionOnBothSto
 					t.Fatalf("rejected recurring reply-context schedule mutated storage: %#v", activation)
 				}
 			}
-			if loaded, found, err := selected.LoadGenericScheduleActivation(ctx, created.Activation.ID); err != nil || !found || loaded.Command.ReplyContext != command.ReplyContext {
+			if loaded, found, err := selected.LoadGenericScheduleActivation(ctx, created.Result.Activation.ID); err != nil || !found || loaded.Command.ReplyContext != command.ReplyContext {
 				t.Fatalf("reply-context readback = %#v found=%v err=%v", loaded, found, err)
 			}
 		})
@@ -736,16 +760,16 @@ func TestMalformedGenericScheduleTerminalizesLoudlyOnBothStores(t *testing.T) {
 				t, runtimecorrelation.RunIDFromContext(ctx), "malformed-agent", "malformed/instance", uuid.NewString(), "malformed-key",
 				runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
 			)
-			created, err := store.AdmitGenericSchedule(ctx, command)
-			if err != nil {
-				t.Fatal(err)
+			created, err := store.AdmitGenericScheduleOutcome(ctx, command)
+			if err != nil || !created.Acknowledged {
+				t.Fatalf("admit malformed fixture: commit=%+v err=%v", created, err)
 			}
-			wakeup, err := created.Activation.Wakeup()
+			wakeup, err := created.Result.Activation.Wakeup()
 			if err != nil {
 				t.Fatal(err)
 			}
 			query := `UPDATE timers SET immutable_hash = ? WHERE timer_id = ?`
-			args := []any{"corrupt", created.Activation.ID}
+			args := []any{"corrupt", created.Result.Activation.ID}
 			if _, ok := store.(*PostgresStore); ok {
 				query = `UPDATE timers SET immutable_hash = $1 WHERE timer_id = $2::uuid`
 			}
@@ -761,7 +785,7 @@ func TestMalformedGenericScheduleTerminalizesLoudlyOnBothStores(t *testing.T) {
 				statusQuery = `SELECT status, failure_code, failure_message FROM timers WHERE timer_id = $1::uuid`
 			}
 			var status, code, message string
-			if err := db.QueryRowContext(ctx, statusQuery, created.Activation.ID).Scan(&status, &code, &message); err != nil {
+			if err := db.QueryRowContext(ctx, statusQuery, created.Result.Activation.ID).Scan(&status, &code, &message); err != nil {
 				t.Fatal(err)
 			}
 			if status != "failed" || code != "malformed_persisted_activation" || message == "" {
@@ -927,10 +951,10 @@ func TestGenericScheduleOwnerDoesNotInterpretWorkflowTimerRowsOnBothStores(t *te
 			if activation, found, err := store.LoadGenericScheduleActivation(ctx, row.timerID); err != nil || found {
 				t.Fatalf("generic load interpreted workflow timer: found=%v activation=%#v err=%v", found, activation, err)
 			}
-			cancelled, err := store.CancelGenericSchedule(ctx, runtimegenericschedule.CancelCommand{
+			cancelled, err := store.CancelGenericScheduleOutcome(ctx, runtimegenericschedule.CancelCommand{
 				ActivationID: row.timerID, Cause: "generic_probe", CancelledAt: time.Now(),
 			})
-			if err != nil || cancelled.Outcome != runtimegenericschedule.CancelMissing {
+			if err != nil || !cancelled.Acknowledged || cancelled.Result.Outcome != runtimegenericschedule.CancelMissing {
 				t.Fatalf("generic cancel interpreted workflow timer: %#v, %v", cancelled, err)
 			}
 			active, err := store.ListActiveGenericScheduleActivations(ctx)

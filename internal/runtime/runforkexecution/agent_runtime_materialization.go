@@ -485,7 +485,7 @@ func agentIdentityDescriptions(identities []agentidentity.Identity) []string {
 	return out
 }
 
-func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (_ *selectedContractAgentRuntime, _ managedexecution.Admission, resultErr error) {
+func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator, diagnostics *selectedForkCommitDiagnostics) (_ *selectedContractAgentRuntime, _ managedexecution.Admission, resultErr error) {
 	ports, err := req.Owner.require()
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
@@ -522,14 +522,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			return nil, managedexecution.Admission{}, err
 		}
 		route := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, ActivationVariables: flow.ActivationVariables}
-		if err := bus.StageFlowInstanceRouteContext(ctx, route); err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-		published = append(published, owner)
-		if err := bus.PublishPersistedFlowInstanceRoute(route); err != nil {
-			return nil, managedexecution.Admission{}, err
-		}
-		if err := bus.VerifyFlowInstanceRoute(ctx, owner); err != nil {
+		if err := publishSelectedContractFlowRoute(ctx, bus, route, diagnostics, &published); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
 	}

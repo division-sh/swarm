@@ -87,6 +87,8 @@ type CommittedAPIEventPublication struct {
 	Completion  apiidempotency.Completion
 	RunCreation *durabledata.RunCreationOperationRecord
 	Replay      bool
+	// Acknowledged is set only after the selected-store mutation result confirms commit.
+	Acknowledged bool
 }
 
 func (r CommittedAPIEventPublication) Validate() error {
@@ -234,6 +236,8 @@ type CommittedPublication struct {
 	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
 	Activations      []CommittedFlowInstanceActivation
 	RouteTopology    []FlowInstanceRouteRecordSet
+	// Acknowledged is false for transaction-local publication evidence.
+	Acknowledged bool
 }
 
 func (r CommittedPublication) Validate() error {
@@ -500,8 +504,12 @@ func validateFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) error 
 
 // FlowInstanceRouteTopologyPersistence atomically replaces every affected
 // route owner in one closed selected-store operation.
+type FlowInstanceRouteTopologyResult struct {
+	Acknowledged bool
+}
+
 type FlowInstanceRouteTopologyPersistence interface {
-	ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) error
+	ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error)
 }
 
 type FlowInstanceRouteRecordReader interface {

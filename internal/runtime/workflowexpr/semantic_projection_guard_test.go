@@ -133,7 +133,7 @@ func TestWorkflowCELProjectionJSONWritersPreserveNumberKinds(t *testing.T) {
 		{name: "workflow engine state", path: filepath.Join(runtimeRoot, "pipeline", "engine_mutation_commit.go"), function: "workflowEngineStateRecord"},
 		{name: "workflow activation state", path: filepath.Join(runtimeRoot, "pipeline", "workflow_instance_activation.go"), function: "PersistenceRecord"},
 		{name: "initial workflow projection", path: filepath.Join(runtimeRoot, "pipeline", "workflow_initial_materialization_commit.go"), function: "workflowInitialMaterializationRecord"},
-		{name: "fan-out capsule", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_obligation.go"), function: "commitFanOutIntentTx"},
+		{name: "fan-out capsule", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_obligation.go"), function: "insertFanOutIntentSQL"},
 		{name: "entity source revision", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_obligation.go"), function: "insertFanOutEntitySourceRevisionTx"},
 		{name: "fork fan-out capsule", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_materializer.go"), function: "materializeRunForkFanOutObligations"},
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -300,6 +301,66 @@ func TestServeLifecyclePresenterProjectsRecoveryOutcomesWithoutBookkeeping(t *te
 	for _, forbidden := range []string{"deliveries", "sessions", "timers", "containers", "pipeline receipts"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("recovery projection exposed bookkeeping %q:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestServeAbandonReportsAcknowledgedCommitBeforeCleanupError(t *testing.T) {
+	cleanup := errors.New("cleanup failed after commit")
+	result := runtimerunquiescence.Result{
+		Acknowledged: true,
+		Runs:         []runtimerunquiescence.QuiescedRun{{RunID: "run"}},
+	}
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{})
+	if err := recordServeAbandonOutcome(presenter, result, cleanup); !errors.Is(err, cleanup) {
+		t.Fatalf("cleanup error = %v", err)
+	}
+	if len(presenter.notices) != 1 || presenter.notices[0].Kind != serveLifecycleNoticeActiveWorkCleared {
+		t.Fatalf("acknowledged abandonment notices = %#v", presenter.notices)
+	}
+
+	presenter = newServeLifecyclePresenter(cliapp.ServeOptions{})
+	result.Acknowledged = false
+	if err := recordServeAbandonOutcome(presenter, result, cleanup); !errors.Is(err, cleanup) {
+		t.Fatalf("unacknowledged error = %v", err)
+	}
+	if len(presenter.notices) != 0 {
+		t.Fatalf("unacknowledged abandonment notices = %#v", presenter.notices)
+	}
+	if err := recordServeAbandonOutcome(presenter, result, nil); err == nil {
+		t.Fatal("unacknowledged work with no native error was accepted")
+	}
+	if len(presenter.notices) != 0 {
+		t.Fatalf("unacknowledged work notices = %#v", presenter.notices)
+	}
+	if err := recordServeAbandonOutcome(presenter, runtimerunquiescence.Result{}, nil); err != nil {
+		t.Fatalf("empty successful abandonment = %v", err)
+	}
+	if len(presenter.notices) != 1 || presenter.notices[0].Kind != serveLifecycleNoticeNoActiveWork {
+		t.Fatalf("empty successful abandonment notices = %#v", presenter.notices)
+	}
+}
+
+func TestServeFailureRendersAcknowledgedRecoveryAction(t *testing.T) {
+	for _, diagnostic := range []bool{false, true} {
+		var out bytes.Buffer
+		presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &out})
+		presenter.recordAbandonedWork(1, 0, 0)
+		if diagnostic {
+			presenter.failWithDiagnostic(5, "runtime_context", errors.New("startup failed"), func(w io.Writer) bool {
+				_, _ = io.WriteString(w, "startup diagnostic\n")
+				return true
+			})
+		} else {
+			presenter.fail(5, "runtime_context", errors.New("startup failed"))
+		}
+		presenter.finish()
+		text := out.String()
+		if !strings.Contains(text, "recovery action") || !strings.Contains(text, "active work cleared for a clean start") {
+			t.Fatalf("diagnostic=%t failure dropped recovery action:\n%s", diagnostic, text)
+		}
+		if strings.Contains(text, "ready in") {
+			t.Fatalf("diagnostic=%t failure rendered readiness:\n%s", diagnostic, text)
 		}
 	}
 }

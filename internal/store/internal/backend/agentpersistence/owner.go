@@ -7,18 +7,17 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
 
 type DirectiveEventCommitter interface {
-	CommitDirectiveEventTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	CommitDirectiveEventTx(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 	LoadDirectiveEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
 }
 
@@ -31,15 +30,15 @@ type LifecycleDiagnosticOriginValidator interface {
 }
 
 type DirectivePipelineOwner interface {
-	TerminalizePipelineObligationTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, runtimepipelineobligation.Disposition, time.Time) error
+	TerminalizePipelineObligationTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Disposition, time.Time) error
 }
 
 type ProviderAttemptDrainPostgresCapturer interface {
-	CaptureProviderAttemptDrainsPostgresTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+	CaptureProviderAttemptDrainsPostgresTx(context.Context, *mutationprotocol.Attempt, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
 }
 
 type ProviderAttemptDrainSQLiteCapturer interface {
-	CaptureProviderAttemptDrainsSQLiteTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+	CaptureProviderAttemptDrainsSQLiteTx(context.Context, *mutationprotocol.Attempt, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
 }
 
 type AgentSource interface {

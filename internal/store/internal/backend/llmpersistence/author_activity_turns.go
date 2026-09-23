@@ -12,7 +12,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimeturnactivity "github.com/division-sh/swarm/internal/runtime/turnactivity"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type authorActivityTurn struct {
@@ -79,11 +79,11 @@ func authorActivityTurnDrafts(turn authorActivityTurn) ([]runtimeauthoractivity.
 	return drafts, nil
 }
 
-func recordCompletionTurnAuthorActivity(ctx context.Context, story *privateauthoractivity.Mutation, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
+func recordCompletionTurnAuthorActivity(ctx context.Context, mutation *mutationprotocol.Attempt, execution runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
 	if settlement.AgentTurn == nil {
 		return nil
 	}
-	if story == nil {
+	if mutation == nil {
 		return fmt.Errorf("completion author activity owner is required")
 	}
 	var blocks []runtimellm.TurnBlock
@@ -98,24 +98,24 @@ func recordCompletionTurnAuthorActivity(ctx context.Context, story *privateautho
 		FlowID: settlement.Spend.FlowInstance, TriggerEventType: t.TriggerEventType, Blocks: blocks,
 		ParseOK: t.ParseOK, DurationMS: t.LatencyMS, RetryCount: t.RetryCount,
 		UsageExactness: string(settlement.Usage.Exactness), InputTokens: settlement.Usage.InputTokens,
-		OutputTokens: settlement.Usage.OutputTokens, ExecutionMode: string(attempt.Authority.ExecutionMode),
+		OutputTokens: settlement.Usage.OutputTokens, ExecutionMode: string(execution.Authority.ExecutionMode),
 		Failure: t.Failure, OccurredAt: settlement.Now.UTC(),
 	})
 	if err != nil {
 		return err
 	}
 	for _, draft := range drafts {
-		if err := story.Record(ctx, draft); err != nil {
+		if err := mutation.Record(ctx, draft); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *LLMPostgresOwner) RecordCompletionTurnAuthorActivityTx(ctx context.Context, story *privateauthoractivity.Mutation, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
-	return recordCompletionTurnAuthorActivity(ctx, story, attempt, settlement)
+func (s *LLMPostgresOwner) RecordCompletionTurnAuthorActivityTx(ctx context.Context, mutation *mutationprotocol.Attempt, execution runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
+	return recordCompletionTurnAuthorActivity(ctx, mutation, execution, settlement)
 }
 
-func (s *LLMSQLiteOwner) RecordCompletionTurnAuthorActivityTx(ctx context.Context, story *privateauthoractivity.Mutation, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
-	return recordCompletionTurnAuthorActivity(ctx, story, attempt, settlement)
+func (s *LLMSQLiteOwner) RecordCompletionTurnAuthorActivityTx(ctx context.Context, mutation *mutationprotocol.Attempt, execution runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
+	return recordCompletionTurnAuthorActivity(ctx, mutation, execution, settlement)
 }

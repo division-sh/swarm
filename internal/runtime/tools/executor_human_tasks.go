@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -226,10 +227,30 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 		BudgetLimit: limit, BudgetWindowStart: windowStart, BudgetWindowEnd: windowEnd,
 		State: decisioncard.HumanTaskContinuationPending, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := store.CreateHumanTaskCard(ctx, card, continuation); err != nil {
+	created, err := store.CreateHumanTaskCardOutcome(ctx, card, continuation)
+	if !created.Acknowledged {
+		if err == nil {
+			err = errors.New("human-task card creation was not acknowledged")
+		}
 		return nil, err
 	}
-	return map[string]any{"card_id": card.CardID, "status": decisioncard.StatusPending}, nil
+	response := map[string]any{"card_id": created.CardID, "status": decisioncard.StatusPending}
+	if err != nil {
+		response["status"] = "committed_with_post_commit_error"
+		response["card_status"] = decisioncard.StatusPending
+		response["write_committed"] = true
+		response["retry_write"] = false
+		response["post_commit_error_code"] = "human_task_create_post_commit_failure"
+		if logger := e.runtimeLogSink(); logger != nil {
+			_ = logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
+				Level: "warn", Message: "Human-task card creation committed with a post-commit failure",
+				Component: "tool-executor", Action: "human_task_create_post_commit_failure",
+				AgentID: strings.TrimSpace(actor.ID),
+				Detail:  map[string]any{"card_id": created.CardID, "post_commit_error": err.Error()},
+			})
+		}
+	}
+	return response, nil
 }
 
 func firstNonEmptyHumanTask(values ...string) string {

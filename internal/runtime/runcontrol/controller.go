@@ -97,10 +97,15 @@ type PostCommitRecovery struct {
 }
 
 type Store interface {
-	StopRunControl(context.Context, TransitionRequest) (State, error)
-	PauseRunControl(context.Context, TransitionRequest) (State, error)
-	ContinueRunControl(context.Context, TransitionRequest) (State, error)
+	StopRunControlOutcome(context.Context, TransitionRequest) (StoreTransition, error)
+	PauseRunControlOutcome(context.Context, TransitionRequest) (StoreTransition, error)
+	ContinueRunControlOutcome(context.Context, TransitionRequest) (StoreTransition, error)
 	RunDispatchBlocked(context.Context, string) (bool, error)
+}
+
+type StoreTransition struct {
+	State        State
+	Acknowledged bool
 }
 
 type QueueReleaser interface {
@@ -167,35 +172,42 @@ func (c *Controller) Stop(ctx context.Context, req TransitionRequest) (Transitio
 		}
 		defer transition.Done()
 	}
-	state, err := c.store.StopRunControl(ctx, req)
-	if err != nil {
+	committed, err := c.store.StopRunControlOutcome(ctx, req)
+	if !committed.Acknowledged {
+		if err == nil {
+			err = errors.New("run stop was not acknowledged")
+		}
 		return TransitionResult{}, err
 	}
+	state := committed.State
 	result := TransitionResult{
 		RunID:               state.RunID,
 		Status:              StatusCancelled,
 		AbandonedDeliveries: state.AbandonedDeliveries,
 		Recovery:            PostCommitRecovery{Disposition: RecoveryComplete},
 	}
+	if err != nil {
+		result.Recovery = PostCommitRecovery{Disposition: RecoveryFailed, Err: err}
+	}
 	if len(state.TimerCancellations) == 0 {
-		return result, nil
+		return result, err
 	}
 	if c.timerCancellations == nil {
 		result.Recovery = PostCommitRecovery{
 			Disposition: RecoveryFailed,
-			Err:         errors.New("timer cancellation reconciler is required after committed run stop"),
+			Err:         errors.Join(err, errors.New("timer cancellation reconciler is required after committed run stop")),
 		}
-		return result, nil
+		return result, err
 	}
-	if err := c.timerCancellations.Reconcile(context.WithoutCancel(ctx), state.TimerCancellations); err != nil {
+	if reconcileErr := c.timerCancellations.Reconcile(context.WithoutCancel(ctx), state.TimerCancellations); reconcileErr != nil {
 		disposition := RecoveryFailed
 		var reconciliation *runtimetimercancellation.ReconciliationError
-		if errors.As(err, &reconciliation) && reconciliation.RecoveryPendingOnly() {
+		if errors.As(reconcileErr, &reconciliation) && reconciliation.RecoveryPendingOnly() {
 			disposition = RecoveryPending
 		}
-		result.Recovery = PostCommitRecovery{Disposition: disposition, Err: err}
+		result.Recovery = PostCommitRecovery{Disposition: disposition, Err: errors.Join(err, reconcileErr)}
 	}
-	return result, nil
+	return result, err
 }
 
 func (c *Controller) Pause(ctx context.Context, req TransitionRequest) (TransitionResult, error) {
@@ -203,11 +215,14 @@ func (c *Controller) Pause(ctx context.Context, req TransitionRequest) (Transiti
 		return TransitionResult{}, fmt.Errorf("run control owner is not configured")
 	}
 	req = c.normalize(req)
-	state, err := c.store.PauseRunControl(ctx, req)
-	if err != nil {
+	committed, err := c.store.PauseRunControlOutcome(ctx, req)
+	if !committed.Acknowledged {
+		if err == nil {
+			err = errors.New("run pause was not acknowledged")
+		}
 		return TransitionResult{}, err
 	}
-	return TransitionResult{RunID: state.RunID, Status: StatusPaused}, nil
+	return TransitionResult{RunID: committed.State.RunID, Status: StatusPaused}, err
 }
 
 func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (TransitionResult, error) {
@@ -220,10 +235,14 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 			return TransitionResult{}, err
 		}
 	}
-	state, err := c.store.ContinueRunControl(ctx, req)
-	if err != nil {
+	committed, err := c.store.ContinueRunControlOutcome(ctx, req)
+	if !committed.Acknowledged {
+		if err == nil {
+			err = errors.New("run continue was not acknowledged")
+		}
 		return TransitionResult{}, err
 	}
+	state := committed.State
 	result := TransitionResult{
 		RunID:  state.RunID,
 		Status: StatusRunning,
@@ -234,7 +253,13 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 	if c.queue != nil {
 		result.Recovery = c.releaseQueuedAfterContinue(ctx, state.RunID)
 	}
-	return result, nil
+	if err != nil {
+		result.Recovery.Err = errors.Join(err, result.Recovery.Err)
+		if result.Recovery.Disposition != RecoveryCancelled {
+			result.Recovery.Disposition = RecoveryFailed
+		}
+	}
+	return result, err
 }
 
 func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string) PostCommitRecovery {
@@ -242,8 +267,15 @@ func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID strin
 		return PostCommitRecovery{Disposition: RecoveryNotConfigured}
 	}
 	recovery := PostCommitRecovery{}
+	firstBatch := true
 	for {
-		result, err := c.queue.ReleaseRunQueue(ctx, runID, c.releaseLimit)
+		releaseCtx := ctx
+		if firstBatch {
+			// An acknowledged transition must initiate recovery even if its caller canceled.
+			releaseCtx = context.WithoutCancel(ctx)
+			firstBatch = false
+		}
+		result, err := c.queue.ReleaseRunQueue(releaseCtx, runID, c.releaseLimit)
 		recovery.Sweep.Settled += result.Settled
 		recovery.Sweep.Examined += result.Examined
 		recovery.Sweep.Exhausted = recovery.Sweep.Exhausted || result.Exhausted

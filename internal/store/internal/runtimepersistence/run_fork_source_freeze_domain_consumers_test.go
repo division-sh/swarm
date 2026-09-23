@@ -22,8 +22,8 @@ import (
 )
 
 type forkedDomainConsumerSurface interface {
-	CreateEntity(context.Context, runtimetools.EntityCreateRecord) error
-	SaveEntityField(context.Context, runtimetools.EntityFieldUpdate) (int, error)
+	CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
+	SaveEntityField(context.Context, runtimetools.EntityFieldUpdate) (runtimetools.EntityFieldWriteResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
 	ListBudgetProjectionTargets(context.Context, []string) ([]budgetspend.ProjectionTarget, error)
 	UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error
@@ -51,7 +51,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				CurrentState: "active", FieldsJSON: json.RawMessage(`{"value":1}`), CreatedAt: fixture.forkedAt.Add(-time.Minute),
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
 			}
-			if err := surface.CreateEntity(ctx, entity); err != nil {
+			if _, err := surface.CreateEntity(ctx, entity); err != nil {
 				t.Fatal(err)
 			}
 			mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE entity_id = ?`
@@ -77,8 +77,9 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 			lateEntity := entity
 			lateEntity.EntityID = uuid.NewString()
-			requireForkedSourceRefusal(t, "create entity", surface.CreateEntity(ctx, lateEntity))
-			_, err := surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
+			_, err := surface.CreateEntity(ctx, lateEntity)
+			requireForkedSourceRefusal(t, "create entity", err)
+			_, err = surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
 				RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "value", ValueJSON: json.RawMessage(`2`),
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
 			})

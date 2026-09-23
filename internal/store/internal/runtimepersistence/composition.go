@@ -185,12 +185,12 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.lLMPostgresOwner = llmOwner
-	effectOwner, err := storeeffect.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, llmOwner)
+	effectOwner, err := storeeffect.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
 	if err != nil {
 		return nil, err
 	}
 	store.effectPostgresOwner = effectOwner
-	deliveryOwner, err := storedelivery.NewDeliveryPostgresOwner(deadLetterOwner, runLifecycle, agentOwner)
+	deliveryOwner, err := storedelivery.NewDeliveryPostgresOwner(deadLetterOwner, runLifecycle, candidates, agentOwner)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := agentOwner.BindProviderAttemptDrains(effectOwner); err != nil {
 		return nil, err
 	}
-	decisionOwner, err := storedecision.NewPostgres(backend, store.requireCurrentSchema, runLifecycle)
+	decisionOwner, err := storedecision.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency)
+	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency, candidates)
 	if err != nil {
 		return nil, err
 	}
@@ -435,12 +435,12 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.lLMSQLiteOwner = llmOwner
-	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, llmOwner)
+	effectOwner, err := storeeffect.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, llmOwner)
 	if err != nil {
 		return nil, err
 	}
 	store.effectSQLiteOwner = effectOwner
-	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, agentOwner, store.now)
+	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, candidates, agentOwner, store.now)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +450,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := agentOwner.BindProviderAttemptDrains(effectOwner); err != nil {
 		return nil, err
 	}
-	decisionOwner, err := storedecision.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, store.now)
+	decisionOwner, err := storedecision.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, store.now)
 	if err != nil {
 		return nil, err
 	}
@@ -507,7 +507,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency, store.now)
+	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency, candidates, store.now)
 	if err != nil {
 		return nil, err
 	}

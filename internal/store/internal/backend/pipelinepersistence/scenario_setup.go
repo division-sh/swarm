@@ -15,9 +15,9 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 )
@@ -31,30 +31,30 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	effects := newRevisionEffects()
-	if err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
-		if !ok {
-			return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
-		}
-		if _, err := s.RunLifecyclePostgresOwner.CreateRunTx(txctx, tx, story, runtimerunlifecycle.CreateRequest{
-			RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-			Source: fact, StartedAt: req.CreatedAt,
-		}); err != nil {
-			return err
-		}
-		if req.ScenarioExecutionProfile != nil {
-			if err := storescenarioexecution.EnsurePostgres(txctx, tx, req.RunID, *req.ScenarioExecutionProfile, req.CreatedAt); err != nil {
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.ScenarioSetupResult, error) {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
+			if !ok {
+				return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
+			}
+			if _, err := s.RunLifecyclePostgresOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
+				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+				Source: fact, StartedAt: req.CreatedAt,
+			}); err != nil {
 				return err
 			}
-		}
-		for _, entity := range req.Entities {
-			fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
-			if err != nil {
-				return err
+			if req.ScenarioExecutionProfile != nil {
+				if err := storescenarioexecution.EnsurePostgres(txctx, tx, req.RunID, *req.ScenarioExecutionProfile, req.CreatedAt); err != nil {
+					return err
+				}
 			}
-			var storedRunID, storedEntityID string
-			err = tx.QueryRowContext(txctx, `
+			for _, entity := range req.Entities {
+				fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
+				if err != nil {
+					return err
+				}
+				var storedRunID, storedEntityID string
+				err = tx.QueryRowContext(txctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, name,
 					current_state, gates, fields, bookkeeping, accumulator, revision,
@@ -68,33 +68,40 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 				ON CONFLICT (run_id, entity_id) DO NOTHING
 				RETURNING run_id::text, entity_id::text
 			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState, string(gatesJSON), string(fieldsJSON), req.CreatedAt).Scan(&storedRunID, &storedEntityID)
-			if err == sql.ErrNoRows {
-				if err := validateExistingPostgresScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
+				if err == sql.ErrNoRows {
+					if err := validateExistingPostgresScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
+						return err
+					}
+					continue
+				}
+				if err != nil {
+					return fmt.Errorf("insert postgres scenario setup entity %s: %w", entity.Alias, err)
+				}
+				if err := attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
 					return err
 				}
-				continue
+				if err := privatemutationlog.InsertEntityStateDiff(txctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+					return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
+				}), storedEntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+					CurrentState: entity.CurrentState,
+					Fields:       fieldsAny,
+					Gates:        gatesAny,
+				}, scenarioSetupMutationWriter()); err != nil {
+					return fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
+				}
 			}
-			if err != nil {
-				return fmt.Errorf("insert postgres scenario setup entity %s: %w", entity.Alias, err)
-			}
-			if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID); err != nil {
-				return err
-			}
-			if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
-				return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			}), story, effects, storedEntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-				CurrentState: entity.CurrentState,
-				Fields:       fieldsAny,
-				Gates:        gatesAny,
-			}, scenarioSetupMutationWriter()); err != nil {
-				return fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
-			}
+			return nil
+		})
+		if err != nil {
+			return runtimepipeline.ScenarioSetupResult{}, err
 		}
-		return nil
-	}); err != nil {
-		return runtimepipeline.ScenarioSetupResult{}, err
+		return scenarioSetupResult(req), nil
+	})
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.ScenarioSetupResult{}, outcome.Err()
 	}
-	return scenarioSetupResult(req), nil
+	return result, outcome.Err()
 }
 
 func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
@@ -106,29 +113,29 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	effects := newRevisionEffects()
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scenario setup", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
-		if !ok {
-			return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
-		}
-		if _, err := s.RunLifecycleSQLiteOwner.CreateRunTx(txctx, tx, story, runtimerunlifecycle.CreateRequest{
-			RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-			Source: fact, StartedAt: req.CreatedAt,
-		}); err != nil {
-			return err
-		}
-		if req.ScenarioExecutionProfile != nil {
-			if err := storescenarioexecution.EnsureSQLite(txctx, tx, req.RunID, *req.ScenarioExecutionProfile, req.CreatedAt); err != nil {
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite scenario setup", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.ScenarioSetupResult, error) {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			fact, ok := runtimecorrelation.SourceArtifactFactFromContext(txctx)
+			if !ok {
+				return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
+			}
+			if _, err := s.RunLifecycleSQLiteOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
+				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+				Source: fact, StartedAt: req.CreatedAt,
+			}); err != nil {
 				return err
 			}
-		}
-		for _, entity := range req.Entities {
-			fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
-			if err != nil {
-				return err
+			if req.ScenarioExecutionProfile != nil {
+				if err := storescenarioexecution.EnsureSQLite(txctx, tx, req.RunID, *req.ScenarioExecutionProfile, req.CreatedAt); err != nil {
+					return err
+				}
 			}
-			res, err := tx.ExecContext(txctx, `
+			for _, entity := range req.Entities {
+				fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
+				if err != nil {
+					return err
+				}
+				res, err := tx.ExecContext(txctx, `
 				INSERT INTO entity_state (
 					run_id, entity_id, flow_instance, entity_type, name,
 					current_state, gates, fields, bookkeeping, accumulator, revision,
@@ -137,36 +144,45 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 				VALUES (?, ?, ?, ?, NULL, ?, ?, ?, '{}', '{}', 1, ?, ?, ?)
 				ON CONFLICT (run_id, entity_id) DO NOTHING
 			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState,
-				string(gatesJSON), string(fieldsJSON), req.CreatedAt.UTC(), req.CreatedAt.UTC(), req.CreatedAt.UTC())
-			if err != nil {
-				return fmt.Errorf("insert sqlite scenario setup entity %s: %w", entity.Alias, err)
-			}
-			rows, err := res.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("inspect sqlite scenario setup entity insert %s: %w", entity.Alias, err)
-			}
-			if rows == 0 {
-				if err := validateExistingSQLiteScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
+					string(gatesJSON), string(fieldsJSON), req.CreatedAt.UTC(), req.CreatedAt.UTC(), req.CreatedAt.UTC())
+				if err != nil {
+					return fmt.Errorf("insert sqlite scenario setup entity %s: %w", entity.Alias, err)
+				}
+				rows, err := res.RowsAffected()
+				if err != nil {
+					return fmt.Errorf("inspect sqlite scenario setup entity insert %s: %w", entity.Alias, err)
+				}
+				if rows == 0 {
+					if err := validateExistingSQLiteScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
+						return err
+					}
+					continue
+				}
+				if err := attempt.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID); err != nil {
 					return err
 				}
-				continue
+				if err := privatemutationlog.InsertSQLiteEntityStateDiff(txctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+					return s.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
+				}), entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+					CurrentState: entity.CurrentState,
+					Fields:       fieldsAny,
+					Gates:        gatesAny,
+				}, scenarioSetupMutationWriter(), req.CreatedAt); err != nil {
+					return fmt.Errorf("record sqlite scenario setup entity mutation %s: %w", entity.Alias, err)
+				}
 			}
-			if err := effects.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID); err != nil {
-				return err
-			}
-			if err := storeentity.InsertSQLiteEntityStateDiff(txctx, story, tx, effects, req.RunID, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-				CurrentState: entity.CurrentState,
-				Fields:       fieldsAny,
-				Gates:        gatesAny,
-			}, scenarioSetupMutationWriter(), req.CreatedAt); err != nil {
-				return fmt.Errorf("record sqlite scenario setup entity mutation %s: %w", entity.Alias, err)
-			}
+			return nil
+		})
+		if err != nil {
+			return runtimepipeline.ScenarioSetupResult{}, err
 		}
-		return nil
-	}); err != nil {
-		return runtimepipeline.ScenarioSetupResult{}, err
+		return scenarioSetupResult(req), nil
+	})
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.ScenarioSetupResult{}, outcome.Err()
 	}
-	return scenarioSetupResult(req), nil
+	return result, outcome.Err()
 }
 
 func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupRequest, error) {

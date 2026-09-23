@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +37,10 @@ func TestFanOutProducerFairnessIgnoresCallerAuditTimeBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := commitFanOutIntentTx(context.Background(), tx, backend == "postgres", newRevisionEffects(), request, request.Key.RunID, nil, request.Capsule.Lineage.ParentEventID, before.Add(offset)); err != nil {
+				if err := request.Validate(); err != nil {
+					t.Fatal(err)
+				}
+				if err := insertFanOutIntentSQL(context.Background(), tx, backend == "postgres", runforkrevision.NewEffects(), request, nil, request.Capsule.Lineage.ParentEventID, before.Add(offset)); err != nil {
 					_ = tx.Rollback()
 					t.Fatal(err)
 				}

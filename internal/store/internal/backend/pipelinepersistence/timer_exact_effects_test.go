@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	"github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -77,15 +76,28 @@ func TestWorkflowTimerExactEffectsReplacementAndCancellationBothStores(t *testin
 			next.Ref.ActivationID, next.Ref.DeclarationRevision = uuid.NewString(), "new"
 			other := old
 			other.Ref.ActivationID, other.RunID = uuid.NewString(), uuid.NewString()
-			mutate := func(effects *revisionEffects, kind runtimepipeline.WorkflowTimerMutationKind, activation runtimepipeline.WorkflowTimerActivation, wantChanged bool) {
+			mutate := func(effects *runforkrevision.Effects, kind runtimepipeline.WorkflowTimerMutationKind, activation runtimepipeline.WorkflowTimerActivation, wantChanged bool) {
 				t.Helper()
-				ref, changed, err := commitWorkflowEngineTimerMutation(ctx, tx, backend == "postgres", effects,
-					runtimepipeline.WorkflowTimerMutation{Kind: kind, Activation: activation})
+				mutation := runtimepipeline.WorkflowTimerMutation{Kind: kind, Activation: activation}
+				if err := mutation.Validate(activation.RunID, activation.Route, activation.EntityID); err != nil {
+					t.Fatal(err)
+				}
+				ref := activation.Ref
+				var changed bool
+				var err error
+				switch kind {
+				case runtimepipeline.WorkflowTimerMutationInsert:
+					changed, err = insertWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", effects, activation)
+				case runtimepipeline.WorkflowTimerMutationCancel:
+					changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", effects, activation)
+				default:
+					t.Fatalf("unsupported timer mutation kind %q", kind)
+				}
 				if err != nil || changed != wantChanged || ref != activation.Ref {
 					t.Fatalf("%s %s: ref=%+v changed=%v, want %v: %v", kind, activation.Ref.ActivationID, ref, changed, wantChanged, err)
 				}
 			}
-			assertEffects := func(got *revisionEffects, ids ...string) {
+			assertEffects := func(got *runforkrevision.Effects, ids ...string) {
 				t.Helper()
 				want := runforkrevision.NewEffects()
 				for _, id := range ids {
@@ -113,15 +125,15 @@ func TestWorkflowTimerExactEffectsReplacementAndCancellationBothStores(t *testin
 			assertEffects(replay)
 
 			cancel := runforkrevision.NewEffects()
-			refs, err := workflowtimer.CancelRunsTx(ctx, tx, backend == "postgres", cancel, []string{runID, runID})
-			if err != nil || len(refs) != 1 || refs[0].ActivationID != next.Ref.ActivationID {
-				t.Fatalf("enumerated cancellation = %+v: %v", refs, err)
+			changed, err := cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", cancel, next)
+			if err != nil || !changed {
+				t.Fatalf("timer cancellation = %v: %v", changed, err)
 			}
 			assertEffects(cancel, next.Ref.ActivationID)
 			noop := runforkrevision.NewEffects()
-			refs, err = workflowtimer.CancelRunsTx(ctx, tx, backend == "postgres", noop, []string{runID})
-			if err != nil || len(refs) != 0 {
-				t.Fatalf("cancellation replay = %+v: %v", refs, err)
+			changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, backend == "postgres", noop, next)
+			if err != nil || changed {
+				t.Fatalf("cancellation replay = %v: %v", changed, err)
 			}
 			assertEffects(noop)
 			for _, spelling := range []string{

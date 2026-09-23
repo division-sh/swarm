@@ -1,15 +1,23 @@
 package runtimepersistence
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -34,8 +42,6 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003100, 0).UTC()
-	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
-	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -51,6 +57,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	}
 	requestJSON, _ := json.Marshal(requestPayload)
+	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestJSON)
 	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID, string(accumulator)); err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +68,6 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 			writer_type, writer_id, handler_step, created_at
 		) VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestJSON), requestJSON); err != nil {
 		t.Fatal(err)
 	}
 	resultPayload, _ := json.Marshal(map[string]any{
@@ -86,7 +90,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
+	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
 	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
@@ -148,8 +152,6 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003200, 0).UTC()
-	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
-	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -165,6 +167,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	})
+	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader", at, selectedActivityProducerSourceWithLoops(t, false, true), payload)
 	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID, string(accumulator)); err != nil {
 		t.Fatal(err)
 	}
@@ -174,11 +177,8 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(payload), payload); err != nil {
-		t.Fatal(err)
-	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
+	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
 	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
@@ -223,8 +223,6 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	requestEventID := activityidentity.RequestEventID(fact)
 	at := time.Unix(1700003300, 0).UTC()
-	seedDeclaredActivityExecutionSource(t, db, sourceRunID, entityID, requestEventID, at, selectedActivityProducerSourceWithLoops(t, false, true))
-	stampSelectedActivityProducerFixture(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer")
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatal(err)
@@ -240,6 +238,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
 		"loop_generation": generation, "loop_stage": "review",
 	})
+	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestPayload)
 	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID, string(accumulator)); err != nil {
 		t.Fatal(err)
 	}
@@ -247,9 +246,6 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at)
 		VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'loop-test', 'seed', $5)
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name = 'platform.activity_requested', flow_instance = '', payload = $3::jsonb, payload_bytes = $4::bytea WHERE run_id = $1::uuid AND event_id = $2::uuid`, sourceRunID, requestEventID, string(requestPayload), requestPayload); err != nil {
 		t.Fatal(err)
 	}
 	failureEnvelope, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(
@@ -287,7 +283,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized := materializeSelectedActivityFixture(t, ctx, pg, sourceRunID, requestEventID)
+	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
 	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatal(err)
@@ -322,4 +318,38 @@ func forkTestJSON(t *testing.T, value any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func seedDeclaredActivityRequestExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID, parentEventID, node string, at time.Time, source semanticview.Source, payload []byte) {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("declared activity source requires its actual artifact")
+	}
+	routingSource, err := pinrouting.AdmitNodeExecutionRoutingSource(source, mustPersistenceNode("flow-a", node), "flow-a", events.RouteIdentity{
+		FlowID: "flow-a", FlowInstance: "flow-a", EntityID: entityID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.ChildForProducerWithRoutingSource(eventID, "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
+		events.EventLineage{RunID: runID, ParentEventID: parentEventID, ExecutionMode: executionmode.Live},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, routingSource.Route()), routingSource, at)
+	parent := semanticEventRecordFixture(parentEventID, runID, "review.accepted", eventtest.Producer(events.EventProducerPlatform, "workflow"), []byte(`{}`),
+		semanticEventRecordFixtureEnvelope(entityID, "flow-a"), at.Add(-time.Microsecond))
+	seedSelectedContractExecutionSourceWithEvent(t, db, semanticRunFixture{
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute),
+		Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),
+	}, entityID, event, at, nil, "flow-a", parent)
+}
+
+func materializeSelectedActivityAtCheckpoint(t *testing.T, ctx context.Context, store *PostgresStore, sourceRunID, entityID string) runfork.RunForkMaterialization {
+	t.Helper()
+	checkpointID := uuid.NewString()
+	checkpoint := semanticEventRecordFixture(checkpointID, sourceRunID, "review.accepted", eventtest.Producer(events.EventProducerPlatform, "workflow"), []byte(`{}`),
+		semanticEventRecordFixtureEnvelope(entityID, "flow-a"), time.Now().UTC())
+	if err := commitSemanticEventFixture(ctx, store, checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	return materializeSelectedActivityFixture(t, ctx, store, sourceRunID, checkpointID)
 }

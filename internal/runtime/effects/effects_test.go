@@ -3,6 +3,8 @@ package effects
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -134,6 +136,12 @@ func TestAgentTurnUsageTargetRejectsIdentityFromDifferentRun(t *testing.T) {
 type effectStoreProbe struct {
 	authorizations []AuthorizeRequest
 	launches       int
+	authorizeErr   error
+	authorizeAck   bool
+	forceUnack     bool
+	launchErr      error
+	observeErr     error
+	settleErr      error
 }
 
 type completionStoreProbe struct {
@@ -167,23 +175,27 @@ func (*effectStoreProbe) IsExternalEffectAuthorityCurrent(context.Context, Autho
 
 func (p *effectStoreProbe) AuthorizeExternalAttempt(_ context.Context, authority Authority, req AuthorizeRequest) (Attempt, error) {
 	p.authorizations = append(p.authorizations, req)
-	return authorizedProbeAttempt(authority, req), nil
+	attempt := authorizedProbeAttempt(authority, req)
+	attempt.AuthorizationAcknowledged = !p.forceUnack && (p.authorizeAck || p.authorizeErr == nil)
+	return attempt, p.authorizeErr
 }
 
 func (p *effectStoreProbe) MarkExternalAttemptLaunched(context.Context, Attempt, time.Time) error {
 	p.launches++
-	return nil
+	return p.launchErr
 }
 
-func (*effectStoreProbe) MarkExternalAttemptResponseObserved(context.Context, Attempt, map[string]any, time.Time) error {
-	return nil
+func (p *effectStoreProbe) MarkExternalAttemptResponseObserved(context.Context, Attempt, map[string]any, time.Time) error {
+	return p.observeErr
 }
 
 func (*effectStoreProbe) HeartbeatCompletionAttempt(context.Context, Attempt, time.Time, time.Duration) error {
 	return nil
 }
 
-func (*effectStoreProbe) SettleExternalAttempt(context.Context, Settlement) error { return nil }
+func (p *effectStoreProbe) SettleExternalAttempt(context.Context, Settlement) error {
+	return p.settleErr
+}
 
 func authorizedProbeAttempt(authority Authority, req AuthorizeRequest) Attempt {
 	return Attempt{
@@ -929,6 +941,61 @@ func TestBeginDerivesStableOperationAndAttemptIdentity(t *testing.T) {
 	}
 	if len(probe.authorizations) != 2 || probe.authorizations[0].RequestFingerprint != probe.authorizations[1].RequestFingerprint {
 		t.Fatalf("authorizations = %#v, want stable fingerprints", probe.authorizations)
+	}
+}
+
+func TestBeginPreservesAcknowledgedAuthorizationCleanupErrorWithoutLaunching(t *testing.T) {
+	cleanup := errors.New("post-commit authorization cleanup failed")
+	for _, acknowledged := range []bool{false, true} {
+		t.Run(fmt.Sprintf("acknowledged=%t", acknowledged), func(t *testing.T) {
+			probe := &effectStoreProbe{authorizeErr: cleanup, authorizeAck: acknowledged}
+			token := effectLifecycleToken(t, 7, "agent-a", 3)
+			ctx := WithLogicalOperationIdentity(
+				WithController(WithLifecycleToken(context.Background(), token), NewController(probe).WithExecutionPosture(executionposture.Live)),
+				"authorization-cleanup",
+			)
+			ctx = managedEffectTestContext(t, ctx, token.AgentID)
+			handle, err := Begin(ctx, "authored_http_tool", []byte("request"), map[string]string{"tool": "lookup"})
+			if !errors.Is(err, cleanup) {
+				t.Fatalf("authorization error = %v, want cleanup error", err)
+			}
+			if acknowledged {
+				var committed *PostCommitMutationError
+				if handle != nil || !errors.As(err, &committed) || committed.Phase != MutationAuthorization ||
+					committed.AttemptID == "" || committed.OperationID == "" {
+					t.Fatalf("acknowledged authorization did not fail closed with exact attempt: handle=%#v err=%v", handle, err)
+				}
+			} else {
+				var committed *PostCommitMutationError
+				if handle != nil || errors.As(err, &committed) {
+					t.Fatalf("unacknowledged authorization exposed committed authority: handle=%#v err=%v", handle, err)
+				}
+			}
+			if len(probe.authorizations) != 1 || probe.launches != 0 {
+				t.Fatalf("authorizations=%d launches=%d, want one admission and no external launch", len(probe.authorizations), probe.launches)
+			}
+		})
+	}
+}
+
+func TestBeginRejectsMissingAuthorizationAcknowledgmentWithoutNativeError(t *testing.T) {
+	probe := &effectStoreProbe{forceUnack: true}
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
+	ctx := WithLogicalOperationIdentity(
+		WithController(WithLifecycleToken(context.Background(), token), NewController(probe).WithExecutionPosture(executionposture.Live)),
+		"missing-authorization-acknowledgment",
+	)
+	ctx = managedEffectTestContext(t, ctx, token.AgentID)
+	handle, err := Begin(ctx, "authored_http_tool", []byte("request"), nil)
+	if handle != nil {
+		t.Fatalf("unacknowledged authorization exposed handle: %#v", handle)
+	}
+	failure, ok := runtimefailures.EnvelopeFromError(err)
+	if !ok || failure.Detail.Code != "external_effect_authorization_acknowledgment_missing" {
+		t.Fatalf("missing acknowledgment error = %v, want explicit refusal", err)
+	}
+	if len(probe.authorizations) != 1 || probe.launches != 0 {
+		t.Fatalf("authorizations=%d launches=%d, want one admission and no launch", len(probe.authorizations), probe.launches)
 	}
 }
 

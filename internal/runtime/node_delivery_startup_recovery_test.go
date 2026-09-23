@@ -58,6 +58,8 @@ type renewalTrackingDeliveryStore struct {
 type startupRecoveryActivationProbe struct {
 	runtimedelivery.Store
 	activations atomic.Int64
+	faults      atomic.Int64
+	cleanupErr  error
 }
 
 func (p *startupRecoveryActivationProbe) ActivateDeliveryAuthority(
@@ -66,6 +68,21 @@ func (p *startupRecoveryActivationProbe) ActivateDeliveryAuthority(
 ) error {
 	p.activations.Add(1)
 	return p.Store.ActivateDeliveryAuthority(ctx, authority)
+}
+
+func (p *startupRecoveryActivationProbe) ActivateDeliveryAuthorityOutcome(
+	ctx context.Context,
+	authority runtimedelivery.ExecutionAuthority,
+) (runtimedelivery.ActivationCommit, error) {
+	p.activations.Add(1)
+	commit, err := p.Store.ActivateDeliveryAuthorityOutcome(ctx, authority)
+	if commit.Acknowledged {
+		err = errors.Join(err, p.cleanupErr)
+		if p.cleanupErr != nil {
+			p.faults.Add(1)
+		}
+	}
+	return commit, err
 }
 
 type committedCleanupPipelineOwner struct {
@@ -190,6 +207,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, runtimeSQLDB, _, selected := backend.setup(t)
+			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
+			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if runtimeSQLDB == nil {
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
@@ -254,7 +273,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				EventPayloadAdmissionBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
 				ManagerStore:            selected,
-				ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: selected,
+				ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: activationProbe,
 				PipelineObligations: selected.PipelineObligations(),
 
 				Options: swarmruntime.RuntimeOptions{
@@ -307,6 +326,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 
 			if err := runtime.Start(ctx); err != nil {
 				t.Fatalf("Start: %v", err)
+			}
+			if got := activationProbe.activations.Load(); got != 1 {
+				t.Fatalf("acknowledged delivery authority activations = %d, want 1", got)
+			}
+			if got := activationProbe.faults.Load(); got != 1 {
+				t.Fatalf("injected delivery authority cleanup faults = %d, want 1", got)
 			}
 			if !hydrated.Load() {
 				t.Fatal("startup did not hydrate the persisted static agent before delivery recovery")
@@ -611,8 +636,8 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			if !errors.Is(sweepErr, injectedErr) {
 				t.Fatalf("pipeline sweep error = %v, want committed cleanup evidence", sweepErr)
 			}
-			if result.Settled != 0 {
-				t.Fatalf("pipeline sweep reported settled = %d despite auxiliary cleanup error", result.Settled)
+			if result.Settled != 1 {
+				t.Fatalf("pipeline sweep reported settled = %d, want acknowledged settlement despite auxiliary cleanup error", result.Settled)
 			}
 			deadline := time.Now().Add(2 * time.Second)
 			for dispatcher.dispatches.Load() == 0 && time.Now().Before(deadline) {

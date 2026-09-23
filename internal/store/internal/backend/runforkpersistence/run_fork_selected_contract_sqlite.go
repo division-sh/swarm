@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -84,81 +84,78 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract source event preparation", func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		var sourceStatus string
-		if err := tx.QueryRowContext(txctx, `SELECT status FROM runs WHERE run_id = $1`, sourceRunID).Scan(&sourceStatus); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return &runtimerunlifecycle.RunNotFoundError{RunID: sourceRunID}
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected-contract source event preparation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		out = nil
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var sourceStatus string
+			if err := tx.QueryRowContext(txctx, `SELECT status FROM runs WHERE run_id = $1`, sourceRunID).Scan(&sourceStatus); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return &runtimerunlifecycle.RunNotFoundError{RunID: sourceRunID}
+				}
+				return fmt.Errorf("load selected-contract source event preparation status: %w", err)
 			}
-			return fmt.Errorf("load selected-contract source event preparation status: %w", err)
-		}
-		if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
-			state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
-			if parseErr != nil {
-				return parseErr
+			if !runForkSelectedContractBranchSourceStatusSupported(sourceStatus) {
+				state, parseErr := runtimerunlifecycle.ParseState(sourceStatus)
+				if parseErr != nil {
+					return parseErr
+				}
+				return fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
 			}
-			return fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
-		}
-		if err := requireSQLiteRunActive(txctx, tx, forkRunID); err != nil {
-			return fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
-		}
-		stateAdmission, err := loadRunForkSourceStateAdmission(txctx, tx, forkRunID, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
-		if err != nil {
-			return err
-		}
-		if stateAdmission.snapshot.RunID != sourceRunID {
-			return fmt.Errorf("source event preparation run disagrees with selected fork binding")
-		}
-		fact, err := s.RunLifecycleSQLiteOwner.RequirePresentSourceTx(txctx, tx, sourceRunID)
-		if err != nil {
-			return err
-		}
-		if err := original.RequireSource(fact.BundleHash()); err != nil {
-			return err
-		}
-		stateAdmission.carriage = original
-		events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
-		if err != nil {
-			return fmt.Errorf("load selected-contract source events: %w", err)
-		}
-		out = make([]runfork.RunForkSelectedContractSourceEvent, 0, len(ids))
-		for _, event := range events {
-			if event.RunID() != sourceRunID {
-				return fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
+			if err := requireSQLiteRunActive(txctx, tx, forkRunID); err != nil {
+				return fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
 			}
-			out = append(out, runfork.RunForkSelectedContractSourceEvent{
-				SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
-				Scope:         string(event.Scope()),
-				RoutingSource: event.RoutingSource(), Payload: event.Payload(),
-			})
-			out[len(out)-1].InputPublication, err = runfork.InputPublicationFromEvent(event)
+			stateAdmission, err := loadRunForkSourceStateAdmission(txctx, tx, forkRunID, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, false)
 			if err != nil {
 				return err
 			}
-		}
-		for idx := range out {
-			prepared, err := prepareRunForkSelectedContractSourceEvent(txctx, tx, story, stateAdmission, out[idx])
+			if stateAdmission.snapshot.RunID != sourceRunID {
+				return fmt.Errorf("source event preparation run disagrees with selected fork binding")
+			}
+			fact, err := s.RunLifecycleSQLiteOwner.RequirePresentSourceTx(txctx, tx, sourceRunID)
 			if err != nil {
 				return err
 			}
-			out[idx] = prepared
-		}
-		if err := story.Finalize(txctx); err != nil {
-			return fmt.Errorf("finalize selected-contract source event author activity: %w", err)
-		}
-		if _, err := runforkrevision.FinalizeSQLite(txctx, tx, runforkrevision.NewEffects()); err != nil {
-			return fmt.Errorf("finalize selected-contract source event preparation revisions: %w", err)
-		}
-		return nil
+			if err := original.RequireSource(fact.BundleHash()); err != nil {
+				return err
+			}
+			stateAdmission.carriage = original
+			events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
+			if err != nil {
+				return fmt.Errorf("load selected-contract source events: %w", err)
+			}
+			out = make([]runfork.RunForkSelectedContractSourceEvent, 0, len(ids))
+			for _, event := range events {
+				if event.RunID() != sourceRunID {
+					return fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
+				}
+				out = append(out, runfork.RunForkSelectedContractSourceEvent{
+					SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
+					Scope:         string(event.Scope()),
+					RoutingSource: event.RoutingSource(), Payload: event.Payload(),
+				})
+				out[len(out)-1].InputPublication, err = runfork.InputPublicationFromEvent(event)
+				if err != nil {
+					return err
+				}
+			}
+			for idx := range out {
+				prepared, err := prepareRunForkSelectedContractSourceEvent(txctx, tx, attempt, stateAdmission, out[idx])
+				if err != nil {
+					return err
+				}
+				out[idx] = prepared
+			}
+			return nil
+		})
+		return struct{}{}, err
 	})
-	if !committed {
-		return nil, err
+	if !result.Acknowledged() {
+		return nil, result.Err()
 	}
-	return out, err
+	if err := result.Err(); err != nil {
+		return out, &selectedForkSourceEventsPostCommitError{sourceRunID: sourceRunID, forkRunID: forkRunID, value: out, cause: err}
+	}
+	return out, result.Err()
 }
 
 func (s *RunForkSQLiteOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID, forkEventID string) error {

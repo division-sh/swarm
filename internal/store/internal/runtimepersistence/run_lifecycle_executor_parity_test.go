@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"runtime"
@@ -18,6 +17,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
@@ -711,58 +711,31 @@ func TestRunLifecycleDirectHandoffCommitAcrossSinkRegistrationParity(t *testing.
 				executed: make(chan runtimerunlifecycle.Candidate, 2),
 			}
 			executor := newRunLifecycleParityExecutor(t, intercept, occurrence)
-			registry := candidateRegistryForFixture(t, fixture)
-
 			candidatePrepared := make(chan struct{})
 			allowCommit := make(chan struct{})
 			mutationDone := make(chan error, 1)
 			go func() {
-				handoff, err := reserveRunLifecycleCandidateHandoff(runtimeCtx)
-				if err != nil {
-					mutationDone <- err
-					return
-				}
-				defer handoff.Rollback()
-				var tx *sql.Tx
-				switch store := fixture.store.(type) {
-				case *PostgresStore:
-					tx, err = store.backend.BeginTx(runtimeCtx, nil)
-				case *SQLiteRuntimeStore:
-					tx, err = store.backend.ConstructionHandle().BeginTx(runtimeCtx, nil)
-				default:
-					err = errors.New("unsupported direct candidate handoff store")
-				}
-				if err != nil {
-					mutationDone <- err
-					return
-				}
-				defer func() { _ = tx.Rollback() }()
-				var result runtimerunlifecycle.CandidateRequestResult
-				switch store := fixture.store.(type) {
-				case *PostgresStore:
-					result, err = requestPostgresCompletionCandidateTx(runtimeCtx, tx, runID, nil, false)
-				case *SQLiteRuntimeStore:
-					result, err = requestSQLiteCompletionCandidateTx(runtimeCtx, tx, runID, nil, store.now(), false)
-				}
-				if err == nil {
-					err = handoff.Prepare(registry, result)
-				}
-				if err != nil {
-					mutationDone <- err
-					return
-				}
-				close(candidatePrepared)
-				select {
-				case <-runtimeCtx.Done():
-					mutationDone <- context.Cause(runtimeCtx)
-					return
-				case <-allowCommit:
-				}
-				if err := tx.Commit(); err != nil {
-					mutationDone <- err
-					return
-				}
-				mutationDone <- handoff.Commit()
+				mutationDone <- runSelectedFixtureMutation(runtimeCtx, fixture.store, "direct candidate handoff", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+					var writer mutationprotocol.CandidateWriter
+					switch store := fixture.store.(type) {
+					case *PostgresStore:
+						writer = store.runLifecyclePostgresOwner
+					case *SQLiteRuntimeStore:
+						writer = store.runLifecycleSQLiteOwner
+					default:
+						return errors.New("unsupported direct candidate handoff store")
+					}
+					if _, err := attempt.RequestCompletion(txctx, writer, runID, nil); err != nil {
+						return err
+					}
+					close(candidatePrepared)
+					select {
+					case <-runtimeCtx.Done():
+						return context.Cause(runtimeCtx)
+					case <-allowCommit:
+						return nil
+					}
+				})
 			}()
 			awaitRunLifecycleSignal(t, candidatePrepared, "uncommitted direct candidate preparation")
 
@@ -882,7 +855,7 @@ func TestPostgresPipelineCompletionHandoffSurvivesPostCommitCleanupError(t *test
 
 			switch operation {
 			case "mark_decision_processed":
-				err = owner.MarkDecisionProcessed(runtimeCtx, claim)
+				settlementOutcome, err = owner.MarkDecisionProcessed(runtimeCtx, claim)
 			case "settle":
 				settlementOutcome, err = owner.Settle(runtimeCtx, claim, runtimepipelineobligation.Acknowledged("processed"))
 			}
@@ -890,7 +863,7 @@ func TestPostgresPipelineCompletionHandoffSurvivesPostCommitCleanupError(t *test
 			if !errors.Is(err, injectedErr) {
 				t.Fatalf("%s error = %v, want injected cleanup failure", operation, err)
 			}
-			if operation == "settle" && (!settlementOutcome.Committed() || !settlementOutcome.DeliveryHandoffCommitted()) {
+			if !settlementOutcome.Committed() || !settlementOutcome.DeliveryHandoffCommitted() {
 				t.Fatalf("settlement outcome after cleanup failure = committed:%v handoff:%v, want true/true",
 					settlementOutcome.Committed(), settlementOutcome.DeliveryHandoffCommitted())
 			}

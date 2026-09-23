@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -40,41 +40,34 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			commit := func(txctx context.Context, tx *sql.Tx, store any) error {
-				story, err := eventFixtureStory(txctx)
-				if err != nil {
-					return err
-				}
-				switch selected := store.(type) {
+			err = runSelectedFixtureMutation(ctx, fixture.store, "directive event fixture", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				var commitErr error
+				switch selected := fixture.store.(type) {
 				case *PostgresStore:
-					_, err = selected.eventPostgresOwner.CommitDirectiveEventTx(txctx, tx, story, privaterunforkrevision.NewEffects(), admitted)
-					if err == nil {
-						var restored events.AdmittedEvent
-						var found bool
-						restored, found, err = selected.eventPostgresOwner.LoadDirectiveEventTx(txctx, tx, event.ID())
-						if err == nil && (!found || !bytes.Equal(restored.Event().Payload(), payload)) {
-							return fmt.Errorf("postgres directive payload = %q found=%v, want %q", restored.Event().Payload(), found, payload)
-						}
+					_, commitErr = selected.eventPostgresOwner.CommitDirectiveEventTx(txctx, attempt, admitted)
+					if commitErr == nil {
+						commitErr = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+							restored, found, err := selected.eventPostgresOwner.LoadDirectiveEventTx(txctx, tx, event.ID())
+							if err == nil && (!found || !bytes.Equal(restored.Event().Payload(), payload)) {
+								return fmt.Errorf("postgres directive payload = %q found=%v, want %q", restored.Event().Payload(), found, payload)
+							}
+							return err
+						})
 					}
 				case *SQLiteRuntimeStore:
-					_, err = selected.eventSQLiteOwner.CommitDirectiveEventTx(txctx, tx, story, privaterunforkrevision.NewEffects(), admitted)
-					if err == nil {
-						var restored events.AdmittedEvent
-						var found bool
-						restored, found, err = selected.eventSQLiteOwner.LoadDirectiveEventTx(txctx, tx, event.ID())
-						if err == nil && (!found || !bytes.Equal(restored.Event().Payload(), payload)) {
-							return fmt.Errorf("sqlite directive payload = %q found=%v, want %q", restored.Event().Payload(), found, payload)
-						}
+					_, commitErr = selected.eventSQLiteOwner.CommitDirectiveEventTx(txctx, attempt, admitted)
+					if commitErr == nil {
+						commitErr = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+							restored, found, err := selected.eventSQLiteOwner.LoadDirectiveEventTx(txctx, tx, event.ID())
+							if err == nil && (!found || !bytes.Equal(restored.Event().Payload(), payload)) {
+								return fmt.Errorf("sqlite directive payload = %q found=%v, want %q", restored.Event().Payload(), found, payload)
+							}
+							return err
+						})
 					}
 				}
-				return err
-			}
-			switch selected := fixture.store.(type) {
-			case *PostgresStore:
-				err = selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return commit(txctx, tx, selected) })
-			case *SQLiteRuntimeStore:
-				err = selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return commit(txctx, tx, selected) })
-			}
+				return commitErr
+			})
 			if err != nil {
 				t.Fatalf("commit directive: %v", err)
 			}

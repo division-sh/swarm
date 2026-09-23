@@ -44,14 +44,14 @@ type flowInstancePersistence interface {
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
-	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
+	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error)
 	MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error
 	Load(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
 type FlowInstanceRouteContextInstaller interface {
-	StageFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
+	StageFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error)
 }
 
 type FlowInstanceActivationCommitter interface {
@@ -113,18 +113,25 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if committer == nil {
 		return fmt.Errorf("flow instance activation requires the selected commit owner")
 	}
-	committed, err := committer.CommitFlowInstanceActivation(ctx, plan)
-	if err != nil {
-		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
+	committed, commitErr := committer.CommitFlowInstanceActivation(ctx, plan)
+	if !committed.Acknowledged {
+		if commitErr != nil {
+			return fmt.Errorf("persist flow instance %s: %w", flowPath, commitErr)
+		}
+		return fmt.Errorf("persist flow instance %s: commit was not acknowledged", flowPath)
+	}
+	var persistErr error
+	if commitErr != nil {
+		persistErr = fmt.Errorf("persist flow instance %s: %w", flowPath, commitErr)
 	}
 	if committed.Plan.Identity.Route() != plan.Identity.Route() {
-		return fmt.Errorf("committed flow instance activation identity does not match plan")
+		return errors.Join(persistErr, fmt.Errorf("committed flow instance activation identity does not match plan"))
 	}
-	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+	finalizeErr := am.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+	if finalizeErr != nil {
 		am.signalDynamicFlowRuntimeReadiness()
-		return err
 	}
-	return nil
+	return errors.Join(persistErr, finalizeErr)
 }
 
 // PrepareFlowInstanceActivation derives the complete durable activation
@@ -361,17 +368,24 @@ func (am *AgentManager) PrepareStandingFlowInstance(ctx context.Context, req run
 		if err != nil {
 			return false, nil, err
 		}
-		committed, err := am.roles.FlowActivation.CommitFlowInstanceActivation(ctx, plan)
-		if err != nil {
-			return false, nil, err
+		committed, commitErr := am.roles.FlowActivation.CommitFlowInstanceActivation(ctx, plan)
+		if !committed.Acknowledged {
+			if commitErr != nil {
+				return false, nil, commitErr
+			}
+			return false, nil, fmt.Errorf("prepared standing activation was not acknowledged")
 		}
 		if err := committed.Validate(); err != nil {
-			return false, nil, err
+			return false, nil, errors.Join(commitErr, err)
 		}
 		if committed.Plan.Identity != plan.Identity {
-			return false, nil, fmt.Errorf("prepared standing activation identity changed at commit")
+			return false, nil, errors.Join(commitErr, fmt.Errorf("prepared standing activation identity changed at commit"))
 		}
 		finish = func() error { return am.FinalizeCommittedFlowInstanceActivation(ctx, committed) }
+		if commitErr != nil {
+			topologyErr := am.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, identity)
+			return true, nil, errors.Join(commitErr, topologyErr, finish())
+		}
 	}
 	if err := am.PreparePersistedDynamicFlowRuntimeProcessTopology(ctx, identity); err != nil {
 		return false, nil, err
@@ -587,20 +601,20 @@ func flowInstanceAgentMaterializationBlueprints(req runtimepipeline.FlowInstance
 	return blueprints, nil
 }
 
-func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, req runtimepipeline.FlowInstanceActivationRequest) error {
+func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, req runtimepipeline.FlowInstanceActivationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	instance := req.Instance
 	vars := flowActivationVars(req)
 	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("invalid flow-instance route identity: %w", err)
+		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("invalid flow-instance route identity: %w", err)
 	}
 	if identity.Route != instance.Route() {
-		return fmt.Errorf("flow-instance route identity disagrees with activation instance")
+		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("flow-instance route identity disagrees with activation instance")
 	}
 	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, ActivationVariables: vars}
 	if am.roles.RouteInstaller != nil {
 		return am.roles.RouteInstaller.StageFlowInstanceRouteContext(ctx, request)
 	}
-	return fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
+	return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
 }
 
 var dynamicFlowCreationEventNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.dynamic-flow.creation-event.v1"))

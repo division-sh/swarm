@@ -12,13 +12,28 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
+func standalonePipelineMutationError[T any](result mutationprotocol.Result[T]) error {
+	if err := result.Err(); err != nil {
+		return err
+	}
+	if !result.Acknowledged() {
+		return fmt.Errorf("pipeline mutation commit was not acknowledged")
+	}
+	return nil
+}
+
 func (s *PipelinePostgresOwner) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
-	return reconcileDynamicFlowRuntimeReadinessPlans(ctx, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, newRevisionEffects(), fn)
+	return reconcileDynamicFlowRuntimeReadinessPlans(ctx, true, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) error) error {
+		if err := s.requireCurrentSchema(); err != nil {
+			return err
+		}
+		return standalonePipelineMutationError(mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, fn(ctx, attempt)
+		}))
 	}, requests, observedAt)
 }
 
@@ -211,8 +226,13 @@ func queryDynamicFlowRuntimeReadiness(ctx context.Context, db dynamicFlowReadine
 }
 
 func (s *PipelineSQLiteOwner) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
-	return reconcileDynamicFlowRuntimeReadinessPlans(ctx, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite dynamic flow readiness reconciliation", newRevisionEffects(), fn)
+	return reconcileDynamicFlowRuntimeReadinessPlans(ctx, false, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) error) error {
+		if err := s.requireCurrentSchema(); err != nil {
+			return err
+		}
+		return standalonePipelineMutationError(mutationprotocol.RunSQLite(ctx, s.backend, "sqlite dynamic flow readiness reconciliation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, fn(ctx, attempt)
+		}))
 	}, requests, observedAt)
 }
 
@@ -225,7 +245,7 @@ type preparedDynamicFlowRuntimeReadinessReconciliation struct {
 func reconcileDynamicFlowRuntimeReadinessPlans(
 	ctx context.Context,
 	postgres bool,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) error) error,
 	requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation,
 	observedAt time.Time,
 ) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
@@ -285,83 +305,90 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 		}
 		return prepared[i].expected.Identity.InstancePath < prepared[j].expected.Identity.InstancePath
 	})
-	results := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, len(prepared))
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		for index, request := range prepared {
-			instancePath := request.expected.Identity.InstancePath
-			loaded, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, request.expected.RunID, request.expected.Identity.Route(), true)
-			if err != nil {
-				return err
-			}
-			if !found {
-				return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
-			}
-			coordinate, err := changedDynamicFlowRuntimeReadinessObservationCoordinate(request.observed, loaded)
-			if err != nil {
-				return err
-			}
-			if coordinate != "" {
-				return &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{
-					RunID: request.expected.RunID, InstancePath: instancePath, Coordinate: coordinate,
-				}
-			}
-			if !loaded.Eligible() {
-				return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
-			}
-			desiredSource, err := runtimecorrelation.DecodeSourceArtifactFact(request.expected.BundleHash)
-			if err != nil || !desiredSource.Matches(loaded.OwningRunSource) {
-				return fmt.Errorf("dynamic flow runtime readiness desired source is not the owning run source for %s", instancePath)
-			}
-			if loaded.Plan.Identity != request.expected.Identity || loaded.Plan.RunID != request.expected.RunID {
-				return fmt.Errorf("dynamic flow runtime readiness reconciliation identity changed for %s", instancePath)
-			}
-			if loaded.Plan.ExecutionMode != request.expected.ExecutionMode {
-				return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
-			}
-			actualJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan)
-			if err != nil {
-				return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
-			}
-			changed := string(actualJSON) != string(request.expectedJSON)
-			if changed && !loaded.CreationEventEmittedAt.IsZero() {
-				actualCreationJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan.CreationEvent)
+	var results []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult
+	err := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		attemptResults := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, len(prepared))
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			for index, request := range prepared {
+				instancePath := request.expected.Identity.InstancePath
+				loaded, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, request.expected.RunID, request.expected.Identity.Route(), true)
 				if err != nil {
-					return fmt.Errorf("encode emitted dynamic flow creation plan %s: %w", instancePath, err)
+					return err
 				}
-				expectedCreationJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(request.expected.CreationEvent)
+				if !found {
+					return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
+				}
+				coordinate, err := changedDynamicFlowRuntimeReadinessObservationCoordinate(request.observed, loaded)
 				if err != nil {
-					return fmt.Errorf("encode revised dynamic flow creation plan %s: %w", instancePath, err)
+					return err
 				}
-				if string(actualCreationJSON) != string(expectedCreationJSON) {
-					return fmt.Errorf("dynamic flow runtime readiness cannot revise emitted creation occurrence for %s", instancePath)
+				if coordinate != "" {
+					return &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{
+						RunID: request.expected.RunID, InstancePath: instancePath, Coordinate: coordinate,
+					}
+				}
+				if !loaded.Eligible() {
+					return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
+				}
+				desiredSource, err := runtimecorrelation.DecodeSourceArtifactFact(request.expected.BundleHash)
+				if err != nil || !desiredSource.Matches(loaded.OwningRunSource) {
+					return fmt.Errorf("dynamic flow runtime readiness desired source is not the owning run source for %s", instancePath)
+				}
+				if loaded.Plan.Identity != request.expected.Identity || loaded.Plan.RunID != request.expected.RunID {
+					return fmt.Errorf("dynamic flow runtime readiness reconciliation identity changed for %s", instancePath)
+				}
+				if loaded.Plan.ExecutionMode != request.expected.ExecutionMode {
+					return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
+				}
+				actualJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan)
+				if err != nil {
+					return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
+				}
+				changed := string(actualJSON) != string(request.expectedJSON)
+				if changed && !loaded.CreationEventEmittedAt.IsZero() {
+					actualCreationJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(loaded.Plan.CreationEvent)
+					if err != nil {
+						return fmt.Errorf("encode emitted dynamic flow creation plan %s: %w", instancePath, err)
+					}
+					expectedCreationJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(request.expected.CreationEvent)
+					if err != nil {
+						return fmt.Errorf("encode revised dynamic flow creation plan %s: %w", instancePath, err)
+					}
+					if string(actualCreationJSON) != string(expectedCreationJSON) {
+						return fmt.Errorf("dynamic flow runtime readiness cannot revise emitted creation occurrence for %s", instancePath)
+					}
+				}
+				attemptResults[index] = runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult{
+					RunID: request.expected.RunID, InstancePath: instancePath, Changed: changed,
 				}
 			}
-			results[index] = runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult{
-				RunID: request.expected.RunID, InstancePath: instancePath, Changed: changed,
+			for index, request := range prepared {
+				if !attemptResults[index].Changed {
+					continue
+				}
+				query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4`
+				args := []any{request.expectedJSON, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
+				if !postgres {
+					query = `UPDATE flow_instance_runtime_readiness SET plan = ?, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_path = ?`
+				}
+				result, err := tx.ExecContext(txctx, query, args...)
+				if err != nil {
+					return err
+				}
+				rows, err := result.RowsAffected()
+				if err != nil {
+					return fmt.Errorf("count dynamic flow runtime readiness reconciliation rows for %s: %w", request.expected.Identity.InstancePath, err)
+				}
+				if rows != 1 {
+					return fmt.Errorf("dynamic flow runtime readiness reconciliation changed %d rows for %s", rows, request.expected.Identity.InstancePath)
+				}
 			}
+			return nil
+		})
+		if err == nil {
+			results = attemptResults
 		}
-		for index, request := range prepared {
-			if !results[index].Changed {
-				continue
-			}
-			query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4`
-			args := []any{request.expectedJSON, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
-			if !postgres {
-				query = `UPDATE flow_instance_runtime_readiness SET plan = ?, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_path = ?`
-			}
-			result, err := tx.ExecContext(txctx, query, args...)
-			if err != nil {
-				return err
-			}
-			rows, err := result.RowsAffected()
-			if err != nil {
-				return fmt.Errorf("count dynamic flow runtime readiness reconciliation rows for %s: %w", request.expected.Identity.InstancePath, err)
-			}
-			if rows != 1 {
-				return fmt.Errorf("dynamic flow runtime readiness reconciliation changed %d rows for %s", rows, request.expected.Identity.InstancePath)
-			}
-		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -492,55 +519,66 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 	return item, err == nil, err
 }
 
-func (s *PipelinePostgresOwner) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
-	return markDynamicFlowRuntimeTopologyReady(ctx, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, newRevisionEffects(), fn)
+func (s *PipelinePostgresOwner) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
+	return markDynamicFlowRuntimeTopologyReady(ctx, true, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) error) mutationprotocol.Result[struct{}] {
+		if err := s.requireCurrentSchema(); err != nil {
+			return mutationprotocol.Reject[struct{}](err)
+		}
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, fn(ctx, attempt)
+		})
 	}, expected, readyAt)
 }
 
-func (s *PipelineSQLiteOwner) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
-	return markDynamicFlowRuntimeTopologyReady(ctx, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite dynamic flow topology readiness", newRevisionEffects(), fn)
+func (s *PipelineSQLiteOwner) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
+	return markDynamicFlowRuntimeTopologyReady(ctx, false, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) error) mutationprotocol.Result[struct{}] {
+		if err := s.requireCurrentSchema(); err != nil {
+			return mutationprotocol.Reject[struct{}](err)
+		}
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite dynamic flow topology readiness", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, fn(ctx, attempt)
+		})
 	}, expected, readyAt)
 }
 
 func markDynamicFlowRuntimeTopologyReady(
 	ctx context.Context,
 	postgres bool,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) error) mutationprotocol.Result[struct{}],
 	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	readyAt time.Time,
-) error {
+) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
 	normalized, err := expected.Normalized()
 	if err != nil {
-		return fmt.Errorf("normalize dynamic flow runtime topology readiness plan: %w", err)
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, fmt.Errorf("normalize dynamic flow runtime topology readiness plan: %w", err)
 	}
 	expectedJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(normalized)
 	if err != nil {
-		return fmt.Errorf("encode dynamic flow runtime topology readiness plan: %w", err)
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, fmt.Errorf("encode dynamic flow runtime topology readiness plan: %w", err)
 	}
 	readyAt = readyAt.UTC()
 	if readyAt.IsZero() {
-		return fmt.Errorf("dynamic flow runtime topology readiness requires an exact occurrence time")
+		return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, fmt.Errorf("dynamic flow runtime topology readiness requires an exact occurrence time")
 	}
-	return run(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		// PostgreSQL JSONB equality erases integer/double kinds. Verify the
-		// exact runtime plan under the same write lock before its CAS.
-		current, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, normalized.RunID, normalized.Identity.Route(), true)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("dynamic flow runtime readiness %s transition topology_ready_at requires one active record", normalized.Identity.InstancePath)
-		}
-		currentJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(current.Plan)
-		if err != nil {
-			return err
-		}
-		if string(currentJSON) != string(expectedJSON) {
-			return fmt.Errorf("dynamic flow runtime readiness %s plan changed before topology completion", normalized.Identity.InstancePath)
-		}
-		query := `
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			// PostgreSQL JSONB equality erases integer/double kinds. Verify the
+			// exact runtime plan under the same write lock before its CAS.
+			current, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, normalized.RunID, normalized.Identity.Route(), true)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("dynamic flow runtime readiness %s transition topology_ready_at requires one active record", normalized.Identity.InstancePath)
+			}
+			currentJSON, err := runtimecanonicaljson.MarshalPreservingNumberKinds(current.Plan)
+			if err != nil {
+				return err
+			}
+			if string(currentJSON) != string(expectedJSON) {
+				return fmt.Errorf("dynamic flow runtime readiness %s plan changed before topology completion", normalized.Identity.InstancePath)
+			}
+			query := `
 			UPDATE flow_instance_runtime_readiness AS readiness
 			SET topology_ready_at = COALESCE(readiness.topology_ready_at, $1), updated_at = $1
 			WHERE readiness.run_id = $2::uuid AND readiness.instance_path = $3 AND readiness.plan = $4::jsonb
@@ -549,9 +587,9 @@ func markDynamicFlowRuntimeTopologyReady(
 				WHERE instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 				  AND LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 				  AND LOWER(BTRIM(run.status)) IN ('running', 'paused'))`
-		args := []any{readyAt, normalized.RunID, normalized.Identity.InstancePath, expectedJSON}
-		if !postgres {
-			query = `
+			args := []any{readyAt, normalized.RunID, normalized.Identity.InstancePath, expectedJSON}
+			if !postgres {
+				query = `
 				UPDATE flow_instance_runtime_readiness
 				SET topology_ready_at = COALESCE(topology_ready_at, ?), updated_at = ?
 				WHERE run_id = ? AND instance_path = ? AND plan = ?
@@ -560,21 +598,24 @@ func markDynamicFlowRuntimeTopologyReady(
 					WHERE instance.run_id = flow_instance_runtime_readiness.run_id AND instance.instance_path = flow_instance_runtime_readiness.instance_path
 					  AND LOWER(TRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
 					  AND LOWER(TRIM(run.status)) IN ('running', 'paused'))`
-			args = []any{readyAt, readyAt, normalized.RunID, normalized.Identity.InstancePath, expectedJSON}
-		}
-		result, err := tx.ExecContext(txctx, query, args...)
-		if err != nil {
-			return err
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if rows != 1 {
-			return fmt.Errorf("dynamic flow runtime readiness %s transition topology_ready_at requires one active record", normalized.Identity.InstancePath)
-		}
-		return nil
+				args = []any{readyAt, readyAt, normalized.RunID, normalized.Identity.InstancePath, expectedJSON}
+			}
+			result, err := tx.ExecContext(txctx, query, args...)
+			if err != nil {
+				return err
+			}
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if rows != 1 {
+				return fmt.Errorf("dynamic flow runtime readiness %s transition topology_ready_at requires one active record", normalized.Identity.InstancePath)
+			}
+			return nil
+		})
 	})
+	_, acknowledged := outcome.Value()
+	return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{Acknowledged: acknowledged}, standalonePipelineMutationError(outcome)
 }
 
 var _ runtimepipeline.DynamicFlowRuntimeReadinessPersistence = (*PipelinePostgresOwner)(nil)

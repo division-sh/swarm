@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +32,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
@@ -845,16 +845,16 @@ func (s *shortLeaseManagerDeliveryStore) ClaimDelivery(
 	if err := s.ensureDelivery(evt, route, authority); err != nil {
 		return runtimedelivery.ClaimResult{}, err
 	}
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		result, err = s.adapter.ClaimExactResult(story, tx, authority, evt, route, s.leaseTTL)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		result, err = s.adapter.ClaimExactResult(ctx, attempt, authority, evt, route, s.leaseTTL)
 		return err
 	})
 	return result, err
 }
 
 func (s *shortLeaseManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.RenewClaim(story, tx, claim, s.leaseTTL)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.RenewClaim(ctx, attempt, claim, s.leaseTTL)
 		return err
 	})
 	return snapshot, err

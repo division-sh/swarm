@@ -24,7 +24,7 @@ type exactDeadLetterStore interface {
 
 type deadLetterRecorderFixtureStore interface {
 	semanticEventFixtureStore
-	runtimedeadletters.Recorder
+	runtimedeadletters.AcknowledgedRecorder
 }
 
 func TestRecordDeadLetterExactOnceParity(t *testing.T) {
@@ -52,8 +52,9 @@ func TestRecordDeadLetterExactOnceParity(t *testing.T) {
 				}),
 			}
 			for attempt := 1; attempt <= 2; attempt++ {
-				if err := selected.RecordDeadLetter(ctx, record); err != nil {
-					t.Fatalf("RecordDeadLetter attempt %d: %v", attempt, err)
+				outcome, err := selected.RecordDeadLetterOutcome(ctx, record)
+				if err != nil || !outcome.Acknowledged {
+					t.Fatalf("RecordDeadLetterOutcome attempt %d: %+v, %v", attempt, outcome, err)
 				}
 			}
 			assertExactOnceDeadLetterRecord(t, ctx, fixture, event.ID())

@@ -9,12 +9,27 @@ import (
 	"time"
 
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
-func CancelRunsTx(ctx context.Context, tx *sql.Tx, postgres bool, effects *privaterunforkrevision.Effects, runIDs []string) ([]runtimetimercancellation.Ref, error) {
-	if tx == nil || effects == nil {
-		return nil, errors.New("workflow timer run cancellation requires transaction and revision effects")
+func CancelRunsTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, runIDs []string) ([]runtimetimercancellation.Ref, error) {
+	var refs []runtimetimercancellation.Ref
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		refs, err = cancelRunsSQL(ctx, tx, postgres, attempt, runIDs)
+		return err
+	})
+	return refs, err
+}
+
+type timerFactSink interface {
+	AddFact(string, privaterunforkrevision.Family, string) error
+}
+
+func cancelRunsSQL(ctx context.Context, tx *sql.Tx, postgres bool, facts timerFactSink, runIDs []string) ([]runtimetimercancellation.Ref, error) {
+	if tx == nil || facts == nil {
+		return nil, errors.New("workflow timer run cancellation requires transaction and revision fact owner")
 	}
 	ids := normalizedIDs(runIDs)
 	if len(ids) == 0 {
@@ -65,7 +80,7 @@ func CancelRunsTx(ctx context.Context, tx *sql.Tx, postgres bool, effects *priva
 		if err != nil || changed != 1 {
 			return nil, fmt.Errorf("workflow timer %s cancellation changed %d rows: %w", ref.ActivationID, changed, err)
 		}
-		if err := effects.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID); err != nil {
+		if err := facts.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID); err != nil {
 			return nil, err
 		}
 	}

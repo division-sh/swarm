@@ -564,10 +564,27 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 		Event: admittedDirective,
 		Now:   now,
 	})
-	if err != nil {
+	if !reservation.Acknowledged {
+		if err == nil {
+			err = errors.New("directive reservation was not acknowledged")
+		}
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
+	if err != nil {
+		am.logDirectivePostcommitError(ctx, "directive_reservation_post_commit_failure", reservation.Operation.OperationID, err)
+	}
 	return am.continueDirectiveOperation(ctx, operationStore, reservation.Operation)
+}
+
+func (am *AgentManager) logDirectivePostcommitError(ctx context.Context, action, operationID string, err error) {
+	if am.bus == nil {
+		return
+	}
+	_ = am.bus.LogRuntime(context.WithoutCancel(ctx), runtimepipeline.RuntimeLogEntry{
+		Level: "warn", Component: "agent-manager", Action: action,
+		Failure: failureEnvelope(err, "agent-manager", action),
+		Detail:  map[string]any{"operation_id": operationID},
+	})
 }
 
 func (am *AgentManager) directiveOperationStore() (runtimeagentcontrol.DirectiveOperationStore, error) {
@@ -596,8 +613,11 @@ func (am *AgentManager) continueDirectiveOperation(ctx context.Context, store ru
 		return directiveResultFromOperation(op)
 	case runtimeagentcontrol.DirectiveOperationExecuted:
 		finalized, err := store.FinalizeDirectiveSuccess(ctx, op.OperationID, time.Now().UTC(), directiveOperationTTL)
-		if err != nil {
+		if !finalized.Acknowledged {
 			return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveCompletionPending, Operation: op}
+		}
+		if err != nil {
+			am.logDirectivePostcommitError(ctx, "directive_success_finalization_post_commit_failure", finalized.OperationID, err)
 		}
 		return directiveResultFromOperation(finalized)
 	case runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
@@ -624,8 +644,14 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		OperationID: op.OperationID, OwnerID: ownerID, Now: time.Now().UTC(), Lease: directiveExecutionLease,
 		ExecutionPosture: am.executionPosture,
 	})
-	if err != nil {
+	if !admission.Acknowledged {
+		if err == nil {
+			err = errors.New("directive execution admission was not acknowledged")
+		}
 		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	if err != nil {
+		am.logDirectivePostcommitError(ctx, "directive_admission_post_commit_failure", admission.Operation.OperationID, err)
 	}
 	admitted := admission.Operation
 	directiveOrigin, err := runtimeagentcontrol.NewDirectiveExecutionOrigin(admitted)
@@ -681,11 +707,14 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		}
 		executionFailure := runtimeagentcontrol.DirectiveBoardStepFailure(executionErr)
 		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, executionFailure, time.Now().UTC(), directiveOperationTTL)
-		if persistErr != nil {
+		if !failed.Acknowledged {
 			admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
 			failure := runtimeagentcontrol.DirectiveFailurePersistenceUnconfirmedFailure()
 			admitted.Failure = &failure
 			return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, Operation: admitted}
+		}
+		if persistErr != nil {
+			am.logDirectivePostcommitError(ctx, "directive_failure_finalization_post_commit_failure", failed.OperationID, persistErr)
 		}
 		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(failed)
 	}
@@ -705,15 +734,21 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
 	executed, err := store.RecordDirectiveExecuted(ctx, admitted.OperationID, ownerID, encoded, time.Now().UTC())
-	if err != nil {
+	if !executed.Acknowledged {
 		admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
 		failure := runtimeagentcontrol.DirectiveResultPersistenceUnconfirmedFailure()
 		admitted.Failure = &failure
 		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, Operation: admitted}
 	}
-	finalized, err := store.FinalizeDirectiveSuccess(ctx, admitted.OperationID, time.Now().UTC(), directiveOperationTTL)
 	if err != nil {
+		am.logDirectivePostcommitError(ctx, "directive_result_recording_post_commit_failure", executed.OperationID, err)
+	}
+	finalized, err := store.FinalizeDirectiveSuccess(ctx, admitted.OperationID, time.Now().UTC(), directiveOperationTTL)
+	if !finalized.Acknowledged {
 		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveCompletionPending, Operation: executed}
+	}
+	if err != nil {
+		am.logDirectivePostcommitError(ctx, "directive_success_finalization_post_commit_failure", finalized.OperationID, err)
 	}
 	return directiveResultFromOperation(finalized)
 }
@@ -1829,7 +1864,9 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 										Failure: failureEnvelope(claimErr, "agent-manager", "claim_delivery"),
 									})
 								}
-								return false
+								if !claimResult.Acknowledged {
+									return false
+								}
 							}
 							switch claimResult.Disposition {
 							case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:

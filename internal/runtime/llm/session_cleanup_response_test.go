@@ -75,8 +75,8 @@ func TestSessionCleanupErrorRetainsResponseAndDoesNotReplayProvider(t *testing.T
 			}
 			draft := agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("agent-1")}
 			response, err := conversation.RunManaged(ctx, draft)
-			if !errors.Is(err, cleanup) || response == nil || response.Message.Content != "done" || response.completionHandle == nil {
-				t.Fatalf("lost settled response or cleanup error: response=%+v err=%v", response, err)
+			if err != nil || response == nil || response.Message.Content != "done" || response.completionHandle == nil {
+				t.Fatalf("acknowledged release cleanup displaced settled response: response=%+v err=%v", response, err)
 			}
 			if requests.Load() != 1 || registry.acquires != acquires+1 || registry.releases != releases+1 {
 				t.Fatalf("replayed provider/lease operation: requests=%d acquire=%d release=%d", requests.Load(), registry.acquires-acquires, registry.releases-releases)
@@ -99,7 +99,7 @@ func TestSessionCleanupErrorRetainsResponseAndDoesNotReplayProvider(t *testing.T
 			if current.SessionID != conversation.Session.ID {
 				t.Fatalf("wrong lease released: %+v", current)
 			}
-			if err := registry.Registry.Release(base, current); err != nil {
+			if _, err := registry.Registry.ReleaseOutcome(base, current); err != nil {
 				t.Fatal(err)
 			}
 			recovered, err := conversation.RunManaged(base, draft)

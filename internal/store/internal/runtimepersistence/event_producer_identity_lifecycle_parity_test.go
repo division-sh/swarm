@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,9 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
@@ -335,58 +335,49 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("persist fork run owner: %v", err)
 	}
 
-	tx, err := fixture.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin historical replay transaction: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin author activity transaction: %v", err)
-	}
-	txctx := ctx
-	loaded, err := loadRunForkReplaySourceEvent(txctx, tx, sourceRunID, sourceEventID)
-	if err != nil {
-		t.Fatalf("loadRunForkReplaySourceEvent: %v", err)
-	}
-	if !loaded.Producer().Equal(producer) {
-		t.Fatalf("historical replay source producer = %q/%q, want %q/%q", loaded.ProducerType(), loaded.SourceAgent(), producer.Type(), producer.ID())
-	}
 	replayedEventID := uuid.NewString()
-	replayedProjection, err := admitDeliveryReplayFixture(loaded, runForkActivationLineage{SourceRunID: sourceRunID, ForkRunID: forkRunID}, replayedEventID, createdAt.Add(2*time.Minute))
-	if err != nil {
-		t.Fatalf("admitDeliveryReplayFixture: %v", err)
-	}
 	sourceRoute := testAgentDeliveryRoute(t, sourceRunID, "replay-agent", "fixture/replay-agent")
 	forkRoute := testAgentDeliveryRoute(t, forkRunID, "replay-agent", "fixture/replay-agent")
 	pg := fixture.store.(*PostgresStore)
-	outcome, err := pg.AppendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), replayedProjection, testHistoricalReplaySettlement([]events.DeliveryRoute{forkRoute}))
-	if err != nil {
-		t.Fatalf("append replay event: %v", err)
-	}
-	if outcome != runtimebus.EventAppendInserted {
-		t.Fatalf("append replay event outcome = %d, want inserted", outcome)
-	}
-	sourceAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, sourceRunID)
-	if err != nil {
-		t.Fatalf("construct source replay delivery authority: %v", err)
-	}
-	effects := runforkrevision.NewEffects()
-	sourceProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, effects, sourceEventID, sourceRunID, []events.DeliveryRoute{sourceRoute}, sourceAuthority)
-	if err != nil || len(sourceProofs) != 1 {
-		t.Fatalf("commit source replay delivery fixture: proofs=%d err=%v", len(sourceProofs), err)
-	}
-	forkAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, forkRunID)
-	if err != nil {
-		t.Fatalf("construct fork replay delivery authority: %v", err)
-	}
-	forkProofs, err := postgresDeliveryAdapter.CommitInitial(txctx, tx, effects, replayedEventID, forkRunID, []events.DeliveryRoute{forkRoute}, forkAuthority)
-	if err != nil || len(forkProofs) != 1 {
-		t.Fatalf("commit fork replay delivery fixture: proofs=%d err=%v", len(forkProofs), err)
-	}
-	sourceDeliveryID := sourceProofs[0].DeliveryID()
-	forkDeliveryID := forkProofs[0].DeliveryID()
-	if _, err := tx.ExecContext(txctx, `
+	err := runSelectedFixtureMutation(ctx, pg, "historical replay", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			loaded, err := loadRunForkReplaySourceEvent(txctx, tx, sourceRunID, sourceEventID)
+			if err != nil {
+				return fmt.Errorf("loadRunForkReplaySourceEvent: %w", err)
+			}
+			if !loaded.Producer().Equal(producer) {
+				return fmt.Errorf("historical replay source producer = %q/%q, want %q/%q", loaded.ProducerType(), loaded.SourceAgent(), producer.Type(), producer.ID())
+			}
+			replayedProjection, err := admitDeliveryReplayFixture(loaded, runForkActivationLineage{SourceRunID: sourceRunID, ForkRunID: forkRunID}, replayedEventID, createdAt.Add(2*time.Minute))
+			if err != nil {
+				return fmt.Errorf("admitDeliveryReplayFixture: %w", err)
+			}
+			outcome, err := pg.AppendAdmittedEventTxOutcome(txctx, attempt, replayedProjection, testHistoricalReplaySettlement([]events.DeliveryRoute{forkRoute}))
+			if err != nil {
+				return fmt.Errorf("append replay event: %w", err)
+			}
+			if outcome != runtimebus.EventAppendInserted {
+				return fmt.Errorf("append replay event outcome = %d, want inserted", outcome)
+			}
+			sourceAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, sourceRunID)
+			if err != nil {
+				return fmt.Errorf("construct source replay delivery authority: %w", err)
+			}
+			sourceProofs, err := pg.CommitInitialDeliveryObligationsTx(txctx, attempt, sourceEventID, sourceRunID, []events.DeliveryRoute{sourceRoute}, sourceAuthority)
+			if err != nil || len(sourceProofs) != 1 {
+				return fmt.Errorf("commit source replay delivery fixture: proofs=%d err=%v", len(sourceProofs), err)
+			}
+			forkAuthority, err := deliveryFixtureAuthorityForRun(txctx, tx, deliveryadapter.DialectPostgres, forkRunID)
+			if err != nil {
+				return fmt.Errorf("construct fork replay delivery authority: %w", err)
+			}
+			forkProofs, err := pg.CommitInitialDeliveryObligationsTx(txctx, attempt, replayedEventID, forkRunID, []events.DeliveryRoute{forkRoute}, forkAuthority)
+			if err != nil || len(forkProofs) != 1 {
+				return fmt.Errorf("commit fork replay delivery fixture: proofs=%d err=%v", len(forkProofs), err)
+			}
+			sourceDeliveryID := sourceProofs[0].DeliveryID()
+			forkDeliveryID := forkProofs[0].DeliveryID()
+			if _, err := tx.ExecContext(txctx, `
 		INSERT INTO run_fork_delivery_event_replays (
 			replay_id, fork_run_id, source_run_id, source_event_id, source_delivery_id,
 			fork_event_id, fork_delivery_id, subscriber_type, subscriber_id, selection_authority, created_at
@@ -395,12 +386,12 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 			$6::uuid, $7::uuid, 'agent', 'replay-agent', $8, $9
 		)
 	`, uuid.NewString(), forkRunID, sourceRunID, sourceEventID, sourceDeliveryID, replayedEventID, forkDeliveryID, runfork.RunForkDeliveryEventReplayOwner, createdAt.Add(2*time.Minute)); err != nil {
-		t.Fatalf("insert replay lineage fixture: %v", err)
-	}
-	if err := story.Finalize(txctx); err != nil {
-		t.Fatalf("finalize historical replay story: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
+				return fmt.Errorf("insert replay lineage fixture: %w", err)
+			}
+			return nil
+		})
+	})
+	if err != nil {
 		t.Fatalf("commit historical replay transaction: %v", err)
 	}
 

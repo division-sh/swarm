@@ -320,7 +320,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatalf("claim child intent: found=%v %v", found, err)
 					}
 					defer func() {
-						if err := grantedOwner.ReleaseFanOutClaim(ctx, claim); err != nil {
+						if _, err := grantedOwner.ReleaseFanOutClaim(ctx, claim); err != nil {
 							if errors.Is(err, fanoutobligation.ErrStaleClaim) {
 								var status string
 								var cursor, cardinality int

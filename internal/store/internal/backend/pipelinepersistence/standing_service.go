@@ -18,12 +18,11 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
 
@@ -33,9 +32,7 @@ type standingServiceAdapter struct {
 	run                          func(context.Context, func(context.Context, *sql.Tx) error) error
 	postgresStore                *PipelinePostgresOwner
 	sqliteStore                  *PipelineSQLiteOwner
-	story                        runtimeauthoractivity.Mutation
-	handoff                      *runLifecycleCandidateHandoffReservation
-	revisionEffects              *revisionEffects
+	attempt                      *mutationprotocol.Attempt
 	deliveryContinuationRequired bool
 	committed                    bool
 }
@@ -50,22 +47,19 @@ func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingSe
 		postgresStore: store,
 	}
 	adapter.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-		committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
-			effects := newRevisionEffects()
-			return store.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-				adapter.story = story
-				adapter.handoff = handoff
-				adapter.revisionEffects = effects
-				defer func() {
-					adapter.story = nil
-					adapter.handoff = nil
-					adapter.revisionEffects = nil
-				}()
+		if err := store.requireCurrentSchema(); err != nil {
+			return err
+		}
+		result := mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			adapter.deliveryContinuationRequired = false
+			adapter.attempt = attempt
+			defer func() { adapter.attempt = nil }()
+			return struct{}{}, attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
 				return fn(txctx, tx)
 			})
 		})
-		adapter.committed = committed
-		return err
+		adapter.committed = result.Acknowledged()
+		return standalonePipelineMutationError(result)
 	}
 	return adapter
 }
@@ -79,25 +73,19 @@ func newSQLiteStandingServiceAdapter(store *PipelineSQLiteOwner) *standingServic
 		sqliteStore: store,
 	}
 	adapter.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-		committed, err := runhandoff.WithCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
-			effects := newRevisionEffects()
-			return store.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite standing service mutation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-				if err := handoff.ResetAttempt(); err != nil {
-					return err
-				}
-				adapter.story = story
-				adapter.handoff = handoff
-				adapter.revisionEffects = effects
-				defer func() {
-					adapter.story = nil
-					adapter.handoff = nil
-					adapter.revisionEffects = nil
-				}()
+		if err := store.requireCurrentSchema(); err != nil {
+			return err
+		}
+		result := mutationprotocol.RunSQLite(ctx, store.backend, "sqlite standing service mutation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			adapter.deliveryContinuationRequired = false
+			adapter.attempt = attempt
+			defer func() { adapter.attempt = nil }()
+			return struct{}{}, attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
 				return fn(txctx, tx)
 			})
 		})
-		adapter.committed = committed
-		return err
+		adapter.committed = result.Acknowledged()
+		return standalonePipelineMutationError(result)
 	}
 	return adapter
 }
@@ -120,7 +108,7 @@ func (s *standingServiceAdapter) queueDeliveryContinuationSignal(context.Context
 }
 
 func (s *standingServiceAdapter) validRunLifecycleMutation(tx *sql.Tx) bool {
-	return s != nil && tx != nil && s.story != nil && (s.postgresStore != nil || s.sqliteStore != nil)
+	return s != nil && tx != nil && s.attempt != nil && (s.postgresStore != nil || s.sqliteStore != nil)
 }
 
 func (s *standingServiceAdapter) requireActiveRunSource(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
@@ -148,9 +136,9 @@ func (s *standingServiceAdapter) createRun(ctx context.Context, tx *sql.Tx, requ
 		return "", errors.New("standing run lifecycle mutation owner is required")
 	}
 	if s.postgresStore != nil {
-		return s.postgresStore.RunLifecyclePostgresOwner.CreateRunTx(ctx, tx, s.story, request)
+		return s.postgresStore.RunLifecyclePostgresOwner.CreateRunTx(ctx, s.attempt, request)
 	}
-	return s.sqliteStore.RunLifecycleSQLiteOwner.CreateRunTx(ctx, tx, s.story, request)
+	return s.sqliteStore.RunLifecycleSQLiteOwner.CreateRunTx(ctx, s.attempt, request)
 }
 
 func (s *standingServiceAdapter) reviseRunSource(ctx context.Context, tx *sql.Tx, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
@@ -158,9 +146,9 @@ func (s *standingServiceAdapter) reviseRunSource(ctx context.Context, tx *sql.Tx
 		return "", errors.New("standing run lifecycle mutation owner is required")
 	}
 	if s.postgresStore != nil {
-		return s.postgresStore.RunLifecyclePostgresOwner.ReviseSourceTx(ctx, tx, s.story, s.handoff, request)
+		return s.postgresStore.RunLifecyclePostgresOwner.ReviseSourceTx(ctx, s.attempt, request)
 	}
-	return s.sqliteStore.RunLifecycleSQLiteOwner.ReviseSourceTx(ctx, tx, s.story, s.handoff, request)
+	return s.sqliteStore.RunLifecycleSQLiteOwner.ReviseSourceTx(ctx, s.attempt, request)
 }
 
 func (s *standingServiceAdapter) transitionActiveRun(ctx context.Context, tx *sql.Tx, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
@@ -168,9 +156,9 @@ func (s *standingServiceAdapter) transitionActiveRun(ctx context.Context, tx *sq
 		return "", errors.New("standing run lifecycle mutation owner is required")
 	}
 	if s.postgresStore != nil {
-		return s.postgresStore.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, tx, s.story, s.handoff, request)
+		return s.postgresStore.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, s.attempt, request)
 	}
-	return s.sqliteStore.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, tx, s.story, s.handoff, request)
+	return s.sqliteStore.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, s.attempt, request)
 }
 
 func (s *standingServiceAdapter) markTerminalRun(ctx context.Context, tx *sql.Tx, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
@@ -178,9 +166,9 @@ func (s *standingServiceAdapter) markTerminalRun(ctx context.Context, tx *sql.Tx
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("standing run lifecycle mutation owner is required")
 	}
 	if s.postgresStore != nil {
-		return s.postgresStore.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, tx, s.story, s.revisionEffects, request)
+		return s.postgresStore.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, s.attempt, request)
 	}
-	return s.sqliteStore.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, tx, s.story, s.revisionEffects, request)
+	return s.sqliteStore.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, s.attempt, request)
 }
 
 func standingServiceResultEvidence(result runtimepipeline.StandingServiceReconciliation, adapter *standingServiceAdapter, err error) (runtimepipeline.StandingServiceReconciliation, error) {
@@ -1348,9 +1336,9 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	var deliveryErr error
 	if s.isSQLite() {
-		_, deliveryErr = s.sqliteStore.TerminalizeRunDeliveriesTx(ctx, tx, s.story, s.revisionEffects, runID, reason)
+		_, deliveryErr = s.sqliteStore.TerminalizeRunDeliveriesTx(ctx, s.attempt, runID, reason)
 	} else {
-		_, deliveryErr = s.postgresStore.TerminalizeRunDeliveriesTx(ctx, tx, s.story, s.revisionEffects, runID, reason)
+		_, deliveryErr = s.postgresStore.TerminalizeRunDeliveriesTx(ctx, s.attempt, runID, reason)
 	}
 	if deliveryErr != nil {
 		return nil, fmt.Errorf("terminalize standing deliveries: %w", deliveryErr)
@@ -1358,9 +1346,9 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	disposition := runtimepipelineobligation.DeadLetter(reason, nil)
 	var pipelineErr error
 	if s.isSQLite() {
-		_, pipelineErr = s.sqliteStore.TerminalizeRunTx(ctx, tx, s.revisionEffects, runID, disposition, now)
+		_, pipelineErr = s.sqliteStore.TerminalizeRunTx(ctx, s.attempt, runID, disposition, now)
 	} else {
-		_, pipelineErr = s.postgresStore.TerminalizeRunTx(ctx, tx, s.revisionEffects, runID, disposition, now)
+		_, pipelineErr = s.postgresStore.TerminalizeRunTx(ctx, s.attempt, runID, disposition, now)
 	}
 	if pipelineErr != nil {
 		return nil, fmt.Errorf("terminalize standing pipeline obligations: %w", pipelineErr)
@@ -1373,15 +1361,15 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 		if changed, err := result.RowsAffected(); err != nil {
 			return nil, err
 		} else if changed > 0 {
-			if err := s.revisionEffects.Add(runID, privaterunforkrevision.FamilyAgentSessions); err != nil {
+			if err := s.attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyAgentSessions); err != nil {
 				return nil, err
 			}
 		}
-		generic, err := storegenericschedule.CancelRunsTx(ctx, tx, false, s.revisionEffects, []string{runID}, reason, now)
+		generic, err := storegenericschedule.CancelRunsTx(ctx, s.attempt, false, []string{runID}, reason, now)
 		if err != nil {
 			return nil, fmt.Errorf("cancel sqlite standing generic schedules: %w", err)
 		}
-		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, false, s.revisionEffects, []string{runID})
+		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, s.attempt, false, []string{runID})
 		if err != nil {
 			return nil, fmt.Errorf("cancel sqlite standing workflow timers: %w", err)
 		}
@@ -1394,15 +1382,15 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	if changed, err := result.RowsAffected(); err != nil {
 		return nil, err
 	} else if changed > 0 {
-		if err := s.revisionEffects.Add(runID, privaterunforkrevision.FamilyAgentSessions); err != nil {
+		if err := s.attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyAgentSessions); err != nil {
 			return nil, err
 		}
 	}
-	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, true, s.revisionEffects, []string{runID}, reason, now)
+	generic, err := storegenericschedule.CancelRunsTx(ctx, s.attempt, true, []string{runID}, reason, now)
 	if err != nil {
 		return nil, fmt.Errorf("cancel standing generic schedules: %w", err)
 	}
-	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, true, s.revisionEffects, []string{runID})
+	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, s.attempt, true, []string{runID})
 	if err != nil {
 		return nil, fmt.Errorf("cancel standing workflow timers: %w", err)
 	}

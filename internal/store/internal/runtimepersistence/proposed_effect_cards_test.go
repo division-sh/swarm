@@ -353,7 +353,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 						terminal.Failure = &failure
 						terminal.ResultEventType = continuation.FailureEvent
 					}
-					if _, err := journal.CompleteActivityAttempt(ctx, terminal); err != nil {
+					if _, _, err := journal.CompleteActivityAttempt(ctx, terminal); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -394,13 +394,13 @@ func TestPipelineGracefulWriteOutcome(t *testing.T) {
 					if method == "settle" {
 						outcome, err = owner.Settle(ctx, work.Claim, obligation.Acknowledged("processed"))
 					} else {
-						err = owner.MarkDecisionProcessed(ctx, work.Claim)
+						outcome, err = owner.MarkDecisionProcessed(ctx, work.Claim)
 					}
 				}()
 				probe.set(nil)
 				session.SetEndTxErrorForTest(nil)
 				committed := phase == "success" || phase == "cancel_commit_admitted" || phase == "endtx" || phase == "release" || phase == "handoff" || phase == "combined" || phase == "release_handoff"
-				if method == "settle" && (outcome.Committed() != committed || outcome.DeliveryHandoffCommitted() != committed) {
+				if outcome.Committed() != committed || outcome.DeliveryHandoffCommitted() != committed {
 					t.Fatalf("commit evidence=%#v, want committed=%v, err=%v", outcome, committed, err)
 				}
 				if phase == "panic" && recovered != primary {
@@ -447,7 +447,7 @@ func TestPipelineGracefulWriteOutcome(t *testing.T) {
 					if method == "settle" {
 						_, err = owner.Settle(base, work.Claim, obligation.Acknowledged("processed"))
 					} else {
-						err = owner.MarkDecisionProcessed(base, work.Claim)
+						_, err = owner.MarkDecisionProcessed(base, work.Claim)
 					}
 					if err != nil {
 						t.Fatalf("healthy successor operation: %v", err)

@@ -54,6 +54,7 @@ import (
 	timerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	tools "github.com/division-sh/swarm/internal/runtime/tools"
 	workflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
+	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	time "time"
 )
 
@@ -237,7 +238,7 @@ func (s *PostgresStore) CommitWorkflowTimerReconciliation(ctx context.Context, c
 	return s.pipelinePostgresOwner.CommitWorkflowTimerReconciliation(ctx, command)
 }
 
-func (s *PostgresStore) CompleteActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {
+func (s *PostgresStore) CompleteActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activityPostgresOwner.CompleteActivityAttempt(ctx, record)
 }
 
@@ -257,16 +258,16 @@ func (s *PostgresStore) CompleteProposedEffectRoute(ctx context.Context, cardID 
 	return s.decisionPostgresOwner.CompleteProposedEffectRoute(ctx, cardID, routeEventID, at)
 }
 
+func (s *PostgresStore) CompletionCandidateCoordinator() *runhandoff.CandidateCoordinator {
+	return s.runLifecyclePostgresOwner.CompletionCandidateCoordinator()
+}
+
 func (s *PostgresStore) ConfirmChannelBinding(ctx context.Context, req operatorchannel.ConfirmRequest) (operatorchannel.Operation, operatorchannel.Binding, error) {
 	return s.operatorChannelPostgresOwner.ConfirmChannelBinding(ctx, req)
 }
 
 func (s *PostgresStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation) error {
 	return s.effectPostgresOwner.ConsumeCompletionResponse(ctx, attempt, successor)
-}
-
-func (s *PostgresStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
-	return s.runLifecyclePostgresOwner.ContinueRunControl(ctx, req)
 }
 
 func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (int, error) {
@@ -289,12 +290,16 @@ func (s *PostgresStore) CreateDecisionCard(ctx context.Context, card decisioncar
 	return s.decisionPostgresOwner.CreateDecisionCard(ctx, card)
 }
 
-func (s *PostgresStore) CreateEntity(ctx context.Context, rec tools.EntityCreateRecord) error {
+func (s *PostgresStore) CreateEntity(ctx context.Context, rec tools.EntityCreateRecord) (tools.EntityCreateResult, error) {
 	return s.entityPostgresOwner.CreateEntity(ctx, rec)
 }
 
 func (s *PostgresStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
 	return s.decisionPostgresOwner.CreateHumanTaskCard(ctx, card, continuation)
+}
+
+func (s *PostgresStore) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
+	return s.decisionPostgresOwner.CreateHumanTaskCardOutcome(ctx, card, continuation)
 }
 
 func (s *PostgresStore) CreateOperatorConversationFork(ctx context.Context, req runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error) {
@@ -443,10 +448,6 @@ func (s *PostgresStore) HeartbeatOperatorConversationForkChat(ctx context.Contex
 
 func (s *PostgresStore) HeartbeatRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, lease time.Duration) error {
 	return s.runForkPostgresOwner.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, lease)
-}
-
-func (s *PostgresStore) IncrementTurn(ctx context.Context, identity agentmemory.Identity, sessionID string) error {
-	return s.lLMPostgresOwner.IncrementTurn(ctx, identity, sessionID)
 }
 
 func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item tools.MailboxItem) (string, error) {
@@ -837,11 +838,11 @@ func (s *PostgresStore) LookupAPIEventPublication(ctx context.Context, request a
 	return s.eventPostgresOwner.LookupAPIEventPublication(ctx, request)
 }
 
-func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {
+func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
+func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
 	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 
@@ -871,10 +872,6 @@ func (s *PostgresStore) ObserveDeliveryContinuation(ctx context.Context, authori
 
 func (s *PostgresStore) Outcomes(ctx context.Context, deliveryID string) ([]deliverylifecycle.Outcome, error) {
 	return s.deliveryPostgresOwner.Outcomes(ctx, deliveryID)
-}
-
-func (s *PostgresStore) PauseRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
-	return s.runLifecyclePostgresOwner.PauseRunControl(ctx, req)
 }
 
 func (s *PostgresStore) PersistLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic, record runtime.RuntimeLogPersistenceRecord) (bool, error) {
@@ -977,6 +974,10 @@ func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec deadletters.Re
 	return s.deliveryPostgresOwner.RecordDeadLetter(ctx, rec)
 }
 
+func (s *PostgresStore) RecordDeadLetterOutcome(ctx context.Context, rec deadletters.Record) (deadletters.RecordOutcome, error) {
+	return s.deliveryPostgresOwner.RecordDeadLetterOutcome(ctx, rec)
+}
+
 func (s *PostgresStore) RecordDirectiveExecuted(ctx context.Context, operationID string, ownerID string, response json.RawMessage, now time.Time) (agentcontrol.DirectiveOperation, error) {
 	return s.agentPostgresOwner.RecordDirectiveExecuted(ctx, operationID, ownerID, response, now)
 }
@@ -1009,10 +1010,6 @@ func (s *PostgresStore) RegisterCompletionCandidateSink(ctx context.Context, sco
 	return s.runLifecyclePostgresOwner.RegisterCompletionCandidateSink(ctx, scope, sink)
 }
 
-func (s *PostgresStore) Release(ctx context.Context, lease *sessions.Lease) error {
-	return s.lLMPostgresOwner.Release(ctx, lease)
-}
-
 func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {
 	return s.deliveryPostgresOwner.RenewClaim(ctx, claim)
 }
@@ -1029,7 +1026,7 @@ func (s *PostgresStore) ReplaceFlowInstanceRouteRecords(ctx context.Context, ide
 	return s.pipelinePostgresOwner.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
-func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) error {
+func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
 	return s.pipelinePostgresOwner.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
@@ -1145,7 +1142,7 @@ func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runI
 	return s.eventPostgresOwner.RuntimeLogLineageParentEventID(ctx, runID, explicitParentEventID, subjectEventID)
 }
 
-func (s *PostgresStore) SaveEntityField(ctx context.Context, update tools.EntityFieldUpdate) (int, error) {
+func (s *PostgresStore) SaveEntityField(ctx context.Context, update tools.EntityFieldUpdate) (tools.EntityFieldWriteResult, error) {
 	return s.entityPostgresOwner.SaveEntityField(ctx, update)
 }
 
@@ -1195,10 +1192,6 @@ func (s *PostgresStore) StandingRunRestartDisposition(ctx context.Context, runID
 
 func (s *PostgresStore) StartActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activityPostgresOwner.StartActivityAttempt(ctx, record)
-}
-
-func (s *PostgresStore) StopRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
-	return s.runLifecyclePostgresOwner.StopRunControl(ctx, req)
 }
 
 func (s *PostgresStore) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
@@ -1445,7 +1438,7 @@ func (s *SQLiteRuntimeStore) CommitWorkflowTimerReconciliation(ctx context.Conte
 	return s.pipelineSQLiteOwner.CommitWorkflowTimerReconciliation(ctx, command)
 }
 
-func (s *SQLiteRuntimeStore) CompleteActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {
+func (s *SQLiteRuntimeStore) CompleteActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activitySQLiteOwner.CompleteActivityAttempt(ctx, record)
 }
 
@@ -1465,16 +1458,16 @@ func (s *SQLiteRuntimeStore) CompleteProposedEffectRoute(ctx context.Context, ca
 	return s.decisionSQLiteOwner.CompleteProposedEffectRoute(ctx, cardID, routeEventID, at)
 }
 
+func (s *SQLiteRuntimeStore) CompletionCandidateCoordinator() *runhandoff.CandidateCoordinator {
+	return s.runLifecycleSQLiteOwner.CompletionCandidateCoordinator()
+}
+
 func (s *SQLiteRuntimeStore) ConfirmChannelBinding(ctx context.Context, req operatorchannel.ConfirmRequest) (operatorchannel.Operation, operatorchannel.Binding, error) {
 	return s.operatorChannelSQLiteOwner.ConfirmChannelBinding(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation) error {
 	return s.effectSQLiteOwner.ConsumeCompletionResponse(ctx, attempt, successor)
-}
-
-func (s *SQLiteRuntimeStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
-	return s.runLifecycleSQLiteOwner.ContinueRunControl(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) CountMailboxItems(ctx context.Context, status string) (int, error) {
@@ -1497,12 +1490,16 @@ func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisi
 	return s.decisionSQLiteOwner.CreateDecisionCard(ctx, card)
 }
 
-func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec tools.EntityCreateRecord) error {
+func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec tools.EntityCreateRecord) (tools.EntityCreateResult, error) {
 	return s.entitySQLiteOwner.CreateEntity(ctx, rec)
 }
 
 func (s *SQLiteRuntimeStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
 	return s.decisionSQLiteOwner.CreateHumanTaskCard(ctx, card, continuation)
+}
+
+func (s *SQLiteRuntimeStore) CreateHumanTaskCardOutcome(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) (decisioncard.HumanTaskCreationResult, error) {
+	return s.decisionSQLiteOwner.CreateHumanTaskCardOutcome(ctx, card, continuation)
 }
 
 func (s *SQLiteRuntimeStore) CreateOperatorConversationFork(ctx context.Context, req runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error) {
@@ -1655,10 +1652,6 @@ func (s *SQLiteRuntimeStore) HeartbeatOperatorConversationForkChat(ctx context.C
 
 func (s *SQLiteRuntimeStore) HeartbeatRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, lease time.Duration) error {
 	return s.runForkSQLiteOwner.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, lease)
-}
-
-func (s *SQLiteRuntimeStore) IncrementTurn(ctx context.Context, identity agentmemory.Identity, sessionID string) error {
-	return s.lLMSQLiteOwner.IncrementTurn(ctx, identity, sessionID)
 }
 
 func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item tools.MailboxItem) (string, error) {
@@ -2017,11 +2010,11 @@ func (s *SQLiteRuntimeStore) LookupAPIEventPublication(ctx context.Context, requ
 	return s.eventSQLiteOwner.LookupAPIEventPublication(ctx, request)
 }
 
-func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {
+func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activitySQLiteOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
+func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
 	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 
@@ -2051,10 +2044,6 @@ func (s *SQLiteRuntimeStore) ObserveDeliveryContinuation(ctx context.Context, au
 
 func (s *SQLiteRuntimeStore) Outcomes(ctx context.Context, deliveryID string) ([]deliverylifecycle.Outcome, error) {
 	return s.deliverySQLiteOwner.Outcomes(ctx, deliveryID)
-}
-
-func (s *SQLiteRuntimeStore) PauseRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
-	return s.runLifecycleSQLiteOwner.PauseRunControl(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) PersistLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic, record runtime.RuntimeLogPersistenceRecord) (bool, error) {
@@ -2157,6 +2146,10 @@ func (s *SQLiteRuntimeStore) RecordDeadLetter(ctx context.Context, rec deadlette
 	return s.deliverySQLiteOwner.RecordDeadLetter(ctx, rec)
 }
 
+func (s *SQLiteRuntimeStore) RecordDeadLetterOutcome(ctx context.Context, rec deadletters.Record) (deadletters.RecordOutcome, error) {
+	return s.deliverySQLiteOwner.RecordDeadLetterOutcome(ctx, rec)
+}
+
 func (s *SQLiteRuntimeStore) RecordDirectiveExecuted(ctx context.Context, operationID string, ownerID string, response json.RawMessage, now time.Time) (agentcontrol.DirectiveOperation, error) {
 	return s.agentSQLiteOwner.RecordDirectiveExecuted(ctx, operationID, ownerID, response, now)
 }
@@ -2189,10 +2182,6 @@ func (s *SQLiteRuntimeStore) RegisterCompletionCandidateSink(ctx context.Context
 	return s.runLifecycleSQLiteOwner.RegisterCompletionCandidateSink(ctx, scope, sink)
 }
 
-func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *sessions.Lease) error {
-	return s.lLMSQLiteOwner.Release(ctx, lease)
-}
-
 func (s *SQLiteRuntimeStore) ReleaseConstructionPossession() error {
 	return s.startupSQLiteOwner.ReleaseConstructionPossession()
 }
@@ -2213,7 +2202,7 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(ctx context.Context
 	return s.pipelineSQLiteOwner.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
-func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) error {
+func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []bus.FlowInstanceRouteRecordSet) (bus.FlowInstanceRouteTopologyResult, error) {
 	return s.pipelineSQLiteOwner.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
@@ -2325,7 +2314,7 @@ func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context,
 	return s.eventSQLiteOwner.RuntimeLogLineageParentEventID(ctx, runID, explicitParentEventID, subjectEventID)
 }
 
-func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update tools.EntityFieldUpdate) (int, error) {
+func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update tools.EntityFieldUpdate) (tools.EntityFieldWriteResult, error) {
 	return s.entitySQLiteOwner.SaveEntityField(ctx, update)
 }
 
@@ -2379,10 +2368,6 @@ func (s *SQLiteRuntimeStore) StandingRunRestartDisposition(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) StartActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activitySQLiteOwner.StartActivityAttempt(ctx, record)
-}
-
-func (s *SQLiteRuntimeStore) StopRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
-	return s.runLifecycleSQLiteOwner.StopRunControl(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {

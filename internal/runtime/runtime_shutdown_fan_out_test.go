@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"sync"
 	"testing"
@@ -202,13 +201,13 @@ func TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive(t *testing.T) {
 		"test.in", "tester", "", nil, 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.id),
 		AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission")}
-	if err := eventfixture.Insert(permit.Context(), store.db, authoractivityfixture.DialectSQLite, event); err != nil {
-		t.Fatal(err)
-	}
 	var proofs []deliverylifecycle.DurableHandoffProof
-	if err := store.mutate(permit.Context(), func(ctx context.Context, tx *sql.Tx) error {
+	if err := store.mutate(permit.Context(), func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		if err := eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectSQLite, event); err != nil {
+			return err
+		}
 		var err error
-		proofs, err = store.adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, store.authority)
+		proofs, err = store.adapter.CommitInitial(ctx, attempt, event.ID(), event.RunID(), []events.DeliveryRoute{route}, store.authority)
 		return err
 	}); err != nil {
 		t.Fatal(err)

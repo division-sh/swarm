@@ -269,7 +269,7 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 	type producerStore interface {
 		runtimepipeline.WorkflowEngineMutationOwner
 		SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
-		CreateEntity(context.Context, runtimetools.EntityCreateRecord) error
+		CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -297,7 +297,7 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 							t.Fatalf("setup scenario state-only target: %v", err)
 						}
 					case "entity_tool":
-						if err := store.CreateEntity(ctx, runtimetools.EntityCreateRecord{
+						if _, err := store.CreateEntity(ctx, runtimetools.EntityCreateRecord{
 							RunID: runID, EntityID: entityID, FlowInstance: instancePath,
 							EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`),
 							CreatedAt: createdAt, Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "producer-proof", HandlerStep: "create_entity"},

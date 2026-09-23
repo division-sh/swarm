@@ -21,15 +21,25 @@ const wakeupCallbackTimeout = 10 * time.Second
 const catchupWarningThreshold = 1000
 
 type Store interface {
-	AdmitGenericSchedule(context.Context, AdmissionCommand) (AdmissionResult, error)
+	AdmitGenericScheduleOutcome(context.Context, AdmissionCommand) (AdmissionCommit, error)
 	LoadGenericScheduleActivation(context.Context, string) (Activation, bool, error)
 	ListActiveGenericScheduleActivations(context.Context) ([]Activation, error)
 	PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparedOccurrence, error)
 	CommitGenericScheduleOccurrence(context.Context, CommitCommand) (CommitResult, error)
-	CancelGenericSchedule(context.Context, CancelCommand) (CancelResult, error)
+	CancelGenericScheduleOutcome(context.Context, CancelCommand) (CancelCommit, error)
 	ClaimGenericScheduleWakeup(context.Context, Wakeup) (bool, error)
 	ReleaseGenericScheduleWakeup(context.Context, Wakeup) error
 	ReleaseGenericScheduleClaims(context.Context) error
+}
+
+type AdmissionCommit struct {
+	Result       AdmissionResult
+	Acknowledged bool
+}
+
+type CancelCommit struct {
+	Result       CancelResult
+	Acknowledged bool
 }
 
 type Scheduler interface {
@@ -182,35 +192,43 @@ func (l *Lifecycle) Admit(ctx context.Context, command AdmissionCommand) (Admiss
 	if err := l.posture.Admit(command.ExecutionMode, "generic schedule admission"); err != nil {
 		return AdmissionResult{}, err
 	}
-	result, err := l.store.AdmitGenericSchedule(ctx, command)
-	if err != nil {
-		return AdmissionResult{}, err
+	commit, commitErr := l.store.AdmitGenericScheduleOutcome(ctx, command)
+	if !commit.Acknowledged {
+		if commitErr == nil {
+			commitErr = errors.New("generic schedule admission was not acknowledged")
+		}
+		return AdmissionResult{}, commitErr
 	}
+	result := commit.Result
 	if err := result.Validate(); err != nil {
-		return AdmissionResult{}, err
+		return result, errors.Join(commitErr, err)
 	}
-	if err := l.reconcileImmediately(ctx, result.Activation.ID); err != nil {
+	if err := l.reconcileImmediately(context.WithoutCancel(ctx), result.Activation.ID); err != nil {
 		l.log(ctx, "reconcile_after_admission", result.Activation.ID, err)
 		l.startRecovery(result.Activation.ID)
 	}
-	return result, nil
+	return result, commitErr
 }
 
 func (l *Lifecycle) Cancel(ctx context.Context, command CancelCommand) (CancelResult, error) {
 	if l == nil {
 		return CancelResult{}, errors.New("generic schedule lifecycle is required")
 	}
-	result, err := l.store.CancelGenericSchedule(ctx, command)
-	if err != nil {
+	commit, err := l.store.CancelGenericScheduleOutcome(ctx, command)
+	if !commit.Acknowledged {
+		if err == nil {
+			err = errors.New("generic schedule cancellation was not acknowledged")
+		}
 		return CancelResult{}, err
 	}
+	result := commit.Result
 	if result.Activation.ID != "" {
-		if err := l.ReconcileWakeup(ctx, result.Activation.ID); err != nil {
+		if err := l.ReconcileWakeup(context.WithoutCancel(ctx), result.Activation.ID); err != nil {
 			l.log(ctx, "reconcile_after_cancel", result.Activation.ID, err)
 			l.startRecovery(result.Activation.ID)
 		}
 	}
-	return result, nil
+	return result, err
 }
 
 func (l *Lifecycle) Restore(ctx context.Context) (int, error) {

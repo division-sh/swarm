@@ -722,13 +722,6 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	if db == nil {
 		return nil
 	}
-	execer := interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-		QueryRowContext(context.Context, string, ...any) *sql.Row
-	}(db)
-	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
-		execer = tx
-	}
 	runID := strings.TrimSpace(evt.RunID())
 	if runID == "" {
 		runID = strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
@@ -774,7 +767,15 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	}); err != nil {
 		return err
 	}
-	return eventfixture.Insert(ctx, execer, dialect, evt)
+	if attempt, ok := pipelineTestMutationAttempt(ctx); ok {
+		return eventfixture.Insert(ctx, attempt, dialect, evt)
+	}
+	if _, ok := PipelineSQLTxFromContext(ctx); ok {
+		return fmt.Errorf("activity boring event fixture has a transaction without a mutation attempt")
+	}
+	return eventfixture.RunMutation(ctx, db, dialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return eventfixture.Insert(ctx, attempt, dialect, evt)
+	}).Err()
 }
 
 func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, kind activityBoringStoreKind, evt events.Event) {
