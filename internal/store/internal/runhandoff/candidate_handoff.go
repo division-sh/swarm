@@ -64,7 +64,13 @@ func ReserveCandidateHandoff(ctx context.Context) (*CandidateHandoff, error) {
 	if !ok {
 		return &CandidateHandoff{ctx: detached}, nil
 	}
-	lease, err := owner.Begin(detached)
+	var lease *worklifetime.Lease
+	var err error
+	if runtimeOwner, ok := owner.(*worklifetime.RuntimeOccurrence); ok {
+		lease, err = runtimeOwner.BeginAcceptedDescendant(detached)
+	} else {
+		lease, err = owner.Begin(detached)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reserve completion candidate handoff: %w", err)
 	}

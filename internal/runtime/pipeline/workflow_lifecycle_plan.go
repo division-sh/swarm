@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -700,28 +701,42 @@ func (pc *PipelineCoordinator) finalizeWorkflowLifecycleMutation(ctx context.Con
 	if pc == nil {
 		return fmt.Errorf("committed workflow lifecycle evidence requires the pipeline coordinator")
 	}
-	if len(committed.Wakeups)+len(committed.Cancellations) > 0 && pc.workflowTimers == nil && pc.timerScheduler != nil {
-		return fmt.Errorf("committed workflow timer evidence requires the lifecycle owner")
-	}
+	var result error
 	if len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations) > 0 && pc.genericSchedules == nil {
-		return fmt.Errorf("committed generic schedule evidence requires the lifecycle owner")
-	}
-	for _, activation := range append(append([]runtimegenericschedule.Activation(nil), committed.GenericScheduleCancellations...), committed.GenericScheduleActivations...) {
-		if _, err := pc.genericSchedules.ReconcileWakeupWithRecovery(ctx, activation.ID); err != nil {
-			return err
+		result = errors.Join(result, fmt.Errorf("committed generic schedule evidence requires the lifecycle owner"))
+	} else {
+		for _, activation := range append(append([]runtimegenericschedule.Activation(nil), committed.GenericScheduleCancellations...), committed.GenericScheduleActivations...) {
+			result = errors.Join(result, pc.reconcileCommittedGenericSchedule(ctx, activation.ID))
 		}
 	}
 	if pc.workflowTimers != nil && pc.timerScheduler != nil {
 		for _, ref := range committed.Cancellations {
-			if err := pc.workflowTimers.queueWakeupReconcile(ctx, ref); err != nil {
-				return err
-			}
+			result = errors.Join(result, pc.reconcileCommittedWorkflowTimer(ctx, ref))
 		}
 		for _, ref := range committed.Wakeups {
-			if err := pc.workflowTimers.queueWakeupReconcile(ctx, ref); err != nil {
-				return err
-			}
+			result = errors.Join(result, pc.reconcileCommittedWorkflowTimer(ctx, ref))
 		}
+	} else if len(committed.Wakeups)+len(committed.Cancellations) > 0 && pc.timerScheduler != nil {
+		result = errors.Join(result, fmt.Errorf("committed workflow timer evidence requires the lifecycle owner"))
 	}
-	return nil
+	return result
+}
+
+func (pc *PipelineCoordinator) reconcileCommittedGenericSchedule(ctx context.Context, activationID string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("reconcile committed generic schedule %s panic: %v", activationID, recovered))
+		}
+	}()
+	_, err = pc.genericSchedules.ReconcileWakeupWithRecovery(ctx, activationID)
+	return err
+}
+
+func (pc *PipelineCoordinator) reconcileCommittedWorkflowTimer(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("reconcile committed workflow timer panic: %v", recovered))
+		}
+	}()
+	return pc.workflowTimers.queueWakeupReconcile(ctx, ref)
 }

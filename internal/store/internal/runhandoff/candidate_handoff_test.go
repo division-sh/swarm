@@ -2,14 +2,52 @@ package runhandoff
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 const handoffTestBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func TestCandidateHandoffAfterFenceRequiresAcceptedSameRuntimeWork(t *testing.T) {
+	process := worklifetime.NewProcess()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "candidate-handoff", BundleHash: handoffTestBundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := owner.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Fence(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReserveCandidateHandoff(worklifetime.WithOccurrence(context.Background(), owner)); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("unowned post-fence handoff = %v", err)
+	}
+	owned := worklifetime.WithOccurrence(parent.Context(), owner)
+	handoff, err := ReserveCandidateHandoff(owned)
+	if err != nil {
+		t.Fatalf("accepted post-fence handoff: %v", err)
+	}
+	handoff.Rollback()
+	if err := parent.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReserveCandidateHandoff(owned); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		t.Fatalf("settled parent admitted handoff: %v", err)
+	}
+	if _, err := owner.RetireAndWait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type recordingCandidateSink struct {
 	mu        sync.Mutex

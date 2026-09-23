@@ -256,17 +256,17 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	emissions := &pipelineEmissionPlan{}
 	if deferCommittedDispatch {
 		emissions.appendIntents(result.EmitIntents)
-		immediateActivities := make([]runtimeengine.ActivityIntent, 0, len(result.ActivityIntents))
+		immediateCount := 0
 		for _, intent := range result.ActivityIntents {
 			if intent.Normalized().ApprovalDecision == "" {
-				immediateActivities = append(immediateActivities, intent)
+				immediateCount++
 			}
 		}
-		activityEmissions, activityErr := activityRequestEmitIntents(immediateActivities)
-		if activityErr != nil {
-			err = errors.Join(err, activityErr)
+		if len(result.ActivityRequestIntents) != immediateCount {
+			err = errors.Join(err, fmt.Errorf("committed activity requests = %d, want %d immediate activities", len(result.ActivityRequestIntents), immediateCount))
+		} else {
+			emissions.appendIntents(result.ActivityRequestIntents)
 		}
-		emissions.appendIntents(activityEmissions)
 	}
 	if !preview {
 		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, node.Key(), handlerOutcomeFromExecutionResult(result), emissionPlanWhen(deferCommittedDispatch, emissions))

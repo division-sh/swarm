@@ -502,6 +502,7 @@ type ExecutionResult struct {
 	StateMutation           StateMutation
 	EmitIntents             []EmitIntent
 	ActivityIntents         []ActivityIntent
+	ActivityRequestIntents  []EmitIntent
 	ComputeModuleTraces     []ComputeModuleTrace
 	DeadLetterIntents       []EmitIntent
 	ChainDepth              int

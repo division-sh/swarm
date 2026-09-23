@@ -505,9 +505,7 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 	if validateErr := committed.Validate(); validateErr != nil {
 		return errors.Join(err, validateErr)
 	}
-	if finalizeErr := planner.FinalizeEnginePublications(ctx, committed.Publications); finalizeErr != nil {
-		return errors.Join(err, finalizeErr)
-	}
+	err = errors.Join(err, planner.FinalizeEnginePublications(ctx, committed.Publications))
 	dispatcher := pc.bus.EngineDispatcher()
 	if dispatcher == nil {
 		return errors.Join(err, errors.New("human-task expiry requires post-commit dispatcher"))
@@ -650,6 +648,8 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 }
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (handled bool, resultErr error) {
+	var probeErr error
+	defer func() { resultErr = errors.Join(resultErr, probeErr) }()
 	if pc == nil {
 		return false, nil
 	}
@@ -719,9 +719,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			claim = admission.claim
 		}
 		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
-		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(runtimedelivery.StatusInProgress))
+		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(runtimedelivery.StatusInProgress)))
 		attemptCtx = withPipelineFlowScope(attemptCtx, nodeFlowID)
-		pc.notifyTestLifecycleHandlerStarted(attemptCtx, node.Key(), evt)
+		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleHandlerStarted(attemptCtx, node.Key(), evt))
 		started := time.Now()
 		heartbeat, heartbeatErr := runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
 		if heartbeatErr != nil {
@@ -755,7 +755,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			for _, emitted := range result.Emissions {
 				emissions.appendEvent(emitted)
 			}
-			pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "completed")
+			probeErr = errors.Join(probeErr, pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "completed"))
 			if result.SettledDeliveryClaim != nil {
 				stopErr := heartbeat.Stop()
 				releaser := pc.deliveryRuntime
@@ -765,7 +765,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				if err := errors.Join(stopErr, releaser.ReleaseDeliveryContinuation(claim.DeliveryID())); err != nil {
 					return result.Handled, errors.Join(postCommitErr, fmt.Errorf("finish settled workflow node delivery continuation: %w", err))
 				}
-				pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
+				probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered"))
 				return result.Handled, postCommitErr
 			}
 			sideEffects := []string{"handler_completed"}
@@ -796,10 +796,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
 				return result.Handled, errors.Join(postCommitErr, fmt.Errorf("settle workflow node delivery: %w", err))
 			}
-			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
+			probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered"))
 			return result.Handled, postCommitErr
 		}
-		pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "failed")
+		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "failed"))
 		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
 		disposition := runtimedelivery.FailureRetry
 		reason := "handler_failure"
@@ -842,7 +842,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		if !settled {
 			return false, errors.Join(err, fmt.Errorf("settle failed workflow node delivery: %w", settlementErr))
 		}
-		pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(snapshot.Status))
+		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(snapshot.Status)))
 		if snapshot.Status == runtimedelivery.StatusDeadLetter {
 			pc.recordWorkflowHandlerFailure(attemptCtx, evt, node.Key(), err)
 			if recoveryClaim {

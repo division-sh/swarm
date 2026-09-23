@@ -25,7 +25,7 @@ type eventBoundaryCallsite struct {
 
 var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", scope: "persistLifecycleDiagnosticTx", name: "AdmitForPersistence"}:                        1,
-	{path: "internal/runtime/bus/outbox.go", scope: "engineDispatcher.DispatchPostCommit", name: "RevalidatePersistedEvent"}:                                                      1,
+	{path: "internal/runtime/bus/outbox.go", scope: "engineDispatcher.dispatchOnePostCommit", name: "RevalidatePersistedEvent"}:                                                   1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.admitPublicationEventFacts", name: "AdmitForPersistence"}:                                                 1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                                                    1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                                                1,

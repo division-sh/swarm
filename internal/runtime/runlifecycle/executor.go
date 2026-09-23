@@ -201,7 +201,7 @@ func (e *Executor) ReserveCompletionCandidate(ctx context.Context) (CandidateAdm
 	if e.retiring {
 		return nil, worklifetime.ErrRetired
 	}
-	lease, err := e.occurrence.Begin(context.WithoutCancel(ctx))
+	lease, err := e.occurrence.BeginAcceptedDescendant(context.WithoutCancel(ctx))
 	if err != nil {
 		return nil, err
 	}

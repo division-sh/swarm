@@ -404,18 +404,30 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 	return preparedCtx, prepared, command, err
 }
 
-func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared PreparedPublish, committed CommittedPublication) (PreparedPublish, error) {
-	var err error
+func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared PreparedPublish, committed CommittedPublication) (result PreparedPublish, err error) {
+	claim := prepared.publicationClaim
+	if claim == nil {
+		return PreparedPublish{}, errors.New("committed publication requires its exact claim")
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("committed publication finalization panic: %v", recovered))
+		}
+		if err != nil {
+			err = errors.Join(err, claim.Release(ctx))
+			result = PreparedPublish{}
+		}
+	}()
 	prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
 	if err != nil {
-		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(ctx))
+		return PreparedPublish{}, err
 	}
 	prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
 	if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations); err != nil {
-		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(ctx))
+		return PreparedPublish{}, err
 	}
 	if err := eb.finalizeCommittedAgentReadiness(ctx, prepared.Event, prepared.plan.DeliveryRoutes()); err != nil {
-		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(ctx))
+		return PreparedPublish{}, err
 	}
 	if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
 		eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
@@ -465,10 +477,21 @@ func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
 		return errors.New("committed flow activation finalizer is unavailable")
 	}
 	ctx = withoutEventPublicationAdmission(ctx)
+	var result error
 	for index, activation := range activations {
-		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
-			return fmt.Errorf("finalize committed flow activation %d for %s: %w", index, activation.Plan.Identity.Route().InstancePath, err)
+		result = errors.Join(result, finalizeOneCommittedFlowActivation(ctx, finalizer, activation, index))
+	}
+	return result
+}
+
+func finalizeOneCommittedFlowActivation(ctx context.Context, finalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, activation CommittedFlowInstanceActivation, index int) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("finalize committed flow activation %d panic: %v", index, recovered))
 		}
+	}()
+	if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
+		return fmt.Errorf("finalize committed flow activation %d for %s: %w", index, activation.Plan.Identity.Route().InstancePath, err)
 	}
 	return nil
 }
@@ -1954,7 +1977,9 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return err
 	}
 	evt = admitted.Event()
-	if result, err := (engineDispatcher{bus: eb}).dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{Event: evt, Context: evt.DeliveryContext()}); result.handled {
+	if result, err := (engineDispatcher{bus: eb}).dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{Event: evt, Context: evt.DeliveryContext()}); err != nil {
+		return err
+	} else if result.handled {
 		return err
 	}
 	return eb.Publish(ctx, evt)

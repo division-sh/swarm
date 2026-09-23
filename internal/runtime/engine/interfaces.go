@@ -105,10 +105,11 @@ type CommittedDurablePublication interface {
 }
 
 type CommittedEngineMutation struct {
-	Committed            bool
-	ActivityIntents      []ActivityIntent
-	EmitIntents          []EmitIntent
-	SettledDeliveryClaim *runtimedelivery.Claim
+	Committed              bool
+	ActivityIntents        []ActivityIntent
+	ActivityRequestIntents []EmitIntent
+	EmitIntents            []EmitIntent
+	SettledDeliveryClaim   *runtimedelivery.Claim
 }
 
 type EngineMutationOwner interface {
@@ -133,7 +134,7 @@ type ActivityIntentWriter interface {
 }
 
 type ActivityDispatcher interface {
-	DispatchActivities(ctx context.Context, intents []ActivityIntent) error
+	DispatchActivities(ctx context.Context, intents []ActivityIntent, committedRequests []EmitIntent) error
 }
 
 type GuardRegistry interface {

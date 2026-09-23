@@ -99,9 +99,9 @@ func assertCommittedHandlerCleanupRows(t *testing.T, ctx context.Context, store 
 		t.Fatalf("emitted events=%d error=%v, want one", eventsCount, err)
 	}
 	bus.deliveryContinuations.mu.Lock()
-	retained := bus.deliveryContinuations.held[deliveryID]
+	retained, exists := bus.deliveryContinuations.held[deliveryID]
 	bus.deliveryContinuations.mu.Unlock()
-	if retained || bus.outboxCount() != 1 {
-		t.Fatalf("committed delivery retained continuation=%t outbox=%d", retained, bus.outboxCount())
+	if exists || bus.outboxCount() != 1 {
+		t.Fatalf("committed delivery retained continuation=%t/%t outbox=%d", retained, exists, bus.outboxCount())
 	}
 }

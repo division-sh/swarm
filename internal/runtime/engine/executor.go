@@ -484,10 +484,11 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	req.EntityID = entityID
 
 	var (
-		result          = ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}
-		intents         []EmitIntent
-		activityIntents []ActivityIntent
-		postCommitErr   error
+		result           = ExecutionResult{HandlerRuleSelection: handlerselection.NotReached()}
+		intents          []EmitIntent
+		activityIntents  []ActivityIntent
+		activityRequests []EmitIntent
+		postCommitErr    error
 	)
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
 		loaded, err := e.loadState(lockCtx, req)
@@ -527,11 +528,13 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		if err != nil && !committed.Committed {
 			result.EmitIntents = nil
 			result.ActivityIntents = nil
+			result.ActivityRequestIntents = nil
 			return err
 		}
 		postCommitErr = err
 		intents = append([]EmitIntent(nil), committed.EmitIntents...)
 		activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
+		activityRequests = append([]EmitIntent(nil), committed.ActivityRequestIntents...)
 		if committed.SettledDeliveryClaim != nil {
 			if claimErr := committed.SettledDeliveryClaim.Validate(); claimErr != nil {
 				return fmt.Errorf("committed engine delivery settlement: %w", claimErr)
@@ -556,6 +559,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	postCommitErr = errors.Join(postCommitErr, err)
 	result.EmitIntents = append([]EmitIntent(nil), intents...)
 	result.ActivityIntents = append([]ActivityIntent(nil), activityIntents...)
+	result.ActivityRequestIntents = append([]EmitIntent(nil), activityRequests...)
 	if req.DeferCommittedDispatch {
 		return result, postCommitErr
 	}
@@ -571,7 +575,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
 			return result, errors.Join(postCommitErr, err)
 		}
-		if err := e.deps.ActivityDispatcher.DispatchActivities(ctx, activityIntents); err != nil {
+		if err := e.deps.ActivityDispatcher.DispatchActivities(ctx, activityIntents, activityRequests); err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
 			return result, errors.Join(postCommitErr, err)
 		}

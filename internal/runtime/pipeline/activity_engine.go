@@ -98,7 +98,7 @@ type pipelineActivityDispatcher struct {
 	emissions   *pipelineEmissionPlan
 }
 
-func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, intents []runtimeengine.ActivityIntent) error {
+func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, intents []runtimeengine.ActivityIntent, committedRequests []runtimeengine.EmitIntent) error {
 	if len(intents) == 0 {
 		return nil
 	}
@@ -116,11 +116,16 @@ func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, inte
 			immediate = append(immediate, intent)
 		}
 	}
-	requests, err := activityRequestEmitIntents(immediate)
-	if err != nil {
-		return err
+	if len(committedRequests) != len(immediate) {
+		return fmt.Errorf("committed activity requests = %d, want %d immediate activities", len(committedRequests), len(immediate))
 	}
-	return dispatcher.DispatchPostCommit(ctx, requests)
+	for index, intent := range immediate {
+		request := committedRequests[index].Event
+		if request.ID() != activityRequestEventID(intent) || request.Type() != activityRequestEventType || request.CreatedAt().IsZero() {
+			return fmt.Errorf("immediate activity %s lacks its exact committed request event", intent.ActivityID)
+		}
+	}
+	return dispatcher.DispatchPostCommit(ctx, committedRequests)
 }
 
 func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, intent runtimeengine.ActivityIntent) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {

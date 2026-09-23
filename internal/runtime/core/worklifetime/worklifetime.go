@@ -61,6 +61,8 @@ type Lease struct {
 	settled   bool
 }
 
+type acceptedLeaseContextKey struct{}
+
 func (g *gate) begin(parent context.Context) (*Lease, error) {
 	return g.beginClass(parent, true)
 }
@@ -70,6 +72,26 @@ func (g *gate) beginStanding(parent context.Context) (*Lease, error) {
 }
 
 func (g *gate) beginClass(parent context.Context, transient bool) (*Lease, error) {
+	return g.beginWithParent(parent, transient, nil)
+}
+
+func (g *gate) beginAcceptedDescendant(parent context.Context) (*Lease, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ancestor, _ := parent.Value(acceptedLeaseContextKey{}).(*Lease)
+	if ancestor == nil {
+		return g.begin(parent)
+	}
+	ancestor.mu.Lock()
+	defer ancestor.mu.Unlock()
+	if ancestor.settled || ancestor.gate != g {
+		return g.begin(parent)
+	}
+	return g.beginWithParent(parent, true, ancestor)
+}
+
+func (g *gate) beginWithParent(parent context.Context, transient bool, ancestor *Lease) (*Lease, error) {
 	if g == nil {
 		return nil, errors.New("work occurrence is required")
 	}
@@ -83,8 +105,10 @@ func (g *gate) beginClass(parent context.Context, transient bool) (*Lease, error
 	}
 	switch g.state {
 	case gateFenced:
-		g.mu.Unlock()
-		return nil, ErrAdmissionFenced
+		if ancestor == nil {
+			g.mu.Unlock()
+			return nil, ErrAdmissionFenced
+		}
 	case gateRetired:
 		g.mu.Unlock()
 		return nil, ErrRetired
@@ -103,6 +127,7 @@ func (g *gate) beginClass(parent context.Context, transient bool) (*Lease, error
 
 	ctx, cancel := context.WithCancelCause(parent)
 	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient}
+	lease.ctx = context.WithValue(ctx, acceptedLeaseContextKey{}, lease)
 	lease.stop = context.AfterFunc(g.ctx, func() {
 		cancel(ErrRetired)
 	})
@@ -752,6 +777,15 @@ func (r *RuntimeOccurrence) Begin(ctx context.Context) (*Lease, error) {
 		return nil, errors.New("runtime occurrence is required")
 	}
 	return r.occurrence.begin(WithOccurrence(WithProcess(ctx, r.process), r))
+}
+
+// BeginAcceptedDescendant preserves already-admitted work through a shutdown
+// fence, but only when its context carries a live lease from this occurrence.
+func (r *RuntimeOccurrence) BeginAcceptedDescendant(ctx context.Context) (*Lease, error) {
+	if r == nil {
+		return nil, errors.New("runtime occurrence is required")
+	}
+	return r.occurrence.gate.beginAcceptedDescendant(WithOccurrence(WithProcess(ctx, r.process), r))
 }
 
 func (r *RuntimeOccurrence) BeginStanding(ctx context.Context) (*Lease, error) {

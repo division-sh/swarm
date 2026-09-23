@@ -3306,6 +3306,15 @@ handler_specification:
       positively acknowledged result remains committed despite later cancellation, panic or cleanup failure; those
       diagnostics do not authorize rollback, plan release or handler retry. Provider calls, asynchronous waits,
       descendant execution and postcommit dispatch run under neither the handler SQL transaction nor its entity lock.
+      After acknowledgement, publication and lifecycle finalizers attempt every independent committed consequence;
+      one diagnostic does not abandon sibling handoffs. A publication with failed activation or receiver-readiness
+      prerequisites retains an exact recovery disposition and cannot be dispatched directly. A diagnostic-only
+      notification failure cannot erase or reclassify an already committed publication. The exact delivery
+      continuation is released or retained from its typed outcome even when later notification or cleanup fails.
+      An activity-request event admitted in the selected-store mutation is carried unchanged through immediate or
+      deferred post-commit dispatch. Consumers use the committed publication's exact event, including its timestamp
+      and route projection; they MUST NOT reconstruct a second event with the same ID after COMMIT or retry a failed
+      staged handoff as a fresh publication.
     consequence: Since independent steps (advances_to, sets_gate, data_accumulation) commit together, their relative execution
       order is cosmetic. The database sees one atomic write. An implementer may write data before or after state advance —
       the result is identical.
@@ -36778,6 +36787,10 @@ durable_pipeline_processing_obligation_authority:
         continuation, manager and completion-executor dependencies are dismantled. This registration-local join
         neither waits for another registration's turns nor replaces the later whole-runtime occurrence drain;
         do not join buffered delivery carriers before their required receiver-retirement protocol.
+        A committed follow-up created by already-admitted work may acquire a descendant occurrence lease after the
+        runtime admission fence only while an exact same-occurrence ancestor lease remains live. The fence still
+        rejects new unrelated work, a foreign or settled ancestor, and all work after retirement. Descendant
+        acquisition is counted in the ordinary runtime join; it never reopens admission or transfers generation.
         Runtime shutdown retains its exact generation-grant handle when durable grant retirement fails, reports
         that failure, and retries retirement through the same owner on a later shutdown call. Local component
         teardown is not proof of durable grant retirement; only a successful retirement consumes that handle.
