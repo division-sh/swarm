@@ -259,6 +259,9 @@ func (eb *EventBus) takeFanOutOutboxOperation(committed CommittedEnginePublicati
 		return pendingOutboxOperation{}, false, nil
 	}
 	operation := operations[0]
+	if operation.finalizationErr != nil {
+		return pendingOutboxOperation{}, false, fmt.Errorf("fan-out publication %s has incomplete prerequisites: %w", id, operation.finalizationErr)
+	}
 	actual, actualErr := events.IntegrityProjection(operation.intent.Event)
 	want, wantErr := events.IntegrityProjection(committed.plan.intent.Event)
 	if err := errors.Join(actualErr, wantErr); err != nil {

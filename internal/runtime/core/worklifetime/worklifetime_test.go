@@ -71,6 +71,71 @@ func TestRuntimeOccurrenceFenceRetireAndProcessJoin(t *testing.T) {
 	}
 }
 
+func TestRuntimeOccurrenceFencedDescendantRequiresLiveSameOwnerLease(t *testing.T) {
+	process := NewProcess()
+	owner, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "descendant-owner", BundleHash: "bundle-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "foreign-owner", BundleHash: "bundle-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := owner.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignLease, err := foreign.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Fence(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Begin(parent.Context()); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("ordinary admission from accepted context = %v", err)
+	}
+	if _, err := owner.BeginAcceptedDescendant(context.Background()); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("unrelated context admitted descendant: %v", err)
+	}
+	if _, err := owner.BeginAcceptedDescendant(foreignLease.Context()); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("foreign lease admitted descendant: %v", err)
+	}
+	child, err := owner.BeginAcceptedDescendant(context.WithoutCancel(parent.Context()))
+	if err != nil {
+		t.Fatalf("accepted child: %v", err)
+	}
+	if err := parent.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.BeginAcceptedDescendant(parent.Context()); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("settled ancestor admitted descendant: %v", err)
+	}
+	if err := child.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if err := foreignLease.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	owner.Retire()
+	if _, err := owner.BeginAcceptedDescendant(child.Context()); !errors.Is(err, ErrRetired) {
+		t.Fatalf("retired owner admitted descendant: %v", err)
+	}
+	foreign.Retire()
+	if _, err := owner.RetireAndWait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := foreign.RetireAndWait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeAndManagerLeasesRetainExactProcessOwner(t *testing.T) {
 	process := NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), RuntimeIdentity{

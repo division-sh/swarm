@@ -3397,7 +3397,7 @@ type orderedActivityDispatcher struct {
 	intents []ActivityIntent
 }
 
-func (d *orderedActivityDispatcher) DispatchActivities(_ context.Context, intents []ActivityIntent) error {
+func (d *orderedActivityDispatcher) DispatchActivities(_ context.Context, intents []ActivityIntent, _ []EmitIntent) error {
 	*d.order = append(*d.order, "activity_dispatch")
 	d.intents = append(d.intents, intents...)
 	return nil

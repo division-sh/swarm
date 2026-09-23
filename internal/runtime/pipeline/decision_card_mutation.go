@@ -302,9 +302,7 @@ func (pc *PipelineCoordinator) finishDecisionCardMutation(ctx context.Context, c
 		if planner == nil {
 			return response, errors.Join(commitErr, validationErr, postCommitErr, fmt.Errorf("decision-card mutation requires the publication planner"))
 		}
-		if err := planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); err != nil {
-			return response, errors.Join(commitErr, validationErr, postCommitErr, err)
-		}
+		postCommitErr = errors.Join(postCommitErr, planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}))
 		dispatcher := pc.bus.EngineDispatcher()
 		if dispatcher == nil {
 			return response, errors.Join(commitErr, validationErr, postCommitErr, fmt.Errorf("decision-card mutation requires the post-commit dispatcher"))

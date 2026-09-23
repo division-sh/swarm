@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -23,9 +24,11 @@ type engineDispatcher struct {
 type pendingOutboxOperation struct {
 	sequence         uint64
 	intent           runtimeengine.EmitIntent
+	source           events.Event
 	outcome          EventAppendOutcome
 	publicationClaim *pipelinePublicationClaim
 	deliveryHandoffs []runtimedelivery.DurableHandoffProof
+	finalizationErr  error
 }
 
 type pendingOutboxDispatch struct {
@@ -244,32 +247,71 @@ func (eb *EventBus) ReleaseEnginePublications(ctx context.Context, plans []runti
 }
 
 func (eb *EventBus) FinalizeEnginePublications(ctx context.Context, evidence []runtimeengine.CommittedDurablePublication) error {
+	var result error
 	for _, value := range evidence {
 		committed, ok := value.(CommittedEnginePublication)
 		if !ok {
-			return fmt.Errorf("committed engine publication has unexpected type %T", value)
+			result = errors.Join(result, fmt.Errorf("committed engine publication has unexpected type %T", value))
+			continue
 		}
-		if err := committed.ValidateCommittedDurablePublication(); err != nil {
-			return err
+		result = errors.Join(result, eb.finalizeOneEnginePublication(ctx, committed))
+	}
+	return result
+}
+
+func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed CommittedEnginePublication) (err error) {
+	claim := committed.plan.prepared.publicationClaim
+	staged := false
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("finalize committed publication %s panic: %v", committed.CommittedDurablePublicationEventID(), recovered))
 		}
-		prepared, err := committed.plan.prepared.WithCommitOutcome(committed.committed.AppendOutcome)
-		if err != nil {
-			return err
+		if err != nil && !staged && claim != nil {
+			err = errors.Join(err, claim.Release(ctx))
 		}
-		prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.committed.DeliveryHandoffs...)
-		if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.committed.Activations); err != nil {
-			return err
-		}
-		if err := eb.finalizeCommittedAgentReadiness(ctx, prepared.Event, prepared.plan.DeliveryRoutes()); err != nil {
-			return err
-		}
-		if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
-			eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
-		}
-		eb.setPendingInternalDelivery(prepared.Event.ID(), prepared.plan.InternalRecipientIDs())
-		eb.stageCommittedOutboxOperation(committed.plan.intent, committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs)
+	}()
+	if err := committed.ValidateCommittedDurablePublication(); err != nil {
+		return err
+	}
+	prepared, err := committed.plan.prepared.WithCommitOutcome(committed.committed.AppendOutcome)
+	if err != nil {
+		return err
+	}
+	prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.committed.DeliveryHandoffs...)
+	activationErr := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.committed.Activations)
+	readinessErr := eb.finalizeEngineAgentReadiness(ctx, prepared.Event, prepared.plan.DeliveryRoutes())
+	internalErr := eb.finalizeEngineInternalDelivery(prepared.Event.ID(), prepared.plan.InternalRecipientIDs())
+	prerequisiteErr := errors.Join(activationErr, readinessErr, internalErr)
+	if prerequisiteErr != nil {
+		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs, prerequisiteErr)
+		staged = true
+		return errors.Join(prerequisiteErr, prepared.publicationClaim.Release(ctx))
+	}
+	eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs, nil)
+	staged = true
+	if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
+		eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
 	}
 	return nil
+}
+
+func (eb *EventBus) finalizeEngineInternalDelivery(eventID string, recipients []string) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("finalize committed internal delivery for %s panic: %v", eventID, recovered))
+		}
+	}()
+	eb.setPendingInternalDelivery(eventID, recipients)
+	return nil
+}
+
+func (eb *EventBus) finalizeEngineAgentReadiness(ctx context.Context, event events.Event, routes []events.DeliveryRoute) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("finalize committed agent readiness for %s panic: %v", event.ID(), recovered))
+		}
+	}()
+	return eb.finalizeCommittedAgentReadiness(ctx, event, routes)
 }
 
 func (eb *EventBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
@@ -279,63 +321,122 @@ func (eb *EventBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return engineDispatcher{bus: eb}
 }
 
-func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
+func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) (err error) {
 	if d.bus == nil || len(intents) == 0 {
 		return nil
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("dispatch committed publication batch panic: %v", recovered), d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
+		}
+	}()
 	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
-		return err
+		return errors.Join(err, d.releaseUndispatchedPostCommit(ctx, intents))
 	}
 	ctx, lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
+		if errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			return errors.Join(err, d.releaseUndispatchedPostCommit(ctx, intents))
+		}
 		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
 	}
-	normalized := make([]runtimeengine.EmitIntent, 0, len(intents))
-	for i := range intents {
-		if strings.TrimSpace(string(intents[i].Event.Type())) == "" {
-			continue
-		}
-		intent := intents[i]
-		var admitted events.AdmittedEvent
-		var err error
-		if intent.Event.AdmissionClass() == events.EventAdmissionInheritedFanOut {
-			// Dispatch requires the named chunk's staged operation or exact
-			// durable readback below, never generic publication authority.
-			admitted, err = events.RevalidatePersistedEvent(intent.Event)
-		} else {
-			_, admitted, err = admitEventForPublish(ctx, intent.Event, time.Now().UTC())
-		}
-		if err != nil {
-			return err
-		}
-		intent.Event = admitted.Event()
-		normalized = append(normalized, intent)
+	var dispatchErr error
+	for _, intent := range intents {
+		dispatchErr = errors.Join(dispatchErr, d.dispatchOnePostCommit(ctx, intent))
 	}
-	intents = normalized
-	if len(intents) == 0 {
+	return dispatchErr
+}
+
+func (d engineDispatcher) releaseUndispatchedPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
+	var result error
+	for _, intent := range intents {
+		if strings.TrimSpace(string(intent.Event.Type())) != "" {
+			result = errors.Join(result, d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), intent.Event))
+		}
+	}
+	return result
+}
+
+func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runtimeengine.EmitIntent) (err error) {
+	if strings.TrimSpace(string(intent.Event.Type())) == "" {
 		return nil
 	}
-	for _, intent := range intents {
-		result, err := d.dispatchPendingOutboxOperation(ctx, intent)
-		if err != nil {
-			return err
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("dispatch committed publication %s panic: %v", intent.Event.ID(), recovered))
 		}
-		if result.handled {
-			continue
-		}
-		if intent.Event.AdmissionClass() == events.EventAdmissionInheritedFanOut {
-			if err := d.bus.requireCommittedInheritedFanOut(ctx, intent.Event); err != nil {
-				return err
-			}
-		}
-		if err := d.dispatchAndRecord(ctx, intent, nil); err != nil {
+	}()
+	var admitted events.AdmittedEvent
+	if intent.Event.AdmissionClass() == events.EventAdmissionInheritedFanOut {
+		// Dispatch requires the staged operation or exact durable readback below.
+		admitted, err = events.RevalidatePersistedEvent(intent.Event)
+	} else {
+		_, admitted, err = admitEventForPublish(ctx, intent.Event, time.Now().UTC())
+	}
+	if err != nil {
+		return err
+	}
+	intent.Event = admitted.Event()
+	result, err := d.dispatchPendingOutboxOperation(ctx, intent)
+	if err != nil || result.handled {
+		return err
+	}
+	if intent.Event.AdmissionClass() == events.EventAdmissionInheritedFanOut {
+		if err := d.bus.requireCommittedInheritedFanOut(ctx, intent.Event); err != nil {
 			return err
 		}
 	}
-	return nil
+	return d.dispatchAndRecord(ctx, intent, nil)
+}
+
+func (d engineDispatcher) releaseUnadmittedPostCommit(ctx context.Context, event events.Event) error {
+	operation, ok, err := d.bus.takeMatchingPendingOutboxOperation(event)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return operation.publicationClaim.Release(ctx)
+}
+
+func (eb *EventBus) takeMatchingPendingOutboxOperation(event events.Event) (pendingOutboxOperation, bool, error) {
+	want, err := events.IntegrityProjection(event)
+	if err != nil {
+		return pendingOutboxOperation{}, false, err
+	}
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	operations := eb.pendingOutboxByID[strings.TrimSpace(event.ID())]
+	if len(operations) == 0 {
+		return pendingOutboxOperation{}, false, nil
+	}
+	actual, err := events.IntegrityProjection(operations[0].source)
+	if err != nil {
+		return pendingOutboxOperation{}, false, err
+	}
+	if !reflect.DeepEqual(actual, want) {
+		projected, err := events.IntegrityProjection(operations[0].intent.Event)
+		if err != nil {
+			return pendingOutboxOperation{}, false, err
+		}
+		if !reflect.DeepEqual(projected, want) {
+			return pendingOutboxOperation{}, false, events.ErrEventIdentityConflict
+		}
+	}
+	if operations[0].finalizationErr != nil {
+		return operations[0], true, nil
+	}
+	operation := operations[0]
+	if len(operations) == 1 {
+		delete(eb.pendingOutboxByID, strings.TrimSpace(event.ID()))
+	} else {
+		eb.pendingOutboxByID[strings.TrimSpace(event.ID())] = operations[1:]
+	}
+	return operation, true, nil
 }
 
 // A repeated post-commit callback has no process-local operation to take. It
@@ -427,7 +528,10 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	if err != nil {
 		return result, err
 	}
-	operation, ok := d.bus.takePendingOutboxOperation(fallback.Event.ID())
+	operation, ok, err := d.bus.takeMatchingPendingOutboxOperation(fallback.Event)
+	if err != nil {
+		return result, err
+	}
 	if !ok {
 		return result, nil
 	}
@@ -435,6 +539,9 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	defer func() {
 		err = errors.Join(err, operation.publicationClaim.Release(ctx))
 	}()
+	if operation.finalizationErr != nil {
+		return result, fmt.Errorf("committed publication %s has incomplete prerequisites: %w", fallback.Event.ID(), operation.finalizationErr)
+	}
 	if operation.intent.Event.Type() != fallback.Event.Type() {
 		return result, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
 	}
@@ -713,6 +820,10 @@ func (eb *EventBus) clearPendingInternalDeliveryRoutes(eventID string) {
 }
 
 func (eb *EventBus) stageCommittedOutboxOperation(intent runtimeengine.EmitIntent, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim, handoffs []runtimedelivery.DurableHandoffProof) {
+	eb.stageCommittedOutboxOperationWithFinalization(intent, intent.Event, outcome, publicationClaim, handoffs, nil)
+}
+
+func (eb *EventBus) stageCommittedOutboxOperationWithFinalization(intent runtimeengine.EmitIntent, source events.Event, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim, handoffs []runtimedelivery.DurableHandoffProof, finalizationErr error) {
 	if eb == nil {
 		return
 	}
@@ -725,30 +836,11 @@ func (eb *EventBus) stageCommittedOutboxOperation(intent runtimeengine.EmitInten
 	eb.mu.Lock()
 	eb.pendingOutboxSequence++
 	eb.pendingOutboxByID[eventID] = append(eb.pendingOutboxByID[eventID], pendingOutboxOperation{
-		sequence: eb.pendingOutboxSequence, intent: intent, outcome: outcome, publicationClaim: publicationClaim,
+		sequence: eb.pendingOutboxSequence, intent: intent, source: source.Clone(), outcome: outcome, publicationClaim: publicationClaim,
 		deliveryHandoffs: append([]runtimedelivery.DurableHandoffProof(nil), handoffs...),
+		finalizationErr:  finalizationErr,
 	})
 	eb.mu.Unlock()
-}
-
-func (eb *EventBus) takePendingOutboxOperation(eventID string) (pendingOutboxOperation, bool) {
-	if eb == nil {
-		return pendingOutboxOperation{}, false
-	}
-	eventID = strings.TrimSpace(eventID)
-	eb.mu.Lock()
-	defer eb.mu.Unlock()
-	operations := eb.pendingOutboxByID[eventID]
-	if len(operations) == 0 {
-		return pendingOutboxOperation{}, false
-	}
-	operation := operations[0]
-	if len(operations) == 1 {
-		delete(eb.pendingOutboxByID, eventID)
-	} else {
-		eb.pendingOutboxByID[eventID] = operations[1:]
-	}
-	return operation, true
 }
 
 func (eb *EventBus) removePendingOutboxOperation(eventID string, sequence uint64) {

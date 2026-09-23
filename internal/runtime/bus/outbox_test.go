@@ -548,6 +548,58 @@ func TestEngineDispatcherDoesNotConsumeAmbientSQLTransactionAuthority(t *testing
 	}
 }
 
+func TestCommittedReadinessFailureBlocksOnlyItsExactOutput(t *testing.T) {
+	store := &directRecipientTransactionalStore{
+		descriptors: []runtimebus.ActiveAgentDescriptor{testActiveAgentDescriptor(t, "agent-a", eventtest.UUID("readiness-ent"), "")},
+	}
+	eb, err := newScopedTestEventBus(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := runtimebustest.Subscribe(t, eb, "agent-a", events.EventType("custom.emitted"))
+	defer runtimebustest.Unsubscribe(eb, "agent-a")
+	intents := make([]runtimeengine.EmitIntent, 2)
+	for i := range intents {
+		intents[i].Event = eventtest.RunCreatingRootIngress(
+			eventtest.UUID(fmt.Sprintf("readiness-event-%d", i)), "custom.emitted", "", "",
+			[]byte(`{"entity_id":"readiness-ent"}`), 0, runtimebustest.DefaultRunID, "",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("readiness-ent")), time.Now().UTC(),
+		)
+	}
+	fault := errors.New("first committed agent readiness failed")
+	seen := make([]string, 0, 2)
+	eb.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, _ []events.DeliveryRoute) error {
+		seen = append(seen, event.ID())
+		if event.ID() == intents[0].Event.ID() {
+			return fault
+		}
+		return nil
+	}))
+	ctx := context.Background()
+	if err := commitEnginePublicationsForTest(ctx, eb, store, intents); !errors.Is(err, fault) {
+		t.Fatalf("committed finalization = %v, want first readiness fault", err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("readiness attempted for %d outputs, want 2", len(seen))
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, intents); !errors.Is(err, fault) {
+		t.Fatalf("dispatch = %v, want exact blocked readiness error", err)
+	}
+	if got := requireBusEvent(t, ch, "independent ready output"); got.ID() != intents[1].Event.ID() {
+		t.Fatalf("delivered %s, want second output %s", got.ID(), intents[1].Event.ID())
+	}
+	select {
+	case delivery := <-ch:
+		if delivery != nil {
+			t.Fatalf("failed-readiness output dispatched: %s", delivery.Event().ID())
+		}
+	default:
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, intents[:1]); !errors.Is(err, fault) {
+		t.Fatalf("repeat dispatch bypassed failed readiness: %v", err)
+	}
+}
+
 func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

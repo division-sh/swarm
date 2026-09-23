@@ -447,7 +447,48 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	}
 	result.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
 	result.EmitIntents = committedIntents
+	activityRequests, activityErr := committedActivityRequestIntents(committed.Publications, mutation.ActivityIntents)
+	result.ActivityRequestIntents = activityRequests
+	resultErr = errors.Join(resultErr, activityErr)
 	return result, resultErr
+}
+
+func committedActivityRequestIntents(publications []runtimeengine.CommittedDurablePublication, activities []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, error) {
+	requests := make([]runtimeengine.EmitIntent, 0, len(activities))
+	seen := make(map[string]struct{}, len(activities))
+	for _, activity := range activities {
+		activity = activity.Normalized()
+		if activity.ApprovalDecision != "" {
+			continue
+		}
+		id := activityRequestEventID(activity)
+		if _, duplicate := seen[id]; duplicate {
+			return nil, fmt.Errorf("committed activity request %s occurs more than once", id)
+		}
+		seen[id] = struct{}{}
+		var matched runtimeengine.CommittedDurablePublication
+		for _, publication := range publications {
+			if publication == nil || publication.CommittedDurablePublicationEventID() != id {
+				continue
+			}
+			if matched != nil {
+				return nil, fmt.Errorf("committed activity request %s has multiple publication records", id)
+			}
+			matched = publication
+		}
+		if matched == nil {
+			return nil, fmt.Errorf("committed activity request %s has no publication record", id)
+		}
+		if err := matched.ValidateCommittedDurablePublication(); err != nil {
+			return nil, fmt.Errorf("committed activity request %s: %w", id, err)
+		}
+		request := matched.CommittedDurablePublicationIntent()
+		if request.Event.ID() != id || request.Event.Type() != activityRequestEventType {
+			return nil, fmt.Errorf("committed activity request %s has mismatched event evidence", id)
+		}
+		requests = append(requests, request)
+	}
+	return requests, nil
 }
 
 func (o pipelineEngineMutationOwner) finishCommittedFlowDeactivation(ctx context.Context, terminal PreparedFlowInstanceDeactivation) (err error) {

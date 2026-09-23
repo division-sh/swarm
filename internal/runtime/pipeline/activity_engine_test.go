@@ -745,7 +745,11 @@ func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *test
 
 	dispatcher := pipelineActivityDispatcher{coordinator: pc}
 	intent := testActivityIntent("https://example.com/source")
-	if err := dispatcher.DispatchActivities(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
+	requests, err := activityRequestEmitIntents([]runtimeengine.ActivityIntent{intent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dispatcher.DispatchActivities(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}, requests); err != nil {
 		t.Fatalf("DispatchActivities: %v", err)
 	}
 	if got := bus.publishedCount(); got != 1 {
@@ -757,6 +761,15 @@ func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *test
 	}
 	if got, want := evt.ID(), activityRequestEventID(intent); got != want {
 		t.Fatalf("request event id = %q, want %q", got, want)
+	}
+	if got, want := evt.CreatedAt(), requests[0].Event.CreatedAt(); !got.Equal(want) {
+		t.Fatalf("dispatched request timestamp = %s, want committed %s", got, want)
+	}
+	if err := dispatcher.DispatchActivities(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}, nil); err == nil {
+		t.Fatal("missing committed request must not reconstruct an activity event")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("missing-evidence retry published %d events, want one", got)
 	}
 }
 
