@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -43,16 +44,17 @@ type RunForkExecutionRequest struct {
 }
 
 type RunForkExecutionResult struct {
-	Owner              string            `json:"owner"`
-	SourceRunID        string            `json:"source_run_id"`
-	SourceRunStatus    string            `json:"source_run_status"`
-	SourceFrozen       bool              `json:"source_frozen"`
-	ForkRunID          string            `json:"fork_run_id"`
-	ForkEventID        string            `json:"fork_event_id"`
-	ForkRunStatus      string            `json:"fork_run_status"`
-	BundleHash         string            `json:"bundle_hash"`
-	ExecutedEventCount int               `json:"executed_event_count"`
-	DataPins           []durabledata.Pin `json:"data_pins"`
+	Owner                  string            `json:"owner"`
+	SourceRunID            string            `json:"source_run_id"`
+	SourceRunStatus        string            `json:"source_run_status"`
+	SourceFrozen           bool              `json:"source_frozen"`
+	ForkRunID              string            `json:"fork_run_id"`
+	ForkEventID            string            `json:"fork_event_id"`
+	ForkRunStatus          string            `json:"fork_run_status"`
+	BundleHash             string            `json:"bundle_hash"`
+	ExecutedEventCount     int               `json:"executed_event_count"`
+	DataPins               []durabledata.Pin `json:"data_pins"`
+	activationAcknowledged bool
 }
 
 type SelectedContractRunForkExecutionFunc func(context.Context, runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error)
@@ -77,6 +79,13 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		ContractSelection:  req.ContractSelection,
 		AgentRuntime:       e.AgentRuntime,
 	})
+	acknowledged := exactSelectedForkActivation(req, result)
+	if result.Activation.Activated && !acknowledged {
+		return RunForkExecutionResult{}, errors.Join(err, fmt.Errorf("selected fork activation has no exact acknowledged identity"))
+	}
+	if err == nil && !acknowledged {
+		return RunForkExecutionResult{}, fmt.Errorf("selected fork execution returned no acknowledged activation")
+	}
 	status := strings.TrimSpace(result.Activation.ForkRunStatus)
 	if status == "" {
 		status = strings.TrimSpace(result.Materialization.ForkRunStatus)
@@ -87,17 +96,30 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		pins[index].RunState = status
 	}
 	return RunForkExecutionResult{
-		Owner:              strings.TrimSpace(result.Owner),
-		SourceRunID:        strings.TrimSpace(result.Materialization.SourceRunID),
-		SourceRunStatus:    strings.TrimSpace(result.Activation.SourceRunStatus),
-		SourceFrozen:       result.Activation.SourceFrozen,
-		ForkRunID:          strings.TrimSpace(result.Materialization.ForkRunID),
-		ForkEventID:        strings.TrimSpace(result.Materialization.ForkPoint.EventID),
-		ForkRunStatus:      status,
-		BundleHash:         strings.TrimSpace(req.BundleHash),
-		ExecutedEventCount: result.ExecutedEventCount,
-		DataPins:           pins,
+		Owner:                  strings.TrimSpace(result.Owner),
+		SourceRunID:            strings.TrimSpace(result.Materialization.SourceRunID),
+		SourceRunStatus:        strings.TrimSpace(result.Activation.SourceRunStatus),
+		SourceFrozen:           result.Activation.SourceFrozen,
+		ForkRunID:              strings.TrimSpace(result.Materialization.ForkRunID),
+		ForkEventID:            strings.TrimSpace(result.Materialization.ForkPoint.EventID),
+		ForkRunStatus:          status,
+		BundleHash:             strings.TrimSpace(req.BundleHash),
+		ExecutedEventCount:     result.ExecutedEventCount,
+		DataPins:               pins,
+		activationAcknowledged: acknowledged,
 	}, err
+}
+
+func exactSelectedForkActivation(req RunForkExecutionRequest, result runtimerunforkexecution.SelectedContractExecutionResult) bool {
+	materialization, activation := result.Materialization, result.Activation
+	return result.Owner == runfork.RunForkSelectedContractExecutionOwner && activation.Activated &&
+		strings.TrimSpace(materialization.SourceRunID) != "" && strings.TrimSpace(materialization.ForkRunID) != "" &&
+		strings.TrimSpace(materialization.ForkPoint.EventID) != "" &&
+		activation.SourceRunID == materialization.SourceRunID && activation.ForkRunID == materialization.ForkRunID &&
+		activation.ForkPoint.EventID == materialization.ForkPoint.EventID &&
+		activation.ForkRunStatus == runfork.RunForkActivatedStatus &&
+		(req.SourceRunID == "" || materialization.SourceRunID == req.SourceRunID) &&
+		(req.ForkEventID == "" || materialization.ForkPoint.EventID == req.ForkEventID)
 }
 
 func OperatorRunForkHandlers(opts RunForkHandlerOptions) map[string]MethodHandler {
@@ -173,7 +195,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 			DataPinOverrides:  params.DataPinOverrides,
 			ContractSelection: contractSelection,
 		})
-		if err != nil {
+		if err != nil && !result.activationAcknowledged {
 			return apiidempotency.Completion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
 		}
 		if result.BundleHash == "" {
@@ -184,6 +206,10 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		}
 		if err := validateRunForkExecutionResult(result); err != nil {
 			return apiidempotency.Completion{}, err
+		}
+		if err != nil {
+			diaglog.ProcessLog(diaglog.LevelWarn, "api", "acknowledged run.fork cleanup failed",
+				"source_run_id", result.SourceRunID, "fork_run_id", result.ForkRunID, "error", err.Error())
 		}
 		response, err := json.Marshal(result)
 		if err != nil {
