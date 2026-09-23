@@ -156,6 +156,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
+	forkPointEventID := uuid.NewString()
 	at := time.Unix(1700002405, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
@@ -175,8 +176,10 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 		t.Fatalf("update source entity_state metadata: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
+	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
+		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(2*time.Minute))
 
-	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -187,7 +190,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 		t.Fatalf("metadata source = %q, want source entity_state", got)
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -287,6 +290,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
+	forkPointEventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	auditID := uuid.NewString()
 	turnID := uuid.NewString()
@@ -294,8 +298,10 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
+	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
+		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(time.Minute))
 
-	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkPointEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -309,7 +315,7 @@ func TestSelectedContractExecutionMaterializationTreatsSourceConversationHistory
 		}
 	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
@@ -441,6 +447,7 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
+	captureRunForkTestRevision(t, db, sourceRunID)
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
