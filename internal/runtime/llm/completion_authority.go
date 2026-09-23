@@ -360,7 +360,7 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 		}
 	}
 	initialRenewalErr := handle.Heartbeat(heartbeatParent, lease)
-	if initialRenewalErr != nil && !runtimeeffects.CommittedMutationPhase(initialRenewalErr, runtimeeffects.MutationHeartbeat, handle.Attempt()) {
+	if initialRenewalErr != nil && !committedCompletionCleanupPhase(initialRenewalErr, handle.Attempt(), runtimeeffects.MutationHeartbeat) {
 		claimHandoff.Finish()
 		_ = workLease.Done()
 		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "prelaunch"}, initialRenewalErr)
@@ -423,7 +423,7 @@ func (h *completionAttemptHeartbeat) Stop() error {
 	if doStop {
 		renewErr := h.renew()
 		h.mu.Lock()
-		if runtimeeffects.CommittedMutationPhase(renewErr, runtimeeffects.MutationHeartbeat, h.handle.Attempt()) {
+		if committedCompletionCleanupPhase(renewErr, h.handle.Attempt(), runtimeeffects.MutationHeartbeat) {
 			h.diagnostic = errors.Join(h.diagnostic, renewErr)
 		} else {
 			h.err = errors.Join(h.err, renewErr)
@@ -439,7 +439,7 @@ func (h *completionAttemptHeartbeat) Stop() error {
 }
 
 func (h *completionAttemptHeartbeat) retainCommittedRenewal(err error) bool {
-	if !runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationHeartbeat, h.handle.Attempt()) {
+	if !committedCompletionCleanupPhase(err, h.handle.Attempt(), runtimeeffects.MutationHeartbeat) {
 		return false
 	}
 	h.mu.Lock()

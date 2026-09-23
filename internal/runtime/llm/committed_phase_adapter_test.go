@@ -48,6 +48,9 @@ func (s *committedPhaseEffectStore) HeartbeatCompletionAttempt(ctx context.Conte
 	if s.heartbeatMode == "joined" {
 		return errors.Join(err, context.Canceled)
 	}
+	if s.heartbeatMode == "joined_committed" {
+		return errors.Join(err, runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationHeartbeat, attempt, errors.New("second renewal cleanup")))
+	}
 	return err
 }
 
@@ -213,33 +216,37 @@ func TestHTTPCompletionUnacknowledgedOrForeignHeartbeatFailsClosed(t *testing.T)
 }
 
 func TestCompletionAcknowledgedPeriodicHeartbeatKeepsExecutionAuthority(t *testing.T) {
-	base := effecttest.New()
-	fault := errors.New("periodic heartbeat cleanup failed after renewal commit")
-	store := &committedPhaseEffectStore{Harness: base, heartbeatFault: fault}
-	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, base, t.Name()))
-	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(store, base, store, base))
-	handle, err := beginManagedTestCompletion(t, ctx, "openai_compatible", []byte(`{"model":"test"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeatWithTiming(ctx, handle, time.Millisecond, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.After(time.Second)
-	for store.heartbeats.Load() < 3 {
-		select {
-		case <-heartbeatCtx.Done():
-			t.Fatalf("acknowledged renewal canceled execution: %v", context.Cause(heartbeatCtx))
-		case <-deadline:
-			t.Fatal("periodic heartbeat did not renew")
-		case <-time.After(time.Millisecond):
-		}
-	}
-	dispatch := newCompletionDispatch(handle, runtimeeffects.StateSettled)
-	dispatch.markProviderInvocationStarted()
-	if err := finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil); err != nil || dispatch.state != runtimeeffects.StateSettled || !errors.Is(dispatch.mutationErr, fault) {
-		t.Fatalf("periodic heartbeat finish = state:%s diagnostic:%v err:%v", dispatch.state, dispatch.mutationErr, err)
+	for _, mode := range []string{"single", "joined_committed"} {
+		t.Run(mode, func(t *testing.T) {
+			base := effecttest.New()
+			fault := errors.New("periodic heartbeat cleanup failed after renewal commit")
+			store := &committedPhaseEffectStore{Harness: base, heartbeatFault: fault, heartbeatMode: mode}
+			ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, base, t.Name()))
+			ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(store, base, store, base))
+			handle, err := beginManagedTestCompletion(t, ctx, "openai_compatible", []byte(`{"model":"test"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeatWithTiming(ctx, handle, time.Millisecond, time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.After(time.Second)
+			for store.heartbeats.Load() < 3 {
+				select {
+				case <-heartbeatCtx.Done():
+					t.Fatalf("acknowledged renewal canceled execution: %v", context.Cause(heartbeatCtx))
+				case <-deadline:
+					t.Fatal("periodic heartbeat did not renew")
+				case <-time.After(time.Millisecond):
+				}
+			}
+			dispatch := newCompletionDispatch(handle, runtimeeffects.StateSettled)
+			dispatch.markProviderInvocationStarted()
+			if err := finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil); err != nil || dispatch.state != runtimeeffects.StateSettled || !errors.Is(dispatch.mutationErr, fault) {
+				t.Fatalf("periodic heartbeat finish = state:%s diagnostic:%v err:%v", dispatch.state, dispatch.mutationErr, err)
+			}
+		})
 	}
 }
 
