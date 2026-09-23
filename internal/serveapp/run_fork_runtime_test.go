@@ -92,13 +92,14 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 			AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "cli-agent"),
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
+	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, "", at.Add(time.Millisecond))
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, t.TempDir(), []string{
 		"--store", "postgres",
 		"--dry-run",
 		"--run", runID,
-		"--at", eventID,
+		"--at", forkPointEventID,
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -132,6 +133,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSO
 			Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "fixture", FlowInstance: "fixture/source-node"}),
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
+	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, "", at.Add(time.Millisecond))
 
 	repo := repoRootForTest()
 	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
@@ -141,7 +143,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunBundleAddsContractFrontierAdmissionJSO
 		"--store", "postgres",
 		"--dry-run",
 		"--run", runID,
-		"--at", eventID,
+		"--at", forkPointEventID,
 		"--bundle-hash", bundleHash,
 		"--json",
 	}, &buf)
@@ -356,16 +358,21 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	diagnosticEventID := uuid.NewString()
+	afterEventID := uuid.NewString()
 	at := time.Unix(1700000312, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, bundleHash, at)
 	seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
+	forkPointEventID := stageRunForkCLIForkPoint(t, db, sourceRunID, entityID, at.Add(time.Millisecond))
+	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, afterEventID, sourceRunID, "source.after",
+		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`),
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at.Add(time.Second))
 
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
 		"--store", "postgres",
 		"--bundle-hash", bundleHash,
 		"--run", sourceRunID,
-		"--at", sourceEventID,
+		"--at", forkPointEventID,
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -377,6 +384,9 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	}
 	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
 		t.Fatalf("selected execution result = %#v", result)
+	}
+	if result.Activation.SourceFrozen || result.Activation.BranchDivergence == nil {
+		t.Fatalf("selected execution lost source-advanced branch = %#v", result.Activation)
 	}
 	if result.SelectedContractExecutionAdmission == nil ||
 		result.SelectedContractExecutionAdmission.RecipientPlanning == nil ||
@@ -464,6 +474,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700000313, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, bundleHash, at)
+	forkPointEventID := stageRunForkCLIForkPoint(t, db, sourceRunID, entityID, at.Add(500*time.Millisecond))
 	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, afterEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
@@ -474,7 +485,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 		"--store", "postgres",
 		"--bundle-hash", bundleHash,
 		"--run", sourceRunID,
-		"--at", sourceEventID,
+		"--at", forkPointEventID,
 		"--json",
 	}, &buf)
 	if code != 0 {
@@ -542,12 +553,13 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		t.Fatalf("seed entity_state: %v", err)
 	}
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
+	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, entityID, at.Add(time.Millisecond))
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--store", "postgres",
 		"--materialize-only",
 		"--run", runID,
-		"--at", eventID,
+		"--at", forkPointEventID,
 		"--bundle-hash", bundleHash,
 		"--json",
 	}, &buf)
@@ -570,7 +582,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	if result.SelectedContractBinding.Owner != runfork.RunForkSelectedContractBindingOwner ||
 		result.SelectedContractBinding.ForkRunID != result.ForkRunID ||
 		result.SelectedContractBinding.SourceRunID != runID ||
-		result.SelectedContractBinding.ForkEventID != eventID ||
+		result.SelectedContractBinding.ForkEventID != forkPointEventID ||
 		result.SelectedContractBinding.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		result.SelectedContractBinding.ContractSelection.BundleHash != bundleHash {
 		t.Fatalf("selected contract binding = %#v", result.SelectedContractBinding)
@@ -593,7 +605,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		WHERE fork_run_id = $1::uuid
 		  AND source_run_id = $2::uuid
 		  AND fork_event_id = $3::uuid
-	`, result.ForkRunID, runID, eventID).Scan(&persistedBindingMode); err != nil {
+	`, result.ForkRunID, runID, forkPointEventID).Scan(&persistedBindingMode); err != nil {
 		t.Fatalf("load selected contract binding row: %v", err)
 	}
 	if persistedBindingMode != runfork.RunForkContractSelectionModeBundleHash {
@@ -610,8 +622,8 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 	eventID := uuid.NewString()
 	at := time.Unix(1700000320, 0).UTC()
 	ctx := runForkRuntimeOwnerContext(context.Background())
-	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	forkPointEventID := seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: forkPointEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -661,8 +673,8 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthorit
 	eventID := uuid.NewString()
 	at := time.Unix(1700000325, 0).UTC()
 	ctx := runForkRuntimeOwnerContext(context.Background())
-	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	forkPointEventID := seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: forkPointEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -694,7 +706,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 	eventID := uuid.NewString()
 	at := time.Unix(1700000330, 0).UTC()
 	ctx := context.Background()
-	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
+	forkPointEventID := seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
 	repo := repoRootForTest()
 	sourceRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
@@ -704,7 +716,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 		"--store", "postgres",
 		"--materialize-only",
 		"--run", runID,
-		"--at", eventID,
+		"--at", forkPointEventID,
 		"--bundle-hash", bundleHash,
 		"--json",
 	}, &materializeOut)
@@ -765,6 +777,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 			AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "safe-agent"),
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
+	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, entityID, at.Add(time.Millisecond))
 	repo := repoRootForTest()
 	sourceRoot := canonicalrouting.CopySelectedRouteRecoveryInput(t)
 	bundleHash := registerRunForkCLIContractCatalog(t, ctx, db, sourceRoot)
@@ -774,7 +787,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 		"--store", "postgres",
 		"--materialize-only",
 		"--run", runID,
-		"--at", eventID,
+		"--at", forkPointEventID,
 		"--bundle-hash", bundleHash,
 		"--json",
 	}, &materializeOut)
@@ -838,10 +851,23 @@ func TestRunForkRuntimeOwnerHarness_NonDryRunWithoutMaterializeOnlyStaysFailClos
 	}
 }
 
-func seedRunForkCLIActivationSource(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) {
+func seedRunForkCLIActivationSource(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) string {
 	t.Helper()
 	seedRunForkCLIActivationSourceWithoutRevision(t, db, runID, entityID, eventID, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
+	return stageRunForkCLIForkPoint(t, db, runID, entityID, at.Add(time.Millisecond))
+}
+
+func stageRunForkCLIForkPoint(t *testing.T, db *sql.DB, runID, entityID string, at time.Time) string {
+	t.Helper()
+	eventID := uuid.NewString()
+	envelope := events.EventEnvelope{Scope: events.EventScopeGlobal}
+	if entityID != "" {
+		envelope = events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
+	}
+	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres,
+		eventID, runID, "fork.cli.checkpoint", eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), envelope, at)
+	return eventID
 }
 
 func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, runID, entityID, eventID string, at time.Time) {
