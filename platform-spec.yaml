@@ -36721,7 +36721,11 @@ durable_pipeline_processing_obligation_authority:
         The existing fan-out chunk owner atomically commits accepted events, ordinal outcomes, cursor and intent
         release. Only its exact returned committed-publication evidence authorizes dispatch. Releasing the intent
         claim does not release retained event publication claims. Publication still checks the current intent lease
-        at mutation admission, not a saved turn timestamp. The group retains its accepted runtime occurrence; a
+        at mutation admission, not a saved turn timestamp. A native chunk COMMIT without protocol acknowledgement
+        is an uncertain turn, never a committed chunk inferred
+        from later ordinal or cursor readback; a successor may write matching rows under its own claim. Uncertain
+        turns do not dispatch publications or represent completion candidates from unacknowledged attempt values.
+        The group retains its accepted runtime occurrence; a
         replacement joins that occurrence and cannot lend successor authority. Ordinary pause retains the accepted
         in-flight contract, while process/session loss and invalid current authority reject new mutations.
         A segment flush consumes only its completed claims and transfers only its committed handoffs. Untouched

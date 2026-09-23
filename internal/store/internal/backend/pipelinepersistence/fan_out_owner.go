@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -628,8 +627,6 @@ func commitFanOutChunk(
 	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error)) mutationprotocol.Result[runtimepipeline.CommittedFanOutChunk],
 	observeNow func() time.Time,
 	candidateWriter mutationprotocol.CandidateWriter,
-	representReconciledCompletion func(context.Context, string) error,
-	readback pipelineQueryer,
 	command runtimepipeline.FanOutChunkCommand,
 ) (runtimepipeline.CommittedFanOutChunk, error) {
 	if err := command.Validate(); err != nil {
@@ -776,140 +773,25 @@ func commitFanOutChunk(
 	})
 	err := outcome.Err()
 	if !outcome.Acknowledged() {
-		// A retry refused before COMMIT is not an uncertain committed chunk.
-		if err == nil || outcome.Phase() != mutationprotocol.CommitAdmission {
-			return runtimepipeline.CommittedFanOutChunk{}, err
+		if err == nil {
+			err = errors.New("fan-out chunk mutation was not acknowledged")
 		}
-		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		committed, readErr := reconcileFanOutChunk(readCtx, readback, postgres, command)
-		if readErr != nil {
+		if outcome.Phase() == mutationprotocol.CommitAdmission {
 			return runtimepipeline.CommittedFanOutChunk{}, runtimefailures.Wrap(
 				runtimefailures.ClassOutcomeUncertain,
 				"fan_out_chunk_commit_unconfirmed",
 				"runtime.fan_out",
-				"reconcile_chunk_commit",
+				"commit_chunk",
 				map[string]any{"intent_id": command.Claim.Key.String(), "claim_generation": command.Claim.Generation},
-				errors.Join(err, readErr),
+				err,
 			)
 		}
-		if !committed {
-			return runtimepipeline.CommittedFanOutChunk{}, err
-		}
-		if result.Intent.Status == fanoutobligation.StatusClosed || len(result.Publications) != 0 {
-			if representReconciledCompletion == nil {
-				err = errors.Join(err, errors.New("reconciled fan-out completion requires candidate representation"))
-			} else {
-				err = errors.Join(err, representReconciledCompletion(readCtx, command.Claim.Key.RunID))
-			}
-		}
-	} else {
-		result, _ = outcome.Value()
+		return runtimepipeline.CommittedFanOutChunk{}, err
 	}
+	result, _ = outcome.Value()
 	// Keep post-commit failures out of the runtime's mutation retry path.
 	result.PostCommitFailure = err
 	return result, nil
-}
-
-func representReconciledFanOutCandidate(ctx context.Context, attempt *mutationprotocol.Attempt, writer mutationprotocol.CandidateWriter, runID string, now time.Time) error {
-	var due sql.NullTime
-	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT completion_due_at FROM runs WHERE run_id=$1`, runID).Scan(&due)
-	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil || !due.Valid || due.Time.After(now) {
-		return err
-	}
-	_, err = attempt.RequestCompletion(ctx, writer, runID, nil)
-	return err
-}
-
-func reconcileFanOutChunk(ctx context.Context, db pipelineQueryer, postgres bool, command runtimepipeline.FanOutChunkCommand) (bool, error) {
-	if db == nil {
-		return false, fmt.Errorf("fan-out chunk readback owner is required")
-	}
-	intent, err := scanFanOutIntent(db.QueryRowContext(ctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath))
-	if err != nil {
-		return false, fmt.Errorf("read fan-out intent after unconfirmed commit: %w", err)
-	}
-	start := command.Outcomes[0].Ordinal
-	end := start + len(command.Outcomes)
-	query := `SELECT ordinal,outcome_kind,COALESCE(event_id::text,''),COALESCE(source_event_id::text,''),COALESCE(inherited_disposition,''),failure FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal>=$6 AND ordinal<$7 ORDER BY ordinal`
-	if !postgres {
-		query = strings.ReplaceAll(query, "event_id::text", "event_id")
-		query = strings.ReplaceAll(query, "source_event_id::text", "source_event_id")
-	}
-	rows, err := db.QueryContext(ctx, query, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath, start, end)
-	if err != nil {
-		return false, fmt.Errorf("read fan-out outcomes after unconfirmed commit: %w", err)
-	}
-	defer rows.Close()
-	type persistedOutcome struct {
-		ordinal                                       int
-		kind, eventID, sourceID, inheritedDisposition string
-		failure                                       any
-	}
-	persisted := make([]persistedOutcome, 0, len(command.Outcomes))
-	for rows.Next() {
-		var outcome persistedOutcome
-		if err := rows.Scan(&outcome.ordinal, &outcome.kind, &outcome.eventID, &outcome.sourceID, &outcome.inheritedDisposition, &outcome.failure); err != nil {
-			return false, err
-		}
-		persisted = append(persisted, outcome)
-	}
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	if len(persisted) == 0 && intent.Cursor == start && intent.Status == fanoutobligation.StatusOpen && intent.ClaimOwner == command.Claim.Owner && intent.ClaimGeneration == command.Claim.Generation {
-		return false, nil
-	}
-	// A successor may have advanced or canceled the mutable header after our
-	// atomic release. Only the exact immutable outcome range proves our commit.
-	if intent.Cursor < end || len(persisted) != len(command.Outcomes) {
-		return false, fmt.Errorf("fan-out commit readback is neither exact commit nor exact no-commit")
-	}
-	for index, actual := range persisted {
-		want := command.Outcomes[index]
-		if actual.ordinal != want.Ordinal || actual.sourceID != "" || actual.inheritedDisposition != "" {
-			return false, fmt.Errorf("fan-out commit readback disagrees at ordinal %d", want.Ordinal)
-		}
-		if want.Publication != nil {
-			if actual.kind != string(fanoutobligation.OutcomeCommitted) || actual.eventID != want.Publication.DurablePublicationEventID() || actual.failure != nil {
-				return false, fmt.Errorf("fan-out committed publication readback disagrees at ordinal %d", want.Ordinal)
-			}
-			continue
-		}
-		if actual.kind != string(fanoutobligation.OutcomeSemanticRejected) || actual.eventID != "" || !semanticJSONEqual(actual.failure, want.Failure) {
-			return false, fmt.Errorf("fan-out semantic rejection readback disagrees at ordinal %d", want.Ordinal)
-		}
-	}
-	return true, nil
-}
-
-func semanticJSONEqual(actual any, expected json.RawMessage) bool {
-	var raw []byte
-	switch value := actual.(type) {
-	case nil:
-		return false
-	case []byte:
-		raw = value
-	case string:
-		raw = []byte(value)
-	default:
-		var err error
-		raw, err = json.Marshal(value)
-		if err != nil {
-			return false
-		}
-	}
-	var left, right any
-	leftDecoder := json.NewDecoder(bytes.NewReader(raw))
-	leftDecoder.UseNumber()
-	rightDecoder := json.NewDecoder(bytes.NewReader(expected))
-	rightDecoder.UseNumber()
-	return leftDecoder.Decode(&left) == nil && rightDecoder.Decode(&right) == nil && reflect.DeepEqual(left, right)
 }
 
 func nullableText(raw string) any {
@@ -1021,16 +903,7 @@ func (s *fanOutPostgresOwner) CommitFanOutChunk(ctx context.Context, command run
 		}
 		return outcome
 	}
-	represent := func(ctx context.Context, runID string) error {
-		outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			return struct{}{}, representReconciledFanOutCandidate(txctx, attempt, s.RunLifecyclePostgresOwner, runID, time.Now().UTC())
-		})
-		if !outcome.Acknowledged() {
-			return errors.Join(outcome.Err(), errors.New("reconciled fan-out completion candidate representation is unconfirmed"))
-		}
-		return outcome.Err()
-	}
-	return commitFanOutChunk(ctx, s, true, run, time.Now, s.RunLifecyclePostgresOwner, represent, s.backend, command)
+	return commitFanOutChunk(ctx, s, true, run, time.Now, s.RunLifecyclePostgresOwner, command)
 }
 
 func (s *fanOutSQLiteOwner) CommitFanOutChunk(ctx context.Context, command runtimepipeline.FanOutChunkCommand) (result runtimepipeline.CommittedFanOutChunk, resultErr error) {
@@ -1076,16 +949,7 @@ func (s *fanOutSQLiteOwner) CommitFanOutChunk(ctx context.Context, command runti
 		}
 		return outcome
 	}
-	represent := func(ctx context.Context, runID string) error {
-		outcome := mutationprotocol.RunSQLite(ctx, s.backend, "represent reconciled fan-out completion", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			return struct{}{}, representReconciledFanOutCandidate(txctx, attempt, s.RunLifecycleSQLiteOwner, runID, s.now())
-		})
-		if !outcome.Acknowledged() {
-			return errors.Join(outcome.Err(), errors.New("reconciled fan-out completion candidate representation is unconfirmed"))
-		}
-		return outcome.Err()
-	}
-	return commitFanOutChunk(ctx, s, false, run, s.now, s.RunLifecycleSQLiteOwner, represent, s.backend, command)
+	return commitFanOutChunk(ctx, s, false, run, s.now, s.RunLifecycleSQLiteOwner, command)
 }
 
 func cancelRunFanOut(ctx context.Context, postgres bool, effects interface {

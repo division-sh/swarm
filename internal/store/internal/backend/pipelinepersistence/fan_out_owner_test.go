@@ -180,40 +180,6 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 	}
 }
 
-func TestFanOutChunkReadbackOnBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, outcome := range []string{"committed", "not_committed", "contradictory"} {
-			t.Run(backend+"/"+outcome, func(t *testing.T) {
-				db := fanOutReadbackTestDB(t, backend)
-				command := seedFanOutReadbackClaim(t, db)
-				if outcome != "not_committed" {
-					persistFanOutReadbackChunk(t, db, command)
-				}
-				if outcome == "contradictory" {
-					if _, err := db.Exec(`DELETE FROM fan_out_outcomes`); err != nil {
-						t.Fatal(err)
-					}
-				}
-				committed, err := reconcileFanOutChunk(context.Background(), db, backend == "postgres", command)
-				switch outcome {
-				case "committed":
-					if !committed || err != nil {
-						t.Fatalf("exact commit = %t, %v", committed, err)
-					}
-				case "not_committed":
-					if committed || err != nil {
-						t.Fatalf("exact no-commit = %t, %v", committed, err)
-					}
-				case "contradictory":
-					if committed || err == nil {
-						t.Fatalf("contradictory readback = %t, %v", committed, err)
-					}
-				}
-			})
-		}
-	}
-}
-
 func persistFanOutReadbackChunk(t *testing.T, db *sql.DB, command runtimepipeline.FanOutChunkCommand) {
 	t.Helper()
 	key := command.Claim.Key
