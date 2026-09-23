@@ -34,7 +34,7 @@ func (s *receiptOutcomeStore) managerTestDeliveryAuthority() runtimedelivery.Exe
 	}).managerTestDeliveryAuthority()
 }
 
-func (s *receiptOutcomeStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+func (s *receiptOutcomeStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	if s.committed.Load() {
 		s.postCommitRenewals.Add(1)
 	}

@@ -333,7 +333,7 @@ func (s *concurrentInboundStore) CommitInboundPublication(ctx context.Context, c
 			return runtimeinbound.CommitResult{}, err
 		}
 		record.Created = false
-		return runtimeinbound.CommitResult{Record: record}, nil
+		return runtimeinbound.CommitResult{Record: record, Acknowledged: true}, nil
 	}
 	if s.inFlight {
 		committed := s.committed
@@ -355,7 +355,7 @@ func (s *concurrentInboundStore) CommitInboundPublication(ctx context.Context, c
 			return runtimeinbound.CommitResult{}, err
 		}
 		record.Created = false
-		return runtimeinbound.CommitResult{Record: record}, nil
+		return runtimeinbound.CommitResult{Record: record, Acknowledged: true}, nil
 	}
 	s.inFlight = true
 	close(s.firstRunEntered)
@@ -416,6 +416,9 @@ func (s *recordingInboundStore) ResolveInboundTarget(context.Context, string, st
 	if target.RunID == "" {
 		target.RunID = defaults.RunID
 	}
+	if target.Generation == 0 {
+		target.Generation = defaults.Generation
+	}
 	if target.PublicationSequence == 0 {
 		target.PublicationSequence = defaults.PublicationSequence
 	}
@@ -439,7 +442,7 @@ func runTestInboundPublication(command runtimeinbound.CommitCommand, inserted bo
 	if !inserted {
 		request.AcknowledgementMode = runtimeinbound.AcknowledgementDurableBeforeDispatch
 		eventID, _ := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
-		return runtimeinbound.CommitResult{Record: runtimeinbound.Record{
+		return runtimeinbound.CommitResult{Acknowledged: true, Record: runtimeinbound.Record{
 			Request: request, State: "committed", OutputCount: 1,
 			Events: []runtimeinbound.EventRecord{{Ordinal: 0, EventID: eventID, EventName: "inbound." + request.Provider}},
 		}}, nil
@@ -469,6 +472,7 @@ func runTestInboundPublication(command runtimeinbound.CommitCommand, inserted bo
 		committed[index] = runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}
 	}
 	return runtimeinbound.CommitResult{
+		Acknowledged: true,
 		Record:       runtimeinbound.Record{Request: request, State: "committed", OutputCount: len(eventRecords), Events: eventRecords, Created: true},
 		Publications: committed,
 	}, nil
@@ -812,7 +816,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
 		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
-		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", PublicationSequence: 1,
+		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
 		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
 		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
@@ -866,7 +870,7 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
 	target := InboundTarget{
 		ServiceID: "9f733ec3-f834-47ff-bd55-3ea9038187ef", FlowPath: "ingress",
-		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", PublicationSequence: 1,
+		RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687", Generation: 1, PublicationSequence: 1,
 		InstanceID: "instance-1", FlowInstance: "ingress/instance-1",
 		EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a",
 		Alias: "chat", Provider: "telegram", AdmissionPlan: firstPlan,
@@ -886,6 +890,7 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 
 	contenderTarget := target
 	contenderTarget.AdmissionPlan = projectionFailingPlan
+	contenderTarget.PublicationSequence = target.PublicationSequence + 1
 	contender := httptest.NewRecorder()
 	contenderDone := make(chan struct{})
 	contenderStarted := make(chan struct{})

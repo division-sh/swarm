@@ -44,10 +44,10 @@ type receiverSettlementFaultStore struct {
 	failSettlement bool
 }
 
-func (s *receiverSettlementFaultStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+func (s *receiverSettlementFaultStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	s.claim.Store(&claim)
 	if s.renewCalls.Add(1) == s.failRenewAt {
-		return runtimedelivery.Snapshot{}, errors.New("injected claim renewal failure")
+		return runtimedelivery.ClaimCommit{}, errors.New("injected claim renewal failure")
 	}
 	return s.Store.RenewClaim(ctx, claim)
 }

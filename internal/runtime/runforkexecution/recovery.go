@@ -32,9 +32,11 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 	if err != nil {
 		return nil, err
 	}
+	admissionFailed := true
 	defer func() {
-		finalErr = errors.Join(finalErr, lease.Done())
-		if finalErr != nil {
+		leaseErr := lease.Done()
+		finalErr = errors.Join(finalErr, leaseErr)
+		if admissionFailed || leaseErr != nil {
 			contexts.retired = true
 		}
 	}()
@@ -51,30 +53,50 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 		return nil, err
 	}
 	results := make([]runfork.SelectedForkRecoveryResult, 0, len(entries))
+	var diagnostics error
 	for _, entry := range entries {
 		availability, err := ports.fork.LoadRunBundleAvailability(ctx, entry.Binding.ForkRunID)
 		if err != nil {
-			return results, err
+			return results, errors.Join(diagnostics, err)
 		}
 		if availability.DataIntegrityError() || availability.BundleHash != entry.BundleHash {
-			return results, fmt.Errorf("selected recovery source integrity: %s", availability.DetailString())
+			return results, errors.Join(diagnostics, fmt.Errorf("selected recovery source integrity: %s", availability.DetailString()))
 		}
 		fact, err := correlation.NewSourceArtifactFact(entry.BundleHash)
 		if err != nil {
-			return results, err
+			return results, errors.Join(diagnostics, err)
 		}
 		runCtx := authoractivity.WithScope(correlation.WithSourceArtifactFact(ctx, fact), authoractivity.BundleScope(process.RuntimeInstanceID, entry.BundleHash))
 		result, err := ports.fork.RecoverSelectedFork(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process, Effects: req})
-		if result.RunID != "" {
-			results = append(results, result)
+		if result.RunID != entry.Binding.ForkRunID || !selectedRecoveryDispositionValid(result.Disposition) {
+			return results, errors.Join(diagnostics, err, fmt.Errorf("recover selected fork %s: missing or mismatched acknowledged result", entry.Binding.ForkRunID))
+		}
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return results, errors.Join(diagnostics, err, ctx.Err())
+		}
+		results = append(results, result)
+		if result.Disposition == runfork.SelectedForkRecoveryCurrent {
+			return results, errors.Join(diagnostics, err, fmt.Errorf("selected startup encountered unregistered current-process execution"))
 		}
 		if err != nil {
-			return results, fmt.Errorf("recover selected fork %s: %w", entry.Binding.ForkRunID, err)
-		}
-		if result.Disposition == runfork.SelectedForkRecoveryCurrent {
-			return results, fmt.Errorf("selected startup encountered unregistered current-process execution")
+			diagnostics = errors.Join(diagnostics, fmt.Errorf("recover selected fork %s: %w", entry.Binding.ForkRunID, err))
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return results, errors.Join(diagnostics, err)
+	}
 	contexts.recovered = true
-	return results, nil
+	admissionFailed = false
+	return results, diagnostics
+}
+
+func selectedRecoveryDispositionValid(disposition runfork.SelectedForkRecoveryDisposition) bool {
+	switch disposition {
+	case runfork.SelectedForkRecoveryTerminal, runfork.SelectedForkRecoveryStaged,
+		runfork.SelectedForkRecoveryControlOnly, runfork.SelectedForkRecoveryCurrent,
+		runfork.SelectedForkRecoveryFailed:
+		return true
+	default:
+		return false
+	}
 }

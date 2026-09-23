@@ -113,8 +113,8 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("bind agent session: %v", err)
 				}
-				if bound.ActiveSessionID != sessionID {
-					t.Fatalf("bound session = %q, want %q", bound.ActiveSessionID, sessionID)
+				if !bound.Acknowledged || bound.Snapshot.ActiveSessionID != sessionID {
+					t.Fatalf("bound session = %#v, want acknowledged session %q", bound, sessionID)
 				}
 				settled, err := backend.store.SettleSuccess(ctx, claimed.Claim, []string{"message.sent"}, 25*time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 				if err != nil {
@@ -819,10 +819,14 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("claim delivery: %v", err)
 				}
 				agedAt := ageDeliveryClaimForConformance(t, ctx, backend, claimed.Snapshot.DeliveryID)
-				renewed, err := backend.store.RenewClaim(ctx, claimed.Claim)
+				renewal, err := backend.store.RenewClaim(ctx, claimed.Claim)
 				if err != nil {
 					t.Fatalf("renew claim: %v", err)
 				}
+				if !renewal.Acknowledged {
+					t.Fatal("renew claim returned no acknowledged commit")
+				}
+				renewed := renewal.Snapshot
 				if renewed.ClaimVersion != claimed.Claim.Version() || renewed.Status != runtimedelivery.StatusInProgress || renewed.ClaimExpiresAt.Before(claimed.Snapshot.ClaimExpiresAt) || !renewed.UpdatedAt.After(agedAt) {
 					t.Fatalf("renewed claim = %#v, original = %#v", renewed, claimed.Snapshot)
 				}

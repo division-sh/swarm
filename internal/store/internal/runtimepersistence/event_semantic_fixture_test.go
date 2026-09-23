@@ -16,11 +16,13 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -554,34 +556,14 @@ func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return err
 	}
-	var insertedID string
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO events (
-			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
-			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key,
-			payload_schema_digest, payload_schema_class,
-			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
-			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			route_settlement, operator_reference_event_id, inherited_fan_out_origin
-		) VALUES (
-			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb, $10::bytea,
-			$11, NULLIF($12,''), $13, $14, $15,
-			$16, $17, $18, $19, NULLIF($20,'')::uuid, $21,
-			$22, NULLIF($23,''), $24::jsonb, $25::jsonb, $26::jsonb,
-			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb
-		) ON CONFLICT (event_id) DO NOTHING RETURNING event_id::text
-	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
-		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
-		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID, record.PayloadSchemaEventKey,
-		record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
-		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt,
-		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID,
-		string(record.InheritedFanOutOrigin)).Scan(&insertedID)
-	if errors.Is(err, sql.ErrNoRows) {
+	inserted, err := eventfixture.InsertUnrevisioned(ctx, tx, authoractivityfixture.DialectPostgres, record)
+	if err != nil {
+		return err
+	}
+	if !inserted {
 		return fmt.Errorf("canonical event record fixture %s was not inserted", record.EventID)
 	}
-	return err
+	return nil
 }
 
 func seedPostgresSemanticEventRecordFixtureTx(
@@ -620,7 +602,17 @@ func insertPostgresSemanticEventRecordFixture(
 	createdAt time.Time,
 ) (events.Event, error) {
 	event := semanticEventRecordFixture(eventID, runID, eventType, producer, payload, envelope, createdAt)
-	return event, insertPostgresCanonicalEventRecordFixture(ctx, db, event)
+	// Historical fixtures stage event and mutation rows before explicitly
+	// capturing one revision for their shared fork point.
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return event, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
+		return event, err
+	}
+	return event, tx.Commit()
 }
 
 func seedPostgresSemanticEventRecordFixture(

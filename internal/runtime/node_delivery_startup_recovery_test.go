@@ -764,7 +764,7 @@ func startupRecoverySourceArtifact(t *testing.T, name string) *sourceartifact.Ad
 	return artifact
 }
 
-func (s *renewalTrackingDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+func (s *renewalTrackingDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	s.renewals.Add(1)
 	return s.Store.RenewClaim(ctx, claim)
 }

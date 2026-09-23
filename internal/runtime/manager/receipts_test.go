@@ -852,12 +852,10 @@ func (s *shortLeaseManagerDeliveryStore) ClaimDelivery(
 	return result, err
 }
 
-func (s *shortLeaseManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		snapshot, err = s.adapter.RenewClaim(ctx, attempt, claim, s.leaseTTL)
-		return err
+func (s *shortLeaseManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
+	return s.mutateClaim(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) (runtimedelivery.Snapshot, error) {
+		return s.adapter.RenewClaim(ctx, attempt, claim, s.leaseTTL)
 	})
-	return snapshot, err
 }
 
 type blockingOutputBus struct {
@@ -997,7 +995,7 @@ func (a *serializingAgent) OnEvent(ctx context.Context, evt events.Event) ([]eve
 	return nil, nil
 }
 
-func (s *renewalTrackingManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+func (s *renewalTrackingManagerDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	s.renewals.Add(1)
 	return s.Store.RenewClaim(ctx, claim)
 }

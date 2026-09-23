@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,12 @@ func TestSelectedForkControlCommittedOutcomesBothStores(t *testing.T) {
 	}
 }
 
+func TestSelectedForkRecoveryMissingOrHostileResultFailsClosedBothStores(t *testing.T) {
+	for _, operation := range []string{"recovery_unacknowledged", "recovery_hostile", "recovery_canceled"} {
+		t.Run(operation, func(t *testing.T) { testSelectedForkControlLifetime(t, operation) })
+	}
+}
+
 type selectedControlOutcomeStore struct {
 	SelectedContractForkLifecycle
 	operation string
@@ -46,9 +53,20 @@ func (s selectedControlOutcomeStore) StopSelectedFork(ctx context.Context, req r
 }
 
 func (s selectedControlOutcomeStore) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
+	if s.operation == "recovery_unacknowledged" {
+		return runfork.SelectedForkRecoveryResult{}, s.cause
+	}
 	result, err := s.SelectedContractForkLifecycle.RecoverSelectedFork(ctx, req)
-	if err == nil && s.operation == "recovery" {
-		err = s.cause
+	if err == nil {
+		switch s.operation {
+		case "recovery":
+			err = s.cause
+		case "recovery_hostile":
+			result.RunID = uuid.NewString()
+			err = s.cause
+		case "recovery_canceled":
+			err = errors.Join(s.cause, context.Canceled)
+		}
 	}
 	return result, err
 }
@@ -58,7 +76,7 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 	phases := []string{"executing", "executing_retirement", "retained", "reconstructed"}
 	if outcomeOperation == "stop" {
 		phases = []string{"retained", "reconstructed"}
-	} else if outcomeOperation == "recovery" {
+	} else if strings.HasPrefix(outcomeOperation, "recovery") {
 		phases = []string{"reconstructed"}
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -129,11 +147,25 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkRun).Scan(&beforeExecutions); err != nil {
 							t.Fatal(err)
 						}
-						if outcomeOperation == "recovery" {
+						if strings.HasPrefix(outcomeOperation, "recovery") {
 							owner.ports.fork = selectedControlOutcomeStore{SelectedContractForkLifecycle: owner.ports.fork, operation: outcomeOperation, cause: outcomeErr}
 						}
 						recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
-						if (outcomeOperation != "recovery" && err != nil) || (outcomeOperation == "recovery" && !errors.Is(err, outcomeErr)) || len(recovered) != 1 || recovered[0].RunID != forkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
+						if strings.HasPrefix(outcomeOperation, "recovery") {
+							if !errors.Is(err, outcomeErr) {
+								t.Fatalf("recovery lost cleanup or refusal diagnostic: %+v %v", recovered, err)
+							}
+							if outcomeOperation == "recovery_canceled" && !errors.Is(err, context.Canceled) {
+								t.Fatalf("recovery lost independent cancellation: %v", err)
+							}
+						} else if err != nil {
+							t.Fatalf("control reconstruction = %+v %v", recovered, err)
+						}
+						if outcomeOperation == "recovery_unacknowledged" || outcomeOperation == "recovery_hostile" || outcomeOperation == "recovery_canceled" {
+							if len(recovered) != 0 {
+								t.Fatalf("unacknowledged or hostile recovery exposed result: %+v", recovered)
+							}
+						} else if len(recovered) != 1 || recovered[0].RunID != forkRun || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
 							t.Fatalf("control reconstruction = %+v %v", recovered, err)
 						}
 						var afterEvents, afterExecutions int
@@ -146,12 +178,16 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						if afterEvents != beforeEvents || afterExecutions != beforeExecutions {
 							t.Fatal("control reconstruction executed selected work")
 						}
-						if outcomeOperation == "recovery" {
+						if strings.HasPrefix(outcomeOperation, "recovery") {
 							owner.ports.contexts.mu.Lock()
 							retired, admitted := owner.ports.contexts.retired, owner.ports.contexts.recovered
 							owner.ports.contexts.mu.Unlock()
-							if !retired || admitted {
-								t.Fatal("failed recovery admitted executable work")
+							if outcomeOperation == "recovery" {
+								if retired || !admitted {
+									t.Fatal("acknowledged recovery cleanup error withheld committed admission")
+								}
+							} else if !retired || admitted {
+								t.Fatal("missing, hostile, or canceled recovery admitted executable work")
 							}
 							if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 								t.Fatal(err)

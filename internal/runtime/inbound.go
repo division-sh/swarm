@@ -23,6 +23,7 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
@@ -464,8 +465,15 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			Request: publicationRequest, Finalization: runtimeinbound.Finalization{EvidenceEvent: evidence},
 			OperatorChannelClaim: operatorClaim,
 		})
-		if err != nil && !commitResult.Acknowledged {
+		if !commitResult.Acknowledged {
+			if err == nil {
+				err = errors.New("inbound operator claim commit acknowledgement missing")
+			}
 			writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, err)
+			return
+		}
+		if recordErr := validateInboundCommittedResultRecord(publicationRequest, commitResult.Record); recordErr != nil {
+			writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, errors.Join(err, recordErr))
 			return
 		}
 		status := "accepted"
@@ -478,8 +486,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			response["operator_channel_operation_id"] = commitResult.OperatorChannelClaim.Operation.OperationID
 		}
 		if err != nil {
-			writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, err)
-			return
+			reportInboundCommittedCleanup(g.logger, requestCtx, provider, entityID, providerEventID, err)
 		}
 		writeJSON(w, http.StatusAccepted, response)
 		return
@@ -516,16 +523,23 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	})
 	commitErr := err
 	record := commitResult.Record
-	if commitErr != nil && !commitResult.Acknowledged {
+	if !commitResult.Acknowledged {
+		if err == nil {
+			err = errors.New("inbound publication commit acknowledgement missing")
+		}
 		err = errors.Join(err, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
+		writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, err)
+		return
+	}
+	if recordErr := validateInboundCommittedResultRecord(publicationRequest, record); recordErr != nil {
+		err = errors.Join(commitErr, recordErr, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
 		writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, err)
 		return
 	}
 	if !record.Created {
 		commitErr = errors.Join(commitErr, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
 		if commitErr != nil {
-			writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, commitErr)
-			return
+			reportInboundCommittedCleanup(g.logger, requestCtx, provider, entityID, providerEventID, commitErr)
 		}
 		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", record, admitted.ProviderEventType, entityID, entitySlug))
 		return
@@ -590,8 +604,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if commitErr != nil {
-		writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, commitErr)
-		return
+		reportInboundCommittedCleanup(g.logger, requestCtx, provider, entityID, providerEventID, commitErr)
 	}
 	writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType, entityID, entitySlug))
 }
@@ -717,6 +730,33 @@ func writeInboundCommitError(w http.ResponseWriter, logger *RuntimeLogger, reque
 		}
 	}
 	http.Error(w, message, status)
+}
+
+func validateInboundCommittedResultRecord(request runtimeinbound.Request, record runtimeinbound.Record) error {
+	want, got := request.Normalized(), record.Request.Normalized()
+	if record.State != "committed" || got.PublicationID != want.PublicationID || got.MarkerEventID != want.MarkerEventID ||
+		got.Provider != want.Provider || got.EntityID != want.EntityID || got.ProviderEventID != want.ProviderEventID ||
+		got.RequestFingerprint != want.RequestFingerprint || got.RequestProjectionVersion != want.RequestProjectionVersion {
+		return errors.New("acknowledged inbound publication does not match the committed request")
+	}
+	if !record.Created {
+		return nil // The store's canonical retry rule admits the original committed record without redispatch.
+	}
+	if got.ResolvedRunID != want.ResolvedRunID || got.ExpectedPublicationSequence != want.ExpectedPublicationSequence ||
+		got.AcknowledgementMode != want.AcknowledgementMode {
+		return errors.New("acknowledged inbound publication changed committed execution authority")
+	}
+	return nil
+}
+
+func reportInboundCommittedCleanup(logger *RuntimeLogger, requestCtx context.Context, provider, entityID, providerEventID string, err error) {
+	diaglog.ProcessLog(diaglog.LevelWarn, "inbound-gateway", "committed inbound publication cleanup failed",
+		"provider", provider, "entity_id", entityID, "provider_event_id", providerEventID, "error", err.Error())
+	if logger != nil {
+		handleRuntimeLogPersistenceError("inbound-gateway", "publish_post_commit_cleanup_failed", logger.Error(requestCtx, "inbound-gateway", "publish_post_commit_cleanup_failed", map[string]any{
+			"provider": provider, "entity_id": entityID, "provider_event_id": providerEventID,
+		}, err))
+	}
 }
 
 func inboundPublicationResponse(status string, record runtimeinbound.Record, providerEventType, entityID, entitySlug string) map[string]any {
