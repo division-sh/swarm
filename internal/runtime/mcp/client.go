@@ -354,7 +354,7 @@ func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cf
 	if err != nil {
 		return RPCResponse{}, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
+	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return RPCResponse{}, err
 	}
 	resp, err := c.httpClient.Do(httpReq)
@@ -474,7 +474,7 @@ func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequ
 	if err != nil {
 		return RPCResponse{}, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
+	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return RPCResponse{}, err
 	}
 	if _, err := c.stdin.Write(raw); err != nil {

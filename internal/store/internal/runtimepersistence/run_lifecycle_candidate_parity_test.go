@@ -13,7 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -851,23 +851,19 @@ func completeRunLifecycleCandidateParity(
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	var snapshot runtimerunlifecycle.Snapshot
 	var disposition runtimerunlifecycle.MutationDisposition
-	var inner error
-	switch store := fixture.store.(type) {
-	case *PostgresStore:
-		err := store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			snapshot, disposition, inner = store.runLifecyclePostgresOwner.CompleteRunTx(txctx, tx, story, privaterunforkrevision.NewEffects(), runID, endedAt)
-			return inner
-		})
-		return snapshot, disposition, err
-	case *SQLiteRuntimeStore:
-		err := store.runPrivateAuthorActivityMutation(ctx, "test successful completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			snapshot, disposition, inner = store.runLifecycleSQLiteOwner.CompleteRunTx(txctx, tx, story, privaterunforkrevision.NewEffects(), runID, endedAt)
-			return inner
-		})
-		return snapshot, disposition, err
-	default:
-		return snapshot, disposition, errors.New("unsupported run lifecycle candidate parity store")
-	}
+	err := runSelectedFixtureMutation(ctx, fixture.store, "test successful completion", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var inner error
+		switch store := fixture.store.(type) {
+		case *PostgresStore:
+			snapshot, disposition, inner = store.runLifecyclePostgresOwner.CompleteRunTx(txctx, attempt, runID, endedAt)
+		case *SQLiteRuntimeStore:
+			snapshot, disposition, inner = store.runLifecycleSQLiteOwner.CompleteRunTx(txctx, attempt, runID, endedAt)
+		default:
+			inner = errors.New("unsupported run lifecycle candidate parity store")
+		}
+		return inner
+	})
+	return snapshot, disposition, err
 }
 
 func runLifecycleCandidateRollback(
@@ -878,24 +874,21 @@ func runLifecycleCandidateRollback(
 	endedAt time.Time,
 	injected error,
 ) error {
-	switch store := fixture.store.(type) {
-	case *PostgresStore:
-		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			if _, _, err := store.runLifecyclePostgresOwner.MarkRunTerminalStateTx(txctx, tx, story, privaterunforkrevision.NewEffects(), terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
-				return err
-			}
-			return injected
-		})
-	case *SQLiteRuntimeStore:
-		return store.runPrivateAuthorActivityMutation(ctx, "test terminal lifecycle rollback", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			if _, _, err := store.runLifecycleSQLiteOwner.MarkRunTerminalStateTx(txctx, tx, story, privaterunforkrevision.NewEffects(), terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
-				return err
-			}
-			return injected
-		})
-	default:
-		return errors.New("unsupported run lifecycle candidate parity store")
-	}
+	return runSelectedFixtureMutation(ctx, fixture.store, "test terminal lifecycle rollback", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		switch store := fixture.store.(type) {
+		case *PostgresStore:
+			_, _, err = store.runLifecyclePostgresOwner.MarkRunTerminalStateTx(txctx, attempt, terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt})
+		case *SQLiteRuntimeStore:
+			_, _, err = store.runLifecycleSQLiteOwner.MarkRunTerminalStateTx(txctx, attempt, terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt})
+		default:
+			return errors.New("unsupported run lifecycle candidate parity store")
+		}
+		if err != nil {
+			return err
+		}
+		return injected
+	})
 }
 
 func loadRunLifecycleCandidateFacts(

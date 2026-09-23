@@ -10,6 +10,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type Dialect string
@@ -23,8 +24,10 @@ type stateKey struct{}
 
 type state struct {
 	tx        *sql.Tx
-	mutation  *privateauthoractivity.Mutation
+	mutation  runtimeauthoractivity.Mutation
+	raw       *privateauthoractivity.Mutation
 	finalized bool
+	managed   bool
 }
 
 func Begin(ctx context.Context, tx *sql.Tx, dialect Dialect) (context.Context, error) {
@@ -33,7 +36,24 @@ func Begin(ctx context.Context, tx *sql.Tx, dialect Dialect) (context.Context, e
 	if err != nil {
 		return nil, err
 	}
-	return context.WithValue(ctx, stateKey{}, &state{tx: tx, mutation: mutation}), nil
+	return context.WithValue(ctx, stateKey{}, &state{tx: tx, mutation: mutation, raw: mutation}), nil
+}
+
+// WithAttempt registers protocol-owned activity for legacy test fixture
+// delegates. The protocol, not this context adapter, finalizes the mutation.
+func WithAttempt(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx) (context.Context, error) {
+	if ctx == nil || attempt == nil || tx == nil {
+		return nil, fmt.Errorf("test author activity attempt and transaction are required")
+	}
+	if err := attempt.WithSQL(ctx, func(_ context.Context, native *sql.Tx) error {
+		if native != tx {
+			return fmt.Errorf("test author activity transaction does not belong to its mutation attempt")
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return context.WithValue(ctx, stateKey{}, &state{tx: tx, mutation: attempt, managed: true}), nil
 }
 
 func Finalize(ctx context.Context) error {
@@ -41,8 +61,11 @@ func Finalize(ctx context.Context) error {
 	if !ok || current.finalized {
 		return fmt.Errorf("test author activity mutation is not active")
 	}
+	if current.managed {
+		return fmt.Errorf("protocol-owned test author activity must be finalized by its mutation runner")
+	}
 	current.finalized = true
-	return current.mutation.Finalize(ctx)
+	return current.raw.Finalize(ctx)
 }
 
 func Record(ctx context.Context, draft runtimeauthoractivity.Draft) error {

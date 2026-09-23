@@ -9,26 +9,17 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
-
-type completionCandidateOwner interface {
-	RequestCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time, *storerunhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error)
-}
-
-type revisionEffects = privaterunforkrevision.Effects
 
 type schemaQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
@@ -37,22 +28,23 @@ type schemaQueryer interface {
 
 type providerDrainDeliveryOwner interface {
 	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
-	RenewProviderOriginTx(context.Context, *sql.Tx, *revisionEffects, runtimedelivery.Claim, time.Duration) error
-	SettleProviderOriginSuccessTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, []string, time.Duration) error
-	SettleProviderOriginFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, runtimedelivery.Settlement) error
-	SettleProviderOriginRecoveryFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, runtimedelivery.Settlement) error
+	RenewProviderOriginTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, time.Duration) error
+	SettleProviderOriginSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration) error
+	SettleProviderOriginFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
+	SettleProviderOriginRecoveryFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 }
 
 type providerDrainDirectiveOwner interface {
 	ValidateProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) error
-	RenewProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, time.Time, time.Duration) error
-	SettleProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error
+	RenewProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, time.Time, time.Duration) error
+	SettleProviderDirectiveOriginTx(context.Context, *mutationprotocol.Attempt, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error
 }
 
 type EffectPostgresOwner struct {
 	backend        *postgresbackend.Backend
 	requireCurrent func() error
-	lifecycle      completionCandidateOwner
+	lifecycle      mutationprotocol.CandidateWriter
+	candidates     *storerunhandoff.CandidateCoordinator
 	llm            *storellm.LLMPostgresOwner
 	delivery       providerDrainDeliveryOwner
 	directives     providerDrainDirectiveOwner
@@ -61,7 +53,8 @@ type EffectPostgresOwner struct {
 type EffectSQLiteOwner struct {
 	backend        *sqlitebackend.Backend
 	requireCurrent func() error
-	lifecycle      completionCandidateOwner
+	lifecycle      mutationprotocol.CandidateWriter
+	candidates     *storerunhandoff.CandidateCoordinator
 	llm            *storellm.LLMSQLiteOwner
 	delivery       providerDrainDeliveryOwner
 	directives     providerDrainDirectiveOwner
@@ -105,100 +98,18 @@ func (s *EffectSQLiteOwner) BindProviderDrainDelivery(owner providerDrainDeliver
 	return nil
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, lifecycle completionCandidateOwner, llm *storellm.LLMPostgresOwner) (*EffectPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || llm == nil {
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, lifecycle mutationprotocol.CandidateWriter, candidates *storerunhandoff.CandidateCoordinator, llm *storellm.LLMPostgresOwner) (*EffectPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || llm == nil {
 		return nil, errors.New("external-effect PostgreSQL owner dependencies are required")
 	}
-	return &EffectPostgresOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, llm: llm}, nil
+	return &EffectPostgresOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, candidates: candidates, llm: llm}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, lifecycle completionCandidateOwner, llm *storellm.LLMSQLiteOwner) (*EffectSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || llm == nil {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, lifecycle mutationprotocol.CandidateWriter, candidates *storerunhandoff.CandidateCoordinator, llm *storellm.LLMSQLiteOwner) (*EffectSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || candidates == nil || llm == nil {
 		return nil, errors.New("external-effect SQLite owner dependencies are required")
 	}
-	return &EffectSQLiteOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, llm: llm}, nil
-}
-
-func (s *EffectPostgresOwner) runRuntimeMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) error {
-	_, err := s.runRuntimeMutationOutcome(ctx, operation)
-	return err
-}
-
-func (s *EffectPostgresOwner) runRuntimeMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) (bool, error) {
-	if err := s.requireCurrent(); err != nil {
-		return false, err
-	}
-	effects := privaterunforkrevision.NewEffects()
-	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := operation(txctx, tx, effects); err != nil {
-			return err
-		}
-		_, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
-		return err
-	})
-}
-
-func (s *EffectSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) error {
-	_, err := s.runRuntimeMutationOutcome(ctx, label, operation)
-	return err
-}
-
-func (s *EffectSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) (bool, error) {
-	if err := s.requireCurrent(); err != nil {
-		return false, err
-	}
-	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		effects := privaterunforkrevision.NewEffects()
-		if err := operation(txctx, tx, effects); err != nil {
-			return err
-		}
-		_, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects)
-		return err
-	})
-}
-
-func (s *EffectPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, operation)
-	return err
-}
-
-func (s *EffectPostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) (bool, error) {
-	return s.runRuntimeMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
-func (s *EffectSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, operation)
-	return err
-}
-
-func (s *EffectSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) (bool, error) {
-	return s.runRuntimeMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
-func (s *EffectPostgresOwner) requestCompletionCandidate(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, handoff *storerunhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return s.lifecycle.RequestCompletionCandidateTx(ctx, tx, runID, dueAt, handoff)
-}
-
-func (s *EffectSQLiteOwner) requestCompletionCandidate(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, handoff *storerunhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return s.lifecycle.RequestCompletionCandidateTx(ctx, tx, runID, dueAt, handoff)
+	return &EffectSQLiteOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, candidates: candidates, llm: llm}, nil
 }
 
 const runLifecycleActiveStateSQLValues = storerunstate.ActiveStateSQLValues
@@ -206,8 +117,6 @@ const sqliteCurrentLeaseSQL = "datetime(substr(replace(CAST(lease_expires_at AS 
 const conversationForkChatExecutionLease = 2 * time.Minute
 
 var agentIdentityFields = storeagent.IdentityFields
-
-type runLifecycleCandidateHandoffReservation = storerunhandoff.CandidateHandoff
 
 func nullUUIDString(raw string) any {
 	raw = strings.TrimSpace(raw)

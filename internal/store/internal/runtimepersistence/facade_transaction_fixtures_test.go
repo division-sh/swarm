@@ -6,25 +6,22 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-// These forwarding methods expose raw transaction hooks only to same-package
-// atomicity fixtures. They are absent from every production method set.
-func (s *PostgresStore) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
-	return s.eventPostgresOwner.AppendAdmittedEventTxOutcome(ctx, tx, story, privaterunforkrevision.NewEffects(), admitted, settlement)
+// These forwarding methods are confined to same-package atomicity fixtures.
+func (s *PostgresStore) AppendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.eventPostgresOwner.AppendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 }
 
-func (s *SQLiteRuntimeStore) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
-	return s.eventSQLiteOwner.AppendAdmittedEventTxOutcome(ctx, tx, story, privaterunforkrevision.NewEffects(), admitted, settlement)
+func (s *SQLiteRuntimeStore) AppendAdmittedEventTxOutcome(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.eventSQLiteOwner.AppendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 }
 
 func (s *PostgresStore) RequirePipelinePublicationClaimTx(ctx context.Context, tx *sql.Tx, eventID string, claim runtimepipelineobligation.Claim) error {
@@ -35,52 +32,52 @@ func (s *SQLiteRuntimeStore) RequirePipelinePublicationClaimTx(ctx context.Conte
 	return s.pipelineSQLiteOwner.RequirePipelinePublicationClaimTx(ctx, tx, eventID, claim)
 }
 
-func (s *PostgresStore) CommitInitialDeliveryObligationsTx(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error) {
-	return s.deliveryPostgresOwner.CommitInitialDeliveryObligationsTx(ctx, tx, privaterunforkrevision.NewEffects(), eventID, runID, routes, authority)
+func (s *PostgresStore) CommitInitialDeliveryObligationsTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID, runID string, routes []events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error) {
+	return s.deliveryPostgresOwner.CommitInitialDeliveryObligationsTx(ctx, attempt, eventID, runID, routes, authority)
 }
 
-func (s *SQLiteRuntimeStore) CommitInitialDeliveryObligationsTx(ctx context.Context, tx *sql.Tx, eventID, runID string, routes []events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error) {
-	return s.deliverySQLiteOwner.CommitInitialDeliveryObligationsTx(ctx, tx, privaterunforkrevision.NewEffects(), eventID, runID, routes, authority)
+func (s *SQLiteRuntimeStore) CommitInitialDeliveryObligationsTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID, runID string, routes []events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error) {
+	return s.deliverySQLiteOwner.CommitInitialDeliveryObligationsTx(ctx, attempt, eventID, runID, routes, authority)
 }
 
-func (s *PostgresStore) CommitInitialPipelineScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimepipelineobligation.CommittedScope) error {
-	return s.pipelinePostgresOwner.CommitInitialPipelineScopeTx(ctx, tx, privaterunforkrevision.NewEffects(), eventID, scope)
+func (s *PostgresStore) CommitInitialPipelineScopeTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string, scope runtimepipelineobligation.CommittedScope) error {
+	return s.pipelinePostgresOwner.CommitInitialPipelineScopeTx(ctx, attempt, eventID, scope)
 }
 
-func (s *SQLiteRuntimeStore) CommitInitialPipelineScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimepipelineobligation.CommittedScope) error {
-	return s.pipelineSQLiteOwner.CommitInitialPipelineScopeTx(ctx, tx, privaterunforkrevision.NewEffects(), eventID, scope)
+func (s *SQLiteRuntimeStore) CommitInitialPipelineScopeTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string, scope runtimepipelineobligation.CommittedScope) error {
+	return s.pipelineSQLiteOwner.CommitInitialPipelineScopeTx(ctx, attempt, eventID, scope)
 }
 
-func (s *PostgresStore) CommitInitialPipelineDispositionTx(ctx context.Context, tx *sql.Tx, eventID string, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
-	return s.pipelinePostgresOwner.CommitInitialPipelineDispositionTx(ctx, tx, privaterunforkrevision.NewEffects(), eventID, claim, disposition)
+func (s *PostgresStore) CommitInitialPipelineDispositionTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+	return s.pipelinePostgresOwner.CommitInitialPipelineDispositionTx(ctx, attempt, eventID, claim, disposition)
 }
 
-func (s *SQLiteRuntimeStore) CommitInitialPipelineDispositionTx(ctx context.Context, tx *sql.Tx, eventID string, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
-	return s.pipelineSQLiteOwner.CommitInitialPipelineDispositionTx(ctx, tx, privaterunforkrevision.NewEffects(), eventID, claim, disposition)
+func (s *SQLiteRuntimeStore) CommitInitialPipelineDispositionTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) error {
+	return s.pipelineSQLiteOwner.CommitInitialPipelineDispositionTx(ctx, attempt, eventID, claim, disposition)
 }
 
-func (s *PostgresStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, record runtimedeadletters.Record, requireActive bool) error {
-	return s.deliveryPostgresOwner.RecordDeadLetterTx(ctx, tx, story, privaterunforkrevision.NewEffects(), record, requireActive)
+func (s *PostgresStore) RecordDeadLetterTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimedeadletters.Record, requireActive bool) error {
+	return s.deliveryPostgresOwner.RecordDeadLetterTx(ctx, attempt, record, requireActive)
 }
 
-func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, record runtimedeadletters.Record, requireActive bool) error {
-	return s.deliverySQLiteOwner.RecordDeadLetterTx(ctx, tx, story, privaterunforkrevision.NewEffects(), record, requireActive)
+func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimedeadletters.Record, requireActive bool) error {
+	return s.deliverySQLiteOwner.RecordDeadLetterTx(ctx, attempt, record, requireActive)
 }
 
-func (s *PostgresStore) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
-	return s.replyPostgresOwner.CreateWithinTransaction(ctx, tx, privaterunforkrevision.NewEffects(), record)
+func (s *PostgresStore) CreateWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.replyPostgresOwner.CreateWithinTransaction(ctx, attempt, record)
 }
 
-func (s *SQLiteRuntimeStore) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
-	return s.replySQLiteOwner.CreateWithinTransaction(ctx, tx, privaterunforkrevision.NewEffects(), record)
+func (s *SQLiteRuntimeStore) CreateWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.replySQLiteOwner.CreateWithinTransaction(ctx, attempt, record)
 }
 
-func (s *PostgresStore) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
-	return s.replyPostgresOwner.ClaimWithinTransaction(ctx, tx, privaterunforkrevision.NewEffects(), command)
+func (s *PostgresStore) ClaimWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
+	return s.replyPostgresOwner.ClaimWithinTransaction(ctx, attempt, command)
 }
 
-func (s *SQLiteRuntimeStore) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
-	return s.replySQLiteOwner.ClaimWithinTransaction(ctx, tx, privaterunforkrevision.NewEffects(), command)
+func (s *SQLiteRuntimeStore) ClaimWithinTransaction(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
+	return s.replySQLiteOwner.ClaimWithinTransaction(ctx, attempt, command)
 }
 
 func (s *PostgresStore) PrepareDynamicFlowCreationOccurrenceCommitTx(ctx context.Context, tx *sql.Tx, request runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) (bool, error) {
@@ -91,12 +88,12 @@ func (s *SQLiteRuntimeStore) PrepareDynamicFlowCreationOccurrenceCommitTx(ctx co
 	return s.pipelineSQLiteOwner.PrepareDynamicFlowCreationOccurrenceCommitTx(ctx, tx, request)
 }
 
-func (s *PostgresStore) CommitFlowInstanceActivationsTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return s.pipelinePostgresOwner.CommitFlowInstanceActivationsTx(ctx, tx, story, privaterunforkrevision.NewEffects(), plans)
+func (s *PostgresStore) CommitFlowInstanceActivationsTx(ctx context.Context, attempt *mutationprotocol.Attempt, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return s.pipelinePostgresOwner.CommitFlowInstanceActivationsTx(ctx, attempt, plans)
 }
 
-func (s *SQLiteRuntimeStore) CommitFlowInstanceActivationsTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return s.pipelineSQLiteOwner.CommitFlowInstanceActivationsTx(ctx, tx, story, privaterunforkrevision.NewEffects(), plans)
+func (s *SQLiteRuntimeStore) CommitFlowInstanceActivationsTx(ctx context.Context, attempt *mutationprotocol.Attempt, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return s.pipelineSQLiteOwner.CommitFlowInstanceActivationsTx(ctx, attempt, plans)
 }
 
 func (s *PostgresStore) ReplaceFlowInstanceRouteTopologyTx(ctx context.Context, tx *sql.Tx, sets []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error) {
@@ -115,10 +112,10 @@ func (s *SQLiteRuntimeStore) MarkDynamicFlowCreationOccurrenceCommittedTx(ctx co
 	return s.pipelineSQLiteOwner.MarkDynamicFlowCreationOccurrenceCommittedTx(ctx, tx, request)
 }
 
-func (s *PostgresStore) TerminalizeRunTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, disposition runtimepipelineobligation.Disposition, at time.Time) (int, error) {
-	return s.pipelinePostgresOwner.TerminalizeRunTx(ctx, tx, effects, runID, disposition, at)
+func (s *PostgresStore) TerminalizeRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, disposition runtimepipelineobligation.Disposition, at time.Time) (int, error) {
+	return s.pipelinePostgresOwner.TerminalizeRunTx(ctx, attempt, runID, disposition, at)
 }
 
-func (s *SQLiteRuntimeStore) TerminalizeRunTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, disposition runtimepipelineobligation.Disposition, at time.Time) (int, error) {
-	return s.pipelineSQLiteOwner.TerminalizeRunTx(ctx, tx, effects, runID, disposition, at)
+func (s *SQLiteRuntimeStore) TerminalizeRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string, disposition runtimepipelineobligation.Disposition, at time.Time) (int, error) {
+	return s.pipelineSQLiteOwner.TerminalizeRunTx(ctx, attempt, runID, disposition, at)
 }

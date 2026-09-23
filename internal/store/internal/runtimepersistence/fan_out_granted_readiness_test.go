@@ -48,7 +48,7 @@ func TestFanOutGrantedGlobalReadinessIsNotOwedSuffixBothStores(t *testing.T) {
 				t.Fatalf("claim: found=%v err=%v", found, err)
 			}
 			assertReady(false)
-			if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
+			if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
 				t.Fatal(err)
 			}
 			assertReady(false)
@@ -65,20 +65,20 @@ func TestFanOutGrantedGlobalReadinessIsNotOwedSuffixBothStores(t *testing.T) {
 			}
 			assertReady(true)
 			control := selected.(interface {
-				PauseRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
-				ContinueRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
+				PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
+				ContinueRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 			})
 			controlCtx := testAuthorActivityContextForBundle(fixture.bundleHash)
 			transition := runcontrol.TransitionRequest{RunID: fixture.runID, Now: time.Now().UTC(), Reason: "readiness-proof", ControlledBy: "test"}
-			if _, err := control.PauseRunControl(controlCtx, transition); err != nil {
-				t.Fatal(err)
+			if outcome, err := control.PauseRunControlOutcome(controlCtx, transition); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause outcome=%+v err=%v", outcome, err)
 			}
 			assertReady(false)
 			if _, _, found, err := owner.ClaimFanOutIntent(ctx, request); err != nil || found {
 				t.Fatalf("paused new turn: found=%v err=%v", found, err)
 			}
-			if _, err := control.ContinueRunControl(controlCtx, transition); err != nil {
-				t.Fatal(err)
+			if outcome, err := control.ContinueRunControlOutcome(controlCtx, transition); err != nil || !outcome.Acknowledged {
+				t.Fatalf("continue outcome=%+v err=%v", outcome, err)
 			}
 			assertReady(true)
 			// A materialized selected binding reserves the run before any

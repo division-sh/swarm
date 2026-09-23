@@ -11,44 +11,21 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type postgresRunLifecycleMutation struct {
 	store    *RunLifecyclePostgresOwner
 	tx       *sql.Tx
 	readOnly bool
-	story    runtimeauthoractivity.Mutation
-	effects  *privaterunforkrevision.Effects
-	handoff  *CandidateHandoff
+	attempt  *mutationprotocol.Attempt
 }
 
 type sqliteRunLifecycleMutation struct {
 	store    *RunLifecycleSQLiteOwner
 	tx       *sql.Tx
 	readOnly bool
-	story    runtimeauthoractivity.Mutation
-	effects  *privaterunforkrevision.Effects
-	handoff  *CandidateHandoff
-}
-
-// TransactionMutation exposes the lifecycle operations that legitimately share
-// an already-owned lifecycle transaction. Transaction ownership remains with
-// the caller's named workflow operation.
-type TransactionMutation interface {
-	Create(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
-	TransitionActive(context.Context, runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error)
-	MarkTerminal(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
-	SyncCounters(context.Context, string) error
-}
-
-func NewPostgresTransactionMutation(owner *RunLifecyclePostgresOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects) TransactionMutation {
-	return postgresRunLifecycleMutation{store: owner, tx: tx, story: story, effects: effects}
-}
-
-func NewSQLiteTransactionMutation(owner *RunLifecycleSQLiteOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects) TransactionMutation {
-	return sqliteRunLifecycleMutation{store: owner, tx: tx, story: story, effects: effects}
+	attempt  *mutationprotocol.Attempt
 }
 
 func (s *RunLifecyclePostgresOwner) RequireActiveTx(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -67,52 +44,94 @@ func (s *RunLifecycleSQLiteOwner) RequirePresentTx(ctx context.Context, tx *sql.
 	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequirePresent(ctx, runID)
 }
 
-func (s *RunLifecyclePostgresOwner) SyncCountersTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID string) error {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).SyncCounters(ctx, runID)
+func (s *RunLifecyclePostgresOwner) SyncCountersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, runID)
+	})
 }
 
-func (s *RunLifecycleSQLiteOwner) SyncCountersTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID string) error {
-	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).SyncCounters(ctx, runID)
+func (s *RunLifecycleSQLiteOwner) SyncCountersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).SyncCounters(ctx, runID)
+	})
 }
 
-func (s *RunLifecyclePostgresOwner) CreateRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).Create(ctx, request)
+func (s *RunLifecyclePostgresOwner) CreateRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	var disposition runtimerunlifecycle.MutationDisposition
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		disposition, err = (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).Create(ctx, request)
+		return err
+	})
+	return disposition, err
 }
 
-func (s *RunLifecycleSQLiteOwner) CreateRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).Create(ctx, request)
+func (s *RunLifecycleSQLiteOwner) CreateRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	var disposition runtimerunlifecycle.MutationDisposition
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		disposition, err = (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).Create(ctx, request)
+		return err
+	})
+	return disposition, err
 }
 
-func (s *RunLifecyclePostgresOwner) TransitionActiveTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, handoff *CandidateHandoff, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).TransitionActive(ctx, request)
+func (s *RunLifecyclePostgresOwner) TransitionActiveTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	var disposition runtimerunlifecycle.MutationDisposition
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		disposition, err = (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, request)
+		return err
+	})
+	return disposition, err
 }
 
-func (s *RunLifecycleSQLiteOwner) TransitionActiveTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, handoff *CandidateHandoff, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).TransitionActive(ctx, request)
+func (s *RunLifecycleSQLiteOwner) TransitionActiveTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	var disposition runtimerunlifecycle.MutationDisposition
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		disposition, err = (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).TransitionActive(ctx, request)
+		return err
+	})
+	return disposition, err
 }
 
-func (s *RunLifecyclePostgresOwner) MarkTerminalTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(ctx, request)
+func (s *RunLifecyclePostgresOwner) MarkTerminalTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.markRunTerminalTx(ctx, tx, attempt, request)
+	})
 }
 
-func (s *RunLifecycleSQLiteOwner) MarkTerminalTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(ctx, request)
+func (s *RunLifecycleSQLiteOwner) MarkTerminalTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.markRunTerminalTx(ctx, tx, attempt, request)
+	})
 }
 
-func (s *RunLifecyclePostgresOwner) ForkSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).ForkSource(ctx, request)
+func (s *RunLifecyclePostgresOwner) ForkSourceTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.markForkSourceTx(ctx, tx, attempt, request)
+	})
 }
 
-func (s *RunLifecycleSQLiteOwner) ForkSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).ForkSource(ctx, request)
+func (s *RunLifecycleSQLiteOwner) ForkSourceTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return withTerminalAttemptSQL(ctx, attempt, func(tx *sql.Tx) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+		return s.markForkSourceTx(ctx, tx, attempt, request)
+	})
 }
 
-func (s *RunLifecyclePostgresOwner) ReviseSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, handoff *CandidateHandoff, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).ReviseSource(ctx, request)
+func (s *RunLifecyclePostgresOwner) ReviseSourceTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	var disposition runtimerunlifecycle.MutationDisposition
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		disposition, err = (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).ReviseSource(ctx, request)
+		return err
+	})
+	return disposition, err
 }
 
-func (s *RunLifecycleSQLiteOwner) ReviseSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, handoff *CandidateHandoff, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).ReviseSource(ctx, request)
+func (s *RunLifecycleSQLiteOwner) ReviseSourceTx(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	var disposition runtimerunlifecycle.MutationDisposition
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		disposition, err = (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).ReviseSource(ctx, request)
+		return err
+	})
+	return disposition, err
 }
 
 func (s *RunLifecyclePostgresOwner) RequireActiveSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
@@ -136,18 +155,20 @@ func runPostgresLifecycleOperation[T any](
 	store *RunLifecyclePostgresOwner,
 	fn func(context.Context, postgresRunLifecycleMutation) (T, error),
 ) (T, error) {
-	return WithCandidateHandoffOutcomeResult(ctx, func(handoff *CandidateHandoff) (T, bool, error) {
-		var result T
-		effects := privaterunforkrevision.NewEffects()
-		committed, err := store.runPrivateAuthorActivityMutationOutcome(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			var err error
-			result, err = fn(txctx, postgresRunLifecycleMutation{
-				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), effects: effects, handoff: handoff,
-			})
+	if err := store.requireCurrentSchema(); err != nil {
+		var zero T
+		return zero, err
+	}
+	result := mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (T, error) {
+		var value T
+		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+			value, err = fn(ctx, postgresRunLifecycleMutation{store: store, tx: tx, attempt: attempt})
 			return err
 		})
-		return result, committed, err
+		return value, err
 	})
+	value, _ := result.Value()
+	return value, result.Err()
 }
 
 func runSQLiteLifecycleOperation[T any](
@@ -155,21 +176,20 @@ func runSQLiteLifecycleOperation[T any](
 	store *RunLifecycleSQLiteOwner,
 	fn func(context.Context, sqliteRunLifecycleMutation) (T, error),
 ) (T, error) {
-	return WithCandidateHandoffOutcomeResult(ctx, func(handoff *CandidateHandoff) (T, bool, error) {
-		var result T
-		effects := privaterunforkrevision.NewEffects()
-		committed, err := store.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite run lifecycle operation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			if err := handoff.ResetAttempt(); err != nil {
-				return err
-			}
-			var err error
-			result, err = fn(txctx, sqliteRunLifecycleMutation{
-				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), effects: effects, handoff: handoff,
-			})
+	if err := store.requireCurrentSchema(); err != nil {
+		var zero T
+		return zero, err
+	}
+	result := mutationprotocol.RunSQLite(ctx, store.backend, "sqlite run lifecycle operation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) (T, error) {
+		var value T
+		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+			value, err = fn(ctx, sqliteRunLifecycleMutation{store: store, tx: tx, attempt: attempt})
 			return err
 		})
-		return result, committed, err
+		return value, err
 	})
+	value, _ := result.Value()
+	return value, result.Err()
 }
 
 func runPostgresLifecycleRead[T any](
@@ -629,105 +649,95 @@ func (m sqliteRunLifecycleMutation) Create(
 
 func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
+	attempt *mutationprotocol.Attempt,
 	forkRunID, sourceRunID, forkEventID string,
 	entityCount int,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
 ) error {
-	if tx == nil {
-		return errors.New("fork run lifecycle creation requires transaction")
-	}
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("fork run lifecycle creation requires canonical executable bundle identity: %w", err)
-	}
-	if story == nil {
-		return errors.New("fork run lifecycle creation requires private story ownership")
-	}
-	mutation := postgresRunLifecycleMutation{store: s, tx: tx}
-	if err := mutation.requireSourceArtifactForWrite(ctx, identity); err != nil {
-		return err
-	}
-	bundleHash := identity.BundleHash()
-	origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
-	if err != nil {
-		return err
-	}
-	startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
-	if _, err := tx.ExecContext(ctx, `
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := identity.Validate(); err != nil {
+			return fmt.Errorf("fork run lifecycle creation requires canonical executable bundle identity: %w", err)
+		}
+		mutation := postgresRunLifecycleMutation{store: s, tx: tx}
+		if err := mutation.requireSourceArtifactForWrite(ctx, identity); err != nil {
+			return err
+		}
+		bundleHash := identity.BundleHash()
+		origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
+		if err != nil {
+			return err
+		}
+		startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
+		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
 			entity_count, event_count, started_at, bundle_hash
 		)
 		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, 0, $7, $8)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.SourceEventID(),
-		entityCount, startedAt.UTC(), bundleHash); err != nil {
-		return fmt.Errorf("insert fork run lifecycle: %w", err)
-	}
-	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
-	if err != nil {
-		return err
-	}
-	return story.Record(ctx, runtimeauthoractivity.Draft{
-		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_prepared",
-		SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
-		OccurredAt: startedAt.UTC(), RunID: forkRunID, Scope: scope,
-		Projection: runtimeauthoractivity.Projection{
-			SubjectType: "run", SubjectID: forkRunID, ParentRunID: sourceRunID, TriggerEventType: "run.fork",
-		},
+			entityCount, startedAt.UTC(), bundleHash); err != nil {
+			return fmt.Errorf("insert fork run lifecycle: %w", err)
+		}
+		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
+		if err != nil {
+			return err
+		}
+		return attempt.Record(ctx, runtimeauthoractivity.Draft{
+			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_prepared",
+			SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
+			OccurredAt: startedAt.UTC(), RunID: forkRunID, Scope: scope,
+			Projection: runtimeauthoractivity.Projection{
+				SubjectType: "run", SubjectID: forkRunID, ParentRunID: sourceRunID, TriggerEventType: "run.fork",
+			},
+		})
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
+	attempt *mutationprotocol.Attempt,
 	forkRunID, sourceRunID, forkEventID string,
 	entityCount int,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
 ) error {
-	if tx == nil {
-		return errors.New("fork run lifecycle creation requires transaction")
-	}
-	if err := identity.Validate(); err != nil {
-		return fmt.Errorf("fork run lifecycle creation requires canonical executable bundle identity: %w", err)
-	}
-	if story == nil {
-		return errors.New("fork run lifecycle creation requires private story ownership")
-	}
-	mutation := sqliteRunLifecycleMutation{store: s, tx: tx}
-	if err := mutation.requireSourceArtifact(ctx, identity); err != nil {
-		return err
-	}
-	bundleHash := identity.BundleHash()
-	origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
-	if err != nil {
-		return err
-	}
-	startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
-	if _, err := tx.ExecContext(ctx, `
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := identity.Validate(); err != nil {
+			return fmt.Errorf("fork run lifecycle creation requires canonical executable bundle identity: %w", err)
+		}
+		mutation := sqliteRunLifecycleMutation{store: s, tx: tx}
+		if err := mutation.requireSourceArtifact(ctx, identity); err != nil {
+			return err
+		}
+		bundleHash := identity.BundleHash()
+		origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
+		if err != nil {
+			return err
+		}
+		startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
+		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
 			entity_count, event_count, started_at, bundle_hash
 		)
 		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.SourceEventID(),
-		entityCount, startedAt.UTC(), bundleHash); err != nil {
-		return fmt.Errorf("insert fork run lifecycle: %w", err)
-	}
-	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
-	if err != nil {
-		return err
-	}
-	return story.Record(ctx, runtimeauthoractivity.Draft{
-		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_prepared",
-		SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
-		OccurredAt: startedAt.UTC(), RunID: forkRunID, Scope: scope,
-		Projection: runtimeauthoractivity.Projection{
-			SubjectType: "run", SubjectID: forkRunID, ParentRunID: sourceRunID, TriggerEventType: "run.fork",
-		},
+			entityCount, startedAt.UTC(), bundleHash); err != nil {
+			return fmt.Errorf("insert fork run lifecycle: %w", err)
+		}
+		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
+		if err != nil {
+			return err
+		}
+		return attempt.Record(ctx, runtimeauthoractivity.Draft{
+			Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_prepared",
+			SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
+			OccurredAt: startedAt.UTC(), RunID: forkRunID, Scope: scope,
+			Projection: runtimeauthoractivity.Projection{
+				SubjectType: "run", SubjectID: forkRunID, ParentRunID: sourceRunID, TriggerEventType: "run.fork",
+			},
+		})
 	})
 }
 
@@ -774,7 +784,7 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 		if m.store == nil {
 			return "", errors.New("PostgreSQL run lifecycle resume requires selected-store candidate owner")
 		}
-		if _, err := m.store.RequestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
+		if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
 			return "", err
 		}
 	}
@@ -824,7 +834,7 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 		if m.store == nil {
 			return "", errors.New("SQLite run lifecycle resume requires selected-store candidate owner")
 		}
-		if _, err := m.store.RequestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
+		if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
 			return "", err
 		}
 	}
@@ -838,7 +848,7 @@ func (m postgresRunLifecycleMutation) MarkTerminal(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL terminal run lifecycle transition requires selected store")
 	}
-	return m.store.markRunTerminalTx(ctx, m.tx, m.story, m.effects, request)
+	return m.store.markRunTerminalTx(ctx, m.tx, m.attempt, request)
 }
 
 func (m sqliteRunLifecycleMutation) MarkTerminal(
@@ -848,7 +858,7 @@ func (m sqliteRunLifecycleMutation) MarkTerminal(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle transition requires selected store")
 	}
-	return m.store.markRunTerminalTx(ctx, m.tx, m.story, m.effects, request)
+	return m.store.markRunTerminalTx(ctx, m.tx, m.attempt, request)
 }
 
 func (m postgresRunLifecycleMutation) ForkSource(
@@ -858,7 +868,7 @@ func (m postgresRunLifecycleMutation) ForkSource(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL fork source lifecycle transition requires selected store")
 	}
-	return m.store.markForkSourceTx(ctx, m.tx, m.story, m.effects, request)
+	return m.store.markForkSourceTx(ctx, m.tx, m.attempt, request)
 }
 
 func (m sqliteRunLifecycleMutation) ForkSource(
@@ -868,7 +878,7 @@ func (m sqliteRunLifecycleMutation) ForkSource(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite fork source lifecycle transition requires selected store")
 	}
-	return m.store.markForkSourceTx(ctx, m.tx, m.story, m.effects, request)
+	return m.store.markForkSourceTx(ctx, m.tx, m.attempt, request)
 }
 
 func (m postgresRunLifecycleMutation) classifyCreateExisting(
@@ -927,14 +937,14 @@ func (m postgresRunLifecycleMutation) requireSourceArtifactForWrite(
 }
 
 func (m postgresRunLifecycleMutation) recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
-	return recordRunStartedWithStory(ctx, m.story, request)
+	return recordRunStarted(ctx, m.attempt, request)
 }
 
 func (m sqliteRunLifecycleMutation) recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
-	return recordRunStartedWithStory(ctx, m.story, request)
+	return recordRunStarted(ctx, m.attempt, request)
 }
 
-func recordRunStartedWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, request runtimerunlifecycle.CreateRequest) error {
+func recordRunStarted(ctx context.Context, attempt *mutationprotocol.Attempt, request runtimerunlifecycle.CreateRequest) error {
 	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, request.Source.BundleHash())
 	if err != nil {
 		return fmt.Errorf("record run lifecycle creation: %w", err)
@@ -948,10 +958,10 @@ func recordRunStartedWithStory(ctx context.Context, story runtimeauthoractivity.
 			TriggerEventType: request.Origin.ActivityTriggerType(),
 		},
 	}
-	if story != nil {
-		return story.Record(ctx, draft)
+	if attempt != nil {
+		return attempt.Record(ctx, draft)
 	}
-	return errors.New("run lifecycle creation requires private story ownership")
+	return errors.New("run lifecycle creation requires attempt")
 }
 
 func (m postgresRunLifecycleMutation) ReviseSource(
@@ -981,7 +991,7 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("revise PostgreSQL run lifecycle source affected %d rows", rows), rowsErr)
 	}
-	if _, err := m.store.RequestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
+	if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
@@ -1014,7 +1024,7 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("revise SQLite run lifecycle source affected %d rows", rows), rowsErr)
 	}
-	if _, err := m.store.RequestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
+	if _, err := m.attempt.RequestCompletion(ctx, m.store, request.RunID, nil); err != nil {
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
@@ -1076,10 +1086,14 @@ func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string, 
 	return nil
 }
 
-func (s *RunLifecyclePostgresOwner) DeleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	return deleteMaterializedForkRunTx(ctx, tx, runID, true)
+func (s *RunLifecyclePostgresOwner) DeleteMaterializedForkRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return deleteMaterializedForkRunTx(ctx, tx, runID, true)
+	})
 }
 
-func (s *RunLifecycleSQLiteOwner) DeleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
-	return deleteMaterializedForkRunTx(ctx, tx, runID, false)
+func (s *RunLifecycleSQLiteOwner) DeleteMaterializedForkRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return deleteMaterializedForkRunTx(ctx, tx, runID, false)
+	})
 }

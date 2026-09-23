@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
@@ -39,7 +40,7 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 	if !ok || source.BundleHash() == "" {
 		return result, fmt.Errorf("fork fixture requires exact source scope")
 	}
-	persist := func(ctx context.Context, tx *sql.Tx, dialect authoractivityfixture.Dialect) error {
+	persist := func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect) error {
 		query := "SELECT bundle_hash FROM runs WHERE run_id=?"
 		if dialect == authoractivityfixture.DialectPostgres {
 			query = "SELECT bundle_hash FROM runs WHERE run_id=$1::uuid"
@@ -101,7 +102,7 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 			if err != nil {
 				return err
 			}
-			event, err := eventfixture.ExistingRunRoot(ctx, tx, dialect, eventID, fixture.RunID, kind, producer, []byte("{}"), events.EventEnvelope{}, at)
+			event, err := eventfixture.ExistingRunRoot(ctx, attempt, dialect, eventID, fixture.RunID, kind, producer, []byte("{}"), events.EventEnvelope{}, at)
 			if err != nil {
 				return err
 			}
@@ -114,16 +115,20 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		if store == nil || store.backend == nil {
 			return result, fmt.Errorf("postgres fixture store is required")
 		}
-		err = store.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			return persist(ctx, tx, authoractivityfixture.DialectPostgres)
-		})
+		err = mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return persist(txctx, tx, attempt, authoractivityfixture.DialectPostgres)
+			})
+		}).Err()
 	case *SQLiteRuntimeStore:
 		if store == nil || store.backend == nil {
 			return result, fmt.Errorf("sqlite fixture store is required")
 		}
-		err = store.backend.RunTransaction(ctx, "conversation fork source fixture", func(ctx context.Context, tx *sql.Tx) error {
-			return persist(ctx, tx, authoractivityfixture.DialectSQLite)
-		})
+		err = mutationprotocol.RunSQLite(ctx, store.backend, "conversation fork source fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return persist(txctx, tx, attempt, authoractivityfixture.DialectSQLite)
+			})
+		}).Err()
 	default:
 		err = fmt.Errorf("fork fixture store %T is unsupported", selected)
 	}

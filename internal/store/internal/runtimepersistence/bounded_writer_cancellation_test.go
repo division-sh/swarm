@@ -137,12 +137,6 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 						}
 					}
 				}
-				if orderRead != nil {
-					var count int
-					if err := db.QueryRow(`SELECT count(*) FROM author_activity_order WHERE singleton_id = 1`).Scan(&count); err != nil || count != 1 {
-						t.Fatalf("preview requires the existing ordering row: count=%d err=%v", count, err)
-					}
-				}
 				var before string
 				if err := db.QueryRow(observe).Scan(&before); err != nil {
 					t.Fatal(err)
@@ -208,7 +202,7 @@ func TestBoundedPostgresWritersCancelBeforeCommit(t *testing.T) {
 						wantQueries = 0
 					}
 					if got := orderRead.queries.Load(); got != wantQueries {
-						t.Fatalf("preview fault read count=%d want=%d", got, wantQueries)
+						t.Fatalf("preview run-lock read count=%d want=%d", got, wantQueries)
 					}
 					if phase == "independent_error" {
 						var native *pq.Error

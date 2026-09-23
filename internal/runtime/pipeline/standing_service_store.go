@@ -313,8 +313,8 @@ func (o StandingServiceOperation) Normalized() StandingServiceOperation {
 }
 
 // StandingServicePersistence owns standing-service reads and complete atomic
-// mutations. DeliveryContinuationRequired is commit evidence consumed only
-// after a successful selected-store commit.
+// mutations. DeliveryContinuationRequired is selected-store commit evidence,
+// including when post-commit cleanup returns an error.
 type StandingServicePersistence interface {
 	ReconcileStandingService(context.Context, StandingServiceCandidate) (StandingServiceReconciliation, error)
 	LoadReconciledStandingService(context.Context, StandingServiceCandidate) (StandingServiceReconciliation, bool, error)
@@ -333,7 +333,7 @@ func (s *workflowInstanceStore) ReconcileStandingService(ctx context.Context, ca
 		return StandingServiceReconciliation{}, errors.New("standing service persistence owner is required")
 	}
 	result, err := s.standingServices.ReconcileStandingService(ctx, candidate)
-	s.consumeStandingServiceCommit(result, err)
+	s.consumeStandingServiceCommit(result)
 	return result, err
 }
 
@@ -349,7 +349,7 @@ func (s *workflowInstanceStore) ReconcileStandingServiceSet(ctx context.Context,
 		return nil, errors.New("standing service persistence owner is required")
 	}
 	results, err := s.standingServices.ReconcileStandingServiceSet(ctx, candidates)
-	s.consumeStandingServiceCommits(results, err)
+	s.consumeStandingServiceCommits(results)
 	return results, err
 }
 
@@ -358,7 +358,7 @@ func (s *workflowInstanceStore) SuspendStandingService(ctx context.Context, oper
 		return StandingServiceReconciliation{}, errors.New("standing service persistence owner is required")
 	}
 	result, err := s.standingServices.SuspendStandingService(ctx, operation)
-	s.consumeStandingServiceCommit(result, err)
+	s.consumeStandingServiceCommit(result)
 	return result, err
 }
 
@@ -367,7 +367,7 @@ func (s *workflowInstanceStore) ResumeStandingService(ctx context.Context, opera
 		return StandingServiceReconciliation{}, errors.New("standing service persistence owner is required")
 	}
 	result, err := s.standingServices.ResumeStandingService(ctx, operation)
-	s.consumeStandingServiceCommit(result, err)
+	s.consumeStandingServiceCommit(result)
 	return result, err
 }
 
@@ -376,7 +376,7 @@ func (s *workflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		return StandingServiceReconciliation{}, errors.New("standing service persistence owner is required")
 	}
 	result, err := s.standingServices.ResetStandingService(ctx, operation)
-	s.consumeStandingServiceCommit(result, err)
+	s.consumeStandingServiceCommit(result)
 	return result, err
 }
 
@@ -408,16 +408,13 @@ func (s *workflowInstanceStore) ListStandingServiceStatuses(ctx context.Context)
 	return s.standingServices.ListStandingServiceStatuses(ctx)
 }
 
-func (s *workflowInstanceStore) consumeStandingServiceCommit(result StandingServiceReconciliation, err error) {
-	if err == nil && result.DeliveryContinuationRequired {
+func (s *workflowInstanceStore) consumeStandingServiceCommit(result StandingServiceReconciliation) {
+	if result.DeliveryContinuationRequired {
 		s.signalDeliveryContinuations()
 	}
 }
 
-func (s *workflowInstanceStore) consumeStandingServiceCommits(results []StandingServiceReconciliation, err error) {
-	if err != nil {
-		return
-	}
+func (s *workflowInstanceStore) consumeStandingServiceCommits(results []StandingServiceReconciliation) {
 	for _, result := range results {
 		if result.DeliveryContinuationRequired {
 			s.signalDeliveryContinuations()

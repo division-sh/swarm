@@ -219,9 +219,9 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			}
 			var store interface {
 				Acquire(context.Context, agentmemory.Identity, string) (*runtimesessions.Lease, error)
-				Release(context.Context, *runtimesessions.Lease) error
+				ReleaseOutcome(context.Context, *runtimesessions.Lease) (runtimesessions.ReleaseResult, error)
 				Rotate(context.Context, agentmemory.Identity, string, runtimesessions.RotationMetadata) (*runtimesessions.Lease, error)
-				IncrementTurn(context.Context, agentmemory.Identity, string) error
+				IncrementTurnOutcome(context.Context, agentmemory.Identity, string) (runtimesessions.TurnIncrementResult, error)
 				AdoptSessionID(context.Context, agentmemory.Identity, string, string) error
 				UpsertConversation(context.Context, runtimellm.ConversationRecord) error
 				UpdateLiveSessionWatchdog(context.Context, runtimellm.ConversationWatchdogUpdate) error
@@ -235,11 +235,13 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			if _, err := store.Acquire(ctx, identity, "worker"); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
 				t.Fatalf("session acquire error = %v", err)
 			}
-			requireForkedSourceRefusal(t, "session release", store.Release(ctx, lease))
+			_, releaseErr := store.ReleaseOutcome(ctx, lease)
+			requireForkedSourceRefusal(t, "session release", releaseErr)
 			if _, err := store.Rotate(ctx, identity, "worker", runtimesessions.RotationMetadata{OperationID: uuid.NewString()}); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
 				t.Fatalf("session rotate error = %v", err)
 			}
-			requireForkedSourceRefusal(t, "session turn", store.IncrementTurn(ctx, identity, lease.SessionID))
+			_, incrementErr := store.IncrementTurnOutcome(ctx, identity, lease.SessionID)
+			requireForkedSourceRefusal(t, "session turn", incrementErr)
 			requireForkedSourceRefusal(t, "session adopt", store.AdoptSessionID(ctx, identity, "worker", uuid.NewString()))
 			requireForkedSourceRefusal(t, "conversation upsert", store.UpsertConversation(ctx, conversation))
 			requireForkedSourceRefusal(t, "watchdog update", store.UpdateLiveSessionWatchdog(ctx, watchdog))

@@ -2,8 +2,8 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -14,7 +14,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -155,19 +155,16 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
 					apply := func() error {
-						switch s := fixture.store.(type) {
-						case *PostgresStore:
-							return s.runPrivateAuthorActivityMutation(ctx, func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRun, childRun, projection, point, c, now.Add(2*time.Minute))
-							})
-						case *SQLiteRuntimeStore:
-							return s.runPrivateAuthorActivityMutation(ctx, "test exact pending generation", func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRun, childRun, projection, point, c, now.Add(2*time.Minute))
-							})
-						default:
-							t.Fatalf("unsupported store %T", fixture.store)
-							return nil
-						}
+						return runSelectedFixtureMutation(ctx, fixture.store, "test exact pending generation", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+							switch s := fixture.store.(type) {
+							case *PostgresStore:
+								return s.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, projection, point, c, now.Add(2*time.Minute))
+							case *SQLiteRuntimeStore:
+								return s.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRun, childRun, projection, point, c, now.Add(2*time.Minute))
+							default:
+								return fmt.Errorf("unsupported store %T", fixture.store)
+							}
+						})
 					}
 					err = apply()
 					if wantFailure {

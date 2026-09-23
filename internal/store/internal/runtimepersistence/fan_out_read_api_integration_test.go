@@ -90,12 +90,12 @@ func TestFanOutReadAPILiveSelectedStores(t *testing.T) {
 			}
 			read(true, "eligible", "running")
 			control := selected.(interface {
-				PauseRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
+				PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 			})
-			if _, err := control.PauseRunControl(testAuthorActivityContextForBundle(fixture.bundleHash), runcontrol.TransitionRequest{
+			if outcome, err := control.PauseRunControlOutcome(testAuthorActivityContextForBundle(fixture.bundleHash), runcontrol.TransitionRequest{
 				RunID: fixture.runID, Now: time.Now().UTC(), Reason: "read-api-proof", ControlledBy: "test",
-			}); err != nil {
-				t.Fatal(err)
+			}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause outcome=%+v err=%v", outcome, err)
 			}
 			read(false, "run_paused", "paused")
 			if calls != 2 {

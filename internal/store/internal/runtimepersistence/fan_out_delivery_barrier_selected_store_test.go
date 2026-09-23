@@ -29,6 +29,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -978,28 +979,18 @@ func advanceFanOutBarriersForTest(t *testing.T, ctx context.Context, selected st
 }
 
 func advanceFanOutBarriersAttempt(ctx context.Context, selected storeTestDurableEventBusStore, runID string, at time.Time) error {
-	switch store := selected.(type) {
-	case *PostgresStore:
-		return store.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			effects := runforkrevision.NewEffects()
-			if _, err := store.pipelinePostgresOwner.AdvanceFanOutDeliveryBarriersTx(txctx, tx, effects, runID, at); err != nil {
-				return err
-			}
-			_, err := runforkrevision.FinalizePostgres(txctx, tx, effects)
+	return runSelectedFixtureMutation(ctx, selected, "fan-out barrier candidate proof", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		switch store := selected.(type) {
+		case *PostgresStore:
+			_, err := store.pipelinePostgresOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, runID, at)
 			return err
-		})
-	case *SQLiteRuntimeStore:
-		return store.runRuntimeMutation(ctx, "sqlite fan-out barrier candidate proof", func(txctx context.Context, tx *sql.Tx) error {
-			effects := runforkrevision.NewEffects()
-			if _, err := store.pipelineSQLiteOwner.AdvanceFanOutDeliveryBarriersTx(txctx, tx, effects, runID, at); err != nil {
-				return err
-			}
-			_, err := runforkrevision.FinalizeSQLite(txctx, tx, effects)
+		case *SQLiteRuntimeStore:
+			_, err := store.pipelineSQLiteOwner.AdvanceFanOutDeliveryBarriersTx(txctx, attempt, runID, at)
 			return err
-		})
-	default:
-		return fmt.Errorf("unsupported fan-out barrier store %T", selected)
-	}
+		default:
+			return fmt.Errorf("unsupported fan-out barrier store %T", selected)
+		}
+	})
 }
 
 func assertFanOutBarrierState(t *testing.T, ctx context.Context, db *sql.DB, runID, triggeringDeliveryID, semanticPath string, wantStatus fanoutbarrier.Status, wantSummary *fanoutbarrier.Summary, wantSchedule string) {

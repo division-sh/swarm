@@ -1373,11 +1373,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	if opts.AbandonActiveRuns {
 		result, err := stores.RunQuiescence().ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
-		if err != nil {
+		if err := recordServeAbandonOutcome(presenter, result, err); err != nil {
 			presenter.fail(5, "run_quiescence", err)
 			return 3
 		}
-		presenter.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if recovery, available := stores.StartupRecovery(); available {
 		if exitCode := runServeSourceArtifactStartupRecovery(ctx, recovery, stores.SourceArtifactStore(), presenter); exitCode != 0 {

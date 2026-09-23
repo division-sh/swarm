@@ -6,107 +6,90 @@ import (
 	"errors"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
 
-type CompletionCandidateRequester interface {
-	RequestCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time, *runhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error)
-}
-
 type DecisionPostgresOwner struct {
 	backend           *postgresbackend.Backend
 	requireCurrent    func() error
-	candidateRequests CompletionCandidateRequester
+	candidateRequests mutationprotocol.CandidateWriter
+	candidates        *runhandoff.CandidateCoordinator
 }
 
 type DecisionSQLiteOwner struct {
 	backend           *sqlitebackend.Backend
 	requireCurrent    func() error
-	candidateRequests CompletionCandidateRequester
+	candidateRequests mutationprotocol.CandidateWriter
+	candidates        *runhandoff.CandidateCoordinator
 	nowFn             func() time.Time
 }
 
-func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, candidates CompletionCandidateRequester) (*DecisionPostgresOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || candidates == nil {
+func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, candidateWriter mutationprotocol.CandidateWriter, candidates *runhandoff.CandidateCoordinator) (*DecisionPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || candidateWriter == nil || candidates == nil {
 		return nil, errors.New("decision-card PostgreSQL owner dependencies are required")
 	}
-	return &DecisionPostgresOwner{backend: backend, requireCurrent: requireCurrent, candidateRequests: candidates}, nil
+	return &DecisionPostgresOwner{backend: backend, requireCurrent: requireCurrent, candidateRequests: candidateWriter, candidates: candidates}, nil
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, candidates CompletionCandidateRequester, now func() time.Time) (*DecisionSQLiteOwner, error) {
-	if backend == nil || !backend.Valid() || requireCurrent == nil || candidates == nil {
+func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, candidateWriter mutationprotocol.CandidateWriter, candidates *runhandoff.CandidateCoordinator, now func() time.Time) (*DecisionSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || candidateWriter == nil || candidates == nil {
 		return nil, errors.New("decision-card SQLite owner dependencies are required")
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &DecisionSQLiteOwner{backend: backend, requireCurrent: requireCurrent, candidateRequests: candidates, nowFn: now}, nil
+	return &DecisionSQLiteOwner{backend: backend, requireCurrent: requireCurrent, candidateRequests: candidateWriter, candidates: candidates, nowFn: now}, nil
 }
 
-func (s *DecisionPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, operation)
-	return err
-}
-
-func (s *DecisionPostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+func postgresDecisionMutation[T any](ctx context.Context, s *DecisionPostgresOwner, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) (T, error)) mutationprotocol.Result[T] {
 	if s == nil || s.backend == nil || s.requireCurrent == nil {
-		return false, errors.New("decision-card PostgreSQL owner is required")
+		return mutationprotocol.Reject[T](errors.New("decision-card PostgreSQL owner is required"))
 	}
 	if err := s.requireCurrent(); err != nil {
-		return false, err
+		return mutationprotocol.Reject[T](err)
 	}
-	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
+	var candidates *runhandoff.CandidateCoordinator
+	if withCandidates {
+		candidates = s.candidates
+	}
+	return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, candidates, write)
 }
 
-func (s *DecisionSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, operation)
-	return err
-}
-
-func (s *DecisionSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
+func sqliteDecisionMutation[T any](ctx context.Context, s *DecisionSQLiteOwner, label string, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) (T, error)) mutationprotocol.Result[T] {
 	if s == nil || s.backend == nil || s.requireCurrent == nil {
-		return false, errors.New("decision-card SQLite owner is required")
+		return mutationprotocol.Reject[T](errors.New("decision-card SQLite owner is required"))
 	}
 	if err := s.requireCurrent(); err != nil {
-		return false, err
+		return mutationprotocol.Reject[T](err)
 	}
-	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
+	var candidates *runhandoff.CandidateCoordinator
+	if withCandidates {
+		candidates = s.candidates
+	}
+	return mutationprotocol.RunSQLite(ctx, s.backend, label, mutationprotocol.Story, mutationprotocol.Ordinary, nil, candidates, write)
+}
+
+func withDecisionSQL[T any](ctx context.Context, attempt *mutationprotocol.Attempt, write func(context.Context, *sql.Tx) (T, error)) (T, error) {
+	var value T
+	err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		value, err = write(txctx, tx)
+		return err
 	})
+	return value, err
 }
 
-func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {
-	if story == nil {
-		return nil
-	}
-	return story
+func writePostgresDecision(ctx context.Context, s *DecisionPostgresOwner, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) error) error {
+	return postgresDecisionMutation(ctx, s, withCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, write(txctx, attempt)
+	}).Err()
 }
 
-func (s *DecisionPostgresOwner) requestCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, handoff *runhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, dueAt, handoff)
-}
-
-func (s *DecisionSQLiteOwner) requestCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, handoff *runhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error) {
-	return s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, dueAt, handoff)
+func writeSQLiteDecision(ctx context.Context, s *DecisionSQLiteOwner, label string, withCandidates bool, write func(context.Context, *mutationprotocol.Attempt) error) error {
+	return sqliteDecisionMutation(ctx, s, label, withCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, write(txctx, attempt)
+	}).Err()
 }

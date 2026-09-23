@@ -2,7 +2,6 @@ package pipelinepersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -10,25 +9,20 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type workflowDecisionRouteTxOwner interface {
-	CompleteProposedEffectRouteTx(context.Context, *sql.Tx, string, string, time.Time) (decisioncard.ProposedEffectContinuation, bool, error)
-	CompleteHumanTaskOutcomeTx(context.Context, *sql.Tx, string, string, time.Time) (decisioncard.HumanTaskContinuation, bool, error)
+	CompleteProposedEffectRouteTx(context.Context, *mutationprotocol.Attempt, string, string, time.Time) (decisioncard.ProposedEffectContinuation, bool, error)
+	CompleteHumanTaskOutcomeTx(context.Context, *mutationprotocol.Attempt, string, string, time.Time) (decisioncard.HumanTaskContinuation, bool, error)
 }
 
 func commitProposedEffectRoute(
 	ctx context.Context,
 	store eventCommitTxStore,
 	decisions workflowDecisionRouteTxOwner,
-	postgres bool,
-	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
-	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
-	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
-	requestCandidate func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error),
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedProposedEffectRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedProposedEffectRoute],
+	candidateWriter mutationprotocol.CandidateWriter,
 	command runtimepipeline.ProposedEffectRouteCommand,
 ) (runtimepipeline.CommittedProposedEffectRoute, error) {
 	if err := command.Validate(); err != nil {
@@ -38,82 +32,65 @@ func commitProposedEffectRoute(
 	if !ok {
 		return runtimepipeline.CommittedProposedEffectRoute{}, fmt.Errorf("proposed-effect route publication has unexpected type %T", command.Publication)
 	}
-	handoff, err := reserve(ctx)
-	if err != nil {
-		return runtimepipeline.CommittedProposedEffectRoute{}, err
-	}
-	defer handoff.Rollback()
-
-	var result runtimepipeline.CommittedProposedEffectRoute
-	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
-		committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedProposedEffectRoute, error) {
+		committed, err := store.commitPublicationTx(txctx, attempt, plan.PublicationCommand())
 		if err != nil {
-			return fmt.Errorf("commit proposed-effect route publication: %w", err)
+			return runtimepipeline.CommittedProposedEffectRoute{}, fmt.Errorf("commit proposed-effect route publication: %w", err)
 		}
-		continuation, changed, err := decisions.CompleteProposedEffectRouteTx(txctx, tx, command.CardID, command.RouteEventID, command.OccurredAt)
+		continuation, changed, err := decisions.CompleteProposedEffectRouteTx(txctx, attempt, command.CardID, command.RouteEventID, command.OccurredAt)
 		if err != nil {
-			return err
+			return runtimepipeline.CommittedProposedEffectRoute{}, err
 		}
 		if changed {
-			candidate, err := requestCandidate(txctx, tx, continuation.RunID)
-			if err != nil {
-				return err
-			}
-			if err := prepare(handoff, candidate); err != nil {
-				return err
+			if _, err := attempt.RequestCompletion(txctx, candidateWriter, continuation.RunID, nil); err != nil {
+				return runtimepipeline.CommittedProposedEffectRoute{}, err
 			}
 		}
 		evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 		if err != nil {
-			return err
+			return runtimepipeline.CommittedProposedEffectRoute{}, err
 		}
-		result.Publication = evidence
-		return nil
+		return runtimepipeline.CommittedProposedEffectRoute{Publication: evidence}, nil
 	})
-	if !committed {
-		return runtimepipeline.CommittedProposedEffectRoute{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.CommittedProposedEffectRoute{}, outcome.Err()
 	}
-	return result, errors.Join(err, result.Validate(), handoff.Commit())
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
 func commitHumanTaskRoute(
 	ctx context.Context,
 	store eventCommitTxStore,
 	decisions workflowDecisionRouteTxOwner,
-	postgres bool,
-	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskRoute],
 	plan runtimebus.EnginePublicationPlan,
 	cardID string,
 	routeEventID string,
 	occurredAt time.Time,
 	completeOutcome bool,
 ) (runtimepipeline.CommittedHumanTaskRoute, error) {
-	var result runtimepipeline.CommittedHumanTaskRoute
-	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), nil)
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskRoute, error) {
+		committed, err := store.commitPublicationTx(txctx, attempt, plan.PublicationCommand())
 		if err != nil {
-			return fmt.Errorf("commit human-task route publication: %w", err)
+			return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("commit human-task route publication: %w", err)
 		}
 		if completeOutcome {
-			if _, _, err := decisions.CompleteHumanTaskOutcomeTx(txctx, tx, cardID, routeEventID, occurredAt); err != nil {
-				return fmt.Errorf("complete human-task route: %w", err)
+			if _, _, err := decisions.CompleteHumanTaskOutcomeTx(txctx, attempt, cardID, routeEventID, occurredAt); err != nil {
+				return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("complete human-task route: %w", err)
 			}
 		}
 		evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 		if err != nil {
-			return err
+			return runtimepipeline.CommittedHumanTaskRoute{}, err
 		}
-		result.Publication = evidence
-		return nil
+		return runtimepipeline.CommittedHumanTaskRoute{Publication: evidence}, nil
 	})
-	if !committed {
-		return runtimepipeline.CommittedHumanTaskRoute{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.CommittedHumanTaskRoute{}, outcome.Err()
 	}
-	return result, errors.Join(err, result.Validate())
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
 func (s *PipelinePostgresOwner) CommitHumanTaskDeferredRoute(ctx context.Context, command runtimepipeline.HumanTaskDeferredRouteCommand) (runtimepipeline.CommittedHumanTaskRoute, error) {
@@ -124,9 +101,8 @@ func (s *PipelinePostgresOwner) CommitHumanTaskDeferredRoute(ctx context.Context
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task deferred route publication has unexpected type %T", command.Publication)
 	}
-	effects := newRevisionEffects()
-	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
+	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskRoute] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, false)
 }
 
@@ -138,9 +114,8 @@ func (s *PipelineSQLiteOwner) CommitHumanTaskDeferredRoute(ctx context.Context, 
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task deferred route publication has unexpected type %T", command.Publication)
 	}
-	effects := newRevisionEffects()
-	return commitHumanTaskRoute(ctx, s, s.DecisionSQLiteOwner, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite human-task deferred route", effects, fn)
+	return commitHumanTaskRoute(ctx, s, s.DecisionSQLiteOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskRoute] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite human-task deferred route", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, false)
 }
 
@@ -152,9 +127,8 @@ func (s *PipelinePostgresOwner) CommitHumanTaskOutcomeRoute(ctx context.Context,
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task outcome route publication has unexpected type %T", command.Publication)
 	}
-	effects := newRevisionEffects()
-	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
+	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskRoute] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, true)
 }
 
@@ -166,35 +140,21 @@ func (s *PipelineSQLiteOwner) CommitHumanTaskOutcomeRoute(ctx context.Context, c
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task outcome route publication has unexpected type %T", command.Publication)
 	}
-	effects := newRevisionEffects()
-	return commitHumanTaskRoute(ctx, s, s.DecisionSQLiteOwner, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite human-task outcome route", effects, fn)
+	return commitHumanTaskRoute(ctx, s, s.DecisionSQLiteOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedHumanTaskRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedHumanTaskRoute] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite human-task outcome route", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, true)
 }
 
 func (s *PipelinePostgresOwner) CommitProposedEffectRoute(ctx context.Context, command runtimepipeline.ProposedEffectRouteCommand) (runtimepipeline.CommittedProposedEffectRoute, error) {
-	effects := newRevisionEffects()
-	return commitProposedEffectRoute(ctx, s, s.DecisionPostgresOwner, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-		return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
-	}, reserveRunLifecycleCandidateHandoff,
-		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-			return reservation.Prepare(s.runLifecycleCandidates, result)
-		}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-			return requestPostgresCompletionCandidateTx(ctx, tx, runID, nil, false)
-		}, command)
+	return commitProposedEffectRoute(ctx, s, s.DecisionPostgresOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedProposedEffectRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedProposedEffectRoute] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
+	}, s.RunLifecyclePostgresOwner, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitProposedEffectRoute(ctx context.Context, command runtimepipeline.ProposedEffectRouteCommand) (runtimepipeline.CommittedProposedEffectRoute, error) {
-	effects := newRevisionEffects()
-	return commitProposedEffectRoute(ctx, s, s.DecisionSQLiteOwner, false, effects,
-		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-			return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite proposed-effect route", effects, fn)
-		}, reserveRunLifecycleCandidateHandoff,
-		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-			return reservation.Prepare(s.runLifecycleCandidates, result)
-		}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-			return requestSQLiteCompletionCandidateTx(ctx, tx, runID, nil, s.now(), false)
-		}, command)
+	return commitProposedEffectRoute(ctx, s, s.DecisionSQLiteOwner, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedProposedEffectRoute, error)) mutationprotocol.Result[runtimepipeline.CommittedProposedEffectRoute] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite proposed-effect route", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
+	}, s.RunLifecycleSQLiteOwner, command)
 }
 
 var _ runtimepipeline.WorkflowDecisionRouteOwner = (*PipelinePostgresOwner)(nil)

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -20,8 +20,8 @@ func TestRunLifecycleInsertForkRejectsMissingPersistedBundleBeforeMutation(t *te
 	forkRunID := uuid.NewString()
 	missingHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 
-	err := pg.runPrivateAuthorActivityMutation(testAuthorActivityContext(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return pg.runForkPostgresOwner.InsertRunForkRunTx(txctx, tx, story, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
+	err := runSelectedFixtureMutation(testAuthorActivityContext(), pg, "missing bundle fork", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return pg.runForkPostgresOwner.InsertRunForkRunTx(txctx, attempt, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
 			mustStoreTestSourceArtifactFact(missingHash))
 	})
 	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {

@@ -4,34 +4,36 @@ package mutationlogfixture
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
+	"time"
 
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func Insert(ctx context.Context, tx *sql.Tx, runLifecycle privatemutationlog.ActiveRunSourceOwner, record runtimemutationlog.Record) error {
-	story, ok := authoractivityfixture.Mutation(ctx)
-	if !ok {
-		return fmt.Errorf("test mutation log fixture requires an active author activity mutation")
-	}
-	return privatemutationlog.InsertWithStory(ctx, tx, runLifecycle, story, privaterunforkrevision.NewEffects(), record)
+func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle privatemutationlog.ActiveRunSourceOwner, record runtimemutationlog.Record) error {
+	return privatemutationlog.Insert(ctx, attempt, runLifecycle, record)
 }
 
 func InsertEntityStateDiff(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	runLifecycle privatemutationlog.ActiveRunSourceOwner,
 	entityID string,
 	before, after runtimemutationlog.EntityStateProjection,
 	writer runtimemutationlog.Writer,
 ) error {
-	story, ok := authoractivityfixture.Mutation(ctx)
-	if !ok {
-		return fmt.Errorf("test mutation log fixture requires an active author activity mutation")
-	}
-	return privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, runLifecycle, story, privaterunforkrevision.NewEffects(), entityID, before, after, writer)
+	return privatemutationlog.InsertEntityStateDiff(ctx, attempt, runLifecycle, entityID, before, after, writer)
+}
+
+func InsertSQLiteEntityStateDiff(
+	ctx context.Context,
+	attempt *mutationprotocol.Attempt,
+	runLifecycle privatemutationlog.ActiveRunSourceOwner,
+	entityID string,
+	before, after runtimemutationlog.EntityStateProjection,
+	writer runtimemutationlog.Writer,
+	occurredAt time.Time,
+) error {
+	return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, runLifecycle, entityID, before, after, writer, occurredAt)
 }

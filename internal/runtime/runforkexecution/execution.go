@@ -67,10 +67,11 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	deferredWorkAdmission := prepared.deferredWorkAdmission
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
 	ctx = operation.PreparationContext()
-	materialization, err := req.Owner.materializePrepared(ctx, prepared)
-	if err != nil {
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
+	materialization, acknowledged, materializationDiagnostic := req.Owner.materializePrepared(ctx, prepared)
+	if !acknowledged {
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, materializationDiagnostic
 	}
+	defer func() { finalErr = errors.Join(finalErr, materializationDiagnostic) }()
 	ctx = operation.Context()
 	agentRuntime, err = agentRuntime.bindRun(materialization.ForkRunID, materialization.AgentTopologies)
 	if err != nil {
@@ -137,6 +138,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 		return result, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
+	defer func() { finalErr = errors.Join(finalErr, container.diagnostics.err()) }()
 	published, err := container.Publish(ctx)
 	result.ExecutedEventCount = len(published)
 	result.ForkEvents = published

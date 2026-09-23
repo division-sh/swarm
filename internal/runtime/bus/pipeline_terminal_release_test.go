@@ -123,12 +123,12 @@ func TestSuccessfulPipelineSettlementSignalsDeliveryContinuationsAfterCommit(t *
 		pipelineObligations:   pipeline,
 		deliveryContinuations: continuations,
 	}
-	if err := bus.settlePipelineObligation(
+	if outcome, err := bus.settlePipelineObligationOutcome(
 		context.Background(),
 		claim,
 		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
-	); err != nil {
-		t.Fatalf("settle pipeline obligation: %v", err)
+	); err != nil || !outcome.Committed() {
+		t.Fatalf("settle pipeline obligation: committed=%t err=%v", outcome.Committed(), err)
 	}
 	continuations.mu.Lock()
 	signals := continuations.signals
@@ -138,12 +138,12 @@ func TestSuccessfulPipelineSettlementSignalsDeliveryContinuationsAfterCommit(t *
 	}
 
 	pipeline.err = errors.New("injected settlement failure")
-	if err := bus.settlePipelineObligation(
+	if outcome, err := bus.settlePipelineObligationOutcome(
 		context.Background(),
 		claim,
 		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
-	); err == nil {
-		t.Fatal("failed pipeline settlement succeeded")
+	); err == nil || outcome.Committed() {
+		t.Fatalf("failed pipeline settlement: committed=%t err=%v", outcome.Committed(), err)
 	}
 	continuations.mu.Lock()
 	signals = continuations.signals
@@ -153,12 +153,12 @@ func TestSuccessfulPipelineSettlementSignalsDeliveryContinuationsAfterCommit(t *
 	}
 
 	pipeline.committed = true
-	if err := bus.settlePipelineObligation(
+	if outcome, err := bus.settlePipelineObligationOutcome(
 		context.Background(),
 		claim,
 		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
-	); !errors.Is(err, pipeline.err) {
-		t.Fatalf("committed settlement cleanup error = %v, want %v", err, pipeline.err)
+	); !outcome.Committed() || !errors.Is(err, pipeline.err) {
+		t.Fatalf("committed settlement: committed=%t err=%v, want error %v", outcome.Committed(), err, pipeline.err)
 	}
 	continuations.mu.Lock()
 	signals = continuations.signals

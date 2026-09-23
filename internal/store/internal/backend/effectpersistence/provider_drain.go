@@ -9,10 +9,10 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -432,13 +432,12 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 func (s *EffectPostgresOwner) settleProviderDrainTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, tx, story, effects, settlement, permit.Origin, s.delivery, s.directives); err != nil {
+	if err := settleProviderDrainOrigin(ctx, mutation, settlement, permit.Origin, s.delivery, s.directives); err != nil {
 		return nil, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=$2 WHERE drain_id=$1::uuid AND state='pending'`, permit.DrainID, settlement.Now.UTC())
@@ -451,13 +450,12 @@ func (s *EffectPostgresOwner) settleProviderDrainTx(
 func (s *EffectSQLiteOwner) settleProviderDrainTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, tx, story, effects, settlement, permit.Origin, s.delivery, s.directives); err != nil {
+	if err := settleProviderDrainOrigin(ctx, mutation, settlement, permit.Origin, s.delivery, s.directives); err != nil {
 		return nil, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=? WHERE drain_id=? AND state='pending'`, settlement.Now.UTC(), permit.DrainID)
@@ -470,8 +468,7 @@ func (s *EffectSQLiteOwner) settleProviderDrainTx(
 func settleProviderDrainRecovery(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
@@ -480,7 +477,7 @@ func settleProviderDrainRecovery(
 	delivery providerDrainDeliveryOwner,
 	directives providerDrainDirectiveOwner,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOriginRecovery(ctx, tx, story, effects, settlement, permit.Origin, delivery, directives); err != nil {
+	if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, permit.Origin, delivery, directives); err != nil {
 		return nil, err
 	}
 	state := "settled"
@@ -511,9 +508,7 @@ func settleProviderDrainRecovery(
 
 func settleProviderDrainOrigin(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	origin runtimeeffects.CompletionOrigin,
 	delivery providerDrainDeliveryOwner,
@@ -524,7 +519,7 @@ func settleProviderDrainOrigin(
 			return fmt.Errorf("provider-drain directive owner is not bound")
 		}
 		failure := directiveDrainFailure(settlement)
-		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, effects, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, failure, settlement.Now.UTC())
+		return directives.SettleProviderDirectiveOriginTx(ctx, mutation, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, failure, settlement.Now.UTC())
 	}
 	if origin.Kind != runtimeeffects.CompletionOriginDelivery || delivery == nil {
 		return fmt.Errorf("provider-drain delivery origin owner is not bound")
@@ -534,13 +529,13 @@ func settleProviderDrainOrigin(
 		duration = time.Duration(settlement.AgentTurn.LatencyMS) * time.Millisecond
 	}
 	if settlement.Settlement.State == runtimeeffects.StateSettled {
-		return delivery.SettleProviderOriginSuccessTx(ctx, tx, story, effects, origin.Delivery, nil, duration)
+		return delivery.SettleProviderOriginSuccessTx(ctx, mutation, origin.Delivery, nil, duration)
 	}
 	reason := "provider_attempt_drained_without_confirmed_success"
 	if settlement.Settlement.Failure != nil && strings.TrimSpace(settlement.Settlement.Failure.Detail.Code) != "" {
 		reason = settlement.Settlement.Failure.Detail.Code
 	}
-	return delivery.SettleProviderOriginFailureTx(ctx, tx, story, effects, origin.Delivery, runtimedelivery.Settlement{
+	return delivery.SettleProviderOriginFailureTx(ctx, mutation, origin.Delivery, runtimedelivery.Settlement{
 		Disposition:   runtimedelivery.FailureDeadLetter,
 		ReasonCode:    reason,
 		Failure:       settlement.Settlement.Failure,
@@ -551,9 +546,7 @@ func settleProviderDrainOrigin(
 
 func settleProviderDrainOriginRecovery(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	origin runtimeeffects.CompletionOrigin,
 	delivery providerDrainDeliveryOwner,
@@ -566,7 +559,7 @@ func settleProviderDrainOriginRecovery(
 		if directives == nil {
 			return fmt.Errorf("provider-drain directive owner is not bound")
 		}
-		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, effects, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, *settlement.Settlement.Failure, settlement.Now.UTC())
+		return directives.SettleProviderDirectiveOriginTx(ctx, mutation, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, *settlement.Settlement.Failure, settlement.Now.UTC())
 	}
 	if origin.Kind != runtimeeffects.CompletionOriginDelivery || delivery == nil {
 		return fmt.Errorf("provider-drain delivery origin owner is not bound")
@@ -579,7 +572,7 @@ func settleProviderDrainOriginRecovery(
 	if code := strings.TrimSpace(settlement.Settlement.Failure.Detail.Code); code != "" {
 		reason = code
 	}
-	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, tx, story, effects, origin.Delivery, runtimedelivery.Settlement{
+	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, mutation, origin.Delivery, runtimedelivery.Settlement{
 		Disposition:   runtimedelivery.FailureDeadLetter,
 		ReasonCode:    reason,
 		Failure:       settlement.Settlement.Failure,
@@ -688,19 +681,19 @@ func (c providerAttemptDrainCandidate) origin(agentID string) (runtimeeffects.Co
 
 func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	if err := capture.Validate(); err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	fields, err := agentIdentityFields(capture.Predecessor.Identity)
-	if err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	rows, err := tx.QueryContext(ctx, `
+	var result runtimeeffects.ProviderAttemptDrainCaptureResult
+	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := capture.Validate(); err != nil {
+			return err
+		}
+		fields, err := agentIdentityFields(capture.Predecessor.Identity)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `
 		SELECT a.attempt_id::text, a.operation_id::text, a.state,
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''), COALESCE(a.origin_run_id::text,''),
 		       COALESCE(a.origin_route_identity,''), COALESCE(a.origin_claim_token::text,''),
@@ -717,33 +710,36 @@ func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 		ORDER BY a.attempt_id
 		FOR UPDATE OF a,o
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, fields.RunID)
-	if err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	candidates, err := scanProviderAttemptDrainCandidates(rows)
-	if err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	return s.captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, true)
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+			capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, fields.RunID)
+		if err != nil {
+			return err
+		}
+		candidates, err := scanProviderAttemptDrainCandidates(rows)
+		if err != nil {
+			return err
+		}
+		result, err = s.captureProviderAttemptDrains(ctx, tx, mutation, capture, candidates, true)
+		return err
+	})
+	return result, err
 }
 
 func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	if err := capture.Validate(); err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	fields, err := agentIdentityFields(capture.Predecessor.Identity)
-	if err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	rows, err := tx.QueryContext(ctx, `
+	var result runtimeeffects.ProviderAttemptDrainCaptureResult
+	err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := capture.Validate(); err != nil {
+			return err
+		}
+		fields, err := agentIdentityFields(capture.Predecessor.Identity)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `
 		SELECT a.attempt_id, a.operation_id, a.state,
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''), COALESCE(a.origin_run_id,''),
 		       COALESCE(a.origin_route_identity,''), COALESCE(a.origin_claim_token,''),
@@ -759,16 +755,19 @@ func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 		  AND a.state IN ('authorized','launched','response_observed')
 		ORDER BY a.attempt_id
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, fields.RunID)
-	if err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	candidates, err := scanProviderAttemptDrainCandidates(rows)
-	if err != nil {
-		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
-	}
-	return s.captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, false)
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+			capture.Predecessor.RuntimeEpoch, capture.Predecessor.Generation, fields.RunID)
+		if err != nil {
+			return err
+		}
+		candidates, err := scanProviderAttemptDrainCandidates(rows)
+		if err != nil {
+			return err
+		}
+		result, err = s.captureProviderAttemptDrains(ctx, tx, mutation, capture, candidates, false)
+		return err
+	})
+	return result, err
 }
 
 func scanProviderAttemptDrainCandidates(rows *sql.Rows) ([]providerAttemptDrainCandidate, error) {
@@ -800,32 +799,29 @@ func scanProviderAttemptDrainCandidates(rows *sql.Rows) ([]providerAttemptDrainC
 func (s *EffectPostgresOwner) captureProviderAttemptDrains(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	return captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, postgres, s.delivery, s.directives)
+	return captureProviderAttemptDrains(ctx, tx, mutation, capture, candidates, postgres, s.delivery, s.directives)
 }
 
 func (s *EffectSQLiteOwner) captureProviderAttemptDrains(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	return captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, postgres, s.delivery, s.directives)
+	return captureProviderAttemptDrains(ctx, tx, mutation, capture, candidates, postgres, s.delivery, s.directives)
 }
 
 func captureProviderAttemptDrains(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
@@ -843,7 +839,7 @@ func captureProviderAttemptDrains(
 		}
 		switch candidate.State {
 		case runtimeeffects.StateAuthorized:
-			if err := abandonPrelaunchProviderAttempt(ctx, tx, story, effects, candidate, origin, capture.CapturedAt, postgres, delivery, directives); err != nil {
+			if err := abandonPrelaunchProviderAttempt(ctx, tx, mutation, candidate, origin, capture.CapturedAt, postgres, delivery, directives); err != nil {
 				return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 			}
 		case runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved:
@@ -861,8 +857,7 @@ func captureProviderAttemptDrains(
 func abandonPrelaunchProviderAttempt(
 	ctx context.Context,
 	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
-	effects *revisionEffects,
+	mutation *mutationprotocol.Attempt,
 	candidate providerAttemptDrainCandidate,
 	origin runtimeeffects.CompletionOrigin,
 	now time.Time,
@@ -879,10 +874,10 @@ func abandonPrelaunchProviderAttempt(
 	)
 	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
 	if origin.Kind == runtimeeffects.CompletionOriginDirective {
-		if err := directives.SettleProviderDirectiveOriginTx(ctx, tx, story, effects, origin.Directive, runtimeagentcontrol.DirectiveOperationFailed, failure, now.UTC()); err != nil {
+		if err := directives.SettleProviderDirectiveOriginTx(ctx, mutation, origin.Directive, runtimeagentcontrol.DirectiveOperationFailed, failure, now.UTC()); err != nil {
 			return fmt.Errorf("settle superseded prelaunch directive origin: %w", err)
 		}
-	} else if err := delivery.SettleProviderOriginFailureTx(ctx, tx, story, effects, origin.Delivery, runtimedelivery.Settlement{
+	} else if err := delivery.SettleProviderOriginFailureTx(ctx, mutation, origin.Delivery, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "provider_attempt_superseded_before_launch", Failure: &failure,
 		RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 	}); err != nil {
@@ -923,7 +918,7 @@ func abandonPrelaunchProviderAttempt(
 	if err != nil {
 		return err
 	}
-	return recordExternalEffectStory(ctx, story, source, runtimeeffects.StateTerminalFailure, &failure, now.UTC())
+	return recordExternalEffectStory(ctx, mutation, source, runtimeeffects.StateTerminalFailure, &failure, now.UTC())
 }
 
 func insertProviderAttemptDrain(

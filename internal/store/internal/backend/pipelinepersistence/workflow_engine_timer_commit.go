@@ -13,33 +13,40 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func commitWorkflowEngineTimerMutation(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *revisionEffects,
 	mutation runtimepipeline.WorkflowTimerMutation,
 ) (timeridentity.WorkflowTimerActivationRef, bool, error) {
 	activation := mutation.Activation.Canonical()
 	if err := mutation.Validate(activation.RunID, activation.Route, activation.EntityID); err != nil {
 		return timeridentity.WorkflowTimerActivationRef{}, false, err
 	}
-	switch mutation.Kind {
-	case runtimepipeline.WorkflowTimerMutationInsert:
-		changed, err := insertWorkflowEngineTimerActivation(ctx, tx, postgres, effects, activation)
-		return activation.Ref, changed, err
-	case runtimepipeline.WorkflowTimerMutationCancel:
-		changed, err := cancelWorkflowEngineTimerActivation(ctx, tx, postgres, effects, activation)
-		return activation.Ref, changed, err
-	default:
-		return timeridentity.WorkflowTimerActivationRef{}, false, fmt.Errorf("workflow timer mutation kind %q is unsupported", mutation.Kind)
-	}
+	var changed bool
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		switch mutation.Kind {
+		case runtimepipeline.WorkflowTimerMutationInsert:
+			changed, err = insertWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)
+		case runtimepipeline.WorkflowTimerMutationCancel:
+			changed, err = cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)
+		default:
+			err = fmt.Errorf("workflow timer mutation kind %q is unsupported", mutation.Kind)
+		}
+		return err
+	})
+	return activation.Ref, changed, err
 }
 
-func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, effects *revisionEffects, activation runtimepipeline.WorkflowTimerActivation) (bool, error) {
+type workflowTimerFactSink interface {
+	AddFact(string, privaterunforkrevision.Family, string) error
+}
+
+func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, facts workflowTimerFactSink, activation runtimepipeline.WorkflowTimerActivation) (bool, error) {
 	var (
 		result sql.Result
 		err    error
@@ -113,14 +120,14 @@ func insertWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 		return false, fmt.Errorf("workflow timer activation %s conflicts with persisted facts", activation.Ref.ActivationID)
 	}
 	if rows == 1 {
-		if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
+		if err := facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
 			return false, err
 		}
 	}
 	return rows == 1, nil
 }
 
-func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, effects *revisionEffects, expected runtimepipeline.WorkflowTimerActivation) (bool, error) {
+func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgres bool, facts workflowTimerFactSink, expected runtimepipeline.WorkflowTimerActivation) (bool, error) {
 	persisted, found, err := loadWorkflowEngineTimerActivation(ctx, tx, postgres, expected.Ref)
 	if err != nil {
 		return false, err
@@ -158,7 +165,7 @@ func cancelWorkflowEngineTimerActivation(ctx context.Context, tx *sql.Tx, postgr
 	if rows != 1 {
 		return false, fmt.Errorf("workflow timer cancellation changed %d rows", rows)
 	}
-	if err := effects.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
+	if err := facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
 		return false, err
 	}
 	return true, nil

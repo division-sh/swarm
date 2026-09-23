@@ -115,7 +115,13 @@ func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationPr
 		Publications: plan.CommitCommands(), AuthorProjection: projection,
 	})
 	if err == nil {
+		if !result.Acknowledged {
+			return runtimeinbound.Record{}, errors.New("selected-store inbound publication did not acknowledge commit")
+		}
 		for index, publication := range result.Publications {
+			if publication.Acknowledged {
+				return runtimeinbound.Record{}, fmt.Errorf("transaction-local inbound publication %d claims commit acknowledgement", index)
+			}
 			if validationErr := publication.Validate(); validationErr != nil {
 				return runtimeinbound.Record{}, fmt.Errorf("validate committed publication %d: %w", index, validationErr)
 			}
@@ -338,14 +344,14 @@ func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Co
 	if err != nil {
 		t.Fatalf("commit zero-event operator claim: %v", err)
 	}
-	if !result.Record.Created || result.Record.OutputCount != 0 || len(result.Record.Events) != 0 || len(result.Publications) != 0 || result.OperatorChannelClaim == nil || result.OperatorChannelClaim.Disposition != operatorchannel.DispositionConsumedBinding {
+	if !result.Acknowledged || !result.Record.Created || result.Record.OutputCount != 0 || len(result.Record.Events) != 0 || len(result.Publications) != 0 || result.OperatorChannelClaim == nil || result.OperatorChannelClaim.Disposition != operatorchannel.DispositionConsumedBinding {
 		t.Fatalf("zero-event operator claim result = %#v", result)
 	}
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, accepted.Request.PublicationID, 0)
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE event_id = `, accepted.Request.MarkerEventID, 1)
 
 	replayed, err := store.CommitInboundPublication(ctx, accepted)
-	if err != nil || replayed.Record.Created || replayed.Record.OutputCount != 0 || replayed.OperatorChannelClaim != nil {
+	if err != nil || !replayed.Acknowledged || replayed.Record.Created || replayed.Record.OutputCount != 0 || replayed.OperatorChannelClaim != nil {
 		t.Fatalf("zero-event operator claim replay = %#v, %v", replayed, err)
 	}
 	changed := accepted

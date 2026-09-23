@@ -3,6 +3,7 @@ package runlifecycle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,10 +17,9 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/store/internal/adminpersistence"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/lib/pq"
 )
 
@@ -86,37 +86,38 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescence(ctx context.Context
 		return out, nil
 	}
 
-	committed, err := s.backend.RunTransactionOutcome(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
-		// Previews and empty selections must roll back even author-activity
-		// initialization. Keep that rollback under the draining transaction owner.
-		if _, err := tx.ExecContext(sqlCtx, "SAVEPOINT active_run_quiescence_selection"); err != nil {
-			return fmt.Errorf("begin active run quiescence selection: %w", err)
-		}
-		var err error
-		out, err = s.applyActiveRunQuiescenceTx(sqlCtx, tx, req, reset, out, runIDs, now)
-		if err != nil {
-			return err
-		}
-		if req.DryRun || (len(out.Runs) == 0 && reset == nil) {
-			if _, err := tx.ExecContext(sqlCtx, "ROLLBACK TO SAVEPOINT active_run_quiescence_selection"); err != nil {
-				return fmt.Errorf("rollback active run quiescence selection: %w", err)
-			}
-		}
-		return nil
-	})
-	if !committed {
-		return runtimerunquiescence.Result{}, err
+	evidence := mutationprotocol.Story
+	if req.DryRun {
+		evidence = mutationprotocol.RevisionOnly
 	}
-	return out, err
+	emptySelection := errors.New("active run quiescence selected no runs")
+	var emptyResult runtimerunquiescence.Result
+	result := mutationprotocol.RunPostgres(ctx, s.backend, evidence, mutationprotocol.Ordinary, nil, nil, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (runtimerunquiescence.Result, error) {
+		var value runtimerunquiescence.Result
+		err := attempt.WithSQL(sqlCtx, func(sqlCtx context.Context, tx *sql.Tx) (err error) {
+			value, err = s.applyActiveRunQuiescenceTx(sqlCtx, tx, attempt, req, reset, out, runIDs, now)
+			return err
+		})
+		if err == nil && !req.DryRun && len(value.Runs) == 0 && reset == nil {
+			emptyResult = value
+			return value, emptySelection
+		}
+		return value, err
+	})
+	if result.Err() == emptySelection {
+		return emptyResult, nil
+	}
+	value, committed := result.Value()
+	if !committed {
+		return runtimerunquiescence.Result{}, result.Err()
+	}
+	value.Acknowledged = true
+	return value, result.Err()
 }
 
-func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Context, tx *sql.Tx, req runtimerunquiescence.Request, reset *runtimedestructivereset.QuiescenceRequest, out runtimerunquiescence.Result, runIDs []string, now time.Time) (runtimerunquiescence.Result, error) {
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		return runtimerunquiescence.Result{}, err
-	}
-
+func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, req runtimerunquiescence.Request, reset *runtimedestructivereset.QuiescenceRequest, out runtimerunquiescence.Result, runIDs []string, now time.Time) (runtimerunquiescence.Result, error) {
 	var runs []runtimerunquiescence.QuiescedRun
+	var err error
 	if req.AllActiveRuns {
 		runs, err = lockAllActiveQuiescenceRunsTx(ctx, tx)
 	} else {
@@ -171,23 +172,21 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Conte
 	if req.DryRun {
 		return out, nil
 	}
-	effects := runforkrevision.NewEffects()
-
 	for _, runID := range runIDs {
-		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, runID, out.ReasonCode); err != nil {
+		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, attempt, runID, out.ReasonCode); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
-		terminalized, err := s.pipeline.TerminalizeRunTx(ctx, tx, effects, runID, runtimepipelineobligation.DeadLetter(out.ReasonCode, nil), now)
+		terminalized, err := s.pipeline.TerminalizeRunTx(ctx, attempt, runID, runtimepipelineobligation.DeadLetter(out.ReasonCode, nil), now)
 		if err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
 		out.PipelineReceiptCount += terminalized
 	}
-	out.SessionCount, err = terminateActiveRunSessionsTx(ctx, tx, effects, runIDs, out.ReasonCode, now)
+	out.SessionCount, err = terminateActiveRunSessionsTx(ctx, tx, attempt, runIDs, out.ReasonCode, now)
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
-	out.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(ctx, tx, true, effects, runIDs, out.ReasonCode, now)
+	out.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(ctx, tx, attempt, true, runIDs, out.ReasonCode, now)
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
@@ -196,7 +195,7 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Conte
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
-		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 		}); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
@@ -204,12 +203,6 @@ func (s *RunLifecyclePostgresOwner) applyActiveRunQuiescenceTx(ctx context.Conte
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, out.ReasonCode, out.ControlledBy, now); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
-	}
-	if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-		return runtimerunquiescence.Result{}, err
-	}
-	if err := story.Finalize(ctx); err != nil {
-		return runtimerunquiescence.Result{}, err
 	}
 	if reset != nil {
 		if err := adminpersistence.CommitResetQuiescenceTx(ctx, tx, *reset, destructiveResetQuiescenceResult(out), false); err != nil {
@@ -260,109 +253,123 @@ func (s *RunLifecycleSQLiteOwner) applyActiveRunQuiescence(ctx context.Context, 
 		return out, nil
 	}
 
-	baseOut := out
-	effects := runforkrevision.NewEffects()
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite active run quiescence", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		attemptOut := baseOut
-		var runs []runtimerunquiescence.QuiescedRun
-		var err error
-		if req.AllActiveRuns {
-			runs, err = sqliteLockAllActiveQuiescenceRunsTx(txctx, tx)
-		} else {
-			runs, err = sqliteLockActiveQuiescenceRunsTx(txctx, tx, requestedRunIDs)
-		}
-		if err != nil {
-			return err
-		}
-		attemptRunIDs := quiescenceRunIDs(runs)
-		if len(attemptRunIDs) == 0 && reset == nil {
-			out = attemptOut
-			return nil
-		}
-		active := []runtimedelivery.Snapshot{}
-		for _, runID := range attemptRunIDs {
-			snapshots, err := s.delivery.ActiveRunDeliverySnapshotsTx(txctx, tx, runID)
-			if err != nil {
-				return err
-			}
-			active = append(active, snapshots...)
-		}
-		for _, delivery := range active {
-			attemptOut.Deliveries = append(attemptOut.Deliveries, runtimerunquiescence.QuiescedDelivery{
-				DeliveryID:      delivery.DeliveryID,
-				RunID:           delivery.RunID,
-				EventID:         delivery.EventID,
-				SubscriberType:  string(delivery.SubscriberClass),
-				SubscriberID:    delivery.SubscriberID,
-				PreviousStatus:  string(delivery.Status),
-				Status:          "dead_letter",
-				ReasonCode:      attemptOut.ReasonCode,
-				PreviousReason:  delivery.ReasonCode,
-				ActiveSessionID: delivery.ActiveSessionID,
-				Changed:         true,
-			})
-		}
-		for _, run := range runs {
-			nextStatus := run.Status
-			changed := false
-			if activeRunQuiescenceRunStatusActive(run.Status) {
-				nextStatus = "cancelled"
-				changed = true
-			}
-			attemptOut.Runs = append(attemptOut.Runs, runtimerunquiescence.QuiescedRun{
-				RunID:          run.RunID,
-				BundleHash:     run.BundleHash,
-				PreviousStatus: run.Status,
-				Status:         nextStatus,
-				ReasonCode:     attemptOut.ReasonCode,
-				Changed:        changed,
-			})
-		}
-		if req.DryRun {
-			out = attemptOut
-			return nil
-		}
-		for _, runID := range attemptRunIDs {
-			if _, err := s.delivery.TerminalizeRunDeliveriesTx(txctx, tx, story, effects, runID, attemptOut.ReasonCode); err != nil {
-				return err
-			}
-			terminalized, err := s.pipeline.TerminalizeRunTx(txctx, tx, effects, runID, runtimepipelineobligation.DeadLetter(attemptOut.ReasonCode, nil), now)
-			if err != nil {
-				return err
-			}
-			attemptOut.PipelineReceiptCount += terminalized
-		}
-		attemptOut.SessionCount, err = sqliteTerminateActiveRunSessionsTx(txctx, tx, effects, attemptRunIDs, attemptOut.ReasonCode, now)
-		if err != nil {
-			return err
-		}
-		attemptOut.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(txctx, tx, false, effects, attemptRunIDs, attemptOut.ReasonCode, now)
-		if err != nil {
-			return err
-		}
-		attemptOut.TimerCount = len(attemptOut.TimerCancellations)
-		for _, run := range runs {
-			if !activeRunQuiescenceRunStatusActive(run.Status) {
-				continue
-			}
-			if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
-				RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
-			}); err != nil {
-				return err
-			}
-			if err := sqliteUpsertActiveRunQuiescenceRunControlTx(txctx, tx, run.RunID, attemptOut.ReasonCode, attemptOut.ControlledBy, now); err != nil {
-				return err
-			}
-		}
-		out = attemptOut
-		if reset != nil {
-			return adminpersistence.CommitResetQuiescenceTx(txctx, tx, *reset, destructiveResetQuiescenceResult(out), true)
-		}
-		return nil
-	}); err != nil {
-		return runtimerunquiescence.Result{}, err
+	evidence := mutationprotocol.Story
+	if req.DryRun {
+		evidence = mutationprotocol.RevisionOnly
 	}
-	return out, nil
+	emptySelection := errors.New("active run quiescence selected no runs")
+	var emptyResult runtimerunquiescence.Result
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite active run quiescence", evidence, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunquiescence.Result, error) {
+		attemptOut := out
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var runs []runtimerunquiescence.QuiescedRun
+			var err error
+			if req.AllActiveRuns {
+				runs, err = sqliteLockAllActiveQuiescenceRunsTx(txctx, tx)
+			} else {
+				runs, err = sqliteLockActiveQuiescenceRunsTx(txctx, tx, requestedRunIDs)
+			}
+			if err != nil {
+				return err
+			}
+			attemptRunIDs := quiescenceRunIDs(runs)
+			if len(attemptRunIDs) == 0 && reset == nil {
+				return nil
+			}
+			active := []runtimedelivery.Snapshot{}
+			for _, runID := range attemptRunIDs {
+				snapshots, err := s.delivery.ActiveRunDeliverySnapshotsTx(txctx, tx, runID)
+				if err != nil {
+					return err
+				}
+				active = append(active, snapshots...)
+			}
+			for _, delivery := range active {
+				attemptOut.Deliveries = append(attemptOut.Deliveries, runtimerunquiescence.QuiescedDelivery{
+					DeliveryID:      delivery.DeliveryID,
+					RunID:           delivery.RunID,
+					EventID:         delivery.EventID,
+					SubscriberType:  string(delivery.SubscriberClass),
+					SubscriberID:    delivery.SubscriberID,
+					PreviousStatus:  string(delivery.Status),
+					Status:          "dead_letter",
+					ReasonCode:      attemptOut.ReasonCode,
+					PreviousReason:  delivery.ReasonCode,
+					ActiveSessionID: delivery.ActiveSessionID,
+					Changed:         true,
+				})
+			}
+			for _, run := range runs {
+				nextStatus := run.Status
+				changed := false
+				if activeRunQuiescenceRunStatusActive(run.Status) {
+					nextStatus = "cancelled"
+					changed = true
+				}
+				attemptOut.Runs = append(attemptOut.Runs, runtimerunquiescence.QuiescedRun{
+					RunID:          run.RunID,
+					BundleHash:     run.BundleHash,
+					PreviousStatus: run.Status,
+					Status:         nextStatus,
+					ReasonCode:     attemptOut.ReasonCode,
+					Changed:        changed,
+				})
+			}
+			if req.DryRun {
+				return nil
+			}
+			for _, runID := range attemptRunIDs {
+				if _, err := s.delivery.TerminalizeRunDeliveriesTx(txctx, attempt, runID, attemptOut.ReasonCode); err != nil {
+					return err
+				}
+				terminalized, err := s.pipeline.TerminalizeRunTx(txctx, attempt, runID, runtimepipelineobligation.DeadLetter(attemptOut.ReasonCode, nil), now)
+				if err != nil {
+					return err
+				}
+				attemptOut.PipelineReceiptCount += terminalized
+			}
+			attemptOut.SessionCount, err = sqliteTerminateActiveRunSessionsTx(txctx, tx, attempt, attemptRunIDs, attemptOut.ReasonCode, now)
+			if err != nil {
+				return err
+			}
+			attemptOut.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(txctx, tx, attempt, false, attemptRunIDs, attemptOut.ReasonCode, now)
+			if err != nil {
+				return err
+			}
+			attemptOut.TimerCount = len(attemptOut.TimerCancellations)
+			for _, run := range runs {
+				if !activeRunQuiescenceRunStatusActive(run.Status) {
+					continue
+				}
+				if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, attempt: attempt}).MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+					RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
+				}); err != nil {
+					return err
+				}
+				if err := sqliteUpsertActiveRunQuiescenceRunControlTx(txctx, tx, run.RunID, attemptOut.ReasonCode, attemptOut.ControlledBy, now); err != nil {
+					return err
+				}
+			}
+			if reset != nil {
+				return adminpersistence.CommitResetQuiescenceTx(txctx, tx, *reset, destructiveResetQuiescenceResult(attemptOut), true)
+			}
+			return nil
+		})
+		if err == nil && !req.DryRun && len(attemptOut.Runs) == 0 && reset == nil {
+			emptyResult = attemptOut
+			return attemptOut, emptySelection
+		}
+		return attemptOut, err
+	})
+	if result.Err() == emptySelection {
+		return emptyResult, nil
+	}
+	value, committed := result.Value()
+	if !committed {
+		return runtimerunquiescence.Result{}, result.Err()
+	}
+	value.Acknowledged = true
+	return value, result.Err()
 }
 
 func normalizeQuiescenceRunIDs(runIDs []string) []string {
@@ -486,7 +493,7 @@ func sqliteLockActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []
 	return scanActiveRunQuiescenceRuns(rows)
 }
 
-func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, runIDs []string, reason string, at time.Time) (int, error) {
+func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runIDs []string, reason string, at time.Time) (int, error) {
 	rows, err := tx.QueryContext(ctx, `
 		UPDATE agent_sessions
 		SET status = 'terminated',
@@ -498,34 +505,30 @@ func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, effects *runf
 		    updated_at = $3
 		WHERE run_id = ANY($1::uuid[])
 		  AND status IN ('active', 'suspended')
-		RETURNING run_id::text
+		RETURNING run_id::text, session_id::text
 	`, pq.Array(runIDs), reason, at.UTC())
 	if err != nil {
 		return 0, fmt.Errorf("terminate active run sessions: %w", err)
 	}
 	defer rows.Close()
-	changedRuns := make(map[string]struct{})
 	count := 0
 	for rows.Next() {
-		var runID string
-		if err := rows.Scan(&runID); err != nil {
+		var runID, sessionID string
+		if err := rows.Scan(&runID, &sessionID); err != nil {
 			return 0, err
 		}
-		changedRuns[runID] = struct{}{}
+		if err := attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID); err != nil {
+			return 0, err
+		}
 		count++
 	}
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	for runID := range changedRuns {
-		if err := effects.Add(runID, runforkrevision.FamilyAgentSessions); err != nil {
-			return 0, err
-		}
-	}
 	return count, nil
 }
 
-func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, runIDs []string, reason string, at time.Time) (int, error) {
+func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runIDs []string, reason string, at time.Time) (int, error) {
 	args := make([]any, 0, len(runIDs)+3)
 	args = append(args, reason, at.UTC(), at.UTC())
 	for _, runID := range runIDs {
@@ -542,47 +545,122 @@ func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, effects
 		    updated_at = ?
 		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
 		  AND status IN ('active', 'suspended')
-		RETURNING run_id
+		RETURNING run_id, session_id
 	`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("terminate sqlite active run sessions: %w", err)
 	}
 	defer rows.Close()
-	changedRuns := make(map[string]struct{})
 	count := 0
 	for rows.Next() {
-		var runID string
-		if err := rows.Scan(&runID); err != nil {
+		var runID, sessionID string
+		if err := rows.Scan(&runID, &sessionID); err != nil {
 			return 0, err
 		}
-		changedRuns[runID] = struct{}{}
+		if err := attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID); err != nil {
+			return 0, err
+		}
 		count++
 	}
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	for runID := range changedRuns {
-		if err := effects.Add(runID, runforkrevision.FamilyAgentSessions); err != nil {
-			return 0, err
-		}
-	}
 	return count, nil
 }
 
-func (s *RunLifecycleSQLiteOwner) TerminateActiveSessionsTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, runIDs []string, reason string, at time.Time) (int, error) {
-	return sqliteTerminateActiveRunSessionsTx(ctx, tx, effects, runIDs, reason, at)
+func (s *RunLifecycleSQLiteOwner) TerminateActiveSessionsTx(ctx context.Context, attempt *mutationprotocol.Attempt, runIDs []string, reason string, at time.Time) (int, error) {
+	var count int
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		count, err = sqliteTerminateActiveRunSessionsTx(ctx, tx, attempt, runIDs, reason, at)
+		return err
+	})
+	return count, err
 }
 
-func cancelActiveRunTimerFamiliesTx(ctx context.Context, tx *sql.Tx, postgres bool, effects *runforkrevision.Effects, runIDs []string, cause string, at time.Time) ([]runtimetimercancellation.Ref, error) {
-	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, postgres, effects, runIDs, cause, at)
+func cancelActiveRunTimerFamiliesTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, runIDs []string, cause string, at time.Time) ([]runtimetimercancellation.Ref, error) {
+	generic, err := storegenericschedule.CancelRunsTx(ctx, attempt, postgres, runIDs, cause, at)
 	if err != nil {
 		return nil, fmt.Errorf("cancel active generic schedules: %w", err)
 	}
-	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, postgres, effects, runIDs)
+	workflow, err := cancelActiveRunWorkflowTimersTx(ctx, tx, attempt, postgres, runIDs)
 	if err != nil {
 		return nil, fmt.Errorf("cancel active workflow timers: %w", err)
 	}
 	return append(generic, workflow...), nil
+}
+
+func cancelActiveRunWorkflowTimersTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, postgres bool, runIDs []string) ([]runtimetimercancellation.Ref, error) {
+	runIDs = normalizeQuiescenceRunIDs(runIDs)
+	if len(runIDs) == 0 {
+		return nil, nil
+	}
+	query := `SELECT CAST(timer_id AS TEXT), timer_name, fire_at, CAST(run_id AS TEXT)
+		FROM timers WHERE run_id IN (` + sqlitePlaceholders(len(runIDs)) + `)
+		AND task_type = 'workflow_timer' AND status = 'active' ORDER BY timer_id`
+	args := make([]any, len(runIDs))
+	for i, runID := range runIDs {
+		args[i] = runID
+	}
+	if postgres {
+		query = `SELECT timer_id::text, timer_name, fire_at, run_id::text
+			FROM timers WHERE run_id = ANY($1::uuid[])
+			AND task_type = 'workflow_timer' AND status = 'active' ORDER BY timer_id FOR UPDATE`
+		args = []any{pq.Array(runIDs)}
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("lock active workflow timers: %w", err)
+	}
+	refs := make([]runtimetimercancellation.Ref, 0)
+	for rows.Next() {
+		var ref runtimetimercancellation.Ref
+		var dueRaw any
+		if err := rows.Scan(&ref.ActivationID, &ref.TaskID, &dueRaw, &ref.RunID); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan active workflow timer: %w", err)
+		}
+		var ok bool
+		ref.DueAt, ok, err = sqliteTimeValue(dueRaw)
+		if err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("decode active workflow timer due coordinate: %w", err)
+		}
+		if !ok {
+			rows.Close()
+			return nil, fmt.Errorf("active workflow timer %s has no due coordinate", ref.ActivationID)
+		}
+		ref.Family = runtimetimercancellation.FamilyWorkflowTimer
+		if err := ref.Validate(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		refs = append(refs, ref.Canonical())
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, ref := range refs {
+		update := `UPDATE timers SET status = 'cancelled' WHERE timer_id = ? AND task_type = 'workflow_timer' AND status = 'active'`
+		if postgres {
+			update = `UPDATE timers SET status = 'cancelled' WHERE timer_id = $1::uuid AND task_type = 'workflow_timer' AND status = 'active'`
+		}
+		result, err := tx.ExecContext(ctx, update, ref.ActivationID)
+		if err != nil {
+			return nil, fmt.Errorf("cancel workflow timer %s: %w", ref.ActivationID, err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 1 {
+			return nil, fmt.Errorf("workflow timer %s cancellation changed %d rows: %w", ref.ActivationID, changed, err)
+		}
+		if err := attempt.AddFact(ref.RunID, runforkrevision.FamilyTimers, ref.ActivationID); err != nil {
+			return nil, err
+		}
+	}
+	return refs, nil
 }
 
 func upsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx, runID, reasonCode, controlledBy string, at time.Time) error {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -66,13 +65,11 @@ func TestHandlerSelectionAfterInsertPostgresCanonicalRead(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					id, runID := uuid.NewString(), uuid.NewString()
-					effects := runforkrevision.NewEffects()
+					id := uuid.NewString()
 					if path == "actual_writer" {
-						err = a.persistHandlerRuleSelection(ctx, tx, effects, runID, id, fact)
+						err = a.persistHandlerRuleSelectionSQL(ctx, tx, id, fact)
 						t.Logf("actual writer admission: %v", err)
 						assertRejection(t, err)
-						selectionEffects(t, effects, runID)
 						return
 					}
 					query := `INSERT INTO event_delivery_handler_rule_selections

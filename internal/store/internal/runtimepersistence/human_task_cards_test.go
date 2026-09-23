@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
@@ -15,7 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -417,25 +416,22 @@ func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardS
 }
 
 func expireHumanTaskCardsInTestMutationResult(ctx context.Context, cardStore decisioncard.Store, at time.Time, limit int) ([]events.Event, error) {
-	var eventsOut []events.Event
-	var mutationErr error
 	switch selected := cardStore.(type) {
 	case *PostgresStore:
-		mutationErr = selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			var err error
-			eventsOut, err = expireHumanTaskCards(txctx, runtimeAuthorActivityMutation(story), tx, at, limit, true)
-			return err
+		result := mutationprotocol.RunPostgres(ctx, selected.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) ([]events.Event, error) {
+			return selected.decisionPostgresOwner.ExpireHumanTasksTx(txctx, attempt, at, limit)
 		})
+		value, _ := result.Value()
+		return value, result.Err()
 	case *SQLiteRuntimeStore:
-		mutationErr = selected.runPrivateAuthorActivityMutation(ctx, "sqlite human-task expiry fixture", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			var err error
-			eventsOut, err = expireHumanTaskCards(txctx, runtimeAuthorActivityMutation(story), tx, at, limit, false)
-			return err
+		result := mutationprotocol.RunSQLite(ctx, selected.backend, "sqlite human-task expiry fixture", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) ([]events.Event, error) {
+			return selected.decisionSQLiteOwner.ExpireHumanTasksTx(txctx, attempt, at, limit)
 		})
+		value, _ := result.Value()
+		return value, result.Err()
 	default:
-		mutationErr = fmt.Errorf("unexpected human-task expiry store %T", cardStore)
+		return nil, fmt.Errorf("unexpected human-task expiry store %T", cardStore)
 	}
-	return eventsOut, mutationErr
 }
 
 func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string, createdAt time.Time, budgetLimit int, deadline time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {

@@ -122,8 +122,8 @@ func (s *outboxClaimStore) issueClaim(eventID string, purpose runtimepipelineobl
 	return claim, nil
 }
 
-func (s *outboxClaimStore) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {
-	return runtimepipelineobligation.ErrIneligible
+func (s *outboxClaimStore) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) (runtimepipelineobligation.SettlementOutcome, error) {
+	return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrIneligible
 }
 
 func (s *outboxClaimStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {

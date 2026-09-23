@@ -3,7 +3,9 @@ package llm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path"
 	"strings"
@@ -112,8 +114,16 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 		return nil, nil, 0, err
 	}
 	if r != nil && r.execWorkspaceFn != nil {
+		var launchCleanupErr error
 		if err := attempt.MarkLaunched(ctx); err != nil {
-			return nil, nil, 0, err
+			if !runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationLaunch, attempt.Attempt()) {
+				return nil, nil, 0, err
+			}
+			launchCleanupErr = err
+			slog.WarnContext(ctx, "tool-result relay launch committed with cleanup error", "error", err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, nil, 0, attempt.Fail(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "tool_result_relay_cancelled_before_dispatch", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"prelaunch": true}, errors.Join(err, launchCleanupErr))
 		}
 		stdout, stderr, exitCode, runErr := r.execWorkspaceFn(ctx, target, stdin, args...)
 		if runErr != nil || exitCode != 0 {
@@ -142,8 +152,16 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 	if strings.TrimSpace(stdin) != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
+	var launchCleanupErr error
 	if err := attempt.MarkLaunched(ctx); err != nil {
-		return stdout.Bytes(), stderr.Bytes(), -1, err
+		if !runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationLaunch, attempt.Attempt()) {
+			return stdout.Bytes(), stderr.Bytes(), -1, err
+		}
+		launchCleanupErr = err
+		slog.WarnContext(ctx, "tool-result relay launch committed with cleanup error", "error", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "tool_result_relay_cancelled_before_dispatch", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"prelaunch": true}, errors.Join(err, launchCleanupErr))
 	}
 	if err := cmd.Start(); err != nil {
 		return stdout.Bytes(), stderr.Bytes(), -1, attempt.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable, "claude_tool_result_relay_start_failed", "claude-cli-adapter", "write_tool_result_relay", map[string]any{"launch_rejected": true}, err)

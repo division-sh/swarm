@@ -20,10 +20,9 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
 )
@@ -38,29 +37,37 @@ var _ decisioncard.Store = (*DecisionPostgresOwner)(nil)
 var _ decisioncard.Store = (*DecisionSQLiteOwner)(nil)
 
 func (s *DecisionPostgresOwner) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
-			return err
-		}
-		return insertDecisionCardWithStory(txctx, story, tx, card, true)
+	return writePostgresDecision(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+				return err
+			}
+			return insertDecisionCardWithStory(txctx, attempt, tx, card, true)
+		})
 	})
 }
 
 func (s *DecisionSQLiteOwner) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
-	return s.runDecisionCardMutation(ctx, "sqlite create decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
-			return err
-		}
-		return insertDecisionCardWithStory(txctx, story, tx, card, false)
+	return writeSQLiteDecision(ctx, s, "sqlite create decision card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+				return err
+			}
+			return insertDecisionCardWithStory(txctx, attempt, tx, card, false)
+		})
 	})
 }
 
-func (s *DecisionPostgresOwner) InsertTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card) error {
-	return insertDecisionCardWithStory(ctx, story, tx, card, true)
+func (s *DecisionPostgresOwner) InsertTx(ctx context.Context, attempt *mutationprotocol.Attempt, card decisioncard.Card) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return insertDecisionCardWithStory(txctx, attempt, tx, card, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) InsertTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card) error {
-	return insertDecisionCardWithStory(ctx, story, tx, card, false)
+func (s *DecisionSQLiteOwner) InsertTx(ctx context.Context, attempt *mutationprotocol.Attempt, card decisioncard.Card) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return insertDecisionCardWithStory(txctx, attempt, tx, card, false)
+	})
 }
 
 func insertDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, card decisioncard.Card, postgres bool) error {
@@ -161,12 +168,16 @@ func loadDecisionCard(ctx context.Context, db decisionCardSQL, id string, postgr
 	return scanDecisionCard(db.QueryRowContext(ctx, query, strings.TrimSpace(id)))
 }
 
-func (s *DecisionPostgresOwner) LoadTx(ctx context.Context, tx *sql.Tx, id string, forUpdate bool) (decisioncard.Card, error) {
-	return loadDecisionCard(ctx, tx, id, true, forUpdate)
+func (s *DecisionPostgresOwner) LoadTx(ctx context.Context, attempt *mutationprotocol.Attempt, id string, forUpdate bool) (decisioncard.Card, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
+		return loadDecisionCard(txctx, tx, id, true, forUpdate)
+	})
 }
 
-func (s *DecisionSQLiteOwner) LoadTx(ctx context.Context, tx *sql.Tx, id string, forUpdate bool) (decisioncard.Card, error) {
-	return loadDecisionCard(ctx, tx, id, false, forUpdate)
+func (s *DecisionSQLiteOwner) LoadTx(ctx context.Context, attempt *mutationprotocol.Attempt, id string, forUpdate bool) (decisioncard.Card, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
+		return loadDecisionCard(txctx, tx, id, false, forUpdate)
+	})
 }
 
 func requireActiveDecisionRun(ctx context.Context, db decisionCardSQL, runID string, postgres bool) error {
@@ -428,23 +439,23 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 }
 
 func (s *DecisionPostgresOwner) ApplyDecisionForTest(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	var out decisioncard.DecisionOutcome
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		out, err = decideDecisionCardWithStory(txctx, story, tx, req, true)
-		return err
+	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.DecisionOutcome, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+			return decideDecisionCardWithStory(txctx, attempt, tx, req, true)
+		})
 	})
-	return out, err
+	out, _ := result.Value()
+	return out, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) ApplyDecisionForTest(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	var out decisioncard.DecisionOutcome
-	err := s.runDecisionCardMutation(ctx, "sqlite decide decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		out, err = decideDecisionCardWithStory(txctx, story, tx, req, false)
-		return err
+	result := sqliteDecisionMutation(ctx, s, "sqlite decide decision card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.DecisionOutcome, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+			return decideDecisionCardWithStory(txctx, attempt, tx, req, false)
+		})
 	})
-	return out, err
+	out, _ := result.Value()
+	return out, result.Err()
 }
 
 func loadPendingDecisionCardMutation(ctx context.Context, tx *sql.Tx, cardID string, postgres bool) (decisioncard.Card, error) {
@@ -605,32 +616,36 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID}, nil
 }
 
-func (s *DecisionPostgresOwner) DecideTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	return decideDecisionCardWithStory(ctx, story, tx, req, true)
+func (s *DecisionPostgresOwner) DecideTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+		return decideDecisionCardWithStory(txctx, attempt, tx, req, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) DecideTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	return decideDecisionCardWithStory(ctx, story, tx, req, false)
+func (s *DecisionSQLiteOwner) DecideTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+		return decideDecisionCardWithStory(txctx, attempt, tx, req, false)
+	})
 }
 
 func (s *DecisionPostgresOwner) ApplyDeferralForTest(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	var out decisioncard.DecisionOutcome
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		out, err = deferDecisionCardWithStory(txctx, story, tx, req, true)
-		return err
+	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.DecisionOutcome, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+			return deferDecisionCardWithStory(txctx, attempt, tx, req, true)
+		})
 	})
-	return out, err
+	out, _ := result.Value()
+	return out, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) ApplyDeferralForTest(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	var out decisioncard.DecisionOutcome
-	err := s.runDecisionCardMutation(ctx, "sqlite defer decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		out, err = deferDecisionCardWithStory(txctx, story, tx, req, false)
-		return err
+	result := sqliteDecisionMutation(ctx, s, "sqlite defer decision card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.DecisionOutcome, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+			return deferDecisionCardWithStory(txctx, attempt, tx, req, false)
+		})
 	})
-	return out, err
+	out, _ := result.Value()
+	return out, result.Err()
 }
 
 func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
@@ -670,32 +685,36 @@ func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID}, err
 }
 
-func (s *DecisionPostgresOwner) DeferTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	return deferDecisionCardWithStory(ctx, story, tx, req, true)
+func (s *DecisionPostgresOwner) DeferTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+		return deferDecisionCardWithStory(txctx, attempt, tx, req, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) DeferTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	return deferDecisionCardWithStory(ctx, story, tx, req, false)
+func (s *DecisionSQLiteOwner) DeferTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.DecisionOutcome, error) {
+		return deferDecisionCardWithStory(txctx, attempt, tx, req, false)
+	})
 }
 
 func (s *DecisionPostgresOwner) BeginInputForTest(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	var draft decisioncard.InputDraft
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		draft, err = beginDecisionCardInput(txctx, tx, req, true)
-		return err
+	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.InputDraft, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+			return beginDecisionCardInput(txctx, tx, req, true)
+		})
 	})
-	return draft, err
+	draft, _ := result.Value()
+	return draft, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) BeginInputForTest(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	var draft decisioncard.InputDraft
-	err := s.runDecisionCardMutation(ctx, "sqlite begin decision card input", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		draft, err = beginDecisionCardInput(txctx, tx, req, false)
-		return err
+	result := sqliteDecisionMutation(ctx, s, "sqlite begin decision card input", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.InputDraft, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+			return beginDecisionCardInput(txctx, tx, req, false)
+		})
 	})
-	return draft, err
+	draft, _ := result.Value()
+	return draft, result.Err()
 }
 
 func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.BeginInputRequest, postgres bool) (decisioncard.InputDraft, error) {
@@ -750,32 +769,36 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	return draft, err
 }
 
-func (s *DecisionPostgresOwner) BeginInputTx(ctx context.Context, tx *sql.Tx, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	return beginDecisionCardInput(ctx, tx, req, true)
+func (s *DecisionPostgresOwner) BeginInputTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+		return beginDecisionCardInput(txctx, tx, req, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) BeginInputTx(ctx context.Context, tx *sql.Tx, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	return beginDecisionCardInput(ctx, tx, req, false)
+func (s *DecisionSQLiteOwner) BeginInputTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+		return beginDecisionCardInput(txctx, tx, req, false)
+	})
 }
 
 func (s *DecisionPostgresOwner) CancelInputForTest(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	var draft decisioncard.InputDraft
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		draft, err = cancelDecisionCardInput(txctx, tx, req, true)
-		return err
+	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.InputDraft, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+			return cancelDecisionCardInput(txctx, tx, req, true)
+		})
 	})
-	return draft, err
+	draft, _ := result.Value()
+	return draft, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) CancelInputForTest(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	var draft decisioncard.InputDraft
-	err := s.runDecisionCardMutation(ctx, "sqlite cancel decision card input", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		draft, err = cancelDecisionCardInput(txctx, tx, req, false)
-		return err
+	result := sqliteDecisionMutation(ctx, s, "sqlite cancel decision card input", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.InputDraft, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+			return cancelDecisionCardInput(txctx, tx, req, false)
+		})
 	})
-	return draft, err
+	draft, _ := result.Value()
+	return draft, result.Err()
 }
 
 func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.CancelInputRequest, postgres bool) (decisioncard.InputDraft, error) {
@@ -802,12 +825,16 @@ func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.C
 	return draft, err
 }
 
-func (s *DecisionPostgresOwner) CancelInputTx(ctx context.Context, tx *sql.Tx, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	return cancelDecisionCardInput(ctx, tx, req, true)
+func (s *DecisionPostgresOwner) CancelInputTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+		return cancelDecisionCardInput(txctx, tx, req, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) CancelInputTx(ctx context.Context, tx *sql.Tx, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	return cancelDecisionCardInput(ctx, tx, req, false)
+func (s *DecisionSQLiteOwner) CancelInputTx(ctx context.Context, attempt *mutationprotocol.Attempt, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.InputDraft, error) {
+		return cancelDecisionCardInput(txctx, tx, req, false)
+	})
 }
 
 func loadDecisionCardDraft(ctx context.Context, db decisionCardSQL, id string, postgres bool) (decisioncard.InputDraft, error) {
@@ -957,48 +984,53 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 }
 
 func (s *DecisionPostgresOwner) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
-	return withRunLifecycleCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
-		return runPostgresDecisionCardMutationOutcome(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-			changed, err := supersedeDecisionCardsForStageWithStory(txctx, story, tx, runID, entityID, activationID, reason, now, true)
-			if err != nil || !changed {
-				return err
-			}
-			_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff)
-			return err
+	return writePostgresDecision(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		changed, err := withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (bool, error) {
+			return supersedeDecisionCardsForStageWithStory(txctx, attempt, tx, runID, entityID, activationID, reason, now, true)
 		})
+		if err != nil || !changed {
+			return err
+		}
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
+		return err
 	})
 }
 
 func (s *DecisionSQLiteOwner) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
-	return withRunLifecycleCandidateHandoffOutcome(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (bool, error) {
-		return s.runDecisionCardMutationOutcome(ctx, "sqlite supersede decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-			if err := handoff.ResetAttempt(); err != nil {
-				return err
-			}
-			changed, err := supersedeDecisionCardsForStageWithStory(txctx, story, tx, runID, entityID, activationID, reason, now, false)
-			if err != nil || !changed {
-				return err
-			}
-			_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff)
-			return err
+	return writeSQLiteDecision(ctx, s, "sqlite supersede decision card", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		changed, err := withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (bool, error) {
+			return supersedeDecisionCardsForStageWithStory(txctx, attempt, tx, runID, entityID, activationID, reason, now, false)
 		})
+		if err != nil || !changed {
+			return err
+		}
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
+		return err
 	})
 }
 
-func (s *DecisionPostgresOwner) SupersedeStageTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time) (bool, error) {
-	return supersedeDecisionCardsForStageWithStory(ctx, story, tx, runID, entityID, activationID, reason, now, true)
+func (s *DecisionPostgresOwner) SupersedeStageTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, entityID, activationID, reason string, now time.Time) (bool, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (bool, error) {
+		return supersedeDecisionCardsForStageWithStory(txctx, attempt, tx, runID, entityID, activationID, reason, now, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) SupersedeStageTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time) (bool, error) {
-	return supersedeDecisionCardsForStageWithStory(ctx, story, tx, runID, entityID, activationID, reason, now, false)
+func (s *DecisionSQLiteOwner) SupersedeStageTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, entityID, activationID, reason string, now time.Time) (bool, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (bool, error) {
+		return supersedeDecisionCardsForStageWithStory(txctx, attempt, tx, runID, entityID, activationID, reason, now, false)
+	})
 }
 
-func (s *DecisionPostgresOwner) LoadByActivationTx(ctx context.Context, tx *sql.Tx, runID, entityID, activationID string) (decisioncard.Card, error) {
-	return loadDecisionCardByActivation(ctx, tx, runID, entityID, activationID, true)
+func (s *DecisionPostgresOwner) LoadByActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, entityID, activationID string) (decisioncard.Card, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
+		return loadDecisionCardByActivation(txctx, tx, runID, entityID, activationID, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) LoadByActivationTx(ctx context.Context, tx *sql.Tx, runID, entityID, activationID string) (decisioncard.Card, error) {
-	return loadDecisionCardByActivation(ctx, tx, runID, entityID, activationID, false)
+func (s *DecisionSQLiteOwner) LoadByActivationTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, entityID, activationID string) (decisioncard.Card, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
+		return loadDecisionCardByActivation(txctx, tx, runID, entityID, activationID, false)
+	})
 }
 
 func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) (bool, error) {
@@ -1042,10 +1074,7 @@ func (fn decisionRunSourceOwner) RequireActiveRunSource(ctx context.Context, run
 	return fn(ctx, runID)
 }
 
-func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
-	if story == nil {
-		return fmt.Errorf("run decision-card supersession requires private story ownership")
-	}
+func supersedeDecisionCardsForRun(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
 	now = decisioncard.CanonicalTimestamp(now)
@@ -1058,7 +1087,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtime
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := supersedeRunGateActivations(ctx, tx, story, effects, runID, reason, now, includeCommitted, postgres); err != nil {
+	if err := supersedeRunGateActivations(ctx, attempt, tx, runID, reason, now, includeCommitted, postgres); err != nil {
 		return err
 	}
 	cardFilter := `c.status = 'pending'`
@@ -1112,7 +1141,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtime
 		if _, err := tx.ExecContext(ctx, update, decisioncard.StatusSuperseded, reason, now, cardID); err != nil {
 			return err
 		}
-		if _, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
+		if _, err := appendDecisionCardChangeDTOWithStory(ctx, attempt, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
 			return err
 		}
 	}
@@ -1131,35 +1160,39 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtime
 	return err
 }
 
-func (s *DecisionPostgresOwner) SupersedeRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool) error {
-	return supersedeDecisionCardsForRun(ctx, tx, story, effects, runID, reason, now, includeCommitted, true)
+func (s *DecisionPostgresOwner) SupersedeRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string, now time.Time, includeCommitted bool) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return supersedeDecisionCardsForRun(txctx, attempt, tx, runID, reason, now, includeCommitted, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) SupersedeRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool) error {
-	return supersedeDecisionCardsForRun(ctx, tx, story, effects, runID, reason, now, includeCommitted, false)
+func (s *DecisionSQLiteOwner) SupersedeRunTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID, reason string, now time.Time, includeCommitted bool) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return supersedeDecisionCardsForRun(txctx, attempt, tx, runID, reason, now, includeCommitted, false)
+	})
 }
 
 func (s *DecisionPostgresOwner) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
-	count := 0
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		count, err = transitionDecisionCardDrafts(txctx, tx, draftTransitionFilter{}, now.UTC(), true, true)
-		return err
+	result := postgresDecisionMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (int, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (int, error) {
+			return transitionDecisionCardDrafts(txctx, tx, draftTransitionFilter{}, now.UTC(), true, true)
+		})
 	})
-	return count, err
+	count, _ := result.Value()
+	return count, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
-	count := 0
-	err := s.runDecisionCardMutation(ctx, "sqlite expire decision card input drafts", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		var err error
-		count, err = transitionDecisionCardDrafts(txctx, tx, draftTransitionFilter{}, now.UTC(), true, false)
-		return err
+	result := sqliteDecisionMutation(ctx, s, "sqlite expire decision card input drafts", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (int, error) {
+		return withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (int, error) {
+			return transitionDecisionCardDrafts(txctx, tx, draftTransitionFilter{}, now.UTC(), true, false)
+		})
 	})
-	return count, err
+	count, _ := result.Value()
+	return count, result.Err()
 }
 
-func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+func supersedeRunGateActivations(ctx context.Context, attempt *mutationprotocol.Attempt, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	mutationCtx := runtimecorrelation.WithRunID(ctx, runID)
 	query := `SELECT entity_id, accumulator FROM entity_state WHERE run_id = ? ORDER BY entity_id`
 	if postgres {
@@ -1255,14 +1288,12 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimea
 		before := runtimemutationlog.EntityStateProjection{Accumulator: item.before}
 		after := runtimemutationlog.EntityStateProjection{Accumulator: item.accumulator}
 		if postgres {
-			if err := privatemutationlog.InsertEntityStateDiffWithStory(
+			if err := privatemutationlog.InsertEntityStateDiff(
 				mutationCtx,
-				tx,
+				attempt,
 				decisionRunSourceOwner(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 					return storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
 				}),
-				story,
-				effects,
 				item.entityID,
 				before,
 				after,
@@ -1270,7 +1301,18 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimea
 			); err != nil {
 				return fmt.Errorf("record run gate activation supersession: %w", err)
 			}
-		} else if err := storeentity.InsertSQLiteEntityStateDiff(mutationCtx, story, tx, effects, runID, item.entityID, before, after, writer, now); err != nil {
+		} else if err := privatemutationlog.InsertSQLiteEntityStateDiff(
+			mutationCtx,
+			attempt,
+			decisionRunSourceOwner(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+				return storerunstate.RequireSQLiteActiveSourceTx(ctx, tx, runID)
+			}),
+			item.entityID,
+			before,
+			after,
+			writer,
+			now,
+		); err != nil {
 			return fmt.Errorf("record run gate activation supersession: %w", err)
 		}
 	}
@@ -1383,14 +1425,6 @@ func appendDecisionCardChangeWithStory(ctx context.Context, story runtimeauthora
 	return id, nil
 }
 
-func AppendDecisionCardChangeWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
-	return appendDecisionCardChangeWithStory(ctx, story, db, runID, cardID, changeType, payload, now, postgres)
-}
-
 func cardChangeRegistered(changeType string) bool {
 	switch strings.TrimSpace(changeType) {
 	case decisioncard.ChangeCreated, decisioncard.ChangeDecided, decisioncard.ChangeDeferred, decisioncard.ChangeExpired, decisioncard.ChangeSuperseded:
@@ -1466,37 +1500,12 @@ func DecisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, e
 	return decisionCardAuthorActivityIdentity(anchor)
 }
 
-func runPostgresDecisionCardMutation(ctx context.Context, selected *DecisionPostgresOwner, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
-	_, err := runPostgresDecisionCardMutationOutcome(ctx, selected, fn)
-	return err
+func RunPostgresDecisionCardMutation(ctx context.Context, selected *DecisionPostgresOwner, fn func(context.Context, *mutationprotocol.Attempt) error) error {
+	return writePostgresDecision(ctx, selected, false, fn)
 }
 
-func runPostgresDecisionCardMutationOutcome(ctx context.Context, selected *DecisionPostgresOwner, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) (bool, error) {
-	if selected == nil || selected.backend == nil {
-		return false, errors.New("PostgreSQL decision card mutation requires selected store")
-	}
-	return selected.runPrivateAuthorActivityMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return fn(txctx, tx, runtimeAuthorActivityMutation(story))
-	})
-}
-
-func RunPostgresDecisionCardMutation(ctx context.Context, selected *DecisionPostgresOwner, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
-	return runPostgresDecisionCardMutation(ctx, selected, fn)
-}
-
-func (s *DecisionSQLiteOwner) RunDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
-	return s.runDecisionCardMutation(ctx, label, fn)
-}
-
-func (s *DecisionSQLiteOwner) runDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
-	_, err := s.runDecisionCardMutationOutcome(ctx, label, fn)
-	return err
-}
-
-func (s *DecisionSQLiteOwner) runDecisionCardMutationOutcome(ctx context.Context, label string, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) (bool, error) {
-	return s.runPrivateAuthorActivityMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return fn(txctx, tx, runtimeAuthorActivityMutation(story))
-	})
+func (s *DecisionSQLiteOwner) RunDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *mutationprotocol.Attempt) error) error {
+	return writeSQLiteDecision(ctx, s, label, false, fn)
 }
 
 func numberPostgresPlaceholders(query string) string {

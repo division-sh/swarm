@@ -46,6 +46,8 @@ type CommittedFlowInstanceActivation struct {
 	Plan      FlowInstanceActivationPlan
 	Created   bool
 	Lifecycle CommittedWorkflowLifecycleMutation
+	// Acknowledged is set only after the selected-store commit is acknowledged.
+	Acknowledged bool
 }
 
 func (a CommittedFlowInstanceActivation) Validate() error {

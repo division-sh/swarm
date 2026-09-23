@@ -484,11 +484,9 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 		if d.bus.pipelineObligations == nil {
 			return nil
 		}
-		if err := d.bus.settlePipelineObligation(ctx, recoveryClaim, disposition); err != nil {
-			return err
-		}
-		claimOpen = false
-		return nil
+		outcome, settleErr := d.bus.settlePipelineObligationOutcome(ctx, recoveryClaim, disposition)
+		claimOpen = !outcome.Committed()
+		return settleErr
 	}
 	disposition, completed, err := d.dispatchIntentDisposition(ctx, intent)
 	if !completed {

@@ -44,6 +44,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "claude-cli-adapter", "run", nil)
 	}
 	attempt := dispatch.handle
+	dispatch.callerCtx = ctx
 	timeout := r.effectiveCLITimeout(ctx)
 	if _, err := requireClaudeExecutionTarget(target); err != nil {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "resolve_execution_target", map[string]any{"prelaunch": true})
@@ -91,8 +92,11 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	if err := requireCompletionAttemptHeartbeat(runCtx); err != nil {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "heartbeat_attempt", map[string]any{"prelaunch": true})
 	}
-	if err := attempt.MarkLaunched(runCtx); err != nil {
+	if err := attempt.MarkLaunched(runCtx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "mark_launched", map[string]any{"prelaunch": true})
+	}
+	if gateErr := completionInvocationGate(ctx, runCtx); gateErr != nil {
+		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, dispatch.noDispatchError(gateErr), "pre_invocation_gate", map[string]any{"prelaunch": true})
 	}
 	if err := cmd.Start(); err != nil {
 		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
@@ -111,7 +115,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	}
 
 	raw := bytes.TrimSpace(stdout.Bytes())
-	if err := attempt.MarkResponseObserved(runCtx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)}); err != nil {
+	if err := attempt.MarkResponseObserved(runCtx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)})
 	}
 	resp = parseCLIResponse(raw)
@@ -148,8 +152,11 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		defer func() { _ = monitor.Close() }()
 	}
 
-	if err := attempt.MarkLaunched(ctx); err != nil {
+	if err := attempt.MarkLaunched(ctx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "mark_launched", map[string]any{"prelaunch": true})
+	}
+	if gateErr := completionInvocationGate(dispatch.callerCtx, ctx); gateErr != nil {
+		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, dispatch.noDispatchError(gateErr), "pre_invocation_gate", map[string]any{"prelaunch": true})
 	}
 	if err := cmd.Start(); err != nil {
 		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
@@ -184,7 +191,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		acc.AddLine(line)
 	}
 	resp := acc.Response()
-	if err := attempt.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)}); err != nil {
+	if err := attempt.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)})
 	}
 	if monitor != nil {

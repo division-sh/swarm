@@ -17,7 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -484,35 +484,9 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 }
 
 func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
-	db := store.backend.ConstructionHandle()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		return err
-	}
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return err
-	}
-	defer handoff.Rollback()
-	effects := privaterunforkrevision.NewEffects()
-	if err := store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(ctx, tx, story, effects, lineage, now, confirmed, handoff); err != nil {
-		return err
-	}
-	if err := story.Finalize(ctx); err != nil {
-		return err
-	}
-	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return handoff.Commit()
+	return runSelectedFixtureMutation(ctx, store, "source freeze fixture", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(txctx, attempt, lineage, now, confirmed)
+	})
 }
 
 func assertRunForkSourceFreezeLifecycleUnchanged(t *testing.T, db *sql.DB, lineage runForkActivationLineage, sourceStatus, childStatus string) {

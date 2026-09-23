@@ -37,7 +37,7 @@ func TestSystemJoinScheduleAdmissionAndHydrationRejectDeclarationDriftOnBothStor
 					before := selectedStoreTimerCount(t, ctx, db)
 					command := bases[hostile.scope]
 					hostile.mutate(t, &command)
-					if _, err := store.AdmitGenericSchedule(ctx, command); err == nil {
+					if _, err := store.AdmitGenericScheduleOutcome(ctx, command); err == nil {
 						t.Fatal("hostile join schedule reached persistence")
 					}
 					if after := selectedStoreTimerCount(t, ctx, db); after != before {
@@ -48,11 +48,11 @@ func TestSystemJoinScheduleAdmissionAndHydrationRejectDeclarationDriftOnBothStor
 
 			admitted := make(map[string]runtimegenericschedule.Activation, len(bases))
 			for scope, command := range bases {
-				result, err := store.AdmitGenericSchedule(ctx, command)
-				if err != nil {
-					t.Fatalf("admit valid %s join schedule: %v", scope, err)
+				result, err := store.AdmitGenericScheduleOutcome(ctx, command)
+				if err != nil || !result.Acknowledged {
+					t.Fatalf("admit valid %s join schedule: commit=%+v err=%v", scope, result, err)
 				}
-				admitted[scope] = result.Activation
+				admitted[scope] = result.Result.Activation
 			}
 
 			for _, hostile := range hostiles {
@@ -332,13 +332,13 @@ func TestJoinScheduleRestoreRejectsEarlyHydrationFailuresWithoutMutationOnBothSt
 			for _, failure := range failures {
 				t.Run(failure.name, func(t *testing.T) {
 					command := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation)
-					admitted, err := store.AdmitGenericSchedule(ctx, command)
-					if err != nil {
-						t.Fatal(err)
+					admitted, err := store.AdmitGenericScheduleOutcome(ctx, command)
+					if err != nil || !admitted.Acknowledged {
+						t.Fatalf("admit join fixture: commit=%+v err=%v", admitted, err)
 					}
-					t.Cleanup(func() { selectedStoreDeleteTimer(t, ctx, db, store, admitted.Activation.ID) })
-					failure.mutate(t, ctx, db, store, admitted.Activation)
-					before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID)
+					t.Cleanup(func() { selectedStoreDeleteTimer(t, ctx, db, store, admitted.Result.Activation.ID) })
+					failure.mutate(t, ctx, db, store, admitted.Result.Activation)
+					before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Result.Activation.ID)
 
 					scheduler := &selectedStoreLifecycleScheduler{}
 					planner := &terminalSchedulePlannerProbe{}
@@ -354,7 +354,7 @@ func TestJoinScheduleRestoreRejectsEarlyHydrationFailuresWithoutMutationOnBothSt
 					if len(scheduler.registered) != 0 || len(scheduler.retired) != 0 || planner.prepareCalls != 0 || dispatcher.calls != 0 {
 						t.Fatalf("early malformed restore crossed a side-effect boundary: registered=%#v retired=%#v planned=%d dispatched=%d", scheduler.registered, scheduler.retired, planner.prepareCalls, dispatcher.calls)
 					}
-					if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID); before != after {
+					if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Result.Activation.ID); before != after {
 						t.Fatalf("early malformed restore mutated timer row\nbefore=%s\nafter=%s", before, after)
 					}
 				})
@@ -491,17 +491,17 @@ func TestJoinScheduleRestoreRejectsPoisonedSameLeafIdentityWithoutRegisteringPar
 			root := selectedStoreJoinScheduleCommand(t, runID, ".", "", "", generation)
 			flow := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation)
 			poison := selectedStoreJoinScheduleCommand(t, runID, "returns", "returns", "returns/order-1", generation)
-			rootResult, err := store.AdmitGenericSchedule(ctx, root)
-			if err != nil {
-				t.Fatal(err)
+			rootResult, err := store.AdmitGenericScheduleOutcome(ctx, root)
+			if err != nil || !rootResult.Acknowledged {
+				t.Fatalf("admit root fixture: commit=%+v err=%v", rootResult, err)
 			}
-			flowResult, err := store.AdmitGenericSchedule(ctx, flow)
-			if err != nil {
-				t.Fatal(err)
+			flowResult, err := store.AdmitGenericScheduleOutcome(ctx, flow)
+			if err != nil || !flowResult.Acknowledged {
+				t.Fatalf("admit flow fixture: commit=%+v err=%v", flowResult, err)
 			}
-			poisonResult, err := store.AdmitGenericSchedule(ctx, poison)
-			if err != nil {
-				t.Fatal(err)
+			poisonResult, err := store.AdmitGenericScheduleOutcome(ctx, poison)
+			if err != nil || !poisonResult.Acknowledged {
+				t.Fatalf("admit poison fixture: commit=%+v err=%v", poisonResult, err)
 			}
 			poisonedPayload := selectedStoreSchedulePayload(t, &poison)
 			poisonedPayload[generation.RevisionField] = "rev-hostile"
@@ -510,7 +510,7 @@ func TestJoinScheduleRestoreRejectsPoisonedSameLeafIdentityWithoutRegisteringPar
 				t.Fatal(err)
 			}
 			update := `UPDATE timers SET fire_payload = ? WHERE timer_id = ?`
-			args := []any{string(raw), poisonResult.Activation.ID}
+			args := []any{string(raw), poisonResult.Result.Activation.ID}
 			if _, ok := store.(*PostgresStore); ok {
 				update = `UPDATE timers SET fire_payload = $1::jsonb WHERE timer_id = $2::uuid`
 			}
@@ -532,7 +532,7 @@ func TestJoinScheduleRestoreRejectsPoisonedSameLeafIdentityWithoutRegisteringPar
 			if _, ok := store.(*PostgresStore); ok {
 				deleteSQL = `DELETE FROM timers WHERE timer_id = $1::uuid`
 			}
-			if _, err := db.ExecContext(ctx, deleteSQL, poisonResult.Activation.ID); err != nil {
+			if _, err := db.ExecContext(ctx, deleteSQL, poisonResult.Result.Activation.ID); err != nil {
 				t.Fatal(err)
 			}
 			if restored, err := lifecycle.Restore(ctx); err != nil || restored != 2 || len(scheduler.registered) != 2 {
@@ -542,7 +542,7 @@ func TestJoinScheduleRestoreRejectsPoisonedSameLeafIdentityWithoutRegisteringPar
 			for _, wakeup := range scheduler.registered {
 				registered[wakeup.ActivationID()] = true
 			}
-			if !registered[rootResult.Activation.ID] || !registered[flowResult.Activation.ID] {
+			if !registered[rootResult.Result.Activation.ID] || !registered[flowResult.Result.Activation.ID] {
 				t.Fatalf("clean restore registered wrong identities: %#v", registered)
 			}
 		})
@@ -557,23 +557,23 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
 			root := selectedStoreJoinScheduleCommand(t, runID, ".", "", "", generation)
 			flow := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation)
-			if _, err := store.AdmitGenericSchedule(ctx, root); err != nil {
-				t.Fatal(err)
+			if rootResult, err := store.AdmitGenericScheduleOutcome(ctx, root); err != nil || !rootResult.Acknowledged {
+				t.Fatalf("admit root fixture: commit=%+v err=%v", rootResult, err)
 			}
-			flowResult, err := store.AdmitGenericSchedule(ctx, flow)
-			if err != nil {
-				t.Fatal(err)
+			flowResult, err := store.AdmitGenericScheduleOutcome(ctx, flow)
+			if err != nil || !flowResult.Acknowledged {
+				t.Fatalf("admit flow fixture: commit=%+v err=%v", flowResult, err)
 			}
 
 			update := `UPDATE timers SET fire_event = ? WHERE timer_id = ?`
-			args := []any{"platform.test_timer_fired", flowResult.Activation.ID}
+			args := []any{"platform.test_timer_fired", flowResult.Result.Activation.ID}
 			if _, ok := store.(*PostgresStore); ok {
 				update = `UPDATE timers SET fire_event = $1 WHERE timer_id = $2::uuid`
 			}
 			if _, err := db.ExecContext(ctx, update, args...); err != nil {
 				t.Fatal(err)
 			}
-			before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, flowResult.Activation.ID)
+			before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, flowResult.Result.Activation.ID)
 
 			scheduler := &selectedStoreLifecycleScheduler{}
 			lifecycle, err := runtimegenericschedule.NewLifecycle(store, scheduler, &terminalSchedulePlannerProbe{}, &terminalScheduleDispatcherProbe{}, nil, executionposture.Live)
@@ -584,7 +584,7 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 			if restored, err := lifecycle.Restore(ctx); err == nil || restored != 0 || len(scheduler.registered) != 0 {
 				t.Fatalf("event-drift restore = restored:%d registered:%#v err:%v", restored, scheduler.registered, err)
 			}
-			if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, flowResult.Activation.ID); before != after {
+			if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, flowResult.Result.Activation.ID); before != after {
 				t.Fatalf("event-drift restore mutated typed join row\nbefore=%s\nafter=%s", before, after)
 			}
 		})

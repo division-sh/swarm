@@ -263,7 +263,7 @@ func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, re
 	if err != nil {
 		return nil, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
+	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return nil, err
 	}
 	resp, err := e.httpClient.Do(req)
@@ -366,7 +366,7 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 	if err != nil {
 		return nil, nil, -1, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
+	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return stdout.Bytes(), stderr.Bytes(), -1, err
 	}
 	if err := cmd.Start(); err != nil {
@@ -436,7 +436,7 @@ func execNativeHostWriteFile(ctx context.Context, target workspace.ExecutionTarg
 	if err != nil {
 		return nil, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
+	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {

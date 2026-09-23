@@ -124,50 +124,50 @@ func (s *SQLiteRuntimeStore) CommitFanOutChunk(ctx context.Context, command pipe
 	return owner.CommitFanOutChunk(ctx, command)
 }
 
-func (s *PostgresStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) error {
+func (s *PostgresStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) (pipeline.FanOutClaimSettlement, error) {
 	owner, err := rawFanOutTestClaimOwner(ctx, s.backend.ConstructionHandle(), s.pipelinePostgresOwner, request.Claim)
 	if err != nil {
-		return err
+		return pipeline.FanOutClaimSettlement{}, err
 	}
 	return owner.BlockFanOutClaim(ctx, request)
 }
 
-func (s *SQLiteRuntimeStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) error {
+func (s *SQLiteRuntimeStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) (pipeline.FanOutClaimSettlement, error) {
 	owner, err := rawFanOutTestClaimOwner(ctx, s.backend.ConstructionHandle(), s.pipelineSQLiteOwner, request.Claim)
 	if err != nil {
-		return err
+		return pipeline.FanOutClaimSettlement{}, err
 	}
 	return owner.BlockFanOutClaim(ctx, request)
 }
 
-func (s *PostgresStore) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+func (s *PostgresStore) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {
 	owner, err := rawFanOutTestClaimOwner(ctx, s.backend.ConstructionHandle(), s.pipelinePostgresOwner, claim)
 	if err != nil {
-		return err
+		return pipeline.FanOutClaimSettlement{}, err
 	}
 	return owner.ReleaseFanOutClaim(ctx, claim)
 }
 
-func (s *SQLiteRuntimeStore) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+func (s *SQLiteRuntimeStore) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {
 	owner, err := rawFanOutTestClaimOwner(ctx, s.backend.ConstructionHandle(), s.pipelineSQLiteOwner, claim)
 	if err != nil {
-		return err
+		return pipeline.FanOutClaimSettlement{}, err
 	}
 	return owner.ReleaseFanOutClaim(ctx, claim)
 }
 
-func (s *PostgresStore) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) error {
+func (s *PostgresStore) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) (pipeline.FanOutClaimSettlement, error) {
 	owner, err := rawFanOutTestClaimOwner(ctx, s.backend.ConstructionHandle(), s.pipelinePostgresOwner, request.Claim)
 	if err != nil {
-		return err
+		return pipeline.FanOutClaimSettlement{}, err
 	}
 	return owner.ReleaseFanOutRetryable(ctx, request)
 }
 
-func (s *SQLiteRuntimeStore) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) error {
+func (s *SQLiteRuntimeStore) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) (pipeline.FanOutClaimSettlement, error) {
 	owner, err := rawFanOutTestClaimOwner(ctx, s.backend.ConstructionHandle(), s.pipelineSQLiteOwner, request.Claim)
 	if err != nil {
-		return err
+		return pipeline.FanOutClaimSettlement{}, err
 	}
 	return owner.ReleaseFanOutRetryable(ctx, request)
 }

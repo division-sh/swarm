@@ -71,7 +71,7 @@ func (r servedSessionCleanupProofLLMRuntime) StartSession(ctx context.Context, a
 	if err != nil {
 		return nil, r.reportFailure(fmt.Errorf("acquire start identity %#v: %w", execution.Identity, err))
 	}
-	if err := r.store.Release(ctx, lease); err != nil {
+	if _, err := r.store.ReleaseOutcome(ctx, lease); err != nil {
 		return nil, r.reportFailure(err)
 	}
 	return &runtimellm.Session{
@@ -95,7 +95,7 @@ func (r servedSessionCleanupProofLLMRuntime) ContinueManagedSession(ctx context.
 	if err != nil {
 		return nil, r.reportFailure(fmt.Errorf("acquire continue identity %#v: %w", session.MemoryIdentity, err))
 	}
-	defer func() { _ = r.store.Release(context.Background(), lease) }()
+	defer func() { _, _ = r.store.ReleaseOutcome(context.Background(), lease) }()
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("served session cleanup proof requires managed capability surface")

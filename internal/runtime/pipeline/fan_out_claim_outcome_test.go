@@ -15,7 +15,7 @@ import (
 type fanOutClaimOutcomeOwner struct {
 	fanOutFailureTestOwner
 	claimFn   func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
-	releaseFn func(context.Context, fanoutobligation.Claim) error
+	releaseFn func(context.Context, fanoutobligation.Claim) (FanOutClaimSettlement, error)
 	loads     int
 	groups    int
 }
@@ -29,7 +29,7 @@ func (o *fanOutClaimOutcomeOwner) ClaimFanOutIntent(ctx context.Context, request
 	return o.claimFn(ctx, request)
 }
 
-func (o *fanOutClaimOutcomeOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+func (o *fanOutClaimOutcomeOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (FanOutClaimSettlement, error) {
 	return o.releaseFn(ctx, claim)
 }
 
@@ -74,12 +74,13 @@ func TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry(t *testing.T) 
 		found      bool
 		claimErr   error
 		releaseErr error
+		releaseAck bool
 		cancel     bool
 	}{
-		{name: "acknowledged", found: true, claimErr: claimErr},
-		{name: "acknowledged release error", found: true, claimErr: claimErr, releaseErr: releaseErr},
-		{name: "acknowledged caller canceled", found: true, claimErr: errors.Join(claimErr, context.Canceled), cancel: true},
-		{name: "acknowledged canceled release error", found: true, claimErr: errors.Join(claimErr, context.Canceled), releaseErr: releaseErr, cancel: true},
+		{name: "acknowledged", found: true, claimErr: claimErr, releaseAck: true},
+		{name: "acknowledged release error", found: true, claimErr: claimErr, releaseErr: releaseErr, releaseAck: true},
+		{name: "acknowledged caller canceled", found: true, claimErr: errors.Join(claimErr, context.Canceled), releaseAck: true, cancel: true},
+		{name: "acknowledged canceled release error", found: true, claimErr: errors.Join(claimErr, context.Canceled), releaseErr: releaseErr, releaseAck: true, cancel: true},
 		{name: "unacknowledged", claimErr: claimErr},
 		{name: "no work"},
 	} {
@@ -103,7 +104,7 @@ func TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry(t *testing.T) 
 					}
 					return fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: claim.Key}}, claim, true, tc.claimErr
 				},
-				releaseFn: func(releaseCtx context.Context, got fanoutobligation.Claim) error {
+				releaseFn: func(releaseCtx context.Context, got fanoutobligation.Claim) (FanOutClaimSettlement, error) {
 					releases++
 					if got != claim {
 						t.Fatalf("released claim = %#v, want %#v", got, claim)
@@ -111,7 +112,7 @@ func TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry(t *testing.T) 
 					if releaseCtx.Err() != nil || releaseCtx.Done() != nil || releaseCtx.Value(contextKey{}) != "claim-scope" {
 						t.Fatal("claim settlement must preserve context values without caller cancellation")
 					}
-					return tc.releaseErr
+					return FanOutClaimSettlement{Acknowledged: tc.releaseAck}, tc.releaseErr
 				},
 			}
 			owner.commit = func(FanOutChunkCommand) (CommittedFanOutChunk, error) {
@@ -126,7 +127,13 @@ func TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry(t *testing.T) 
 				bus:                bus,
 			}
 			reenter, err := pc.serveFanOutTurn(ctx, time.Now())
-			if reenter.refill() || !errors.Is(err, tc.claimErr) || (tc.releaseErr != nil && !errors.Is(err, tc.releaseErr)) {
+			wantDisposition := fanOutTurnAwaitScan
+			if tc.releaseAck {
+				wantDisposition = fanOutTurnReleased
+			} else if !tc.found && tc.claimErr == nil {
+				wantDisposition = fanOutTurnExhausted
+			}
+			if reenter != wantDisposition || !errors.Is(err, tc.claimErr) || (tc.releaseErr != nil && !errors.Is(err, tc.releaseErr)) {
 				t.Fatalf("turn = reenter:%v err:%v, want claim:%v release:%v", reenter, err, tc.claimErr, tc.releaseErr)
 			}
 			wantReleases := 0
@@ -148,8 +155,8 @@ type fanOutCleanupOutcomeOwner struct {
 	blockErr error
 }
 
-func (o *fanOutCleanupOutcomeOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) error {
-	return o.blockErr
+func (o *fanOutCleanupOutcomeOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, o.blockErr
 }
 
 func TestFanOutPreparationFailureReportsUnsettledCleanup(t *testing.T) {
@@ -165,15 +172,15 @@ func TestFanOutPreparationFailureReportsUnsettledCleanup(t *testing.T) {
 					claimFn: func(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
 						return fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: claim.Key}}, claim, true, nil
 					},
-					releaseFn: func(ctx context.Context, got fanoutobligation.Claim) error {
+					releaseFn: func(ctx context.Context, got fanoutobligation.Claim) (FanOutClaimSettlement, error) {
 						releases++
 						if ctx.Err() != nil || got != claim {
 							t.Fatal("cleanup lost exact claim or inherited cancellation")
 						}
 						if cleanupFails {
-							return releaseErr
+							return FanOutClaimSettlement{}, releaseErr
 						}
-						return nil
+						return FanOutClaimSettlement{Acknowledged: true}, nil
 					},
 				},
 			}
@@ -183,7 +190,11 @@ func TestFanOutPreparationFailureReportsUnsettledCleanup(t *testing.T) {
 				fanOutOwnerID:      claim.Owner,
 			}
 			disposition, err := pc.serveFanOutTurn(context.Background(), time.Now())
-			if disposition != fanOutTurnAwaitScan || !errors.Is(err, blockErr) || errors.Is(err, releaseErr) != cleanupFails {
+			wantDisposition := fanOutTurnReleased
+			if cleanupFails {
+				wantDisposition = fanOutTurnAwaitScan
+			}
+			if disposition != wantDisposition || !errors.Is(err, blockErr) || errors.Is(err, releaseErr) != cleanupFails {
 				t.Fatalf("disposition=%v err=%v; failed cleanup must remain observable", disposition, err)
 			}
 			if releases != 1 || owner.loads != 1 || owner.groups != 0 || len(owner.commands) != 0 || len(owner.retryRelease) != 0 {

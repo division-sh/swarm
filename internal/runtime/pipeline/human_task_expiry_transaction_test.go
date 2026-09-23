@@ -13,8 +13,10 @@ import (
 )
 
 type transactionProbeHumanTaskExpiry struct {
-	event       events.Event
-	commitCalls int
+	event        events.Event
+	commitCalls  int
+	acknowledged bool
+	commitErr    error
 }
 
 func (e *transactionProbeHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
@@ -29,6 +31,9 @@ func (e *transactionProbeHumanTaskExpiry) CommitHumanTaskExpirations(ctx context
 		return CommittedHumanTaskExpiry{}, err
 	}
 	e.commitCalls++
+	if !e.acknowledged && e.commitErr != nil {
+		return CommittedHumanTaskExpiry{}, e.commitErr
+	}
 	committed := make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications))
 	for index, publication := range command.Publications {
 		plan, ok := publication.(pipelineTestPublicationPlan)
@@ -40,7 +45,7 @@ func (e *transactionProbeHumanTaskExpiry) CommitHumanTaskExpirations(ctx context
 		}
 		committed = append(committed, pipelineTestCommittedPublication{eventID: plan.DurablePublicationEventID(), intent: plan.intent})
 	}
-	return CommittedHumanTaskExpiry{Publications: committed}, nil
+	return CommittedHumanTaskExpiry{Acknowledged: true, Publications: committed}, e.commitErr
 }
 
 func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
@@ -49,6 +54,7 @@ func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
 	workflowStore := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
 	expiry := &transactionProbeHumanTaskExpiry{
+		acknowledged: true,
 		event: eventtest.RuntimeControl(
 			uuid.NewString(), events.EventType("mailbox.card_expired"), "platform", "", []byte(`{"card_id":"card-a"}`),
 			0, runID, "", events.EventEnvelope{}, time.Now().UTC(),

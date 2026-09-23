@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
@@ -9,7 +10,7 @@ import (
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -41,20 +42,29 @@ func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 			claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)
 			store := postgresDeliveryFixtureStore(db)
 			before := loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route)
-			tx, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback()
-			if tc.table != "" {
-				// Install the fault only after lawful claim acquisition. Returning
-				// NULL simulates a lost write without changing the admitted before-state.
-				if _, err := tx.ExecContext(ctx, `CREATE TRIGGER test_renewal_fault BEFORE UPDATE ON `+tc.table+` FOR EACH ROW EXECUTE FUNCTION `+tc.function+`() `); err != nil {
-					t.Fatal(err)
+			var updated runtimedelivery.Snapshot
+			rollback := errors.New("rollback renewal fixture")
+			result := mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				if tc.table != "" {
+					// Install the fault after claim acquisition in the same transaction.
+					if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+						_, err := tx.ExecContext(txctx, `CREATE TRIGGER test_renewal_fault BEFORE UPDATE ON `+tc.table+` FOR EACH ROW EXECUTE FUNCTION `+tc.function+`() `)
+						return err
+					}); err != nil {
+						return struct{}{}, err
+					}
 				}
-			}
-			effects := privaterunforkrevision.NewEffects()
-			updated, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, effects, claimed.Claim, 2*time.Minute)
+				var err error
+				updated, err = postgresDeliveryAdapter.RenewClaim(txctx, attempt, claimed.Claim, 2*time.Minute)
+				if err != nil {
+					return struct{}{}, err
+				}
+				if !tc.commit {
+					return struct{}{}, rollback
+				}
+				return struct{}{}, nil
+			})
+			err := result.Err()
 			if tc.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 					t.Fatalf("renewal error=%v, want %q", err, tc.wantError)
@@ -66,7 +76,7 @@ func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 					t.Fatalf("failed renewal returned partial authority: %+v", updated)
 				}
 			} else {
-				if err != nil {
+				if err != nil && !(tc.name == "rollback" && errors.Is(err, rollback)) {
 					t.Fatal(err)
 				}
 				if updated.ClaimExpiresAt.Sub(updated.UpdatedAt) != 2*time.Minute || !updated.UpdatedAt.After(before.UpdatedAt) {
@@ -77,17 +87,6 @@ func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 				if !reflect.DeepEqual(unchanged, before) {
 					t.Fatalf("renewal changed non-time facts: before=%+v after=%+v", before, unchanged)
 				}
-				if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if tc.commit {
-				err = tx.Commit()
-			} else {
-				err = tx.Rollback()
-			}
-			if err != nil {
-				t.Fatal(err)
 			}
 			want := before
 			if tc.commit {

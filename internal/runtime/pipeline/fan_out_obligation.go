@@ -184,10 +184,16 @@ type FanOutObligationOwner interface {
 	ClaimFanOutIntent(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error)
 	LoadFanOutEvaluation(context.Context, fanoutobligation.Claim) (FanOutEvaluationInput, error)
 	CommitFanOutChunk(context.Context, FanOutChunkCommand) (CommittedFanOutChunk, error)
-	ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) error
-	ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) error
-	BlockFanOutClaim(context.Context, FanOutBlockRequest) error
+	ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) (FanOutClaimSettlement, error)
+	ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) (FanOutClaimSettlement, error)
+	BlockFanOutClaim(context.Context, FanOutBlockRequest) (FanOutClaimSettlement, error)
 	CancelRunFanOut(context.Context, string, string, time.Time) error
+}
+
+// FanOutClaimSettlement carries selected-store commit truth independently of
+// post-commit cleanup errors.
+type FanOutClaimSettlement struct {
+	Acknowledged bool
 }
 
 // FanOutPublicationPlanner carries the explicit bounded publication lifetime;

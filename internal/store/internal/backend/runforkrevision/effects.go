@@ -71,6 +71,19 @@ type familySelection struct {
 
 func NewEffects() *Effects { return &Effects{byRun: map[string]map[Family]*familySelection{}} }
 
+// HasDeclarations reports whether this attempt selected any revision facts.
+func (e *Effects) HasDeclarations() bool {
+	if e == nil {
+		return false
+	}
+	for _, families := range e.byRun {
+		if len(families) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // AttemptReset is captured by the outer transaction owner before entering a
 // retryable transaction. Invoke it at each callback entry: contributions from
 // rolled-back attempts must not survive, while predeclared effects must.
@@ -187,6 +200,28 @@ func (e *Effects) AddFact(runID string, family Family, key string) error {
 		return err
 	}
 	return e.AddFacts(runID, ref)
+}
+
+// DiscardDeletedRun removes contributions that cannot have a historical owner
+// after whole-parent deletion. Contributions to any other run fail closed.
+func (e *Effects) DiscardDeletedRun(runID string) error {
+	if e == nil {
+		return fmt.Errorf("run fork revision effects are required")
+	}
+	owner, err := uuid.Parse(strings.TrimSpace(runID))
+	if err != nil {
+		return fmt.Errorf("deleted run requires a UUID run_id: %w", err)
+	}
+	for selectedRunID := range e.byRun {
+		selectedOwner, err := uuid.Parse(selectedRunID)
+		if err != nil || selectedOwner != owner {
+			return fmt.Errorf("whole-parent deletion cannot discard another run's revision effects")
+		}
+	}
+	for selectedRunID := range e.byRun {
+		delete(e.byRun, selectedRunID)
+	}
+	return nil
 }
 
 func (e *Effects) selection(runID string, family Family) *familySelection {

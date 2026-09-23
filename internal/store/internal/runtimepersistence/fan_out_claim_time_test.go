@@ -39,19 +39,19 @@ func TestFanOutExpiredUnreclaimedClaimCannotReadOrCommitOnBothStores(t *testing.
 			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 1, turnTime)); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 				t.Errorf("expired commit using original audit time: %v", err)
 			}
-			if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{
+			if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{
 				Claim: claim, Now: turnTime, Failure: fanOutRetryFailureForTest(),
 			}); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 				t.Errorf("expired claim changed retry state: %v", err)
 			}
-			if err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{
+			if _, err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{
 				Claim: claim, Now: turnTime, Failure: runtimefailures.Normalize(errors.New("invariant"), "runtime.fan_out", "test"),
 			}); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 				t.Errorf("expired claim blocked intent: %v", err)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
 			// Discarding our own expired claim is cleanup, not renewed authority.
-			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
 			_, successor, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
@@ -60,7 +60,7 @@ func TestFanOutExpiredUnreclaimedClaimCannotReadOrCommitOnBothStores(t *testing.
 			if err != nil || !found || successor.Generation <= claim.Generation {
 				t.Fatalf("successor claim: found=%v claim=%+v err=%v", found, successor, err)
 			}
-			if err := owner.ReleaseFanOutClaim(ctx, claim); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
+			if _, err := owner.ReleaseFanOutClaim(ctx, claim); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 				t.Fatalf("expired cleanup must not release successor: %v", err)
 			}
 			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(successor, 0, 1, time.Now().UTC())); err != nil {
@@ -89,7 +89,7 @@ func TestFanOutClaimLeaseUsesAdmissionRatherThanCallerClockOnBothStores(t *testi
 				if claim.LeaseUntil.Before(before.Truncate(time.Microsecond).Add(time.Minute)) || claim.LeaseUntil.After(after.Add(time.Minute)) {
 					t.Fatalf("caller time selected lease: before=%s after=%s claim=%+v", before, after, claim)
 				}
-				if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+				if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 					t.Fatal(err)
 				}
 			}

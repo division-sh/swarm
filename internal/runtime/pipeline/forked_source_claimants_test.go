@@ -143,7 +143,7 @@ func TestForkedSourceActivityAttemptMutationsRefuseAndPreserveJournal(t *testing
 				activitySuccessPayload(intent, map[string]any{"ok": true}),
 				nil,
 			)
-			_, err = fixture.store.CompleteActivityAttempt(fixture.ctx, success)
+			_, _, err = fixture.store.CompleteActivityAttempt(fixture.ctx, success)
 			requireForkedPipelineRefusal(t, "complete activity", err)
 			failure := runtimefailures.Normalize(errors.New("provider outcome is unknown"), "pipeline-test", "freeze_activity")
 			uncertain := started.withTerminal(
@@ -153,7 +153,7 @@ func TestForkedSourceActivityAttemptMutationsRefuseAndPreserveJournal(t *testing
 				map[string]any{"uncertain": true},
 				&failure,
 			)
-			_, err = fixture.store.MarkActivityAttemptUncertain(fixture.ctx, uncertain)
+			_, _, err = fixture.store.MarkActivityAttemptUncertain(fixture.ctx, uncertain)
 			requireForkedPipelineRefusal(t, "mark activity uncertain", err)
 
 			preserved, ok, err := fixture.store.LoadActivityAttempt(fixture.ctx, started.RequestEventID)

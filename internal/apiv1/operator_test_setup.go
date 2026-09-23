@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -57,6 +58,7 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHa
 	if err != nil {
 		return nil, err
 	}
+	var postCommitErr error
 	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		Actor:          apiidempotency.BearerActor(req.ActorTokenID),
@@ -104,9 +106,13 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHa
 		if err := validateTestSetupEntitiesAgainstBundle(selectedScope.Source, request); err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		result, err := opts.Setup.SetupScenarioEntities(ctx, request)
-		if err != nil {
-			return apiidempotency.Completion{}, err
+		result, setupErr := opts.Setup.SetupScenarioEntities(ctx, request)
+		if setupErr != nil {
+			// The setup owner returns its protocol value only after commit acknowledgement.
+			if result.RunID != request.RunID {
+				return apiidempotency.Completion{}, setupErr
+			}
+			postCommitErr = setupErr
 		}
 		apiResult := testSetupEntitiesAPIResult(result.Normalized())
 		response, err := json.Marshal(apiResult)
@@ -119,16 +125,16 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHa
 		}, nil
 	})
 	if err != nil {
-		return nil, runStartIdempotencyError(err)
+		return nil, errors.Join(runStartIdempotencyError(err), postCommitErr)
 	}
 	var result testSetupEntitiesResult
 	if err := json.Unmarshal(completion.Response, &result); err != nil {
 		if replay {
-			return nil, fmt.Errorf("decode test.setup_entities idempotency response: %w", err)
+			return nil, errors.Join(fmt.Errorf("decode test.setup_entities idempotency response: %w", err), postCommitErr)
 		}
-		return nil, fmt.Errorf("decode test.setup_entities response: %w", err)
+		return nil, errors.Join(fmt.Errorf("decode test.setup_entities response: %w", err), postCommitErr)
 	}
-	return result, nil
+	return result, postCommitErr
 }
 
 func testSetupEntitiesRequestFromParams(params map[string]any, now time.Time) (runtimepipeline.ScenarioSetupRequest, bundleIdentityParam, error) {

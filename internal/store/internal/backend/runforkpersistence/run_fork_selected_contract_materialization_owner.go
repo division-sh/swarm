@@ -15,12 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
@@ -32,7 +31,7 @@ import (
 type runForkSelectedContractMaterializationPort struct {
 	postgres            bool
 	requireCurrent      func() error
-	runMutation         func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error)
+	runMutation         func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
 	lockSourceStatus    func(context.Context, *sql.Tx, string) (string, error)
 	plan                func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	deliveries          *storedelivery.Adapter
@@ -42,9 +41,9 @@ type runForkSelectedContractMaterializationPort struct {
 	loadSnapshot        runForkLifecycleSnapshotLoader
 	requireProfile      func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
 	durableData         *storedurabledata.Owner
-	insertRun           func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string, string, int, time.Time, runtimecorrelation.SourceArtifactFact) error
+	insertRun           func(context.Context, *mutationprotocol.Attempt, string, string, string, int, time.Time, runtimecorrelation.SourceArtifactFact) error
 	ensureProfile       func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
-	materializeEntity   func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, activeRunSourceOwnerFunc, *runforkrevision.Effects, string, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time) error
+	materializeEntity   func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time) error
 	materializeBarriers runForkFanOutBarrierOwner
 	now                 func() time.Time
 }
@@ -64,7 +63,8 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		return runfork.RunForkMaterialization{}, err
 	}
 
-	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects) error {
+	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
+		materialization = runfork.RunForkMaterialization{}
 		if err := proveSelectedPreparationForMutationTx(txctx, tx, req.Preparation, !port.postgres); err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
 		}
 		txctx = runtimeauthoractivity.WithScope(txctx, forkScope)
-		if err := port.insertRun(txctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.SourceArtifactFact); err != nil {
+		if err := port.insertRun(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.SourceArtifactFact); err != nil {
 			return fmt.Errorf("insert selected-contract fork run: %w", err)
 		}
 		pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
@@ -224,11 +224,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return port.activeForkSource(ctx, tx, runID)
 		})
 		for _, entity := range plan.Entities {
-			if err := port.materializeEntity(forkCtx, tx, story, forkMutationSource, effects, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+			if err := port.materializeEntity(forkCtx, tx, attempt, forkMutationSource, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 				return err
 			}
 		}
-		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, port.postgres, effects, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, now)
+		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, port.postgres, attempt, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, now)
 		if err != nil {
 			return err
 		}
@@ -260,8 +260,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		}
 		return nil
 	})
-	if !committed && materialization.ForkRunID != "" {
+	if !committed {
 		return runfork.RunForkMaterialization{}, err
+	}
+	if err != nil {
+		return materialization, &selectedForkMaterializationPostCommitError{value: materialization, cause: err}
 	}
 	return materialization, err
 }
@@ -309,18 +312,13 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 	return runForkSelectedContractMaterializationPort{
 		postgres:       true,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
-			return s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sql.Tx) error {
-				story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-				if err != nil {
-					return err
-				}
-				effects := runforkrevision.NewEffects()
-				if err := operation(ctx, tx, story, effects); err != nil {
-					return err
-				}
-				return finalizeRunForkAuthorActivityTransaction(ctx, tx, story, effects)
+		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
+			result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+					return operation(txctx, tx, attempt)
+				})
 			})
+			return result.Acknowledged(), result.Err()
 		},
 		lockSourceStatus: func(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
 			var status string
@@ -350,8 +348,8 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 		durableData:    s.durableData,
 		insertRun:      s.InsertRunForkRunTx,
 		ensureProfile:  scenarioexecutionpersistence.EnsurePostgres,
-		materializeEntity: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, source activeRunSourceOwnerFunc, effects *runforkrevision.Effects, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, metadata runForkEntityMetadata, now time.Time) error {
-			return materializeRunForkEntityState(ctx, s.DecisionPostgresOwner, s.MaterializeRunForkProposedEffectCardsTx, privatemutationlog.InsertEntityStateDiffWithStory, tx, story, source, effects, forkRunID, plan, entity, metadata, now)
+		materializeEntity: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, source activeRunSourceOwnerFunc, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, metadata runForkEntityMetadata, now time.Time) error {
+			return materializeRunForkEntityState(ctx, s.DecisionPostgresOwner, s.MaterializeRunForkProposedEffectCardsTx, true, tx, attempt, source, forkRunID, plan, entity, metadata, now)
 		},
 		materializeBarriers: s.PipelinePostgresOwner,
 		now:                 func() time.Time { return time.Now().UTC() },
@@ -362,25 +360,16 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 	return runForkSelectedContractMaterializationPort{
 		postgres:       false,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
-		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
+		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
 			if err := s.requireCurrentSchema(); err != nil {
 				return false, err
 			}
-			return s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract fork materialization", func(txctx context.Context, tx *sql.Tx) error {
-				story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-				if err != nil {
-					return err
-				}
-				effects := runforkrevision.NewEffects()
-				if err := operation(txctx, tx, story, effects); err != nil {
-					return err
-				}
-				if err := story.Finalize(txctx); err != nil {
-					return err
-				}
-				_, err = runforkrevision.FinalizeSQLite(txctx, tx, effects)
-				return err
+			result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected-contract fork materialization", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+					return operation(txctx, tx, attempt)
+				})
 			})
+			return result.Acknowledged(), result.Err()
 		},
 		lockSourceStatus: func(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
 			var status string
@@ -410,8 +399,8 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 		durableData:    s.durableData,
 		insertRun:      s.InsertRunForkRunTx,
 		ensureProfile:  scenarioexecutionpersistence.EnsureSQLite,
-		materializeEntity: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, source activeRunSourceOwnerFunc, effects *runforkrevision.Effects, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, metadata runForkEntityMetadata, now time.Time) error {
-			return materializeRunForkEntityState(ctx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, privatemutationlog.InsertSQLiteEntityStateDiffWithStory, tx, story, source, effects, forkRunID, plan, entity, metadata, now)
+		materializeEntity: func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, source activeRunSourceOwnerFunc, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, metadata runForkEntityMetadata, now time.Time) error {
+			return materializeRunForkEntityState(ctx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, false, tx, attempt, source, forkRunID, plan, entity, metadata, now)
 		},
 		materializeBarriers: s.PipelineSQLiteOwner,
 		now:                 s.now,

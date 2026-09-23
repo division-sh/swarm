@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
@@ -110,44 +109,6 @@ func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*Activ
 		return nil, fmt.Errorf("activity journal sqlite backend is required")
 	}
 	return &ActivitySQLiteOwner{backend: backend, schemaGuard: schemaGuard}, nil
-}
-
-func (s *ActivityPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("activity journal postgres owner is required")
-	}
-	if err := s.schemaGuard(); err != nil {
-		return err
-	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
-func (s *ActivitySQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("activity journal sqlite owner is required")
-	}
-	if err := s.schemaGuard(); err != nil {
-		return err
-	}
-	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
 }
 
 func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {

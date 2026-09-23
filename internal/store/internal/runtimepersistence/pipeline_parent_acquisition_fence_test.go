@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"reflect"
 	"sync"
@@ -12,8 +11,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func TestPipelineParentRefusesExactGroupAcquisitionBeforeSQLBothStores(t *testing.T) {
@@ -65,11 +64,6 @@ func TestPipelineParentRefusesExactGroupAcquisitionBeforeSQLBothStores(t *testin
 			}
 			ctx, cancel := context.WithTimeout(f.ctx, time.Second)
 			defer cancel()
-			tx, err := f.db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback()
 			var queries atomic.Int32
 			f.probe.set(func(phase, _ string) error {
 				if phase == "before_query" || phase == "before_exec" {
@@ -77,7 +71,7 @@ func TestPipelineParentRefusesExactGroupAcquisitionBeforeSQLBothStores(t *testin
 				}
 				return nil
 			})
-			err = terminalizeAcquisitionEvent(ctx, f, tx, "  "+eventID+"  ")
+			err := terminalizeAcquisitionEvent(ctx, f, "  "+eventID+"  ", false)
 			f.probe.set(nil)
 			failure, typed := failures.EnvelopeFromError(err)
 			wantOwner := "local"
@@ -90,19 +84,11 @@ func TestPipelineParentRefusesExactGroupAcquisitionBeforeSQLBothStores(t *testin
 			if queries.Load() != 0 || ctx.Err() != nil {
 				t.Fatalf("parent waited on SQL instead of refusing admission: queries=%d context=%v", queries.Load(), ctx.Err())
 			}
-			if err := tx.Rollback(); err != nil {
-				t.Fatal(err)
-			}
 			// A different event in the same run is not covered by this exact
 			// acquiring key. Exercise its real SQL, then roll back the probe.
-			foreign, err := f.db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			foreignErr := terminalizeAcquisitionEvent(ctx, f, foreign, f.seed.eventID)
-			rollbackErr := foreign.Rollback()
-			if foreignErr != nil || rollbackErr != nil {
-				t.Fatalf("unrelated event was blocked: operation=%v rollback=%v", foreignErr, rollbackErr)
+			foreignErr := terminalizeAcquisitionEvent(ctx, f, f.seed.eventID, true)
+			if !errors.Is(foreignErr, errAcquisitionProbeRollback) {
+				t.Fatalf("unrelated event was blocked: operation=%v", foreignErr)
 			}
 			unblock()
 			if err := receiveGroupProof(t, done); err != nil {
@@ -127,11 +113,26 @@ func TestPipelineParentRefusesExactGroupAcquisitionBeforeSQLBothStores(t *testin
 	}
 }
 
-func terminalizeAcquisitionEvent(ctx context.Context, f *groupProofFixture, tx *sql.Tx, eventID string) error {
-	effects := runforkrevision.NewEffects()
+var errAcquisitionProbeRollback = errors.New("rollback acquisition probe")
+
+func terminalizeAcquisitionEvent(ctx context.Context, f *groupProofFixture, eventID string, rollback bool) error {
 	disposition := pipelineobligation.DeadLetter("run_stopped", nil)
-	if f.postgres {
-		return f.raw.(*PostgresStore).pipelinePostgresOwner.TerminalizePipelineObligationTx(ctx, tx, effects, eventID, disposition, time.Now().UTC())
+	write := func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		var err error
+		if f.postgres {
+			err = f.raw.(*PostgresStore).pipelinePostgresOwner.TerminalizePipelineObligationTx(txctx, attempt, eventID, disposition, time.Now().UTC())
+		} else {
+			err = f.raw.(*SQLiteRuntimeStore).pipelineSQLiteOwner.TerminalizePipelineObligationTx(txctx, attempt, eventID, disposition, time.Now().UTC())
+		}
+		if err == nil && rollback {
+			err = errAcquisitionProbeRollback
+		}
+		return struct{}{}, err
 	}
-	return f.raw.(*SQLiteRuntimeStore).pipelineSQLiteOwner.TerminalizePipelineObligationTx(ctx, tx, effects, eventID, disposition, time.Now().UTC())
+	if f.postgres {
+		store := f.raw.(*PostgresStore)
+		return mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, write).Err()
+	}
+	store := f.raw.(*SQLiteRuntimeStore)
+	return mutationprotocol.RunSQLite(ctx, store.backend, "acquisition fence probe", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, write).Err()
 }

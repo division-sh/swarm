@@ -464,7 +464,7 @@ func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteRecords(
 func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
-) error {
+) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	before := make(map[string]runtimebus.FlowInstanceRouteRecord, len(s.routes))
 	for key, route := range s.routes {
 		before[key] = route
@@ -472,10 +472,10 @@ func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
 	for _, set := range sets {
 		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
 			s.routes = before
-			return err
+			return runtimebus.FlowInstanceRouteTopologyResult{}, err
 		}
 	}
-	return nil
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
@@ -531,8 +531,8 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 		},
 	}
 	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	if err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil {
-		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
+	if committed, err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil || !committed.Acknowledged {
+		t.Fatalf("StageFlowInstanceRouteContext: committed=%+v err=%v", committed, err)
 	}
 	if len(store.routes) == 0 {
 		t.Fatal("staged route was not persisted")
@@ -609,7 +609,7 @@ func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBe
 	}
 	store.routes = map[string]runtimebus.FlowInstanceRouteRecord{"prior": prior}
 	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current})
+	_, err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current})
 	if err == nil || !strings.Contains(err.Error(), "semantic source does not match") {
 		t.Fatalf("StageFlowInstanceRouteContext error = %v, want foreign semantic-source rejection", err)
 	}
@@ -633,8 +633,8 @@ func TestEventBusStageFlowInstanceRouteAcceptsExactEmptyRouteSet(t *testing.T) {
 		Identity: identity,
 	}
 	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	if err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil {
-		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
+	if committed, err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil || !committed.Acknowledged {
+		t.Fatalf("StageFlowInstanceRouteContext: committed=%+v err=%v", committed, err)
 	}
 	if store.upsertCalls != 0 {
 		t.Fatalf("empty route set persistence calls = %d, want none", store.upsertCalls)
@@ -1670,10 +1670,10 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	secondRoute := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-2")
 	second := testRunScopedFlowRoute(secondRoute)
 	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
-	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
+	if committed, err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: second,
-	}); err != nil {
-		t.Fatalf("stage second nested template instance: %v", err)
+	}); err != nil || !committed.Acknowledged {
+		t.Fatalf("stage second nested template instance: committed=%+v err=%v", committed, err)
 	}
 	replaced := map[runtimeflowidentity.RunScopedFlowInstance]bool{}
 	for _, route := range store.replaceCalls {
@@ -1686,7 +1686,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	store.flowInstances[0].FlowTemplate = "child"
 	store.replaceCalls = nil
 	store.stagedRoutes = nil
-	err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
+	_, err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "template child does not match route template grandchild") {

@@ -7,12 +7,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func (a *Adapter) materializationEvent(ctx context.Context, q queryer, eventID string) (events.Event, error) {
@@ -169,7 +168,13 @@ func (a *Adapter) continuationWithMaterialization(ctx context.Context, q queryer
 
 // TerminalizeMaterializationDependents is part of the materializer's terminal
 // transaction. It never runs an agent or fabricates a successful materialization.
-func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, story authoractivity.Mutation, materializer deliverylifecycle.Snapshot) ([]deliverylifecycle.Terminalization, error) {
+func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, attempt *mutationprotocol.Attempt, materializer deliverylifecycle.Snapshot) ([]deliverylifecycle.Terminalization, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) ([]deliverylifecycle.Terminalization, error) {
+		return a.terminalizeMaterializationDependentsTx(ctx, tx, attempt, materializer)
+	})
+}
+
+func (a *Adapter) terminalizeMaterializationDependentsTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, materializer deliverylifecycle.Snapshot) ([]deliverylifecycle.Terminalization, error) {
 	if !materializer.Route.Recipient.IsNode() || (materializer.Status != deliverylifecycle.StatusDeadLetter && materializer.Status != deliverylifecycle.StatusDelivered) {
 		return nil, nil
 	}
@@ -220,5 +225,5 @@ func (a *Adapter) TerminalizeMaterializationDependents(ctx context.Context, tx *
 	if !ok {
 		return nil, fmt.Errorf("construct receiver materialization failure")
 	}
-	return a.terminalizeDeliveries(ctx, tx, effects, story, ids, reason, failure)
+	return a.terminalizeDeliveries(ctx, tx, attempt, ids, reason, failure)
 }

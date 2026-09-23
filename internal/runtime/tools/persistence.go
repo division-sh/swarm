@@ -26,8 +26,19 @@ type MailboxPersistence interface {
 type EntityPersistence interface {
 	LoadEntityState(ctx context.Context, identity EntityIdentity) (map[string]any, bool, error)
 	QueryEntityStates(ctx context.Context, query EntityStateQuery) ([]map[string]any, error)
-	SaveEntityField(ctx context.Context, update EntityFieldUpdate) (int, error)
-	CreateEntity(ctx context.Context, rec EntityCreateRecord) error
+	SaveEntityField(ctx context.Context, update EntityFieldUpdate) (EntityFieldWriteResult, error)
+	CreateEntity(ctx context.Context, rec EntityCreateRecord) (EntityCreateResult, error)
+}
+
+type EntityCreateResult struct {
+	EntityID     string
+	Acknowledged bool
+}
+
+type EntityFieldWriteResult struct {
+	Revision int
+	// Acknowledged is set only when the selected-store commit returns a value.
+	Acknowledged bool
 }
 
 type EntityIdentity struct {
@@ -82,4 +93,4 @@ type EntityCreateRecord struct {
 	Writer       EntityMutationWriter
 }
 
-type HumanTaskCardStore = decisioncard.HumanTaskCreationStore
+type HumanTaskCardStore = decisioncard.HumanTaskAcknowledgedCreationStore

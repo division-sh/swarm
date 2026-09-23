@@ -35,6 +35,97 @@ type settledContinuationProbe struct {
 	consumed    int
 }
 
+type committedCleanupCompletionProbe struct {
+	*effecttest.Harness
+	cleanupErr error
+	cancel     context.CancelFunc
+}
+
+func (p *committedCleanupCompletionProbe) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
+	result, err := p.Harness.SettleCompletion(ctx, attempt, settlement)
+	if result.Committed {
+		if p.cancel != nil {
+			p.cancel()
+		}
+		err = errors.Join(err, p.cleanupErr)
+	}
+	return result, err
+}
+
+func TestCommittedCompletionProjectsContinuationDespiteCleanupError(t *testing.T) {
+	harness := effecttest.New()
+	cleanup := errors.New("completion cleanup failed after commit")
+	probe := &committedCleanupCompletionProbe{Harness: harness, cleanupErr: cleanup}
+	ctx := managedEffectHarnessContext(t, harness, t.Name())
+	authority, ok := runtimeeffects.CompletionAuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("completion authority missing")
+	}
+	ownedTarget := authority.Target
+	ownedTarget.EntityID = "77777777-7777-4777-8777-777777777777"
+	ctx = llmTestWorkContext(t, runtimeeffects.WithUsageTarget(ctx, ownedTarget))
+	ctx, cancel := context.WithCancel(ctx)
+	probe.cancel = cancel
+	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(harness, probe, harness, harness))
+	handle, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("exact-request"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, model := testClaudeProviderSelection(t)
+	dispatch := newCompletionDispatch(handle, "")
+	dispatch.providerModel = model
+	dispatch.request = []byte("exact-request")
+	dispatch.markProviderInvocationStarted()
+	launchCleanup := errors.New("launch cleanup failed after commit")
+	observationCleanup := errors.New("observation cleanup failed after commit")
+	foreign := handle.Attempt()
+	foreign.AttemptID = uuid.NewString()
+	if dispatch.retainCommittedMutation(runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, foreign, launchCleanup), runtimeeffects.MutationLaunch) || dispatch.mutationErr != nil {
+		t.Fatal("foreign attempt cleanup error authorized this completion dispatch")
+	}
+	if dispatch.retainCommittedMutation(errors.Join(runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, handle.Attempt(), launchCleanup), context.Canceled), runtimeeffects.MutationLaunch) || dispatch.mutationErr != nil {
+		t.Fatal("joined caller cancellation authorized this completion dispatch")
+	}
+	if !dispatch.retainCommittedMutation(runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationLaunch, handle.Attempt(), launchCleanup), runtimeeffects.MutationLaunch) ||
+		!dispatch.retainCommittedMutation(runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationObservation, handle.Attempt(), observationCleanup), runtimeeffects.MutationObservation) {
+		t.Fatal("committed phase diagnostics were rejected")
+	}
+	target := handle.Attempt().Authority.Target
+	session := &Session{ID: target.SessionID, AgentID: target.AgentID, Memory: target.Memory, MemoryIdentity: target.AgentIdentity.Normalize()}
+	if err := bindCompletionProjection(dispatch, session, Message{Role: "user", Content: "hello"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	response := &Response{Message: Message{Role: "assistant", Content: "done"}, Raw: json.RawMessage(`{"content":"done"}`)}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed capability surface missing")
+	}
+	turn := AgentTurnRecord{
+		AgentID: target.AgentID, Identity: target.AgentIdentity, Memory: target.Memory,
+		SessionID: target.SessionID, RunID: target.RunID, EntityID: target.EntityID,
+		FlowInstance: target.FlowInstance, CapabilitySurface: &surface,
+	}
+	result, err := settleCompletionTurn(ctx, dispatch, target.ID, turn, response, profile,
+		unavailableCompletionUsage(model.ConcreteModel), runtimeeffects.StateSettled, nil, nil)
+	if !result.Committed || !errors.Is(err, cleanup) || !errors.Is(err, launchCleanup) || !errors.Is(err, observationCleanup) {
+		failure, _ := runtimefailures.As(err)
+		if failure != nil {
+			t.Fatalf("settlement = %+v, err=%v, attributes=%+v", result, err, failure.Failure.Detail.Attributes)
+		}
+		t.Fatalf("settlement = %+v, err=%v", result, err)
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("settlement did not exercise canceled caller: %v", ctx.Err())
+	}
+	if len(dispatch.continuation) == 0 {
+		t.Fatal("acknowledged completion lost its continuation")
+	}
+	projected, err := projectCompletionContinuation(context.WithoutCancel(ctx), dispatch, session, response)
+	if err != nil || !projected || session.TurnCount != 1 || len(session.Messages) != 2 {
+		t.Fatalf("continuation projection = %t, session=%+v, err=%v", projected, session, err)
+	}
+}
+
 func (p *settledContinuationProbe) RecoverCompletionContinuation(context.Context, runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
 	return p.attempt, true, nil
 }
@@ -278,11 +369,11 @@ func TestAllNormalProviderSuccessPathsConsumeCanonicalDrainedDisposition(t *test
 		settlement    string
 		mutableMarker string
 	}{
-		{file: "api_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
-		{file: "openai_compatible_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
-		{file: "openai_responses_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
+		{file: "api_runtime.go", settlement: "settled, settlementErr := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
+		{file: "openai_compatible_runtime.go", settlement: "settled, settlementErr := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
+		{file: "openai_responses_runtime.go", settlement: "settled, settlementErr := settleCompletionTurn(", mutableMarker: "s.Messages = append("},
 		{file: "cli_runtime.go", settlement: "var settled runtimeeffects.CompletionSettlementResult", mutableMarker: "s.Messages = append("},
-		{file: "mock_runtime.go", settlement: "settled, err := settleCompletionTurn(", mutableMarker: "session.Messages = append("},
+		{file: "mock_runtime.go", settlement: "settled, settlementErr := settleCompletionTurn(", mutableMarker: "session.Messages = append("},
 	} {
 		t.Run(candidate.file, func(t *testing.T) {
 			raw, err := os.ReadFile(candidate.file)
@@ -313,7 +404,7 @@ func TestManagedSessionAdoptionFailsClosedBeforeProviderDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed durable session: %v", err)
 	}
-	if err := registry.Release(ctx, current); err != nil {
+	if _, err := registry.ReleaseOutcome(ctx, current); err != nil {
 		t.Fatalf("release durable session: %v", err)
 	}
 

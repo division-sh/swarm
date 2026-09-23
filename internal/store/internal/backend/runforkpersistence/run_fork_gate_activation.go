@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -18,26 +17,27 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type runForkDecisionMaterializer interface {
-	LoadTx(context.Context, *sql.Tx, string, bool) (decisioncard.Card, error)
-	InsertTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.Card) error
-	DecideTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error)
-	SupersedeStageTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, string, string, string, string, time.Time) (bool, error)
-	LoadProposedEffectTx(context.Context, *sql.Tx, string, bool) (decisioncard.ProposedEffectContinuation, error)
-	InsertProposedEffectTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
+	LoadTx(context.Context, *mutationprotocol.Attempt, string, bool) (decisioncard.Card, error)
+	InsertTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card) error
+	DecideTx(context.Context, *mutationprotocol.Attempt, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error)
+	SupersedeStageTx(context.Context, *mutationprotocol.Attempt, string, string, string, string, time.Time) (bool, error)
+	LoadProposedEffectTx(context.Context, *mutationprotocol.Attempt, string, bool) (decisioncard.ProposedEffectContinuation, error)
+	InsertProposedEffectTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
 }
 
-func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecisionMaterializer, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID string, projection runfork.EntityProjection, bindings []runForkGateActivationBinding, now time.Time) error {
-	if story == nil {
+func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecisionMaterializer, attempt *mutationprotocol.Attempt, forkRunID string, projection runfork.EntityProjection, bindings []runForkGateActivationBinding, now time.Time) error {
+	if attempt == nil {
 		return fmt.Errorf("fork decision-card materialization requires private story ownership")
 	}
 	if projection.Source.EntityID == "" || projection.Source.FlowInstance == "" || projection.Fork.EntityID == "" || projection.Fork.FlowInstance == "" {
 		return fmt.Errorf("fork decision-card materialization requires exact source and fork entity ownership")
 	}
 	for _, binding := range bindings {
-		sourceCard, err := decisions.LoadTx(ctx, tx, binding.Source.CardID, false)
+		sourceCard, err := decisions.LoadTx(ctx, attempt, binding.Source.CardID, false)
 		if err != nil {
 			return fmt.Errorf("load source decision card %s for fork: %w", binding.Source.CardID, err)
 		}
@@ -102,7 +102,7 @@ func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecis
 		if err != nil {
 			return fmt.Errorf("construct fork decision card: %w", err)
 		}
-		if err := decisions.InsertTx(ctx, story, tx, forkCard); err != nil {
+		if err := decisions.InsertTx(ctx, attempt, forkCard); err != nil {
 			return fmt.Errorf("insert fork decision card: %w", err)
 		}
 		switch binding.Fork.Status {
@@ -111,7 +111,7 @@ func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecis
 			if strings.TrimSpace(sourceVerdict) == "" || strings.TrimSpace(binding.Fork.DecisionEventID) == "" {
 				return fmt.Errorf("source decision card %s lacks committed verdict evidence", sourceCard.CardID)
 			}
-			if _, err := decisions.DecideTx(ctx, story, tx, decisioncard.DecideRequest{
+			if _, err := decisions.DecideTx(ctx, attempt, decisioncard.DecideRequest{
 				CardID: forkCard.CardID, Verdict: sourceVerdict, Fields: sourceFields, PrincipalID: sourceActor,
 				ObservedContentHash: forkCard.CardContentHash, DeliveryReceiptID: sourceReceipt, DeliveryRenderHash: sourceRenderHash,
 				DecisionEventID: binding.Fork.DecisionEventID, Now: now,
@@ -119,7 +119,7 @@ func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecis
 				return fmt.Errorf("restore committed fork decision card: %w", err)
 			}
 		case gateruntime.StatusSuperseded:
-			if _, err := decisions.SupersedeStageTx(ctx, story, tx, forkRunID, projection.Fork.EntityID, binding.Fork.ActivationID, binding.Fork.SupersededReason, now); err != nil {
+			if _, err := decisions.SupersedeStageTx(ctx, attempt, forkRunID, projection.Fork.EntityID, binding.Fork.ActivationID, binding.Fork.SupersededReason, now); err != nil {
 				return fmt.Errorf("restore superseded fork decision card: %w", err)
 			}
 		}
@@ -127,15 +127,15 @@ func materializeRunForkDecisionCards(ctx context.Context, decisions runForkDecis
 	return nil
 }
 
-func (s *RunForkPostgresOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID string, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time) error {
-	return materializeRunForkDecisionCards(ctx, s.DecisionPostgresOwner, tx, story, forkRunID, projection, bindings, now)
+func (s *RunForkPostgresOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, forkRunID string, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time) error {
+	return materializeRunForkDecisionCards(ctx, s.DecisionPostgresOwner, attempt, forkRunID, projection, bindings, now)
 }
 
-func (s *RunForkSQLiteOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID string, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time) error {
-	return materializeRunForkDecisionCards(ctx, s.DecisionSQLiteOwner, tx, story, forkRunID, projection, bindings, now)
+func (s *RunForkSQLiteOwner) MaterializeRunForkDecisionCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, forkRunID string, projection runfork.EntityProjection, bindings []RunForkGateActivationBinding, now time.Time) error {
+	return materializeRunForkDecisionCards(ctx, s.DecisionSQLiteOwner, attempt, forkRunID, projection, bindings, now)
 }
 
-type runForkProposedEffectMaterializer func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string, runfork.EntityProjection, runfork.RunForkPoint, *loopruntime.ForkCorrespondence, time.Time) error
+type runForkProposedEffectMaterializer func(context.Context, *mutationprotocol.Attempt, string, string, runfork.EntityProjection, runfork.RunForkPoint, *loopruntime.ForkCorrespondence, time.Time) error
 
 const postgresRunForkProposedEffectCardIDsQuery = `
 	SELECT p.card_id
@@ -158,41 +158,48 @@ const sqliteRunForkProposedEffectCardIDsQuery = `
 	ORDER BY c.created_at, p.card_id
 `
 
-func materializeRunForkProposedEffectCards(ctx context.Context, decisions runForkDecisionMaterializer, cardIDsQuery string, tx *sql.Tx, story runtimeauthoractivity.Mutation, sourceRunID, forkRunID string, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
-	if story == nil {
+func materializeRunForkProposedEffectCards(ctx context.Context, decisions runForkDecisionMaterializer, cardIDsQuery string, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
+	if attempt == nil {
 		return fmt.Errorf("fork proposed-effect materialization requires private story ownership")
 	}
 	if err := correspondence.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, cardIDsQuery, strings.TrimSpace(sourceRunID), projection.Source.EntityID, forkPoint.Timestamp.UTC())
-	if err != nil {
-		return fmt.Errorf("load source proposed effects for fork: %w", err)
-	}
 	var cardIDs []string
-	for rows.Next() {
-		var cardID string
-		if err := rows.Scan(&cardID); err != nil {
-			_ = rows.Close()
+	var forkActivations []loopruntime.Activation
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, cardIDsQuery, strings.TrimSpace(sourceRunID), projection.Source.EntityID, forkPoint.Timestamp.UTC())
+		if err != nil {
+			return fmt.Errorf("load source proposed effects for fork: %w", err)
+		}
+		for rows.Next() {
+			var cardID string
+			if err := rows.Scan(&cardID); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			cardIDs = append(cardIDs, cardID)
+		}
+		if err := rows.Close(); err != nil {
 			return err
 		}
-		cardIDs = append(cardIDs, cardID)
-	}
-	if err := rows.Close(); err != nil {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(cardIDs) == 0 {
+			return nil
+		}
+		forkActivations, err = loadRunForkEntityActivations(ctx, tx, forkRunID, projection.Fork.EntityID)
 		return err
-	}
-	if err := rows.Err(); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 	if len(cardIDs) == 0 {
 		return nil
 	}
-	forkActivations, err := loadRunForkEntityActivations(ctx, tx, forkRunID, projection.Fork.EntityID)
-	if err != nil {
-		return err
-	}
 	for _, cardID := range cardIDs {
-		sourceCard, err := decisions.LoadTx(ctx, tx, cardID, false)
+		sourceCard, err := decisions.LoadTx(ctx, attempt, cardID, false)
 		if err != nil {
 			return fmt.Errorf("load source proposed-effect card %s: %w", cardID, err)
 		}
@@ -205,7 +212,7 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 		if !pendingAtFork {
 			continue
 		}
-		sourceContinuation, err := decisions.LoadProposedEffectTx(ctx, tx, cardID, false)
+		sourceContinuation, err := decisions.LoadProposedEffectTx(ctx, attempt, cardID, false)
 		if err != nil {
 			return fmt.Errorf("load source proposed-effect continuation %s: %w", cardID, err)
 		}
@@ -216,19 +223,19 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 		if err != nil {
 			return err
 		}
-		if err := decisions.InsertProposedEffectTx(ctx, story, tx, forkCard, forkContinuation); err != nil {
+		if err := decisions.InsertProposedEffectTx(ctx, attempt, forkCard, forkContinuation); err != nil {
 			return fmt.Errorf("insert fork-local proposed effect: %w", err)
 		}
 	}
 	return nil
 }
 
-func (s *RunForkPostgresOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, sourceRunID, forkRunID string, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
-	return materializeRunForkProposedEffectCards(ctx, s.DecisionPostgresOwner, postgresRunForkProposedEffectCardIDsQuery, tx, story, sourceRunID, forkRunID, projection, forkPoint, correspondence, now)
+func (s *RunForkPostgresOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
+	return materializeRunForkProposedEffectCards(ctx, s.DecisionPostgresOwner, postgresRunForkProposedEffectCardIDsQuery, attempt, sourceRunID, forkRunID, projection, forkPoint, correspondence, now)
 }
 
-func (s *RunForkSQLiteOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, sourceRunID, forkRunID string, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
-	return materializeRunForkProposedEffectCards(ctx, s.DecisionSQLiteOwner, sqliteRunForkProposedEffectCardIDsQuery, tx, story, sourceRunID, forkRunID, projection, forkPoint, correspondence, now)
+func (s *RunForkSQLiteOwner) MaterializeRunForkProposedEffectCardsTx(ctx context.Context, attempt *mutationprotocol.Attempt, sourceRunID, forkRunID string, projection runfork.EntityProjection, forkPoint runfork.RunForkPoint, correspondence *loopruntime.ForkCorrespondence, now time.Time) error {
+	return materializeRunForkProposedEffectCards(ctx, s.DecisionSQLiteOwner, sqliteRunForkProposedEffectCardIDsQuery, attempt, sourceRunID, forkRunID, projection, forkPoint, correspondence, now)
 }
 
 func forkPendingProposedEffect(sourceCard decisioncard.Card, source decisioncard.ProposedEffectContinuation, forkRunID string, projection runfork.EntityProjection, correspondence *loopruntime.ForkCorrespondence, forkActivations []loopruntime.Activation, now time.Time) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {

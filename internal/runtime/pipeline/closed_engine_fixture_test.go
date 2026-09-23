@@ -135,6 +135,10 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 		if !ok || tx == nil {
 			return fmt.Errorf("pipeline test engine commit requires its private transaction")
 		}
+		attempt, ok := pipelineTestMutationAttempt(txctx)
+		if !ok {
+			return fmt.Errorf("pipeline test engine commit requires its mutation attempt")
+		}
 		if command.EntitylessTarget.Empty() {
 			if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
 				return err
@@ -162,7 +166,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 					return err
 				}
 			}
-			if err := eventfixture.Insert(txctx, tx, dialect, plan.intent.Event); err != nil {
+			if err := eventfixture.Insert(txctx, attempt, dialect, plan.intent.Event); err != nil {
 				return err
 			}
 			result.Publications = append(result.Publications, pipelineTestCommittedPublication{eventID: plan.intent.Event.ID(), intent: plan.intent})
@@ -181,11 +185,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 			if err != nil {
 				return err
 			}
-			story, ok := authoractivityfixture.Mutation(txctx)
-			if !ok {
-				return fmt.Errorf("pipeline test engine delivery settlement requires its author activity mutation")
-			}
-			if _, err := adapter.SettleSuccessWithinMutation(txctx, tx, story, success.Claim, success.SideEffects, success.Duration, success.RuleSelection); err != nil {
+			if _, err := adapter.SettleSuccess(txctx, attempt, success.Claim, success.SideEffects, success.Duration, success.RuleSelection); err != nil {
 				return err
 			}
 			claim := success.Claim
@@ -312,7 +312,11 @@ func (r *recordingRuntimeMutationRunner) commitHumanTaskRouteForTest(
 		if !ok || tx == nil {
 			return fmt.Errorf("pipeline test human-task route requires its private transaction")
 		}
-		if err := eventfixture.Insert(txctx, tx, authoractivityfixture.Dialect(r.dialect), plan.intent.Event); err != nil {
+		attempt, ok := pipelineTestMutationAttempt(txctx)
+		if !ok {
+			return fmt.Errorf("pipeline test human-task route requires its mutation attempt")
+		}
+		if err := eventfixture.Insert(txctx, attempt, authoractivityfixture.Dialect(r.dialect), plan.intent.Event); err != nil {
 			return err
 		}
 		if cardID != "" {
@@ -444,6 +448,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowInitialMaterialization(ct
 	if err != nil {
 		return CommittedWorkflowInitialMaterialization{}, err
 	}
+	result.Committed = true
 	return result, result.Validate()
 }
 
@@ -611,7 +616,11 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowTimerOccurrence(ctx conte
 				return err
 			}
 		}
-		if err := eventfixture.Insert(txctx, tx, dialect, plan.intent.Event); err != nil {
+		attempt, ok := pipelineTestMutationAttempt(txctx)
+		if !ok {
+			return fmt.Errorf("pipeline test timer commit requires its mutation attempt")
+		}
+		if err := eventfixture.Insert(txctx, attempt, dialect, plan.intent.Event); err != nil {
 			return err
 		}
 		next := activation.normalized()
@@ -851,7 +860,11 @@ func commitPipelineTestWorkflowMutationLog(
 	}
 	if record.Transition.CreatesState() && len(initial) > 0 {
 		if store.testDialect() == workflowStoreDialectPostgres {
-			before, err = insertWorkflowCreateEntityInitialValueMutations(ctx, tx, store.runLifecycle, record.EntityID, before, after, initial)
+			attempt, ok := pipelineTestMutationAttempt(ctx)
+			if !ok {
+				return fmt.Errorf("pipeline test initial values require mutation attempt")
+			}
+			before, err = insertWorkflowCreateEntityInitialValueMutations(ctx, attempt, store.runLifecycle, record.EntityID, before, after, initial)
 		} else {
 			before, err = insertSQLiteWorkflowCreateEntityInitialValueMutations(ctx, tx, store.runLifecycle, record.EntityID, before, after, initial)
 		}
@@ -868,10 +881,14 @@ func commitPipelineTestWorkflowMutationLog(
 		ID:          "workflow_engine",
 		HandlerStep: handlerStep,
 	}
-	if store.testDialect() == workflowStoreDialectPostgres {
-		return mutationlogfixture.InsertEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)
+	attempt, ok := pipelineTestMutationAttempt(ctx)
+	if !ok {
+		return fmt.Errorf("pipeline test workflow state requires its mutation attempt")
 	}
-	return insertSQLiteEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)
+	if store.testDialect() == workflowStoreDialectSQLite {
+		return mutationlogfixture.InsertSQLiteEntityStateDiff(ctx, attempt, store.runLifecycle, record.EntityID, before, after, writer, record.UpdatedAt)
+	}
+	return mutationlogfixture.InsertEntityStateDiff(ctx, attempt, store.runLifecycle, record.EntityID, before, after, writer)
 }
 
 var _ EnginePublicationPlanner = (*recordingPipelineBus)(nil)

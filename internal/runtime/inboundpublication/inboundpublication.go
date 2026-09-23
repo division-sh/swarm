@@ -281,6 +281,8 @@ type CommitResult struct {
 	Record               Record
 	Publications         []runtimebus.CommittedPublication
 	OperatorChannelClaim *operatorchannel.ClaimSettlement
+	// Acknowledged is set only after the selected-store mutation result confirms commit.
+	Acknowledged bool
 }
 
 type EvidencePayload struct {

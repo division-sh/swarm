@@ -72,7 +72,7 @@ type PipelineCoordinator struct {
 	decisionDraftExpiry          DecisionCardDraftExpiry
 	humanTaskExpiry              HumanTaskExpiry
 	deliveryStore                runtimedelivery.Store
-	deadLetters                  runtimedeadletters.Recorder
+	deadLetters                  runtimedeadletters.AcknowledgedRecorder
 	deliveryRuntime              WorkflowDeliveryRuntime
 	flowRoutes                   FlowInstanceRouteOwner
 	credentials                  runtimecredentials.Store
@@ -106,7 +106,7 @@ type PipelineCoordinatorOptions struct {
 	Module                           WorkflowModule
 	Persistence                      WorkflowPersistence
 	DeliveryStore                    runtimedelivery.Store
-	DeadLetters                      runtimedeadletters.Recorder
+	DeadLetters                      runtimedeadletters.AcknowledgedRecorder
 	PipelineObligations              runtimepipelineobligation.Store
 	InstanceDeactivationPreparer     FlowInstanceDeactivationPreparer
 	TimerScheduler                   *Scheduler
@@ -496,17 +496,27 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 		return errors.Join(fmt.Errorf("human-task expiry planner returned %d plans for %d events", len(plans), len(intents)), releaseErr)
 	}
 	committed, err := expiry.CommitHumanTaskExpirations(ctx, HumanTaskExpiryCommand{ObservedAt: now, Limit: limit, Publications: plans})
-	if err != nil {
+	if !committed.Acknowledged {
+		if err == nil {
+			err = errors.New("human-task expiry was not acknowledged")
+		}
 		return errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
-	if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
-		return err
+	if validateErr := committed.Validate(); validateErr != nil {
+		return errors.Join(err, validateErr)
+	}
+	if finalizeErr := planner.FinalizeEnginePublications(ctx, committed.Publications); finalizeErr != nil {
+		return errors.Join(err, finalizeErr)
 	}
 	dispatcher := pc.bus.EngineDispatcher()
 	if dispatcher == nil {
-		return errors.New("human-task expiry requires post-commit dispatcher")
+		return errors.Join(err, errors.New("human-task expiry requires post-commit dispatcher"))
 	}
-	return dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), intents)
+	committedIntents := make([]runtimeengine.EmitIntent, 0, len(committed.Publications))
+	for _, publication := range committed.Publications {
+		committedIntents = append(committedIntents, publication.CommittedDurablePublicationIntent())
+	}
+	return errors.Join(err, dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), committedIntents))
 }
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
@@ -700,6 +710,9 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			if err != nil {
 				return false, err
 			}
+			if admission.postCommitErr != nil {
+				defer func() { resultErr = errors.Join(resultErr, admission.postCommitErr) }()
+			}
 			if admission.handled {
 				return true, nil
 			}
@@ -860,8 +873,9 @@ type workflowNodeDeliveryAuthority interface {
 }
 
 type workflowNodeDeliveryAdmission struct {
-	claim   runtimedelivery.Claim
-	handled bool
+	claim         runtimedelivery.Claim
+	handled       bool
+	postCommitErr error
 }
 
 func admitWorkflowNodeDelivery(
@@ -905,45 +919,49 @@ func admitWorkflowNodeDelivery(
 		_, completionErr := carrier.Complete(reportCarrierFailure)
 		return errors.Join(primary, completionErr)
 	}
-	claimResult, err := deliveryStore.ClaimDelivery(ctx, authority, evt, route)
-	if err != nil {
-		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("claim workflow node delivery: %w", err))
+	claimResult, claimErr := deliveryStore.ClaimDelivery(ctx, authority, evt, route)
+	if !claimResult.Acknowledged {
+		if claimErr == nil {
+			claimErr = errors.New("delivery claim was not acknowledged")
+		}
+		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("claim workflow node delivery: %w", claimErr))
 	}
+	postCommitErr := claimErr
 	switch claimResult.Disposition {
 	case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
 		if err := returnCarrier(nil); err != nil {
-			return workflowNodeDeliveryAdmission{}, err
+			return workflowNodeDeliveryAdmission{}, errors.Join(postCommitErr, err)
 		}
-		return workflowNodeDeliveryAdmission{handled: true}, nil
+		return workflowNodeDeliveryAdmission{handled: true, postCommitErr: postCommitErr}, nil
 	case runtimedelivery.ClaimTerminal:
 		if err := authorityProvider.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID); err != nil {
-			return workflowNodeDeliveryAdmission{}, returnCarrier(err)
+			return workflowNodeDeliveryAdmission{}, returnCarrier(errors.Join(postCommitErr, err))
 		}
 		if err := returnCarrier(nil); err != nil {
-			return workflowNodeDeliveryAdmission{}, err
+			return workflowNodeDeliveryAdmission{}, errors.Join(postCommitErr, err)
 		}
-		return workflowNodeDeliveryAdmission{handled: true}, nil
+		return workflowNodeDeliveryAdmission{handled: true, postCommitErr: postCommitErr}, nil
 	case runtimedelivery.ClaimWrongAuthority, runtimedelivery.ClaimAbsent, runtimedelivery.ClaimInvariantInvalid:
-		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("claim workflow node delivery disposition %s: %w", claimResult.Disposition, claimResult.Invariant))
+		return workflowNodeDeliveryAdmission{}, returnCarrier(errors.Join(postCommitErr, fmt.Errorf("claim workflow node delivery disposition %s: %w", claimResult.Disposition, claimResult.Invariant)))
 	case runtimedelivery.ClaimAcquired:
 	default:
-		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("claim workflow node delivery returned unknown disposition %q", claimResult.Disposition))
+		return workflowNodeDeliveryAdmission{}, returnCarrier(errors.Join(postCommitErr, fmt.Errorf("claim workflow node delivery returned unknown disposition %q", claimResult.Disposition)))
 	}
 	owned, acquired := claimResult.Acquired()
 	if !acquired {
-		return workflowNodeDeliveryAdmission{}, returnCarrier(errors.New("workflow node delivery acquired without an exact claim"))
+		return workflowNodeDeliveryAdmission{}, returnCarrier(errors.Join(postCommitErr, errors.New("workflow node delivery acquired without an exact claim")))
 	}
 	resolution, consumeErr := carrier.Consume(reportCarrierFailure)
 	if consumeErr != nil {
-		return workflowNodeDeliveryAdmission{}, returnCarrier(fmt.Errorf("consume workflow node delivery continuation: %w", consumeErr))
+		return workflowNodeDeliveryAdmission{}, returnCarrier(errors.Join(postCommitErr, fmt.Errorf("consume workflow node delivery continuation: %w", consumeErr)))
 	}
 	if resolution == worklifetime.DeliveryContinuationTerminal {
 		if err := authorityProvider.ReleaseDeliveryContinuation(owned.Claim.DeliveryID()); err != nil {
-			return workflowNodeDeliveryAdmission{}, err
+			return workflowNodeDeliveryAdmission{}, errors.Join(postCommitErr, err)
 		}
-		return workflowNodeDeliveryAdmission{handled: true}, nil
+		return workflowNodeDeliveryAdmission{handled: true, postCommitErr: postCommitErr}, nil
 	}
-	return workflowNodeDeliveryAdmission{claim: owned.Claim}, nil
+	return workflowNodeDeliveryAdmission{claim: owned.Claim, postCommitErr: postCommitErr}, nil
 }
 
 func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context, evt events.Event, nodeID string, err error) {
@@ -999,11 +1017,22 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 				"intercepted_event_type": eventType,
 				"handler_node":           nodeID,
 			}, errors.New("workflow intercepted-emission dead-letter recorder is required"))
-		} else if err := pc.deadLetters.RecordDeadLetter(ctx, rec); err != nil {
-			pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
-				"intercepted_event_type": eventType,
-				"handler_node":           nodeID,
-			}, err)
+		} else {
+			committed, err := pc.deadLetters.RecordDeadLetterOutcome(ctx, rec)
+			if !committed.Acknowledged {
+				if err == nil {
+					err = errors.New("intercepted-emission dead-letter record was not acknowledged")
+				}
+				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
+					"intercepted_event_type": eventType,
+					"handler_node":           nodeID,
+				}, err)
+			} else if err != nil {
+				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_post_commit_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
+					"intercepted_event_type": eventType,
+					"handler_node":           nodeID,
+				}, err)
+			}
 		}
 		deadLetterPayload := map[string]any{
 			"original_event":   eventType,

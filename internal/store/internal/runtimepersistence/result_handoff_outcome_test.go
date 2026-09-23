@@ -81,7 +81,7 @@ func TestResultSiblingsPreserveAcknowledgedHandoffOutcomeBothStores(t *testing.T
 						}
 						run = func() (bool, error) {
 							result, err := fixture.store.(publicationRevisionProofStore).CommitPublication(ctx, command)
-							return result.AppendOutcome == runtimebus.EventAppendInserted, err
+							return result.Acknowledged && result.AppendOutcome == runtimebus.EventAppendInserted, err
 						}
 					}
 					query := "SELECT bundle_hash FROM runs WHERE run_id=?"

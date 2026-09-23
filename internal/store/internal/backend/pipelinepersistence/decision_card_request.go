@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type decisionCardRequestLease struct {
@@ -134,10 +134,38 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 		return pipeline.CommittedDecisionCardMutation{}, fmt.Errorf("card request source changed before commit")
 	}
 	l.used = true
-	effects := newRevisionEffects()
 	if s := l.postgres; s != nil {
-		return commitDecisionCardOperation(ctx, s, s.DecisionPostgresOwner, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return commitDecisionCardOperation(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (pipeline.CommittedDecisionCardMutation, error)) mutationprotocol.Result[pipeline.CommittedDecisionCardMutation] {
+			if err := s.requireCurrentSchema(); err != nil {
+				return mutationprotocol.Reject[pipeline.CommittedDecisionCardMutation](err)
+			}
+			return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (pipeline.CommittedDecisionCardMutation, error) {
+				err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+					current, err := s.RequireActiveSourceTx(txctx, tx, l.runID)
+					if err != nil {
+						return err
+					}
+					if !current.Matches(l.source) {
+						return fmt.Errorf("card source changed at commit")
+					}
+					return nil
+				})
+				if err != nil {
+					return pipeline.CommittedDecisionCardMutation{}, err
+				}
+				return write(txctx, attempt)
+			})
+		}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
+			return storeapiidempotency.StorePostgresCompletionTx(ctx, l.pgLease, tx, completion)
+		})
+	}
+	s := l.sqlite
+	return commitDecisionCardOperation(ctx, s, s.DecisionSQLiteOwner, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (pipeline.CommittedDecisionCardMutation, error)) mutationprotocol.Result[pipeline.CommittedDecisionCardMutation] {
+		if err := s.requireCurrentSchema(); err != nil {
+			return mutationprotocol.Reject[pipeline.CommittedDecisionCardMutation](err)
+		}
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite decision-card operation", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (pipeline.CommittedDecisionCardMutation, error) {
+			err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 				current, err := s.RequireActiveSourceTx(txctx, tx, l.runID)
 				if err != nil {
 					return err
@@ -145,23 +173,12 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 				if !current.Matches(l.source) {
 					return fmt.Errorf("card source changed at commit")
 				}
-				return fn(txctx, tx, story)
+				return nil
 			})
-		}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
-			return storeapiidempotency.StorePostgresCompletionTx(ctx, l.pgLease, tx, completion)
-		})
-	}
-	s := l.sqlite
-	return commitDecisionCardOperation(ctx, s, s.DecisionSQLiteOwner, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite decision-card operation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			current, err := s.RequireActiveSourceTx(txctx, tx, l.runID)
 			if err != nil {
-				return err
+				return pipeline.CommittedDecisionCardMutation{}, err
 			}
-			if !current.Matches(l.source) {
-				return fmt.Errorf("card source changed at commit")
-			}
-			return fn(txctx, tx, story)
+			return write(txctx, attempt)
 		})
 	}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
 		return storeapiidempotency.StoreSQLiteCompletionTx(ctx, l.sqLease, tx, completion)

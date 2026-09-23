@@ -18,6 +18,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 var _ runtimeeffects.CompletionContinuationStore = (*EffectPostgresOwner)(nil)
@@ -54,75 +55,101 @@ type completionContinuationRow struct {
 }
 
 func (s *EffectPostgresOwner) RecoverCompletionContinuation(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
-	var attempt runtimeeffects.Attempt
-	var found bool
-	err := s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
-		if err := requireCompletionContinuationRequest(req); err != nil {
-			return err
-		}
-		if err := requireExternalEffectAuthorityPostgres(txctx, tx, req.Authority, false); err != nil {
-			return err
-		}
-		if s.delivery == nil {
-			return errors.New("completion continuation PostgreSQL delivery owner is not bound")
-		}
-		if err := s.delivery.ValidateProviderOriginTx(txctx, tx, req.Origin.Delivery); err != nil {
-			return err
-		}
-		rows, err := loadCompletionContinuationRowsPostgres(txctx, tx, req.Origin)
-		if err != nil {
-			return err
-		}
-		if len(rows) == 0 {
+	if err := s.requireCurrent(); err != nil {
+		return runtimeeffects.Attempt{}, false, err
+	}
+	type recovery struct {
+		attempt runtimeeffects.Attempt
+		found   bool
+	}
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (recovery, error) {
+		var value recovery
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireCompletionContinuationRequest(req); err != nil {
+				return err
+			}
+			if err := requireExternalEffectAuthorityPostgres(txctx, tx, req.Authority, false); err != nil {
+				return err
+			}
+			if s.delivery == nil {
+				return errors.New("completion continuation PostgreSQL delivery owner is not bound")
+			}
+			if err := s.delivery.ValidateProviderOriginTx(txctx, tx, req.Origin.Delivery); err != nil {
+				return err
+			}
+			rows, err := loadCompletionContinuationRowsPostgres(txctx, tx, req.Origin)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				return nil
+			}
+			if len(rows) != 1 {
+				return fmt.Errorf("delivery %s has ambiguous settled completion continuations", req.Origin.Delivery.DeliveryID())
+			}
+			value.attempt, err = admitCompletionContinuationRow(txctx, req, rows[0])
+			if err != nil {
+				return err
+			}
+			value.found = true
 			return nil
-		}
-		if len(rows) != 1 {
-			return fmt.Errorf("delivery %s has ambiguous settled completion continuations", req.Origin.Delivery.DeliveryID())
-		}
-		attempt, err = admitCompletionContinuationRow(txctx, req, rows[0])
-		if err != nil {
-			return err
-		}
-		found = true
-		return nil
+		})
+		return value, err
 	})
-	return attempt, found, err
+	value, ok := result.Value()
+	if !ok {
+		return runtimeeffects.Attempt{}, false, result.Err()
+	}
+	return value.attempt, value.found, result.Err()
 }
 
 func (s *EffectSQLiteOwner) RecoverCompletionContinuation(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
-	var attempt runtimeeffects.Attempt
-	var found bool
-	err := s.runRuntimeMutation(ctx, "sqlite recover exact completion continuation", func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
-		if err := requireCompletionContinuationRequest(req); err != nil {
-			return err
-		}
-		if err := requireExternalEffectAuthoritySQLite(txctx, tx, req.Authority, false); err != nil {
-			return err
-		}
-		if s.delivery == nil {
-			return errors.New("completion continuation SQLite delivery owner is not bound")
-		}
-		if err := s.delivery.ValidateProviderOriginTx(txctx, tx, req.Origin.Delivery); err != nil {
-			return err
-		}
-		rows, err := loadCompletionContinuationRowsSQLite(txctx, tx, req.Origin)
-		if err != nil {
-			return err
-		}
-		if len(rows) == 0 {
+	if err := s.requireCurrent(); err != nil {
+		return runtimeeffects.Attempt{}, false, err
+	}
+	type recovery struct {
+		attempt runtimeeffects.Attempt
+		found   bool
+	}
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite recover exact completion continuation", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (recovery, error) {
+		var value recovery
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireCompletionContinuationRequest(req); err != nil {
+				return err
+			}
+			if err := requireExternalEffectAuthoritySQLite(txctx, tx, req.Authority, false); err != nil {
+				return err
+			}
+			if s.delivery == nil {
+				return errors.New("completion continuation SQLite delivery owner is not bound")
+			}
+			if err := s.delivery.ValidateProviderOriginTx(txctx, tx, req.Origin.Delivery); err != nil {
+				return err
+			}
+			rows, err := loadCompletionContinuationRowsSQLite(txctx, tx, req.Origin)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				return nil
+			}
+			if len(rows) != 1 {
+				return fmt.Errorf("delivery %s has ambiguous settled completion continuations", req.Origin.Delivery.DeliveryID())
+			}
+			value.attempt, err = admitCompletionContinuationRow(txctx, req, rows[0])
+			if err != nil {
+				return err
+			}
+			value.found = true
 			return nil
-		}
-		if len(rows) != 1 {
-			return fmt.Errorf("delivery %s has ambiguous settled completion continuations", req.Origin.Delivery.DeliveryID())
-		}
-		attempt, err = admitCompletionContinuationRow(txctx, req, rows[0])
-		if err != nil {
-			return err
-		}
-		found = true
-		return nil
+		})
+		return value, err
 	})
-	return attempt, found, err
+	value, ok := result.Value()
+	if !ok {
+		return runtimeeffects.Attempt{}, false, result.Err()
+	}
+	return value.attempt, value.found, result.Err()
 }
 
 func requireCompletionContinuationRequest(req runtimeeffects.CompletionContinuationRequest) error {
@@ -337,62 +364,76 @@ func loadSettledCompletionContinuationSQLite(ctx context.Context, tx *sql.Tx, at
 }
 
 func (s *EffectPostgresOwner) ProjectCompletionConversation(ctx context.Context, attempt runtimeeffects.Attempt, projection runtimeeffects.CompletionConversationProjection) error {
-	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
-		locked, err := s.lockCompletionContinuationPostgres(txctx, tx, attempt)
-		if err != nil {
-			return err
-		}
-		if err := validateCompletionProjection(attempt, projection, locked); err != nil {
-			return err
-		}
-		if locked.phase == runtimeeffects.CompletionProjectionConversationProjected || locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
-			return nil
-		}
-		if locked.phase != runtimeeffects.CompletionProjectionResponseSettled {
-			return fmt.Errorf("completion continuation has invalid projection phase %q", locked.phase)
-		}
-		if projection.Memory.Enabled {
-			record, err := completionConversationRecord(projection)
+	if err := s.requireCurrent(); err != nil {
+		return err
+	}
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			locked, err := s.lockCompletionContinuationPostgres(txctx, tx, attempt)
 			if err != nil {
 				return err
 			}
-			if err := s.llm.ProjectCompletionConversationTx(txctx, tx, effects, record, projection.ExpectedTurnCount); err != nil {
+			if err := validateCompletionProjection(attempt, projection, locked); err != nil {
 				return err
 			}
-		}
-		res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='conversation_projected',updated_at=now() WHERE attempt_id=$1::uuid AND operation_id=$2::uuid AND completion_projection_phase='response_settled'`, attempt.AttemptID, attempt.OperationID)
-		return requireExternalAttemptTransition(res, err)
+			if locked.phase == runtimeeffects.CompletionProjectionConversationProjected || locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
+				return nil
+			}
+			if locked.phase != runtimeeffects.CompletionProjectionResponseSettled {
+				return fmt.Errorf("completion continuation has invalid projection phase %q", locked.phase)
+			}
+			if projection.Memory.Enabled {
+				record, err := completionConversationRecord(projection)
+				if err != nil {
+					return err
+				}
+				if err := s.llm.ProjectCompletionConversationTx(txctx, mutation, record, projection.ExpectedTurnCount); err != nil {
+					return err
+				}
+			}
+			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='conversation_projected',updated_at=now() WHERE attempt_id=$1::uuid AND operation_id=$2::uuid AND completion_projection_phase='response_settled'`, attempt.AttemptID, attempt.OperationID)
+			return requireExternalAttemptTransition(res, err)
+		})
+		return struct{}{}, err
 	})
+	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationProjection, attempt)
 }
 
 func (s *EffectSQLiteOwner) ProjectCompletionConversation(ctx context.Context, attempt runtimeeffects.Attempt, projection runtimeeffects.CompletionConversationProjection) error {
-	return s.runRuntimeMutation(ctx, "sqlite project exact completion conversation", func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
-		locked, err := s.lockCompletionContinuationSQLite(txctx, tx, attempt)
-		if err != nil {
-			return err
-		}
-		if err := validateCompletionProjection(attempt, projection, locked); err != nil {
-			return err
-		}
-		if locked.phase == runtimeeffects.CompletionProjectionConversationProjected || locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
-			return nil
-		}
-		if locked.phase != runtimeeffects.CompletionProjectionResponseSettled {
-			return fmt.Errorf("completion continuation has invalid projection phase %q", locked.phase)
-		}
-		now := time.Now().UTC()
-		if projection.Memory.Enabled {
-			record, err := completionConversationRecord(projection)
+	if err := s.requireCurrent(); err != nil {
+		return err
+	}
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite project exact completion conversation", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			locked, err := s.lockCompletionContinuationSQLite(txctx, tx, attempt)
 			if err != nil {
 				return err
 			}
-			if err := s.llm.ProjectCompletionConversationTx(txctx, tx, effects, record, projection.ExpectedTurnCount, now); err != nil {
+			if err := validateCompletionProjection(attempt, projection, locked); err != nil {
 				return err
 			}
-		}
-		res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='conversation_projected',updated_at=? WHERE attempt_id=? AND operation_id=? AND completion_projection_phase='response_settled'`, now, attempt.AttemptID, attempt.OperationID)
-		return requireExternalAttemptTransition(res, err)
+			if locked.phase == runtimeeffects.CompletionProjectionConversationProjected || locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
+				return nil
+			}
+			if locked.phase != runtimeeffects.CompletionProjectionResponseSettled {
+				return fmt.Errorf("completion continuation has invalid projection phase %q", locked.phase)
+			}
+			now := time.Now().UTC()
+			if projection.Memory.Enabled {
+				record, err := completionConversationRecord(projection)
+				if err != nil {
+					return err
+				}
+				if err := s.llm.ProjectCompletionConversationTx(txctx, mutation, record, projection.ExpectedTurnCount, now); err != nil {
+					return err
+				}
+			}
+			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='conversation_projected',updated_at=? WHERE attempt_id=? AND operation_id=? AND completion_projection_phase='response_settled'`, now, attempt.AttemptID, attempt.OperationID)
+			return requireExternalAttemptTransition(res, err)
+		})
+		return struct{}{}, err
 	})
+	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationProjection, attempt)
 }
 
 func validateCompletionProjection(attempt runtimeeffects.Attempt, projection runtimeeffects.CompletionConversationProjection, locked lockedCompletionContinuation) error {
@@ -434,45 +475,59 @@ func completionConversationRecord(projection runtimeeffects.CompletionConversati
 }
 
 func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) error {
-	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
-		locked, err := s.lockCompletionContinuationPostgres(txctx, tx, attempt)
-		if err != nil {
-			return err
-		}
-		successorRaw, err := validateCompletionSuccessor(attempt, successor)
-		if err != nil {
-			return err
-		}
-		if locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
-			return requireMatchingCompletionSuccessor(locked.successor, successor)
-		}
-		if locked.phase != runtimeeffects.CompletionProjectionConversationProjected {
-			return fmt.Errorf("completion response cannot be consumed from phase %q", locked.phase)
-		}
-		res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='response_consumed',completion_successor_turn=$3::jsonb,updated_at=now() WHERE attempt_id=$1::uuid AND operation_id=$2::uuid AND completion_projection_phase='conversation_projected'`, attempt.AttemptID, attempt.OperationID, successorRaw)
-		return requireExternalAttemptTransition(res, err)
+	if err := s.requireCurrent(); err != nil {
+		return err
+	}
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			locked, err := s.lockCompletionContinuationPostgres(txctx, tx, attempt)
+			if err != nil {
+				return err
+			}
+			successorRaw, err := validateCompletionSuccessor(attempt, successor)
+			if err != nil {
+				return err
+			}
+			if locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
+				return requireMatchingCompletionSuccessor(locked.successor, successor)
+			}
+			if locked.phase != runtimeeffects.CompletionProjectionConversationProjected {
+				return fmt.Errorf("completion response cannot be consumed from phase %q", locked.phase)
+			}
+			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='response_consumed',completion_successor_turn=$3::jsonb,updated_at=now() WHERE attempt_id=$1::uuid AND operation_id=$2::uuid AND completion_projection_phase='conversation_projected'`, attempt.AttemptID, attempt.OperationID, successorRaw)
+			return requireExternalAttemptTransition(res, err)
+		})
+		return struct{}{}, err
 	})
+	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationProjection, attempt)
 }
 
 func (s *EffectSQLiteOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) error {
-	return s.runRuntimeMutation(ctx, "sqlite consume exact completion response", func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
-		locked, err := s.lockCompletionContinuationSQLite(txctx, tx, attempt)
-		if err != nil {
-			return err
-		}
-		successorRaw, err := validateCompletionSuccessor(attempt, successor)
-		if err != nil {
-			return err
-		}
-		if locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
-			return requireMatchingCompletionSuccessor(locked.successor, successor)
-		}
-		if locked.phase != runtimeeffects.CompletionProjectionConversationProjected {
-			return fmt.Errorf("completion response cannot be consumed from phase %q", locked.phase)
-		}
-		res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='response_consumed',completion_successor_turn=?,updated_at=? WHERE attempt_id=? AND operation_id=? AND completion_projection_phase='conversation_projected'`, successorRaw, time.Now().UTC(), attempt.AttemptID, attempt.OperationID)
-		return requireExternalAttemptTransition(res, err)
+	if err := s.requireCurrent(); err != nil {
+		return err
+	}
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite consume exact completion response", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			locked, err := s.lockCompletionContinuationSQLite(txctx, tx, attempt)
+			if err != nil {
+				return err
+			}
+			successorRaw, err := validateCompletionSuccessor(attempt, successor)
+			if err != nil {
+				return err
+			}
+			if locked.phase == runtimeeffects.CompletionProjectionResponseConsumed {
+				return requireMatchingCompletionSuccessor(locked.successor, successor)
+			}
+			if locked.phase != runtimeeffects.CompletionProjectionConversationProjected {
+				return fmt.Errorf("completion response cannot be consumed from phase %q", locked.phase)
+			}
+			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET completion_projection_phase='response_consumed',completion_successor_turn=?,updated_at=? WHERE attempt_id=? AND operation_id=? AND completion_projection_phase='conversation_projected'`, successorRaw, time.Now().UTC(), attempt.AttemptID, attempt.OperationID)
+			return requireExternalAttemptTransition(res, err)
+		})
+		return struct{}{}, err
 	})
+	return effectMutationError(result.Acknowledged(), result.Err(), runtimeeffects.MutationProjection, attempt)
 }
 
 func validateCompletionSuccessor(attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) (any, error) {

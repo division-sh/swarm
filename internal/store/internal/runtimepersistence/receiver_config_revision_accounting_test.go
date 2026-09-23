@@ -26,6 +26,7 @@ func TestReceiverConfigActivationRollbackLeavesNoDurableResidueBothStores(t *tes
 			before := f.revisionCounts(t)
 			barrier.install(t, f.db, correlation.RunIDFromContext(ctx), "", "writer")
 			done := make(chan forkContentionResult, 1)
+			acknowledged := make(chan bool, 1)
 			finished := make(chan struct{})
 			t.Cleanup(func() {
 				cancel()
@@ -38,7 +39,8 @@ func TestReceiverConfigActivationRollbackLeavesNoDurableResidueBothStores(t *tes
 			})
 			go func() {
 				defer close(finished)
-				_, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
+				committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
+				acknowledged <- committed.Acknowledged
 				done <- forkContentionResult{err: err}
 			}()
 			barrier.awaitWinner(t, ctx, f.db, done)
@@ -46,6 +48,9 @@ func TestReceiverConfigActivationRollbackLeavesNoDurableResidueBothStores(t *tes
 			result := awaitForkContentionResult(t, ctx, done)
 			if result.err == nil || !strings.Contains(result.err.Error(), "h18_requested_rollback") {
 				t.Fatalf("activation did not roll back at finalization: %v", result.err)
+			}
+			if <-acknowledged {
+				t.Fatal("rolled-back activation reported an acknowledged result")
 			}
 			f.requireCounts(t, 0)
 			if after := f.revisionCounts(t); after != before {
@@ -55,8 +60,8 @@ func TestReceiverConfigActivationRollbackLeavesNoDurableResidueBothStores(t *tes
 				t.Fatalf("rollback leaked agents/topology: %#v %v", agents, err)
 			}
 			retried, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
-			if err != nil || !retried.Created {
-				t.Fatalf("rollback poisoned clean retry: created=%v err=%v", retried.Created, err)
+			if err != nil || !retried.Created || !retried.Acknowledged {
+				t.Fatalf("rollback poisoned clean retry: created=%v acknowledged=%v err=%v", retried.Created, retried.Acknowledged, err)
 			}
 			f.requireCounts(t, 1)
 			f.requireConfig(t, plan)

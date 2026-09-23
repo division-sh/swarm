@@ -14,15 +14,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/google/uuid"
 )
 
 type selectedRecoveryTxOwner interface {
-	MarkTerminalTx(context.Context, *sql.Tx, authoractivity.Mutation, *runforkrevision.Effects, runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
-	RecoverSelectedForkEffectsTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects, string, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
+	MarkTerminalTx(context.Context, *mutationprotocol.Attempt, runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error)
+	RecoverSelectedForkEffectsTx(context.Context, *mutationprotocol.Attempt, string, runtimeeffects.RecoveryRequest) (runtimeeffects.RecoverySummary, error)
 }
 
 func (s *RunForkPostgresOwner) ListSelectedForkRecoveryEntries(ctx context.Context) ([]runfork.SelectedForkRecoveryEntry, error) {
@@ -84,33 +83,26 @@ func (s *RunForkPostgresOwner) RecoverSelectedFork(ctx context.Context, req runc
 	if err := req.Validate(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
-	var result runfork.SelectedForkRecoveryResult
-	committed, err := s.backend.RunTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedForkRecoveryResult, error) {
+		var recovered runfork.SelectedForkRecoveryResult
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := admitSelectedRecoveryTx(txctx, tx, req, false); err != nil {
+				return err
+			}
+			snapshot, err := s.LoadSnapshotTx(txctx, tx, req.Entry.Binding.ForkRunID, true)
+			if err != nil {
+				return err
+			}
+			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, false)
 			return err
-		}
-		if err := admitSelectedRecoveryTx(ctx, tx, req, false); err != nil {
-			return err
-		}
-		snapshot, err := s.LoadSnapshotTx(ctx, tx, req.Entry.Binding.ForkRunID, true)
-		if err != nil {
-			return err
-		}
-		effects := runforkrevision.NewEffects()
-		result, err = recoverSelectedForkTx(ctx, tx, s, story, effects, snapshot, req, false)
-		if err != nil {
-			return err
-		}
-		if err := finalizeRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
-			return err
-		}
-		return nil
+		})
+		return recovered, err
 	})
-	if !committed {
-		return runfork.SelectedForkRecoveryResult{}, err
+	if !result.Acknowledged() {
+		return runfork.SelectedForkRecoveryResult{}, result.Err()
 	}
-	return result, err
+	recovered, _ := result.Value()
+	return recovered, result.Err()
 }
 
 func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error) {
@@ -120,33 +112,26 @@ func (s *RunForkSQLiteOwner) RecoverSelectedFork(ctx context.Context, req runcon
 	if err := s.requireCurrentSchema(); err != nil {
 		return runfork.SelectedForkRecoveryResult{}, err
 	}
-	var result runfork.SelectedForkRecoveryResult
-	committed, err := s.backend.RunTransactionOutcome(ctx, "recover selected fork", func(ctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "recover selected fork", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedForkRecoveryResult, error) {
+		var recovered runfork.SelectedForkRecoveryResult
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := admitSelectedRecoveryTx(txctx, tx, req, true); err != nil {
+				return err
+			}
+			snapshot, err := s.LoadSnapshotTx(txctx, tx, req.Entry.Binding.ForkRunID)
+			if err != nil {
+				return err
+			}
+			recovered, err = recoverSelectedForkTx(txctx, tx, s, attempt, snapshot, req, true)
 			return err
-		}
-		if err := admitSelectedRecoveryTx(ctx, tx, req, true); err != nil {
-			return err
-		}
-		snapshot, err := s.LoadSnapshotTx(ctx, tx, req.Entry.Binding.ForkRunID)
-		if err != nil {
-			return err
-		}
-		effects := runforkrevision.NewEffects()
-		result, err = recoverSelectedForkTx(ctx, tx, s, story, effects, snapshot, req, true)
-		if err != nil {
-			return err
-		}
-		if _, err := runforkrevision.FinalizeSQLite(ctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(ctx)
+		})
+		return recovered, err
 	})
-	if !committed {
-		return runfork.SelectedForkRecoveryResult{}, err
+	if !result.Acknowledged() {
+		return runfork.SelectedForkRecoveryResult{}, result.Err()
 	}
-	return result, err
+	recovered, _ := result.Value()
+	return recovered, result.Err()
 }
 
 func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) error {
@@ -163,7 +148,7 @@ func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.Sel
 	return nil
 }
 
-func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
+func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool) (runfork.SelectedForkRecoveryResult, error) {
 	runID := req.Entry.Binding.ForkRunID
 	result := runfork.SelectedForkRecoveryResult{RunID: runID}
 	binding, err := loadRunForkSelectedContractBinding(ctx, tx, runID)
@@ -307,12 +292,12 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	if _, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='failed',fence_generation=fence_generation+1,lease_expires_at=NULL,failure=$2,terminal_at=$3,updated_at=$3 WHERE execution_id=$1`, result.ExecutionID, string(failureRaw), req.Effects.Now()); err != nil {
 		return result, err
 	}
-	result.Effects, err = owner.RecoverSelectedForkEffectsTx(ctx, tx, story, effects, result.ExecutionID, req.Effects)
+	result.Effects, err = owner.RecoverSelectedForkEffectsTx(ctx, attempt, result.ExecutionID, req.Effects)
 	if err != nil {
 		return result, err
 	}
 	if !snapshot.State.Terminal() {
-		if _, _, err := owner.MarkTerminalTx(ctx, tx, story, effects, runlifecycle.TerminalRequest{RunID: runID, State: runlifecycle.StateFailed, Failure: failure, EndedAt: req.Effects.Now()}); err != nil {
+		if _, _, err := owner.MarkTerminalTx(ctx, attempt, runlifecycle.TerminalRequest{RunID: runID, State: runlifecycle.StateFailed, Failure: failure, EndedAt: req.Effects.Now()}); err != nil {
 			return result, err
 		}
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -257,28 +257,17 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 
 	bulkFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "bulk_code", nil))
 	bulkPayload := json.RawMessage(`{"log_level":"error","message":"bulk runtime failed","details":{"component":"mcp-gateway","action":"request_failed","agent_id":"agent-1","failure":` + bulkFailure + `}}`)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin bulk runtime-log fixture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin bulk runtime-log author activity: %v", err)
-	}
-	txctx := ctx
-	for i := 1; i <= 1005; i++ {
-		event := eventtest.DiagnosticDirect(
-			uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", bulkPayload, 0, runID, "", events.EventEnvelope{}, base.Add(2*time.Minute+time.Duration(i)*time.Millisecond),
-		)
-		if err := commitDiagnosticRuntimeLogFixtureTx(txctx, pg, tx, story, event); err != nil {
-			t.Fatalf("seed bulk runtime log %d: %v", i, err)
+	if err := runSelectedFixtureMutation(ctx, pg, "bulk runtime-log fixture", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		for i := 1; i <= 1005; i++ {
+			event := eventtest.DiagnosticDirect(
+				uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", bulkPayload, 0, runID, "", events.EventEnvelope{}, base.Add(2*time.Minute+time.Duration(i)*time.Millisecond),
+			)
+			if err := commitDiagnosticRuntimeLogFixtureTx(txctx, pg, attempt, event); err != nil {
+				return err
+			}
 		}
-	}
-	if err := story.Finalize(txctx); err != nil {
-		t.Fatalf("finalize bulk runtime-log story: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
+		return nil
+	}); err != nil {
 		t.Fatalf("commit bulk runtime-log fixture: %v", err)
 	}
 	bulkIncidents, err := pg.ListOperatorRuntimeIncidents(ctx, operatorread.OperatorRuntimeIncidentListOptions{

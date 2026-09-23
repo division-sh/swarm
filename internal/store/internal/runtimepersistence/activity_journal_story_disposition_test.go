@@ -339,10 +339,10 @@ func activityStoryOuter(fixture authorActivityReceiptFixture, op string, record 
 	case "claim":
 		return j.ClaimActivityAttemptForLoopGeneration(ctx, record)
 	case "complete":
-		out, err := j.CompleteActivityAttempt(ctx, record)
+		out, _, err := j.CompleteActivityAttempt(ctx, record)
 		return out, false, err
 	case "uncertain":
-		out, err := j.MarkActivityAttemptUncertain(ctx, record)
+		out, _, err := j.MarkActivityAttemptUncertain(ctx, record)
 		return out, false, err
 	default:
 		panic("unknown activity test operation")

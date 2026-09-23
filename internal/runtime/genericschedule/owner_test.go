@@ -354,8 +354,8 @@ func TestCatchupDepthUsesPersistedCoordinatesWithoutSkipping(t *testing.T) {
 
 type restoreStore struct{ activation Activation }
 
-func (s *restoreStore) AdmitGenericSchedule(context.Context, AdmissionCommand) (AdmissionResult, error) {
-	return AdmissionResult{}, nil
+func (s *restoreStore) AdmitGenericScheduleOutcome(context.Context, AdmissionCommand) (AdmissionCommit, error) {
+	return AdmissionCommit{Acknowledged: true}, nil
 }
 func (s *restoreStore) LoadGenericScheduleActivation(context.Context, string) (Activation, bool, error) {
 	return s.activation, true, nil
@@ -369,8 +369,8 @@ func (*restoreStore) PrepareGenericScheduleOccurrence(context.Context, Wakeup) (
 func (*restoreStore) CommitGenericScheduleOccurrence(context.Context, CommitCommand) (CommitResult, error) {
 	return CommitResult{}, nil
 }
-func (*restoreStore) CancelGenericSchedule(context.Context, CancelCommand) (CancelResult, error) {
-	return CancelResult{}, nil
+func (*restoreStore) CancelGenericScheduleOutcome(context.Context, CancelCommand) (CancelCommit, error) {
+	return CancelCommit{Acknowledged: true}, nil
 }
 func (*restoreStore) ClaimGenericScheduleWakeup(context.Context, Wakeup) (bool, error) {
 	return true, nil
@@ -482,11 +482,11 @@ type lifecycleProofStore struct {
 	order       *[]string
 }
 
-func (s *lifecycleProofStore) AdmitGenericSchedule(context.Context, AdmissionCommand) (AdmissionResult, error) {
+func (s *lifecycleProofStore) AdmitGenericScheduleOutcome(context.Context, AdmissionCommand) (AdmissionCommit, error) {
 	if s.order != nil {
 		*s.order = append(*s.order, "persist")
 	}
-	return AdmissionResult{Outcome: AdmissionCreated, Activation: s.activation}, nil
+	return AdmissionCommit{Result: AdmissionResult{Outcome: AdmissionCreated, Activation: s.activation}, Acknowledged: true}, nil
 }
 func (s *lifecycleProofStore) LoadGenericScheduleActivation(context.Context, string) (Activation, bool, error) {
 	if s.order != nil {
@@ -507,8 +507,8 @@ func (s *lifecycleProofStore) CommitGenericScheduleOccurrence(_ context.Context,
 	}
 	return s.commit(command)
 }
-func (*lifecycleProofStore) CancelGenericSchedule(context.Context, CancelCommand) (CancelResult, error) {
-	return CancelResult{}, nil
+func (*lifecycleProofStore) CancelGenericScheduleOutcome(context.Context, CancelCommand) (CancelCommit, error) {
+	return CancelCommit{Acknowledged: true}, nil
 }
 func (s *lifecycleProofStore) ClaimGenericScheduleWakeup(context.Context, Wakeup) (bool, error) {
 	if s.order != nil {

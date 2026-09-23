@@ -71,7 +71,7 @@ func (*startupEffectStore) IsExternalEffectAuthorityCurrent(context.Context, run
 
 func (*startupEffectStore) AuthorizeExternalAttempt(_ context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
 	return runtimeeffects.Attempt{
-		OperationID: req.OperationID, AttemptID: req.AttemptID, Authority: authority,
+		OperationID: req.OperationID, AttemptID: req.AttemptID, Authority: authority, AuthorizationAcknowledged: true,
 		Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport,
 		Ordinal: 1, AuthorizedAt: req.Now,
 	}, nil

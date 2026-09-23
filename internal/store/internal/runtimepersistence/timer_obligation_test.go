@@ -2,7 +2,8 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -73,18 +74,38 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			assertTimerFamilyObligation(t, mustTimerRun(t, before, runID).Families, runtimetimerobligation.FamilyScheduledTask, 0, 0, 0)
 			assertTimerFamilyObligation(t, before.GlobalFamilies, runtimetimerobligation.FamilyGlobalRecurring, 0, 0, 0)
 
-			tx, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatalf("begin timer obligation proof transaction: %v", err)
+			ready := make(chan error, 1)
+			release := make(chan struct{})
+			done := make(chan error, 1)
+			rollback := errors.New("rollback timer obligation proof")
+			go func() {
+				done <- runSelectedFixtureMutation(ctx, selected, "timer obligation observation boundary", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+					err := insertTimerObligationProofRowAttempt(t, txctx, attempt, selected, runID, "scheduled_task", observedAt)
+					ready <- err
+					if err != nil {
+						return err
+					}
+					<-release
+					return rollback
+				})
+			}()
+			select {
+			case err := <-ready:
+				if err != nil {
+					t.Fatalf("stage timer obligation proof: %v", err)
+				}
+			case err := <-done:
+				t.Fatalf("timer obligation mutation did not stage: %v", err)
 			}
-			insertTimerObligationProofRowTx(t, ctx, tx, selected, runID, "scheduled_task", observedAt)
 			during, err := reader.ReadTimerObligations(ctx, scope, observedAt)
 			if err != nil {
-				_ = tx.Rollback()
+				close(release)
+				<-done
 				t.Fatalf("read timer obligations while ambient transaction is open: %v", err)
 			}
 			assertTimerFamilyObligation(t, mustTimerRun(t, during, runID).Families, runtimetimerobligation.FamilyScheduledTask, 0, 0, 0)
-			if err := tx.Rollback(); err != nil {
+			close(release)
+			if err := <-done; !errors.Is(err, rollback) {
 				t.Fatalf("rollback timer obligation proof transaction: %v", err)
 			}
 			after, err := reader.ReadTimerObligations(ctx, scope, observedAt)
@@ -155,19 +176,19 @@ func insertTimerObligationProofRow(
 	}
 	command := timerObligationProofCommand(t, runID, family, fireAt)
 	setGenericScheduleClock(t, store, func() time.Time { return fireAt.Add(-time.Hour) })
-	if admitted, err := store.AdmitGenericSchedule(ctx, command); err != nil || admitted.Outcome != runtimegenericschedule.AdmissionCreated {
-		t.Fatalf("admit %s timer obligation row = %#v, %v", family, admitted, err)
+	if committed, err := store.AdmitGenericScheduleOutcome(ctx, command); err != nil || !committed.Acknowledged || committed.Result.Outcome != runtimegenericschedule.AdmissionCreated {
+		t.Fatalf("admit %s timer obligation row = %#v, %v", family, committed, err)
 	}
 }
 
-func insertTimerObligationProofRowTx(
+func insertTimerObligationProofRowAttempt(
 	t *testing.T,
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	selected any,
 	runID, family string,
 	fireAt time.Time,
-) {
+) error {
 	t.Helper()
 	command := timerObligationProofCommand(t, runID, family, fireAt)
 	var (
@@ -177,16 +198,20 @@ func insertTimerObligationProofRowTx(
 	switch store := selected.(type) {
 	case *PostgresStore:
 		store.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time { return fireAt.Add(-time.Hour) })
-		admitted, err = store.genericSchedulePostgresOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
+		admitted, err = store.genericSchedulePostgresOwner.AdmitTx(ctx, attempt, command)
 	case *SQLiteRuntimeStore:
 		store.genericScheduleSQLiteOwner.SetNowFnForTest(func() time.Time { return fireAt.Add(-time.Hour) })
-		admitted, err = store.genericScheduleSQLiteOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
+		admitted, err = store.genericScheduleSQLiteOwner.AdmitTx(ctx, attempt, command)
 	default:
-		t.Fatalf("unsupported selected store %T", selected)
+		return fmt.Errorf("unsupported selected store %T", selected)
 	}
-	if err != nil || admitted.Outcome != runtimegenericschedule.AdmissionCreated {
-		t.Fatalf("admit transactional %s timer obligation row = %#v, %v", family, admitted, err)
+	if err != nil {
+		return err
 	}
+	if admitted.Outcome != runtimegenericschedule.AdmissionCreated {
+		return fmt.Errorf("admit transactional %s timer obligation row = %#v", family, admitted)
+	}
+	return nil
 }
 
 func timerObligationProofCommand(t *testing.T, runID, family string, fireAt time.Time) runtimegenericschedule.AdmissionCommand {

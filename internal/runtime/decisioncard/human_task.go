@@ -109,6 +109,16 @@ type HumanTaskCreationStore interface {
 	CreateHumanTaskCard(context.Context, Card, HumanTaskContinuation) error
 }
 
+// HumanTaskCreationResult is populated only from an acknowledged store attempt.
+type HumanTaskCreationResult struct {
+	CardID       string
+	Acknowledged bool
+}
+
+type HumanTaskAcknowledgedCreationStore interface {
+	CreateHumanTaskCardOutcome(context.Context, Card, HumanTaskContinuation) (HumanTaskCreationResult, error)
+}
+
 type HumanTaskStore interface {
 	HumanTaskCreationStore
 	LoadHumanTaskContinuation(context.Context, string) (HumanTaskContinuation, error)

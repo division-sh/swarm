@@ -44,6 +44,24 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			run_id TEXT PRIMARY KEY,
 			bundle_hash TEXT
 		)`,
+		`CREATE TABLE run_fork_revision_heads (
+			run_id TEXT PRIMARY KEY,
+			last_revision INTEGER NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP
+		)`,
+		`CREATE TABLE run_fork_revisions (
+			run_id TEXT,
+			revision INTEGER,
+			recorded_at TIMESTAMP
+		)`,
+		`CREATE TABLE run_fork_fact_revisions (
+			run_id TEXT,
+			revision INTEGER,
+			family TEXT,
+			fact_key TEXT,
+			fact TEXT,
+			present BOOLEAN
+		)`,
 		`CREATE TABLE events (
 			event_class TEXT NOT NULL,
 			event_id TEXT PRIMARY KEY,
@@ -64,6 +82,8 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			chain_depth INTEGER NOT NULL,
 			produced_by TEXT NOT NULL,
 			produced_by_type TEXT NOT NULL,
+			handler_node TEXT,
+			idempotency_key TEXT,
 			source_event_id TEXT,
 			created_at TIMESTAMP NOT NULL,
 			routing_source_kind TEXT NOT NULL,
@@ -216,19 +236,19 @@ func (s *managerDeliveryTestStore) seedAgentDeliveries(t *testing.T, agentID str
 		if _, err := uuid.Parse(evt.ID()); err != nil {
 			t.Fatalf("manager delivery fixture event id %q is not durable: %v", evt.ID(), err)
 		}
-		if err := eventfixture.Insert(context.Background(), s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
+		if err := s.ensureRun(context.Background(), evt.RunID()); err != nil {
+			t.Fatalf("seed manager delivery run %s: %v", evt.RunID(), err)
+		}
+		if err := s.mutate(context.Background(), func(ctx context.Context, attempt *eventfixture.Attempt) error {
+			return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectSQLite, evt)
+		}); err != nil {
 			t.Fatalf("seed manager delivery event %s: %v", evt.ID(), err)
 		}
-		tx, err := s.db.BeginTx(context.Background(), nil)
-		if err != nil {
-			t.Fatalf("begin manager delivery seed: %v", err)
-		}
-		if _, err := s.adapter.CommitInitial(context.Background(), tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, s.authority); err != nil {
-			_ = tx.Rollback()
+		if err := s.mutate(context.Background(), func(ctx context.Context, attempt *eventfixture.Attempt) error {
+			_, err := s.adapter.CommitInitial(ctx, attempt, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, s.authority)
+			return err
+		}); err != nil {
 			t.Fatalf("seed manager delivery obligation %s: %v", evt.ID(), err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit manager delivery obligation %s: %v", evt.ID(), err)
 		}
 		s.mu.Lock()
 		s.events[evt.ID()] = evt
@@ -259,18 +279,23 @@ func (s *managerDeliveryTestStore) ensureDelivery(
 	if _, err := uuid.Parse(runID); err != nil {
 		runID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("manager-delivery-test-run:"+evt.ID())).String()
 	}
-	if err := eventfixture.Insert(context.Background(), s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
+	if err := s.ensureRun(context.Background(), runID); err != nil {
+		return err
+	}
+	if evt.RunID() != "" && evt.RunID() != runID {
+		if err := s.ensureRun(context.Background(), evt.RunID()); err != nil {
+			return err
+		}
+	}
+	if err := s.mutate(context.Background(), func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectSQLite, evt)
+	}); err != nil {
 		return fmt.Errorf("seed manager delivery event %s: %w", evt.ID(), err)
 	}
-	tx, err := s.db.BeginTx(context.Background(), nil)
-	if err != nil {
+	if err := s.mutate(context.Background(), func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		_, err := s.adapter.CommitInitial(ctx, attempt, evt.ID(), runID, []events.DeliveryRoute{route}, authority)
 		return err
-	}
-	if _, err := s.adapter.CommitInitial(context.Background(), tx, evt.ID(), runID, []events.DeliveryRoute{route}, authority); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
+	}); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -279,28 +304,19 @@ func (s *managerDeliveryTestStore) ensureDelivery(
 	return nil
 }
 
-func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (s *managerDeliveryTestStore) ensureRun(ctx context.Context, runID string) error {
+	if runID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash) VALUES (?, ?) ON CONFLICT (run_id) DO NOTHING`, runID, sourceartifactfixture.BundleHash)
+	return err
+}
+
+func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := fn(story, tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := authoractivityfixture.Finalize(story); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	return eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, fn).Err()
 }
 
 func (s *managerDeliveryTestStore) claimExact(ctx context.Context, evt events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
@@ -308,9 +324,9 @@ func (s *managerDeliveryTestStore) claimExact(ctx context.Context, evt events.Ev
 		return runtimedelivery.ClaimedObligation{}, err
 	}
 	var result runtimedelivery.ClaimResult
-	err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
+	err := s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
 		var err error
-		result, err = s.adapter.ClaimExactResult(story, tx, s.authority, evt, route, runtimedelivery.DefaultLeaseTTL)
+		result, err = s.adapter.ClaimExactResult(ctx, attempt, s.authority, evt, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	if err != nil {
@@ -324,10 +340,19 @@ func (s *managerDeliveryTestStore) claimExact(ctx context.Context, evt events.Ev
 }
 
 func (s *managerDeliveryTestStore) ActivateDeliveryAuthority(ctx context.Context, authority runtimedelivery.ExecutionAuthority) error {
+	_, err := s.ActivateDeliveryAuthorityOutcome(ctx, authority)
+	return err
+}
+
+func (s *managerDeliveryTestStore) ActivateDeliveryAuthorityOutcome(ctx context.Context, authority runtimedelivery.ExecutionAuthority) (runtimedelivery.ActivationCommit, error) {
 	s.authority = authority
-	return s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		return s.adapter.ActivateNormalAuthority(story, tx, authority)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return s.adapter.ActivateNormalAuthority(ctx, attempt, authority)
 	})
+	return runtimedelivery.ActivationCommit{Acknowledged: result.Acknowledged()}, result.Err()
 }
 
 func (s *managerDeliveryTestStore) InspectDeliveryRecovery(
@@ -341,17 +366,20 @@ func (s *managerDeliveryTestStore) ClaimDelivery(ctx context.Context, authority 
 	if err := s.ensureDelivery(evt, route, authority); err != nil {
 		return runtimedelivery.ClaimResult{}, err
 	}
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		result, err = s.adapter.ClaimExactResult(story, tx, authority, evt, route, runtimedelivery.DefaultLeaseTTL)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		result, err = s.adapter.ClaimExactResult(ctx, attempt, authority, evt, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	return result, err
 }
 
 func (s *managerDeliveryTestStore) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (page runtimedelivery.ContinuationPage, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		page, err = s.adapter.ScanContinuations(story, tx, authority, cursor, limit)
-		return err
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			page, err = s.adapter.ScanContinuations(ctx, tx, authority, cursor, limit)
+			return err
+		})
 	})
 	if err != nil {
 		return runtimedelivery.ContinuationPage{}, err
@@ -373,32 +401,32 @@ func (s *managerDeliveryTestStore) ObserveDeliveryContinuation(
 }
 
 func (s *managerDeliveryTestStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.BindAgentSession(story, tx, claim, sessionID)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
 		return err
 	})
 	return snapshot, err
 }
 
 func (s *managerDeliveryTestStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.RenewClaim(story, tx, claim, runtimedelivery.DefaultLeaseTTL)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	return snapshot, err
 }
 
 func (s *managerDeliveryTestStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.SettleSuccess(story, tx, claim, sideEffects, duration, selection)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, selection)
 		return err
 	})
 	return snapshot, err
 }
 
 func (s *managerDeliveryTestStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.SettleFailure(story, tx, claim, settlement)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.SettleFailure(ctx, attempt, claim, settlement)
 		return err
 	})
 	return snapshot, err
@@ -421,8 +449,8 @@ func (s *managerDeliveryTestStore) SummarizeRun(ctx context.Context, runID strin
 }
 
 func (s *managerDeliveryTestStore) TerminalizeRun(ctx context.Context, runID, reason string) (terminalizations []runtimedelivery.Terminalization, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		terminalizations, err = s.adapter.TerminalizeRun(story, tx, runID, reason)
+	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		terminalizations, err = s.adapter.TerminalizeRun(ctx, attempt, runID, reason)
 		return err
 	})
 	return terminalizations, err

@@ -16,9 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -327,15 +326,31 @@ func TestSelectedForkWriterPortsSettlement(t *testing.T) {
 				if cut == "commit_uncertain" {
 					probe.commitError = primary
 				}
-				run := postgresRunForkSelectedContractActivationPort(s).runMutation
+				run := func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+					return postgresRunForkSelectedContractActivationPort(s).runMutation(ctx, func(ctx context.Context, tx *sql.Tx, _ *mutationprotocol.Attempt) error {
+						return fn(ctx, tx)
+					})
+				}
 				wantIsolation := sql.LevelReadCommitted
 				if family == "materialization" {
-					run = postgresRunForkSelectedContractMaterializationPort(s).runMutation
+					run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+						return postgresRunForkSelectedContractMaterializationPort(s).runMutation(ctx, func(ctx context.Context, tx *sql.Tx, _ *mutationprotocol.Attempt) error {
+							return fn(ctx, tx)
+						})
+					}
 				}
 				if family == "discard" {
 					wantIsolation = sql.LevelSerializable
-					run = func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
-						err := postgresRunForkSelectedContractDiscardPort(s).runMutation(ctx, fn)
+					run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+						err := postgresRunForkSelectedContractDiscardPort(s).runMutation(ctx, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+							if err := attempt.WithSQL(ctx, fn); err != nil {
+								return err
+							}
+							if _, err := attempt.SelectForkDiscardRetention(ctx, uuid.NewString()); err != nil {
+								return err
+							}
+							return attempt.BeginDestructiveCleanup(ctx)
+						})
 						return err == nil, err
 					}
 				}
@@ -345,7 +360,7 @@ func TestSelectedForkWriterPortsSettlement(t *testing.T) {
 				var panicked any
 				func() {
 					defer func() { panicked = recover() }()
-					committed, err = run(ctx, func(sqlCtx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, _ *runforkrevision.Effects) error {
+					committed, err = run(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
 						calls++
 						if _, err := tx.ExecContext(sqlCtx, `INSERT INTO selected_writer_probe VALUES (1)`); err != nil {
 							return err
@@ -418,7 +433,7 @@ func TestSelectedForkActivationProjectsAcknowledgedOutcome(t *testing.T) {
 			port := postgresRunForkSelectedContractActivationPort(s)
 			// Isolate the typed projection from SQL. The port settlement matrix
 			// above separately proves the real transaction's acknowledged outcome.
-			port.runMutation = func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) (bool, error) {
+			port.runMutation = func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
 				return committed, primary
 			}
 			result, err := activateRunForkForSelectedContractExecution(context.Background(), runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: uuid.NewString()}, port)

@@ -261,7 +261,7 @@ func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected 
 			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
 		},
 	} {
-		if err := selected.CreateEntity(ctx, record); err != nil {
+		if _, err := selected.CreateEntity(ctx, record); err != nil {
 			t.Fatalf("create materialized entity %s: %v", record.EntityID, err)
 		}
 	}

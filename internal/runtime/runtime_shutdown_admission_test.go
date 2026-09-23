@@ -151,6 +151,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			payload_schema_class TEXT NOT NULL,
 			execution_mode TEXT NOT NULL, chain_depth INTEGER NOT NULL, produced_by TEXT NOT NULL,
 			produced_by_type TEXT NOT NULL, source_event_id TEXT, created_at TIMESTAMP NOT NULL,
+			handler_node TEXT, idempotency_key TEXT,
 			routing_source_kind TEXT NOT NULL, routing_source_authority TEXT, source_route BLOB NOT NULL,
 				target_route BLOB NOT NULL, target_set BLOB NOT NULL, operator_reference_event_id TEXT, inherited_fan_out_origin BLOB,
 				route_settlement BLOB NOT NULL
@@ -209,6 +210,9 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			runtime_instance_id TEXT, bundle_hash TEXT, author_safe_summary TEXT,
 			projection TEXT NOT NULL DEFAULT '{}', failure TEXT, occurred_at TIMESTAMP NOT NULL
 		)`,
+		`CREATE TABLE run_fork_revision_heads (run_id TEXT PRIMARY KEY, last_revision INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP)`,
+		`CREATE TABLE run_fork_revisions (run_id TEXT, revision INTEGER, recorded_at TIMESTAMP)`,
+		`CREATE TABLE run_fork_fact_revisions (run_id TEXT, revision INTEGER, family TEXT, fact_key TEXT, fact TEXT, present BOOLEAN)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatalf("create runtime shutdown delivery schema: %v", err)
@@ -225,6 +229,9 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "runtime-shutdown-test", 1)
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery authority: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO runs (run_id, bundle_hash) VALUES (?, ?)`, agentidentitytest.DefaultRunID, source.BundleHash()); err != nil {
+		t.Fatalf("seed runtime shutdown delivery run: %v", err)
 	}
 	return &runtimeShutdownDeliveryStore{
 		db: db, adapter: adapter, authority: authority, events: make(map[string]events.Event),
@@ -246,25 +253,8 @@ func (s *runtimeShutdownDeliveryStore) ObserveDeliveryContinuation(
 	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
 }
 
-func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := fn(story, tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := authoractivityfixture.Finalize(story); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt) error) error {
+	return eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, fn).Err()
 }
 
 func (s *runtimeShutdownDeliveryStore) ClaimDelivery(
@@ -275,15 +265,15 @@ func (s *runtimeShutdownDeliveryStore) ClaimDelivery(
 ) (result runtimedelivery.ClaimResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
-		return runtimedelivery.ClaimResult{}, err
-	}
 	s.events[evt.ID()] = evt
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		if _, err := s.adapter.CommitInitial(story, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
+	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		if err := eventfixture.Insert(txctx, attempt, authoractivityfixture.DialectSQLite, evt); err != nil {
 			return err
 		}
-		result, err = s.adapter.ClaimExactResult(story, tx, authority, evt, route, runtimedelivery.DefaultLeaseTTL)
+		if _, err := s.adapter.CommitInitial(txctx, attempt, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
+			return err
+		}
+		result, err = s.adapter.ClaimExactResult(txctx, attempt, authority, evt, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	return result, err
@@ -296,9 +286,19 @@ func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthority(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.authority = authority
-	return s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		return s.adapter.ActivateNormalAuthority(story, tx, authority)
+	return s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		return s.adapter.ActivateNormalAuthority(txctx, attempt, authority)
 	})
+}
+
+func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthorityOutcome(
+	ctx context.Context,
+	authority runtimedelivery.ExecutionAuthority,
+) (runtimedelivery.ActivationCommit, error) {
+	if err := s.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		return runtimedelivery.ActivationCommit{}, err
+	}
+	return runtimedelivery.ActivationCommit{Acknowledged: true}, nil
 }
 
 func (s *runtimeShutdownDeliveryStore) ScanDeliveryContinuations(
@@ -309,9 +309,11 @@ func (s *runtimeShutdownDeliveryStore) ScanDeliveryContinuations(
 ) (page runtimedelivery.ContinuationPage, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		page, err = s.adapter.ScanContinuations(story, tx, authority, cursor, limit)
-		return err
+	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			page, err = s.adapter.ScanContinuations(txctx, tx, authority, cursor, limit)
+			return err
+		})
 	})
 	if err != nil {
 		return runtimedelivery.ContinuationPage{}, err
@@ -327,24 +329,24 @@ func (s *runtimeShutdownDeliveryStore) ScanDeliveryContinuations(
 }
 
 func (s *runtimeShutdownDeliveryStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.SettleSuccess(story, tx, claim, effects, duration, selection)
+	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.SettleSuccess(txctx, attempt, claim, effects, duration, selection)
 		return err
 	})
 	return snapshot, err
 }
 
 func (s *runtimeShutdownDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.RenewClaim(story, tx, claim, runtimedelivery.DefaultLeaseTTL)
+	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.RenewClaim(txctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
 	return snapshot, err
 }
 
 func (s *runtimeShutdownDeliveryStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.SettleFailure(story, tx, claim, settlement)
+	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		snapshot, err = s.adapter.SettleFailure(txctx, attempt, claim, settlement)
 		return err
 	})
 	return snapshot, err

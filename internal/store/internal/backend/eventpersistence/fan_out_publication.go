@@ -2,20 +2,18 @@ package eventpersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func commitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects,
-	store eventCommitTxStore, postgres bool, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission,
-	handoff *runLifecycleCandidateHandoffReservation,
+func commitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt,
+	store eventCommitTxStore, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission,
 ) (runtimebus.CommittedPublication, error) {
-	if tx == nil || story == nil {
-		return runtimebus.CommittedPublication{}, fmt.Errorf("fan-out publication requires the named chunk transaction")
+	if attempt == nil {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("fan-out publication requires the named chunk mutation attempt")
 	}
 	if err := command.ValidateFanOut(); err != nil {
 		return runtimebus.CommittedPublication{}, err
@@ -23,17 +21,17 @@ func commitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateau
 	if err := projection.ValidateEvent(command.Commit.Event.Event()); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	return commitValidatedPublicationTx(ctx, tx, story, effects, store, postgres, command, handoff)
+	return commitValidatedPublicationTx(ctx, attempt, store, command)
 }
 
-func (s *EventPostgresOwner) CommitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects,
-	command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission, handoff *runLifecycleCandidateHandoffReservation,
+func (s *EventPostgresOwner) CommitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt,
+	command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission,
 ) (runtimebus.CommittedPublication, error) {
-	return commitFanOutPublicationTx(ctx, tx, story, effects, s, true, command, projection, handoff)
+	return commitFanOutPublicationTx(ctx, attempt, s, command, projection)
 }
 
-func (s *EventSQLiteOwner) CommitFanOutPublicationTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects,
-	command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission, handoff *runLifecycleCandidateHandoffReservation,
+func (s *EventSQLiteOwner) CommitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt,
+	command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission,
 ) (runtimebus.CommittedPublication, error) {
-	return commitFanOutPublicationTx(ctx, tx, story, effects, s, false, command, projection, handoff)
+	return commitFanOutPublicationTx(ctx, attempt, s, command, projection)
 }

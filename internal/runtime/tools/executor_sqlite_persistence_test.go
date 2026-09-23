@@ -34,6 +34,7 @@ import (
 type humanTaskToolStore interface {
 	decisioncard.Store
 	decisioncard.HumanTaskStore
+	decisioncard.HumanTaskAcknowledgedCreationStore
 	runtimereplycontext.Store
 }
 
@@ -221,7 +222,7 @@ func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
 	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	entityID := uuid.NewString()
-	if err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
+	if _, err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
 		RunID:        entityToolTestRunID,
 		EntityID:     entityID,
 		FlowInstance: "review/inst-structured",
@@ -263,7 +264,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
 	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
 	entityID := uuid.NewString()
-	if err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
+	if _, err := sqliteStore.CreateEntity(ctx, runtimetools.EntityCreateRecord{
 		RunID:        entityToolTestRunID,
 		EntityID:     entityID,
 		FlowInstance: "validation/inst-1",

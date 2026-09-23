@@ -60,7 +60,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				ControlledBy:  "test",
 				DeliveryNote:  "test active-run delivery quiescence dry-run",
 			})
-			if err != nil || !dryRun.DryRun || len(dryRun.Deliveries) != 1 {
+			if err != nil || !dryRun.Acknowledged || !dryRun.DryRun || len(dryRun.Deliveries) != 1 {
 				t.Fatalf("dry-run quiescence = %#v, err=%v", dryRun, err)
 			}
 			assertQuiescenceHandlerSelectionCount(t, fixture, ctx, claimed.Snapshot.DeliveryID, 0)
@@ -79,6 +79,9 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatalf("ApplyActiveRunQuiescence: %v", err)
+			}
+			if !result.Acknowledged {
+				t.Fatal("committed quiescence omitted acknowledgement")
 			}
 			if len(result.Deliveries) != 1 || !result.Deliveries[0].Changed {
 				t.Fatalf("quiesced deliveries = %#v, want one changed delivery", result.Deliveries)

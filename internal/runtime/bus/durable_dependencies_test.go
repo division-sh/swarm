@@ -46,6 +46,9 @@ func (unexpectedDurableTestRoles) MarkTerminalRun(context.Context, runtimerunlif
 func (unexpectedDurableTestRoles) ActivateDeliveryAuthority(context.Context, runtimedelivery.ExecutionAuthority) error {
 	return errUnexpectedDurableTestRole
 }
+func (unexpectedDurableTestRoles) ActivateDeliveryAuthorityOutcome(context.Context, runtimedelivery.ExecutionAuthority) (runtimedelivery.ActivationCommit, error) {
+	return runtimedelivery.ActivationCommit{}, errUnexpectedDurableTestRole
+}
 func (unexpectedDurableTestRoles) InspectDeliveryRecovery(context.Context, runtimecorrelation.SourceArtifactFact) (runtimedelivery.RecoveryInventory, error) {
 	return runtimedelivery.RecoveryInventory{}, errUnexpectedDurableTestRole
 }
@@ -97,8 +100,8 @@ func (unexpectedDurableTestRoles) ListFlowInstanceRoutes(context.Context) ([]run
 func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance, []FlowInstanceRouteRecord) error {
 	return errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteTopology(context.Context, []FlowInstanceRouteRecordSet) error {
-	return errUnexpectedDurableTestRole
+func (unexpectedDurableTestRoles) ReplaceFlowInstanceRouteTopology(context.Context, []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
+	return FlowInstanceRouteTopologyResult{}, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]FlowInstanceRouteRecord, error) {
 	return nil, errUnexpectedDurableTestRole
@@ -129,6 +132,9 @@ func (unexpectedDurableTestRoles) LoadPreparedPublishEvent(context.Context, stri
 }
 func (unexpectedDurableTestRoles) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
 	return errUnexpectedDurableTestRole
+}
+func (unexpectedDurableTestRoles) RecordDeadLetterOutcome(context.Context, runtimedeadletters.Record) (runtimedeadletters.RecordOutcome, error) {
+	return runtimedeadletters.RecordOutcome{}, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil

@@ -16,6 +16,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -350,6 +351,14 @@ type recordingRuntimeMutationRunner struct {
 	calls                                 int32
 	committedGenericScheduleActivations   []runtimegenericschedule.Activation
 	committedGenericScheduleCancellations []runtimegenericschedule.Activation
+	postCommitErr                         error
+}
+
+type pipelineTestAttemptKey struct{}
+
+func pipelineTestMutationAttempt(ctx context.Context) (*eventfixture.Attempt, bool) {
+	attempt, ok := ctx.Value(pipelineTestAttemptKey{}).(*eventfixture.Attempt)
+	return attempt, ok && attempt != nil
 }
 
 func (r *recordingRuntimeMutationRunner) lifecycleMutation(ctx context.Context) (testRunLifecycleMutation, error) {
@@ -452,50 +461,58 @@ func (r *recordingRuntimeMutationRunner) SyncRunCounters(ctx context.Context, ru
 }
 
 func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	_, err := r.RunRuntimeMutationContextAcknowledged(ctx, fn)
+	return err
+}
+
+func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContextAcknowledged(ctx context.Context, fn func(context.Context) error) (bool, error) {
 	atomic.AddInt32(&r.calls, 1)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
 	postCommit := make([]OwnerAction, 0, 4)
 	rollbackActions := make([]OwnerAction, 0, 4)
-	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
-	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
-	dialect := r.dialect
 	authorDialect := authoractivityfixture.DialectSQLite
-	if dialect == workflowStoreDialectPostgres {
+	if r.dialect == workflowStoreDialectPostgres {
 		authorDialect = authoractivityfixture.DialectPostgres
-	} else {
-		dialect = workflowStoreDialectSQLite
 	}
-	storyctx, err := authoractivityfixture.Begin(txctx, tx, authorDialect)
-	if err != nil {
+	result := eventfixture.RunMutation(ctx, r.db, authorDialect, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		callbackCtx := txctx
+		if r.dialect == workflowStoreDialectPostgres {
+			// PostgreSQL drains SQL with a non-cancelable context; fixture work
+			// still needs the caller's deadline and cancellation.
+			var cancel context.CancelFunc
+			callbackCtx, cancel = context.WithCancel(txctx)
+			deadlineCancel := func() {}
+			if deadline, ok := ctx.Deadline(); ok {
+				callbackCtx, deadlineCancel = context.WithDeadline(callbackCtx, deadline)
+			}
+			stop := context.AfterFunc(ctx, cancel)
+			defer func() {
+				stop()
+				deadlineCancel()
+				cancel()
+			}()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		return attempt.WithSQL(callbackCtx, func(txctx context.Context, tx *sql.Tx) error {
+			txctx = withPipelinePostCommitActions(WithPipelineSQLTxContext(txctx, tx), &postCommit)
+			txctx = withPipelineRollbackActions(txctx, &rollbackActions)
+			txctx = context.WithValue(txctx, pipelineTestAttemptKey{}, attempt)
+			storyctx, err := authoractivityfixture.WithAttempt(txctx, attempt, tx)
+			if err != nil {
+				return err
+			}
+			return fn(storyctx)
+		})
+	})
+	if !result.Acknowledged() {
 		flushPipelineRollbackActions(rollbackActions)
-		return err
+		return false, result.Err()
 	}
-	if err := fn(storyctx); err != nil {
-		flushPipelineRollbackActions(rollbackActions)
-		return err
-	}
-	if err := authoractivityfixture.Finalize(storyctx); err != nil {
-		flushPipelineRollbackActions(rollbackActions)
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		flushPipelineRollbackActions(rollbackActions)
-		return err
-	}
-	committed = true
 	flushPipelinePostCommitActions(postCommit)
-	return nil
+	return true, errors.Join(result.Err(), r.postCommitErr)
 }
 
 func newSQLiteWorkflowInstanceStoreForTest(t *testing.T, db *sql.DB) *workflowInstanceStore {
@@ -514,6 +531,13 @@ func newSQLiteWorkflowInstanceStoreTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	createSQLiteWorkflowInstanceStoreTestSchema(t, db)
+	// A cancelled attempt may discard its connection; keep the shared in-memory
+	// database alive so recovery reads the same durable fixture after cancellation.
+	keepalive, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("retain sqlite workflow test database: %v", err)
+	}
+	t.Cleanup(func() { _ = keepalive.Close() })
 	return db
 }
 
@@ -545,6 +569,28 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 				started_at TIMESTAMP NOT NULL,
 				ended_at TIMESTAMP
 		)`,
+		`CREATE TABLE run_fork_revision_heads (
+			run_id TEXT PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,
+			last_revision INTEGER NOT NULL DEFAULT 0 CHECK (last_revision >= 0),
+			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE run_fork_revisions (
+			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+			revision INTEGER NOT NULL CHECK (revision > 0),
+			recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (run_id, revision)
+		)`,
+		`CREATE TABLE run_fork_fact_revisions (
+			run_id TEXT NOT NULL,
+			revision INTEGER NOT NULL,
+			family TEXT NOT NULL,
+			fact_key TEXT NOT NULL CHECK (fact_key <> ''),
+			fact TEXT NOT NULL,
+			present BOOLEAN NOT NULL DEFAULT TRUE,
+			PRIMARY KEY (run_id, family, fact_key, revision),
+			FOREIGN KEY (run_id, revision) REFERENCES run_fork_revisions(run_id, revision) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX idx_run_fork_fact_revision_snapshot ON run_fork_fact_revisions (run_id, revision, family, fact_key)`,
 		`CREATE TABLE flow_instances (
 			run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
 			instance_path TEXT NOT NULL,

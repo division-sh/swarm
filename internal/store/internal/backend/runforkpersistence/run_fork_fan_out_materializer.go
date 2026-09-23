@@ -16,11 +16,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type runForkFanOutBarrierOwner interface {
-	MaterializeRunForkFanOutBarrierTx(context.Context, *sql.Tx, *runforkrevision.Effects, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
+	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
 }
 
 func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage) error {
@@ -211,7 +212,7 @@ func materializeRunForkFanOutObligations(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	effects *runforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	barriers runForkFanOutBarrierOwner,
 	forkRunID string,
 	plan runfork.RunForkPlan,
@@ -281,7 +282,7 @@ func materializeRunForkFanOutObligations(
 		if err != nil {
 			return 0, err
 		}
-		if err := effects.AddFacts(forkRunID, intentRef); err != nil {
+		if err := attempt.AddFacts(forkRunID, intentRef); err != nil {
 			return 0, err
 		}
 		for _, sourceOutcome := range obligation.Outcomes {
@@ -314,7 +315,7 @@ func materializeRunForkFanOutObligations(
 			if err != nil {
 				return 0, err
 			}
-			if err := effects.AddFacts(forkRunID, outcomeRef); err != nil {
+			if err := attempt.AddFacts(forkRunID, outcomeRef); err != nil {
 				return 0, err
 			}
 		}
@@ -322,7 +323,7 @@ func materializeRunForkFanOutObligations(
 			if barriers == nil {
 				return 0, fmt.Errorf("fork fan-out barrier requires selected-store pipeline owner")
 			}
-			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, tx, effects, forkRunID, *obligation.Barrier, planRef, generation, now); err != nil {
+			if err := barriers.MaterializeRunForkFanOutBarrierTx(ctx, attempt, forkRunID, *obligation.Barrier, planRef, generation, now); err != nil {
 				return 0, err
 			}
 		}
@@ -333,7 +334,7 @@ func materializeRunForkFanOutObligations(
 func bindRunForkFanOutPendingReplays(
 	ctx context.Context,
 	tx *sql.Tx,
-	effects *runforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
 	forkRunID string,
 	plan runfork.RunForkPlan,
 	now time.Time,
@@ -378,7 +379,7 @@ func bindRunForkFanOutPendingReplays(
 				if err != nil {
 					return err
 				}
-				if err := effects.AddFacts(forkRunID, ref); err != nil {
+				if err := attempt.AddFacts(forkRunID, ref); err != nil {
 					return err
 				}
 			}

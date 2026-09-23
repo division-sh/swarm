@@ -300,14 +300,20 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			case "running":
 				return nil
 			case "paused":
-				_, err := store.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{
+				outcome, err := store.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 					RunID: runID, Reason: "runtime_log_status_test", ControlledBy: "test", Now: time.Now().UTC(),
 				})
+				if !outcome.Acknowledged {
+					return errors.Join(err, errors.New("run pause was not acknowledged"))
+				}
 				return err
 			case "cancelled":
-				_, err := store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+				outcome, err := store.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 					RunID: runID, Reason: "runtime_log_status_test", ControlledBy: "test", Now: time.Now().UTC(),
 				})
+				if !outcome.Acknowledged {
+					return errors.Join(err, errors.New("run stop was not acknowledged"))
+				}
 				return err
 			case "completed":
 				return convergeTerminalAdmissionRun(ctx, db, true, store, runID, eventID)
@@ -386,14 +392,20 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 			case "running":
 				return nil
 			case "paused":
-				_, err := store.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{
+				outcome, err := store.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 					RunID: runID, Reason: "runtime_log_status_test", ControlledBy: "test", Now: time.Now().UTC(),
 				})
+				if !outcome.Acknowledged {
+					return errors.Join(err, errors.New("run pause was not acknowledged"))
+				}
 				return err
 			case "cancelled":
-				_, err := store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+				outcome, err := store.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 					RunID: runID, Reason: "runtime_log_status_test", ControlledBy: "test", Now: time.Now().UTC(),
 				})
+				if !outcome.Acknowledged {
+					return errors.Join(err, errors.New("run stop was not acknowledged"))
+				}
 				return err
 			case "completed":
 				return convergeTerminalAdmissionRun(ctx, store.backend.ConstructionHandle(), false, store, runID, eventID)

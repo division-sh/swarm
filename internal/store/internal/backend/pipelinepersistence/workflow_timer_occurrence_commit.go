@@ -10,18 +10,16 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func commitWorkflowTimerOccurrence(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
-	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error),
-	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
-	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
-	requestCandidate func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error),
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowTimerOccurrence, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowTimerOccurrence],
+	candidateWriter mutationprotocol.CandidateWriter,
 	command runtimepipeline.WorkflowTimerOccurrenceCommand,
 ) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
 	if err := command.Validate(); err != nil {
@@ -31,88 +29,78 @@ func commitWorkflowTimerOccurrence(
 	if !ok {
 		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, fmt.Errorf("workflow timer publication has unexpected type %T", command.Publication)
 	}
-	handoff, err := reserve(ctx)
-	if err != nil {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
-	}
-	defer handoff.Rollback()
-
-	result := runtimepipeline.CommittedWorkflowTimerOccurrence{}
-	committed, err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
-		result = runtimepipeline.CommittedWorkflowTimerOccurrence{}
-		activation, found, err := loadWorkflowEngineTimerActivation(txctx, tx, postgres, command.Activation.Ref)
-		if err != nil {
-			return err
-		}
-		if !found || activation.Status != "active" || !activation.FireAt.Equal(command.Occurrence.DueAt) {
-			result.Outcome = runtimepipeline.WorkflowTimerOccurrenceTerminal
-			return nil
-		}
-		if !sameWorkflowEngineTimerActivation(activation, command.Activation) || activation.Ref != command.Occurrence.Activation {
-			return fmt.Errorf("workflow timer occurrence persisted coordinate changed before commit")
-		}
-		if postgres {
-			err = requirePostgresRunActive(txctx, tx, activation.RunID)
-		} else {
-			err = requireSQLiteRunActive(txctx, tx, activation.RunID)
-		}
-		if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
-			result.Outcome = runtimepipeline.WorkflowTimerOccurrenceTerminal
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
-		if err != nil {
-			return fmt.Errorf("commit workflow timer publication: %w", err)
-		}
-		if committed.AppendOutcome == runtimebus.EventAppendExactDuplicate {
-			return fmt.Errorf("active workflow timer occurrence already has a persisted event")
-		}
-		if committed.AppendOutcome != runtimebus.EventAppendInserted {
-			return fmt.Errorf("workflow timer publication returned invalid append outcome")
-		}
-
-		next, err := advanceWorkflowEngineTimerOccurrence(txctx, tx, postgres, effects, activation, command.FiredAt)
-		if err != nil {
-			return err
-		}
-		if !activation.Recurring {
-			candidate, err := requestCandidate(txctx, tx, activation.RunID)
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
+		result := runtimepipeline.CommittedWorkflowTimerOccurrence{}
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			activation, found, err := loadWorkflowEngineTimerActivation(txctx, tx, postgres, command.Activation.Ref)
 			if err != nil {
 				return err
 			}
-			if err := prepare(handoff, candidate); err != nil {
+			if !found || activation.Status != "active" || !activation.FireAt.Equal(command.Occurrence.DueAt) {
+				result.Outcome = runtimepipeline.WorkflowTimerOccurrenceTerminal
+				return nil
+			}
+			if !sameWorkflowEngineTimerActivation(activation, command.Activation) || activation.Ref != command.Occurrence.Activation {
+				return fmt.Errorf("workflow timer occurrence persisted coordinate changed before commit")
+			}
+			if postgres {
+				err = requirePostgresRunActive(txctx, tx, activation.RunID)
+			} else {
+				err = requireSQLiteRunActive(txctx, tx, activation.RunID)
+			}
+			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
+				result.Outcome = runtimepipeline.WorkflowTimerOccurrenceTerminal
+				return nil
+			}
+			if err != nil {
 				return err
 			}
-		}
-		evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
-		if err != nil {
-			return err
-		}
-		result = runtimepipeline.CommittedWorkflowTimerOccurrence{
-			Outcome:     runtimepipeline.WorkflowTimerOccurrenceCommitted,
-			Next:        next,
-			Publication: evidence,
-		}
-		return nil
+
+			committed, err := store.commitPublicationTx(txctx, attempt, plan.PublicationCommand())
+			if err != nil {
+				return fmt.Errorf("commit workflow timer publication: %w", err)
+			}
+			if committed.AppendOutcome == runtimebus.EventAppendExactDuplicate {
+				return fmt.Errorf("active workflow timer occurrence already has a persisted event")
+			}
+			if committed.AppendOutcome != runtimebus.EventAppendInserted {
+				return fmt.Errorf("workflow timer publication returned invalid append outcome")
+			}
+
+			next, err := advanceWorkflowEngineTimerOccurrence(txctx, tx, postgres, attempt, activation, command.FiredAt)
+			if err != nil {
+				return err
+			}
+			if !activation.Recurring {
+				if _, err := attempt.RequestCompletion(txctx, candidateWriter, activation.RunID, nil); err != nil {
+					return err
+				}
+			}
+			evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+			if err != nil {
+				return err
+			}
+			result = runtimepipeline.CommittedWorkflowTimerOccurrence{
+				Outcome:     runtimepipeline.WorkflowTimerOccurrenceCommitted,
+				Next:        next,
+				Publication: evidence,
+			}
+			return nil
+		})
+		return result, err
 	})
-	if !committed {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, outcome.Err()
 	}
-	return result, errors.Join(err, result.Validate(), handoff.Commit())
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
 func advanceWorkflowEngineTimerOccurrence(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	effects *revisionEffects,
+	facts workflowTimerFactSink,
 	activation runtimepipeline.WorkflowTimerActivation,
 	firedAt time.Time,
 ) (runtimepipeline.WorkflowTimerActivation, error) {
@@ -154,7 +142,7 @@ func advanceWorkflowEngineTimerOccurrence(
 	if rows != 1 {
 		return runtimepipeline.WorkflowTimerActivation{}, fmt.Errorf("workflow timer occurrence advanced %d rows", rows)
 	}
-	if err := addTimerRevisionEffects(effects, storedRunID, storedTimerID); err != nil {
+	if err := facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID); err != nil {
 		return runtimepipeline.WorkflowTimerActivation{}, err
 	}
 	next.Status = nextStatus
@@ -166,45 +154,15 @@ func advanceWorkflowEngineTimerOccurrence(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowTimerOccurrence(ctx context.Context, command runtimepipeline.WorkflowTimerOccurrenceCommand) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
-	effects := newRevisionEffects()
-	return commitWorkflowTimerOccurrence(
-		ctx,
-		s,
-		true,
-		effects,
-		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-			return s.runPrivateAuthorActivityMutationOutcome(ctx, effects, fn)
-		},
-		reserveRunLifecycleCandidateHandoff,
-		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-			return reservation.Prepare(s.runLifecycleCandidates, result)
-		},
-		func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-			return requestPostgresCompletionCandidateTx(ctx, tx, runID, nil, false)
-		},
-		command,
-	)
+	return commitWorkflowTimerOccurrence(ctx, s, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowTimerOccurrence, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowTimerOccurrence] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
+	}, s.RunLifecyclePostgresOwner, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowTimerOccurrence(ctx context.Context, command runtimepipeline.WorkflowTimerOccurrenceCommand) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
-	effects := newRevisionEffects()
-	return commitWorkflowTimerOccurrence(
-		ctx,
-		s,
-		false,
-		effects,
-		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-			return s.runPrivateAuthorActivityMutationOutcome(ctx, "sqlite workflow timer occurrence", effects, fn)
-		},
-		reserveRunLifecycleCandidateHandoff,
-		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
-			return reservation.Prepare(s.runLifecycleCandidates, result)
-		},
-		func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
-			return requestSQLiteCompletionCandidateTx(ctx, tx, runID, nil, s.now(), false)
-		},
-		command,
-	)
+	return commitWorkflowTimerOccurrence(ctx, s, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowTimerOccurrence, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowTimerOccurrence] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite workflow timer occurrence", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, write)
+	}, s.RunLifecycleSQLiteOwner, command)
 }
 
 var _ runtimepipeline.WorkflowTimerOccurrenceOwner = (*PipelinePostgresOwner)(nil)

@@ -2264,6 +2264,7 @@ contract_formats:
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
           named-object field. The value schema is the exact declared subpath type. Runtime lowering consumes the same
           declared dotted replacement owner as save_entity_field.'
+        response_semantics: 'Generated save/update tools inherit save_entity_field committed revision and post-commit failure response semantics; they expose only the safe post_commit_error_code and MUST NOT expose raw SQL or connection error text or invite a duplicate write.'
         materialized_field_exclusion: 'Fields declaring materialize_from, and every nested subpath below them, MUST NOT
           appear in generated write tools or writable-path summaries. They are runtime-owned projection fields.'
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
@@ -4843,6 +4844,10 @@ engine:
         human_task: ask_human atomically stores a typed decision card and human_task_continuations row with source_event_id,
           typed scope, requester identity, and the opaque reply_context_id. Defer and terminal outcomes restore the ref from the
           continuation, persist a direct requester route independently of event payload fields, and do not claim the reply.
+          The creation owner returns a typed card ID only from an acknowledged selected-store attempt. On acknowledged
+          post-commit failure, ask_human returns that committed card ID with status committed_with_post_commit_error and card_status pending,
+          write_committed true, retry_write false, and a stable post_commit_error_code; backend error text is internal-only.
+          Without acknowledgement, ask_human refuses and returns no committed card ID or success result.
         human_task_operation_identity:
           owner: decisioncard.HumanTaskOperationID
           encoding: 'human-task-operation:v1: followed by the canonical lower-case UUIDv5 in the OID namespace, derived from the UTF-8 domain swarm.human-task.operation.v1, one NUL byte, and canonical JSON of the two-element string array [exact run ID, exact logical-call coordinate].'
@@ -8936,6 +8941,16 @@ tool_model:
           entity_id: string — the created entity's ID
           current_state: string — the entity's initial state from the owning flow state machine
           created_at: string — ISO 8601
+          status: string — present as committed_with_post_commit_error only when an acknowledged create has a later post-commit failure
+          write_committed: boolean — true on that post-commit failure response
+          retry_write: boolean — false on that post-commit failure response; creation must not be repeated
+          post_commit_error_code: string — fixed safe code entity_create_post_commit_failure on that response; raw backend errors are never tool output
+        response_semantics: |
+          An acknowledged create returns the generated canonical entity_id even
+          if cleanup or another post-commit step fails. The safe response has no
+          tool error and forbids a duplicate retry. Raw joined causes are limited
+          to internal runtime diagnostics. An unacknowledged create returns
+          write_failed without a created entity response.
         validation: The caller does not supply entity_id, entity_type, or envelope fields. Missing declared fields materialize
           from explicit initial values or type defaults.
       get_entity:
@@ -8970,6 +8985,17 @@ tool_model:
           entity_id: string
           field: string
           revision: integer — new revision after write
+          status: string — present as committed_with_post_commit_error only when an acknowledged write has a later post-commit failure
+          write_committed: boolean — true on that post-commit failure response
+          retry_write: boolean — false on that post-commit failure response; the write must not be repeated
+          post_commit_error_code: string — fixed safe code entity_field_write_post_commit_failure on that response; raw backend errors are never tool output
+        response_semantics: |
+          An acknowledged write returns its committed revision even if cleanup or
+          another post-commit step fails. That response has no tool error and
+          carries the safe post_commit_error_code rather than SQL, connection,
+          or joined error text. The raw joined cause is restricted to an internal
+          runtime diagnostic when a logger is available. An unacknowledged write
+          returns write_failed without a revision.
         validation: The field path must exist on the inferred entity contract. Undeclared fields, envelope fields,
           bracket/index/dynamic paths, materialized/runtime-owned fields, and post-create writes to immutable fields are
           rejected. Values must satisfy the resolved declared type.
@@ -13480,11 +13506,12 @@ platform_tables:
       - Generation-authority mutation fencing reuses this existing selected-store ordering coordinate. Pooled delivery claims, retained lifecycle mutations, grant proof and transition, explicit retirement, bulk takeover/authority repair, and retained reset cleanup acquire it before authority-head, run, execution/binding, lifecycle-cell or grant-fact locks. Selected grant foreign-key acquisitions occur while this fence is held. Grant facts are append-only; mutation authorization reads the actual current head after fence acquisition, not a historical head selected before waiting. The fence lasts through commit or rollback. Claim-wins blocks retirement until that mutation ends; retirement-wins admits no new attempt or claim version. Cancelled waiters and failed mutations change neither grant nor domain state. This ordering does not allocate author occurrences or change previously accepted provider-tail settlement rights. No new registry, per-process mutex permission, or once-latest-row lock substitutes for the shared transaction fence.
       - Nested registered producers MUST join the exact outer transaction and draft batch. A registered producer reached through a raw transaction without the story context MUST fail closed.
       - Source transitions, story rows, and counter advancement MUST commit or roll back atomically.
+      - A named selected-store mutation attempt binds one native transaction, its evidence mode, retry-local result, story drafts, declared historical effects, and any completion-candidate reservation. Only the private lifecycle owner may finalize evidence or interpret native COMMIT acknowledgement. Retry discards the failed attempt's drafts, generated identities, results, and reservations while retaining explicit baseline declarations and the operation's occurrence lease. A positive COMMIT acknowledgement exposes only that attempt's typed result; later cleanup or handoff failure cannot erase it. Runtime consumers of that result MUST complete the exact committed finalization and dispatch before reporting the joined post-commit error, and MUST NOT release or retry it as an uncommitted attempt. Missing acknowledgement exposes no attempt value and fails closed, but is not proof of rollback. A completion candidate is reserved only from its canonical durable request in the same attempt and is submitted only after acknowledged COMMIT. Standalone and composed writers join this same attempt rather than pair unrelated transaction, story, revision, and handoff values.
       - Sequence ranges MUST be assigned only while the singleton is locked. BIGSERIAL, allocation-order cursors, timestamps, UUID order, post-commit appends, and fallback readers are forbidden.
       - Replayed source identities MUST return the existing identical occurrence or fail on conflict. ON CONFLICT DO NOTHING MUST NOT hide a conflicting story registration.
       - Mutable source helpers MUST report whether the authoritative source transition changed. A semantic no-op or duplicate receipt MUST NOT draft, append, or rewrite author activity; only a real source transition may produce an occurrence.
       - Activity Start/Claim, Complete and MarkUncertain MUST use the actual insert/update disposition for story eligibility after mandatory validation. Duplicate starts and terminal no-ops return existing authoritative evidence without drafting, including fork-copied terminal attempts with no local started occurrence. Story deduplication is not proof of a source transition.
-      - No domain mutation may occur after story finalization.
+      - No ordinary domain mutation may occur after story finalization. The named selected-contract fork discard is the sole destructive exception: it selects retention from the canonical execution row inside the active transaction; after terminalizing pending deliveries and drafting their activity, it finalizes those drafts before deleting fork-owned state. PostgreSQL uses a serializable transaction and SQLite uses its selected-store transaction. An unretained fork deletes the parent run and its dependent story occurrences without publishing a revision for the removed parent; contributions for that deleted run are explicitly discarded, while contributions for another run are refused. The global activity-order head is not rewound or reused. A fork with retained completion evidence keeps the terminal run and required evidence, removes mutable state, then publishes exact tombstones for the removed historical facts. The destructive cleanup cannot draft new activity after its early finalization. Absent parents remain no-ops; dependency refusal and failed transactions publish neither deletion nor activity. This exception does not change ordinary finalization order, claim admission, or historical fork cuts.
     read_contract:
       cursor: author_activity_occurrences.sequence
       ordering: strictly ascending sequence after an exclusive cursor
@@ -17201,7 +17228,11 @@ run_model:
         queries select exact affected coordinates before hydration, not after reading and decoding unrelated rows.
         Duplicate projected identities and wrong-run or unknown coordinates fail closed, never LIMIT-one selection.
         A removed live row requires its prior owning-run fact for tombstoning; whole-parent deletion remains distinct
-        from retained-run tombstones. One private finalizer compares only the
+        from retained-run tombstones. The selected-contract whole-parent discard finalizes pending-delivery activity
+        before removing the parent and its dependent rows, including the just-finalized per-run activity rows; it
+        publishes no revision for the removed run. Retained-run discard instead preserves terminal completion evidence
+        and finalizes exact absence tombstones for removed mutable facts after cleanup. Both are named transaction
+        operations under the same selected-store attempt owner, not caller-selected finalizer orders. One private finalizer compares only the
         declared canonical projected fact JSON and presence against the latest published revision, after all domain
         writes and before commit. Writes to excluded physical columns do not advance a family. Every changed family for
         one run shares one revision; exact no-change emits no revision; rollback publishes neither domain facts nor
@@ -37609,6 +37640,8 @@ managed_external_effect_authority:
     write_or_unknown: The operation may mutate state or lacks authoritative no-effect proof.
   launch:
     rule: Authorization atomically compares the lifecycle token with the durable agents cell, validates and stamps the exact normal-agent delivery or directive-operation origin, and creates the attempt and budget reservation. At launch, the selected-store transaction locks and revalidates the same lifecycle cell and exact origin against the attempt token before atomically marking the operation and attempt launched. Lifecycle supersession locks that same cell before classifying every exact predecessor attempt. Transition-wins occurs before external dispatch and terminally abandons authorized work, releases reservations, and settles the exact origin. Launch-wins atomically captures the launched or response-observed attempt into one predecessor drain. No third result exists. The durable launched marker must commit before HTTP dispatch, process start, MCP stdio write, or any filesystem mutation, including parent-directory creation, temporary-file creation/cleanup, file write/sync/chmod, and replacement.
+    acknowledged_cleanup: An acknowledged authorization with a later cleanup error exposes the exact committed attempt identity and diagnostic but grants no launch handle. An acknowledged launched marker with a later cleanup error is a committed phase transition, not a failed launch; the current attempt may dispatch only after its existing authority and cancellation checks still pass. The diagnostic remains observable even if no later settlement runs. If those checks prevent dispatch, the exact no-dispatch outcome is recorded through the existing effect owner. Neither a launched marker nor a cleanup error proves network I/O after a crash or permits automatic redispatch.
+    response_observation_cleanup: Acknowledged response_observed with a later cleanup error retains the actual response bytes, continues ordinary parsing and exact settlement, and carries the diagnostic. It neither converts the response to an unacknowledged write nor authorizes another external call. Acknowledged heartbeat, settlement, and completion projection likewise retain their committed phase/result while independently checking cancellation and expiry; missing acknowledgement remains ambiguous and follows existing reconciliation.
     rejection: If the primitive subsequently rejects launch with exact zero-effect proof, the already-marked attempt settles terminal_failure with launch_rejected evidence. Marker failure performs zero launch or mutation.
     stale: platform.superseded_generation with zero launch or mutation.
   settlement:
@@ -37641,7 +37674,7 @@ managed_external_effect_authority:
       process_lifetime: Provider heartbeat and post-tool tail execution are process-owned after launch. Before launch, the generation-owned delivery heartbeat or directive execution heartbeat yields renewal authority while one selected-store provider heartbeat atomically renews the effect attempt, its exact origin authority, and its pending drain when present. At provider-tail completion that authority returns only when the generation remains current; supersession instead consumes the exact drained settlement. Generation retirement rejects new work and may cancel generation-local consumers, but it cannot discard the accepted process-local tail before exact terminal settlement. On startup, external-effect recovery is one idempotent Manager finalizer and must complete before the first static-agent readback or declaration reconciliation; a terminal-target drain therefore finalizes at its bound successor generation before static reintroduction may compute a later generation. An ordinary lifecycle transition out of draining is rejected while an exact drain remains pending. Hydration consumes the same finalizer and cannot run it twice.
       forbidden: [provider redispatch, provider-head mutation, session or conversation mutation, watchdog mutation, output publication, successor projection, inferred event-to-delivery lookup, latest-claim lookup, stale-error fallback, compatibility settlement]
   recovery:
-    authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch.
+    authorized: An authorized attempt has proven no primitive launch because the exact primitive contract requires durable launched state before every dispatch/start/write/mutation; startup settles it as effect_recovery_prelaunch_abandoned without dispatch. Exact authorized/prelaunch attempts remain eligible for this no-dispatch resolution when their run has become terminal, including non-provider effects. Recovery must preserve selected-process possession and live-owner fences, must not resurrect the run, and must not request new external work or completion from a terminal run.
     launched_or_response_observed: Startup first reconciles exact provider-attempt drains and then remaining ordinary effect attempts. It settles the existing attempt and operation as platform.outcome_uncertain/effect_recovery_outcome_unconfirmed without dispatch, atomically settles the exact delivery or directive-operation origin and pending drain when present, releases reservation authority, and finalizes the terminal lifecycle cell when the last drain closes. Recovery may restore a bounded lease only for the exact still-open delivery token/version or executing directive operation while holding that origin's lifecycle row; any newer delivery token/version, foreign directive execution owner, or identity mismatch fails closed. If the exact origin already has its terminal attempt/outcome, recovery verifies and preserves that settlement. A terminal run does not hide its pending normal-provider attempts; exact-origin recovery remains mandatory and may settle only through the stored closed origin. Delivery recovery starts only after this phase reaches explicit completion.
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
   invariant_ids:

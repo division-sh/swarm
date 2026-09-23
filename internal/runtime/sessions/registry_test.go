@@ -27,7 +27,7 @@ func TestInMemoryRegistryLeaseConflictAndRelease(t *testing.T) {
 	if _, err := sr.Acquire(context.Background(), identity, "worker-b"); err == nil {
 		t.Fatal("expected lease conflict")
 	}
-	if err := sr.Release(context.Background(), leaseA); err != nil {
+	if _, err := sr.ReleaseOutcome(context.Background(), leaseA); err != nil {
 		t.Fatalf("release A: %v", err)
 	}
 	leaseB, err := sr.Acquire(context.Background(), identity, "worker-b")

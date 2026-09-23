@@ -32,6 +32,7 @@ const (
 	fanOutTurnBlocked
 	fanOutTurnUncertain
 	fanOutTurnYielded
+	fanOutTurnReleased
 )
 
 // A completed or durably deferred intent does not imply queue exhaustion.
@@ -77,17 +78,28 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	}
 	if err != nil {
 		// A returned claim is acknowledged ownership even when cleanup failed.
-		return fanOutTurnAwaitScan, errors.Join(err, owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim))
+		settlement, releaseErr := owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim)
+		if settlement.Acknowledged {
+			return fanOutTurnReleased, errors.Join(err, releaseErr)
+		}
+		return fanOutTurnAwaitScan, errors.Join(err, releaseErr)
 	}
 	if candidate != nil && (intent.Request.Key != *candidate || claim.Key != *candidate) {
-		return fanOutTurnAwaitScan, errors.Join(errors.New("fan-out claim differs from the selected candidate"), owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim))
+		settlement, releaseErr := owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim)
+		if settlement.Acknowledged {
+			return fanOutTurnReleased, errors.Join(errors.New("fan-out claim differs from the selected candidate"), releaseErr)
+		}
+		return fanOutTurnAwaitScan, errors.Join(errors.New("fan-out claim differs from the selected candidate"), releaseErr)
 	}
 	turnStarted := time.Now()
 	release := true
 	defer func() {
 		if release {
-			if err := owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim); err != nil {
-				disposition = fanOutTurnAwaitScan
+			settlement, err := owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim)
+			if settlement.Acknowledged && disposition == fanOutTurnAwaitScan {
+				disposition = fanOutTurnReleased
+			}
+			if err != nil {
 				turnErr = errors.Join(turnErr, err)
 			}
 		}
@@ -96,10 +108,10 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 		releaseErr := plannerReleaseFanOutPlans(context.WithoutCancel(ctx), pc.bus, plans)
 		cause = fanOutBlockedTurnCause(stage, ordinal, intent, cause)
 		failure := runtimefailures.Normalize(cause, "runtime.fan_out", stage)
-		blockErr := owner.BlockFanOutClaim(context.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failure})
-		if blockErr == nil {
+		settlement, blockErr := owner.BlockFanOutClaim(context.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failure})
+		if settlement.Acknowledged {
 			release = false
-			return fanOutTurnBlocked, errors.Join(cause, releaseErr)
+			return fanOutTurnBlocked, errors.Join(cause, releaseErr, blockErr)
 		}
 		return fanOutTurnAwaitScan, errors.Join(cause, releaseErr, blockErr)
 	}
@@ -278,11 +290,11 @@ func releaseFanOutPrecommitRetry(
 	started time.Time,
 ) (bool, error) {
 	releasePlansErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
-	releaseClaimErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
+	settlement, releaseClaimErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
 		Claim: claim, Now: time.Now().UTC(), ObservedDuration: time.Since(started),
 		Failure: runtimefailures.Normalize(cause, "runtime.fan_out", "prepare_chunk"),
 	})
-	return releaseClaimErr == nil, errors.Join(cause, releasePlansErr, releaseClaimErr)
+	return settlement.Acknowledged, errors.Join(cause, releasePlansErr, releaseClaimErr)
 }
 
 func fanOutBlockedTurnCause(stage string, ordinal int, intent fanoutobligation.Intent, cause error) error {
@@ -355,12 +367,12 @@ func (pc *PipelineCoordinator) commitFanOutRange(
 		return CommittedFanOutChunk{}, fanOutTurnUncertain, err
 	}
 	if failure.Retryable {
-		releaseErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
+		settlement, releaseErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
 			Claim: claim, Now: time.Now().UTC(), ObservedDuration: time.Since(started),
 			Failure: failure,
 		})
 		disposition := fanOutTurnAwaitScan
-		if releaseErr == nil {
+		if settlement.Acknowledged {
 			disposition = fanOutTurnRetryWait
 		}
 		return CommittedFanOutChunk{}, disposition, errors.Join(
@@ -380,9 +392,9 @@ func (pc *PipelineCoordinator) blockFanOutCommit(ctx context.Context, owner FanO
 		}, cause)
 	}
 	failure := runtimefailures.Normalize(cause, "runtime.fan_out", "blocked_commit")
-	blockErr := owner.BlockFanOutClaim(context.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: now, Failure: failure})
+	settlement, blockErr := owner.BlockFanOutClaim(context.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: now, Failure: failure})
 	disposition := fanOutTurnAwaitScan
-	if blockErr == nil {
+	if settlement.Acknowledged {
 		disposition = fanOutTurnBlocked
 	}
 	return CommittedFanOutChunk{}, disposition, errors.Join(cause, releaseFanOutOutcomePlans(ctx, planner, outcomes), blockErr)

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -17,7 +17,7 @@ import (
 )
 
 type completionCandidateOwner interface {
-	RequestCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time, *runhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error)
+	mutationprotocol.CandidateWriter
 }
 
 type LLMPostgresOwner struct {
@@ -59,61 +59,16 @@ func (s *LLMPostgresOwner) requireCurrentSchema() error { return s.requireCurren
 func (s *LLMSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
 func (s *LLMSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
 
-func agentSessionEffects(runID, sessionID string, otherSessionIDs ...string) (*runforkrevision.Effects, error) {
-	effects := runforkrevision.NewEffects()
-	if err := addAgentSessionFacts(effects, runID, sessionID, otherSessionIDs...); err != nil {
-		return nil, err
-	}
-	return effects, nil
-}
-
-func addAgentSessionFacts(effects *runforkrevision.Effects, runID, sessionID string, otherSessionIDs ...string) error {
-	if err := effects.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID); err != nil {
+func addAgentSessionFacts(attempt *mutationprotocol.Attempt, runID, sessionID string, otherSessionIDs ...string) error {
+	if err := attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID); err != nil {
 		return err
 	}
 	for _, id := range otherSessionIDs {
-		if err := effects.AddFact(runID, runforkrevision.FamilyAgentSessions, id); err != nil {
+		if err := attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, id); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func emptyRunForkRevisionEffects() *runforkrevision.Effects {
-	return runforkrevision.NewEffects()
-}
-
-func (s *LLMPostgresOwner) runPostgresRuntimeMutation(ctx context.Context, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := fn(txctx, tx); err != nil {
-			return err
-		}
-		_, err := runforkrevision.FinalizePostgres(txctx, tx, effects)
-		return err
-	})
-}
-
-func (s *LLMSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) error {
-	_, err := s.runRuntimeMutationOutcome(ctx, label, effects, fn)
-	return err
-}
-
-func (s *LLMSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	resetEffects := effects.AttemptReset()
-	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		resetEffects()
-		if err := fn(txctx, tx); err != nil {
-			return err
-		}
-		_, err := runforkrevision.FinalizeSQLite(txctx, tx, effects)
-		return err
-	})
 }
 
 func sqliteNullString(raw string) any {

@@ -104,15 +104,15 @@ func TestStandingReconciliationNormalizesRunPauseForActiveDeclarationParity(t *t
 				t.Fatalf("create standing service: %v", err)
 			}
 			controller, ok := fixture.selected.(interface {
-				PauseRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
+				PauseRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 			})
 			if !ok {
 				t.Fatalf("selected store %T does not own public run pause", fixture.selected)
 			}
-			if _, err := controller.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{
+			if outcome, err := controller.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 				RunID: created.RunID, Reason: "operator_pause_before_restart", ControlledBy: "operator", Now: time.Now().UTC(),
-			}); err != nil {
-				t.Fatalf("pause standing run: %v", err)
+			}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause standing run: outcome=%+v err=%v", outcome, err)
 			}
 
 			reconciled, err := fixture.workflow.ReconcileStandingService(ctx, candidate)

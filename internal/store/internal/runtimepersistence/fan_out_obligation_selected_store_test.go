@@ -65,7 +65,7 @@ type selectedFanOutDiagnosticOwner interface {
 type selectedFanOutLifecycleOwner interface {
 	selectedFanOutDiagnosticOwner
 	PipelineObligations() runtimepipelineobligation.Store
-	StopRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
+	StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 }
 
 type selectedFanOutMixedRouteOwner interface {
@@ -871,7 +871,7 @@ func TestFanOutDiagnosticsAndTestQuiescenceUseDurableOwnerOnBothStores(t *testin
 			if !ok {
 				t.Fatal("construct blocked fan-out diagnosis")
 			}
-			if err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{Claim: claim, Now: now.Add(time.Second), Failure: blockedFailure}); err != nil {
+			if _, err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{Claim: claim, Now: now.Add(time.Second), Failure: blockedFailure}); err != nil {
 				t.Fatalf("block diagnostic fan-out: %v", err)
 			}
 			report, err = owner.LoadRunDebugReport(ctx, fixture.runID, operatorread.RunDebugQueryOptions{})
@@ -1078,10 +1078,10 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			if err != nil || !found {
 				t.Fatalf("claim suffix before stop: found=%v err=%v", found, err)
 			}
-			state, err := owner.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+			state, err := owner.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 				RunID: stopping.runID, Reason: "test stop", ControlledBy: "test", Now: base.Add(12 * time.Second),
 			})
-			if err != nil || state.Status != "cancelled" || state.ControlStatus != "stopped" {
+			if err != nil || !state.Acknowledged || state.State.Status != "cancelled" || state.State.ControlStatus != "stopped" {
 				t.Fatalf("stop fan-out run = %#v err=%v", state, err)
 			}
 			summary, err := owner.FanOutRunSummary(ctx, stopping.runID, base.Add(13*time.Second))
@@ -1162,7 +1162,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 			if _, err := secondOwner.CommitFanOutChunk(ctx, rejectedFanOutChunk(fastClaim, 0, 1, base.Add(11*time.Second))); err != nil {
 				t.Fatalf("serve fast intent: %v", err)
 			}
-			if err := firstOwner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{
+			if _, err := firstOwner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{
 				Claim: slowClaim, Now: base.Add(12 * time.Second), ObservedDuration: 1250 * time.Millisecond,
 				Failure: fanOutRetryFailureForTest(),
 			}); err != nil {
@@ -1194,7 +1194,7 @@ func TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores(t *t
 			if err != nil || !found || reclaimed.Key != expiringClaim.Key || reclaimed.Generation != expiringClaim.Generation+1 {
 				t.Fatalf("expired claim recovery = old:%#v new:%#v found=%v err=%v", expiringClaim, reclaimed, found, err)
 			}
-			if err := secondOwner.ReleaseFanOutClaim(ctx, expiringClaim); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
+			if _, err := secondOwner.ReleaseFanOutClaim(ctx, expiringClaim); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 				t.Fatalf("stale release error = %v", err)
 			}
 			if _, err := secondOwner.CommitFanOutChunk(ctx, rejectedFanOutChunk(expiringClaim, 1, 1, base.Add(19*time.Second))); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
@@ -1318,7 +1318,7 @@ func TestFanOutRetryableReleaseHalvesWithoutSemanticProgressOnBothStores(t *test
 			if err != nil || !found {
 				t.Fatalf("claim retryable fan-out: found=%v err=%v", found, err)
 			}
-			if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{
+			if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{
 				Claim: claim, Now: claimAt.Add(time.Second), ObservedDuration: 1250 * time.Millisecond,
 				Failure: fanOutRetryFailureForTest(),
 			}); err != nil {
@@ -1377,7 +1377,7 @@ func TestFanOutClaimIsScopedToExactAdmittedBundleOnBothStores(t *testing.T) {
 			if intent.Request.Key.ElementRef.SemanticPath != local.semanticPath || intent.Request.PlanRef.BundleHash != local.bundleHash {
 				t.Fatalf("local runtime claimed foreign obligation: %#v", intent.Request)
 			}
-			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
 			foreignIntent, _, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
@@ -1682,7 +1682,7 @@ func TestFanOutEntityRevisionRejectsUnrelatedRunWithoutProgressOnBothStores(t *t
 			if err != nil || projectedEntityScore != float64(7.25) {
 				t.Fatalf("own-run entity projected score = %#v err=%v", projectedEntityScore, err)
 			}
-			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1914,7 +1914,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				}
 			}
 			proveEmit(intent, input.Trigger, input.Items[0])
-			if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := db.ExecContext(ctx, `DELETE FROM resource_version_pins WHERE run_id=$1 AND flow_path=$2 AND event_name=$3`, fixture.runID, ref.FlowPath, ref.EventName); err != nil {
@@ -1928,7 +1928,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				t.Fatalf("unpinned resource load error = %v, want missing exact pin", err)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
-			if err := owner.ReleaseFanOutClaim(ctx, hostileClaim); err != nil {
+			if _, err := owner.ReleaseFanOutClaim(ctx, hostileClaim); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := db.ExecContext(ctx, `INSERT INTO resource_version_pins (run_id,flow_path,event_name,schema_digest,version_id,selection,pinned_at) VALUES ($1,$2,$3,$4,$5,'explicit',$6)`, fixture.runID, ref.FlowPath, ref.EventName, imported.SchemaDigest, imported.Candidate.VersionID, createdAt); err != nil {
@@ -1978,7 +1978,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				t.Fatalf("claim fork resource fan-out: found=%v err=%v", found, err)
 			}
 			defer func() {
-				if err := granted.ReleaseFanOutClaim(ctx, childClaim); err != nil {
+				if _, err := granted.ReleaseFanOutClaim(ctx, childClaim); err != nil {
 					t.Error(err)
 				}
 			}()
@@ -2072,7 +2072,7 @@ func claimFanOutForRun(t *testing.T, ctx context.Context, owner selectedFanOutOw
 		if err != nil || !found || intent.Request.Key.RunID == runID {
 			return intent, claim, found, err
 		}
-		if err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+		if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 			return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, err
 		}
 	}

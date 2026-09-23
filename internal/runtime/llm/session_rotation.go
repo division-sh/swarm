@@ -24,7 +24,7 @@ func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sess
 	lease, resolved, err := acquireContinuedMemory(ctx, registry, s, lockOwner)
 	if err != nil {
 		if lease != nil {
-			err = errors.Join(err, registry.Release(context.WithoutCancel(ctx), lease))
+			err = releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink, err)
 		}
 		return err
 	}
@@ -32,17 +32,15 @@ func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sess
 		return errors.New("managed session rotation requires an exact live lease")
 	}
 	if strings.TrimSpace(lease.SessionID) != strings.TrimSpace(s.ID) {
-		return errors.Join(
-			fmt.Errorf("managed session changed before rotation: have=%s want=%s", strings.TrimSpace(lease.SessionID), strings.TrimSpace(s.ID)),
-			registry.Release(context.WithoutCancel(ctx), lease),
-		)
+		return releasePreProviderSessionLease(ctx, registry, lease, s.AgentID, sink,
+			fmt.Errorf("managed session changed before rotation: have=%s want=%s", strings.TrimSpace(lease.SessionID), strings.TrimSpace(s.ID)))
 	}
 	releaseLease := lease
 	rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, registry, lockOwner, rotateAfter, sink)
 	if rotated != nil {
 		releaseLease = rotated
 	}
-	return errors.Join(rotateErr, registry.Release(context.WithoutCancel(ctx), releaseLease))
+	return releasePreProviderSessionLease(ctx, registry, releaseLease, s.AgentID, sink, rotateErr)
 }
 
 func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) (*sessions.Lease, error) {

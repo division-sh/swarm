@@ -86,16 +86,16 @@ func (startupRecoveryWorkflowOwner) CommitFanOutChunk(context.Context, runtimepi
 	return runtimepipeline.CommittedFanOutChunk{}, errors.New("startup recovery fixture has no fan-out work")
 }
 
-func (startupRecoveryWorkflowOwner) ReleaseFanOutClaim(context.Context, runtimefanout.Claim) error {
-	return nil
+func (startupRecoveryWorkflowOwner) ReleaseFanOutClaim(context.Context, runtimefanout.Claim) (runtimepipeline.FanOutClaimSettlement, error) {
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: true}, nil
 }
 
-func (startupRecoveryWorkflowOwner) ReleaseFanOutRetryable(context.Context, runtimepipeline.FanOutRetryableRelease) error {
-	return nil
+func (startupRecoveryWorkflowOwner) ReleaseFanOutRetryable(context.Context, runtimepipeline.FanOutRetryableRelease) (runtimepipeline.FanOutClaimSettlement, error) {
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: true}, nil
 }
 
-func (startupRecoveryWorkflowOwner) BlockFanOutClaim(context.Context, runtimepipeline.FanOutBlockRequest) error {
-	return nil
+func (startupRecoveryWorkflowOwner) BlockFanOutClaim(context.Context, runtimepipeline.FanOutBlockRequest) (runtimepipeline.FanOutClaimSettlement, error) {
+	return runtimepipeline.FanOutClaimSettlement{Acknowledged: true}, nil
 }
 
 func (startupRecoveryWorkflowOwner) CancelRunFanOut(context.Context, string, string, time.Time) error {
@@ -260,8 +260,11 @@ func (s *startupRecoveryPipelineOwner) verify(claim runtimepipelineobligation.Cl
 	return nil
 }
 
-func (s *startupRecoveryPipelineOwner) MarkDecisionProcessed(_ context.Context, claim runtimepipelineobligation.Claim) error {
-	return s.verify(claim)
+func (s *startupRecoveryPipelineOwner) MarkDecisionProcessed(_ context.Context, claim runtimepipelineobligation.Claim) (runtimepipelineobligation.SettlementOutcome, error) {
+	if err := s.verify(claim); err != nil {
+		return runtimepipelineobligation.SettlementOutcome{}, err
+	}
+	return runtimepipelineobligation.CommittedSettlement(false), nil
 }
 
 func (s *startupRecoveryPipelineOwner) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {
@@ -500,8 +503,8 @@ func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(
 	context.Context,
 	runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	time.Time,
-) error {
-	return errors.New("unexpected readiness topology completion")
+) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
+	return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, errors.New("unexpected readiness topology completion")
 }
 
 func (*startupReadinessFinalizationStore) CommitDynamicFlowRuntimeCreationOccurrence(

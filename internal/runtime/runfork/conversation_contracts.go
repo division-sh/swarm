@@ -240,11 +240,13 @@ func (p ConversationForkChatPrepared) ValidateSandboxPolicy() error {
 
 type ConversationForkChatExecution struct {
 	AssistantMessage string
-	ToolCalls        []operatorread.OperatorConversationToolCall
-	ToolResults      []operatorread.OperatorConversationToolResult
-	AvailableTools   []string
-	ExecutionOwner   string
-	FenceGeneration  uint64
+	// AssistantCompletionAcknowledged is transient selected-store completion proof, not fork-turn record proof.
+	AssistantCompletionAcknowledged bool `json:"-"`
+	ToolCalls                       []operatorread.OperatorConversationToolCall
+	ToolResults                     []operatorread.OperatorConversationToolResult
+	AvailableTools                  []string
+	ExecutionOwner                  string
+	FenceGeneration                 uint64
 }
 
 type ConversationForkChatReplayStateError struct {

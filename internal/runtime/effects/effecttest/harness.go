@@ -171,9 +171,10 @@ func (h *Harness) AuthorizeExternalAttempt(_ context.Context, authority runtimee
 		Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport,
 		Ordinal: 1, AuthorizedAt: req.Now, Origin: req.Origin,
 	}
-	h.Attempts[attempt.AttemptID] = attempt
 	h.Authorizations[attempt.AttemptID] = req
 	h.States[attempt.AttemptID] = runtimeeffects.StateAuthorized
+	attempt.AuthorizationAcknowledged = true
+	h.Attempts[attempt.AttemptID] = attempt
 	return attempt, nil
 }
 

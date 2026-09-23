@@ -17,35 +17,44 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 var _ decisioncard.ProposedEffectStore = (*DecisionPostgresOwner)(nil)
 var _ decisioncard.ProposedEffectStore = (*DecisionSQLiteOwner)(nil)
 
 func (s *DecisionPostgresOwner) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
-			return err
-		}
-		return insertProposedEffectCardWithStory(txctx, story, tx, card, continuation, true)
+	return writePostgresDecision(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
+				return err
+			}
+			return insertProposedEffectCardWithStory(txctx, attempt, tx, card, continuation, true)
+		})
 	})
 }
 
 func (s *DecisionSQLiteOwner) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
-	return s.runDecisionCardMutation(ctx, "sqlite create proposed-effect card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
-			return err
-		}
-		return insertProposedEffectCardWithStory(txctx, story, tx, card, continuation, false)
+	return writeSQLiteDecision(ctx, s, "sqlite create proposed-effect card", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
+				return err
+			}
+			return insertProposedEffectCardWithStory(txctx, attempt, tx, card, continuation, false)
+		})
 	})
 }
 
-func (s *DecisionPostgresOwner) InsertProposedEffectTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
-	return insertProposedEffectCardWithStory(ctx, story, tx, card, continuation, true)
+func (s *DecisionPostgresOwner) InsertProposedEffectTx(ctx context.Context, attempt *mutationprotocol.Attempt, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return insertProposedEffectCardWithStory(txctx, attempt, tx, card, continuation, true)
+	})
 }
 
-func (s *DecisionSQLiteOwner) InsertProposedEffectTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
-	return insertProposedEffectCardWithStory(ctx, story, tx, card, continuation, false)
+func (s *DecisionSQLiteOwner) InsertProposedEffectTx(ctx context.Context, attempt *mutationprotocol.Attempt, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
+	return attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return insertProposedEffectCardWithStory(txctx, attempt, tx, card, continuation, false)
+	})
 }
 
 func insertProposedEffectCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation, postgres bool) error {
@@ -190,12 +199,16 @@ func loadProposedEffectContinuation(ctx context.Context, db decisionCardSQL, car
 	return out.Canonical(), nil
 }
 
-func (s *DecisionPostgresOwner) LoadProposedEffectTx(ctx context.Context, tx *sql.Tx, cardID string, forUpdate bool) (decisioncard.ProposedEffectContinuation, error) {
-	return loadProposedEffectContinuation(ctx, tx, cardID, true, forUpdate)
+func (s *DecisionPostgresOwner) LoadProposedEffectTx(ctx context.Context, attempt *mutationprotocol.Attempt, cardID string, forUpdate bool) (decisioncard.ProposedEffectContinuation, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.ProposedEffectContinuation, error) {
+		return loadProposedEffectContinuation(txctx, tx, cardID, true, forUpdate)
+	})
 }
 
-func (s *DecisionSQLiteOwner) LoadProposedEffectTx(ctx context.Context, tx *sql.Tx, cardID string, forUpdate bool) (decisioncard.ProposedEffectContinuation, error) {
-	return loadProposedEffectContinuation(ctx, tx, cardID, false, forUpdate)
+func (s *DecisionSQLiteOwner) LoadProposedEffectTx(ctx context.Context, attempt *mutationprotocol.Attempt, cardID string, forUpdate bool) (decisioncard.ProposedEffectContinuation, error) {
+	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.ProposedEffectContinuation, error) {
+		return loadProposedEffectContinuation(txctx, tx, cardID, false, forUpdate)
+	})
 }
 
 type proposedEffectProjection struct {
@@ -296,58 +309,59 @@ func commitProposedEffectDecision(ctx context.Context, tx *sql.Tx, card decision
 }
 
 func (s *DecisionPostgresOwner) CompleteProposedEffectRoute(ctx context.Context, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return decisioncard.ProposedEffectContinuation{}, err
-	}
-	defer handoff.Rollback()
-	var continuation decisioncard.ProposedEffectContinuation
-	committed, err := runPostgresDecisionCardMutationOutcome(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+	result := postgresDecisionMutation(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.ProposedEffectContinuation, error) {
+		var continuation decisioncard.ProposedEffectContinuation
 		var changed bool
-		continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, true)
-		if err != nil || !changed {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, true)
 			return err
+		})
+		if err != nil || !changed {
+			return continuation, err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, continuation.RunID, nil, handoff)
-		return err
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
+		return continuation, err
 	})
-	if !committed {
-		return decisioncard.ProposedEffectContinuation{}, err
-	}
-	return continuation, errors.Join(err, handoff.Commit())
+	continuation, _ := result.Value()
+	return continuation, result.Err()
 }
 
 func (s *DecisionSQLiteOwner) CompleteProposedEffectRoute(ctx context.Context, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return decisioncard.ProposedEffectContinuation{}, err
-	}
-	defer handoff.Rollback()
-	var continuation decisioncard.ProposedEffectContinuation
-	committed, err := s.runDecisionCardMutationOutcome(ctx, "sqlite complete proposed-effect route", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
+	result := sqliteDecisionMutation(ctx, s, "sqlite complete proposed-effect route", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (decisioncard.ProposedEffectContinuation, error) {
+		var continuation decisioncard.ProposedEffectContinuation
 		var changed bool
-		continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, false)
-		if err != nil || !changed {
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+			continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, false)
 			return err
+		})
+		if err != nil || !changed {
+			return continuation, err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, continuation.RunID, nil, handoff)
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, continuation.RunID, nil)
+		return continuation, err
+	})
+	continuation, _ := result.Value()
+	return continuation, result.Err()
+}
+
+func (s *DecisionPostgresOwner) CompleteProposedEffectRouteTx(ctx context.Context, attempt *mutationprotocol.Attempt, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, bool, error) {
+	var continuation decisioncard.ProposedEffectContinuation
+	var changed bool
+	err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+		continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, true)
 		return err
 	})
-	if !committed {
-		return decisioncard.ProposedEffectContinuation{}, err
-	}
-	return continuation, errors.Join(err, handoff.Commit())
+	return continuation, changed, err
 }
 
-func (s *DecisionPostgresOwner) CompleteProposedEffectRouteTx(ctx context.Context, tx *sql.Tx, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, bool, error) {
-	return completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, true)
-}
-
-func (s *DecisionSQLiteOwner) CompleteProposedEffectRouteTx(ctx context.Context, tx *sql.Tx, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, bool, error) {
-	return completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, false)
+func (s *DecisionSQLiteOwner) CompleteProposedEffectRouteTx(ctx context.Context, attempt *mutationprotocol.Attempt, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, bool, error) {
+	var continuation decisioncard.ProposedEffectContinuation
+	var changed bool
+	err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) (err error) {
+		continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, false)
+		return err
+	})
+	return continuation, changed, err
 }
 
 func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeEventID string, at time.Time, postgres bool) (decisioncard.ProposedEffectContinuation, bool, error) {
@@ -428,46 +442,29 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 }
 
 func (s *DecisionPostgresOwner) SupersedeProposedEffectsForLoopGenerations(ctx context.Context, runID, entityID string, current []attemptgeneration.Generation, reason string, at time.Time) error {
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return err
-	}
-	defer handoff.Rollback()
-	committed, err := runPostgresDecisionCardMutationOutcome(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		changed, err := supersedeProposedEffectsForLoopGenerations(txctx, story, tx, runID, entityID, current, reason, at, true)
+	return writePostgresDecision(ctx, s, true, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		changed, err := withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (bool, error) {
+			return supersedeProposedEffectsForLoopGenerations(txctx, attempt, tx, runID, entityID, current, reason, at, true)
+		})
 		if err != nil || !changed {
 			return err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff)
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
 		return err
 	})
-	if !committed {
-		return err
-	}
-	return errors.Join(err, handoff.Commit())
 }
 
 func (s *DecisionSQLiteOwner) SupersedeProposedEffectsForLoopGenerations(ctx context.Context, runID, entityID string, current []attemptgeneration.Generation, reason string, at time.Time) error {
-	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
-	if err != nil {
-		return err
-	}
-	defer handoff.Rollback()
-	committed, err := s.runDecisionCardMutationOutcome(ctx, "sqlite supersede proposed effects for loop generation", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-		if err := handoff.ResetAttempt(); err != nil {
-			return err
-		}
-		changed, err := supersedeProposedEffectsForLoopGenerations(txctx, story, tx, runID, entityID, current, reason, at, false)
+	return writeSQLiteDecision(ctx, s, "sqlite supersede proposed effects for loop generation", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		changed, err := withDecisionSQL(txctx, attempt, func(txctx context.Context, tx *sql.Tx) (bool, error) {
+			return supersedeProposedEffectsForLoopGenerations(txctx, attempt, tx, runID, entityID, current, reason, at, false)
+		})
 		if err != nil || !changed {
 			return err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff)
+		_, err = attempt.RequestCompletion(txctx, s.candidateRequests, runID, nil)
 		return err
 	})
-	if !committed {
-		return err
-	}
-	return errors.Join(err, handoff.Commit())
 }
 
 func supersedeProposedEffectsForLoopGenerations(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID string, current []attemptgeneration.Generation, reason string, at time.Time, postgres bool) (bool, error) {

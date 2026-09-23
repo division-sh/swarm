@@ -156,10 +156,11 @@ func (o *expiredEvaluationOwner) CommitFanOutChunk(ctx context.Context, command 
 	return committed, err
 }
 
-func (o *expiredEvaluationOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+func (o *expiredEvaluationOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {
 	o.released = append(o.released, claim)
-	o.releaseErr = o.FanOutObligationOwner.ReleaseFanOutClaim(ctx, claim)
-	return o.releaseErr
+	settlement, err := o.FanOutObligationOwner.ReleaseFanOutClaim(ctx, claim)
+	o.releaseErr = err
+	return settlement, err
 }
 
 func TestFanOutProductionCallerM35ExpiredEvaluationOnBothBackends(t *testing.T) {

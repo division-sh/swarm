@@ -241,7 +241,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
 		t.Fatalf("materialize readiness: result=%d err=%v", result, err)
 	}
-	if err := workflow.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, occurredAt.Add(time.Second)); err != nil {
+	if committed, err := workflow.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, occurredAt.Add(time.Second)); err != nil || !committed.Acknowledged {
 		t.Fatalf("mark topology ready: %v", err)
 	}
 	return dynamicFlowCreationAtomicityFixture{

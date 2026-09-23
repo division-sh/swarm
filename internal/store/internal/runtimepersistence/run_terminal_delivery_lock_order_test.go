@@ -4,15 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 )
 
 func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
@@ -32,57 +31,28 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	}
 	defer terminalDB.Close()
 	terminalStore := postgresDeliveryFixtureStore(terminalDB)
-	terminalConn, err := terminalDB.Conn(ctx)
-	if err != nil {
-		t.Fatalf("borrow terminal connection: %v", err)
-	}
-	defer terminalConn.Close()
-	var terminalPID int
-	if err := terminalConn.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&terminalPID); err != nil {
-		t.Fatalf("load terminal connection pid: %v", err)
-	}
-	terminalCtx := runtimepipelinefixture.WithSQLConn(ctx, terminalConn)
-	terminalTx, err := terminalConn.BeginTx(terminalCtx, nil)
-	if err != nil {
-		t.Fatalf("begin terminal transaction: %v", err)
-	}
-	defer terminalTx.Rollback()
-	terminalCtx = runtimepipelinefixture.WithSQLTx(terminalCtx, terminalTx)
-	storyCtx, err := authoractivityfixture.Begin(terminalCtx, terminalTx, authoractivityfixture.DialectPostgres)
-	if err != nil {
-		t.Fatalf("begin terminal author activity mutation: %v", err)
-	}
-	story, ok := authoractivityfixture.Mutation(storyCtx)
-	if !ok {
-		t.Fatal("terminal author activity owner is unavailable")
-	}
 
 	runLocked := make(chan struct{})
 	renew := make(chan struct{})
 	renewalDone := make(chan error, 1)
+	var signalRunLocked sync.Once
 	go func() {
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			renewalDone <- err
-			return
-		}
-		defer tx.Rollback()
-		if err := requirePostgresRunActive(ctx, tx, fixture.RunID); err != nil {
-			renewalDone <- err
-			return
-		}
-		close(runLocked)
-		select {
-		case <-renew:
-		case <-ctx.Done():
-			renewalDone <- context.Cause(ctx)
-			return
-		}
-		if _, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, privaterunforkrevision.NewEffects(), claimed.Claim, runtimedelivery.DefaultLeaseTTL); err != nil {
-			renewalDone <- err
-			return
-		}
-		renewalDone <- tx.Commit()
+		result := mutationprotocol.RunPostgres(ctx, settlementStore.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, settlementStore.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return requirePostgresRunActive(txctx, tx, fixture.RunID)
+			}); err != nil {
+				return struct{}{}, err
+			}
+			signalRunLocked.Do(func() { close(runLocked) })
+			select {
+			case <-renew:
+			case <-txctx.Done():
+				return struct{}{}, context.Cause(txctx)
+			}
+			_, err := postgresDeliveryAdapter.RenewClaim(txctx, attempt, claimed.Claim, runtimedelivery.DefaultLeaseTTL)
+			return struct{}{}, err
+		})
+		renewalDone <- result.Err()
 	}()
 
 	select {
@@ -96,23 +66,27 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 		err    error
 	}
 	terminalDone := make(chan terminalResult, 1)
+	terminalPIDReady := make(chan int, 1)
 	go func() {
-		effects := privaterunforkrevision.NewEffects()
-		snapshot, _, err := terminalStore.runLifecyclePostgresOwner.MarkTerminalTx(storyCtx, terminalTx, story, effects, runtimerunlifecycle.TerminalRequest{
-			RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+		var snapshot runtimerunlifecycle.Snapshot
+		result := mutationprotocol.RunPostgres(ctx, terminalStore.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, terminalStore.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			var terminalPID int
+			if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				return tx.QueryRowContext(txctx, `SELECT pg_backend_pid()`).Scan(&terminalPID)
+			}); err != nil {
+				return struct{}{}, err
+			}
+			terminalPIDReady <- terminalPID
+			var err error
+			snapshot, _, err = terminalStore.runLifecyclePostgresOwner.MarkTerminalTx(txctx, attempt, runtimerunlifecycle.TerminalRequest{
+				RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+			})
+			return struct{}{}, err
 		})
-		if err == nil {
-			_, err = privaterunforkrevision.FinalizePostgres(storyCtx, terminalTx, effects)
-		}
-		if err == nil {
-			err = authoractivityfixture.Finalize(storyCtx)
-		}
-		if err == nil {
-			err = terminalTx.Commit()
-		}
-		terminalDone <- terminalResult{status: string(snapshot.State), err: err}
+		terminalDone <- terminalResult{status: string(snapshot.State), err: result.Err()}
 	}()
 
+	terminalPID := <-terminalPIDReady
 	query := observePostgresTerminalRunLock(t, ctx, db, terminalPID)
 	upperQuery := strings.ToUpper(query)
 	if !strings.Contains(upperQuery, "FROM RUNS") || !strings.Contains(upperQuery, "FOR UPDATE") {

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -22,9 +21,9 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -129,35 +128,43 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 			)`); err != nil {
 				t.Fatal(err)
 			}
-			tx, err := db.BeginTx(context.Background(), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
 			runID := uuid.NewString()
-			effects := privaterunforkrevision.NewEffects()
-			mutationID, err := insertFanOutEntitySourceRevisionTx(
-				context.Background(), tx, backend == "postgres", effects,
-				runID, uuid.NewString(), "items",
-				[]any{map[string]any{"integer": int64(75), "double": float64(75), "exponent": json.Number("75e0")}},
-				uuid.NewString(), time.Now().UTC(),
-			)
-			if err != nil {
-				_ = tx.Rollback()
-				t.Fatal(err)
-			}
-			if err := tx.Commit(); err != nil {
-				t.Fatal(err)
-			}
-			wantEffects := privaterunforkrevision.NewEffects()
-			if err := wantEffects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(effects, wantEffects) {
-				t.Fatal("source revision must declare exactly its generated mutation UUID")
-			}
 			var raw []byte
-			if err := db.QueryRow(`SELECT new_value FROM entity_mutations WHERE mutation_id=$1`, mutationID).Scan(&raw); err != nil {
-				t.Fatal(err)
+			rollback := errors.New("rollback isolated encoding test")
+			write := func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+				err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+					mutationID, err := insertFanOutEntitySourceRevisionTx(
+						ctx, tx, backend == "postgres", attempt,
+						runID, uuid.NewString(), "items",
+						[]any{map[string]any{"integer": int64(75), "double": float64(75), "exponent": json.Number("75e0")}},
+						uuid.NewString(), time.Now().UTC(),
+					)
+					if err != nil {
+						return err
+					}
+					if err := tx.QueryRowContext(ctx, `SELECT new_value FROM entity_mutations WHERE mutation_id=$1`, mutationID).Scan(&raw); err != nil {
+						return err
+					}
+					return rollback
+				})
+				return struct{}{}, err
+			}
+			var result mutationprotocol.Result[struct{}]
+			if backend == "postgres" {
+				store, err := postgresbackend.New(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result = mutationprotocol.RunPostgres(context.Background(), store, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+			} else {
+				store, err := sqlitebackend.New(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result = mutationprotocol.RunSQLite(context.Background(), store, "fan-out source encoding", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+			}
+			if !errors.Is(result.Err(), rollback) {
+				t.Fatalf("source revision attempt = %v, want isolated rollback", result.Err())
 			}
 			var items []map[string]any
 			if err := canonicaljson.DecodePreservingNumberLexemes(raw, &items); err != nil {
@@ -173,110 +180,48 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 	}
 }
 
-func TestFanOutChunkCommitAcknowledgementReadbackOnBothStores(t *testing.T) {
+func TestFanOutChunkReadbackOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, outcome := range []string{"committed", "neutral_success", "fast_success", "expired_after_admission", "rolled_back", "contradictory", "acknowledged_cleanup"} {
+		for _, outcome := range []string{"committed", "not_committed", "contradictory"} {
 			t.Run(backend+"/"+outcome, func(t *testing.T) {
 				db := fanOutReadbackTestDB(t, backend)
 				command := seedFanOutReadbackClaim(t, db)
-				if outcome == "expired_after_admission" {
-					command.Claim.LeaseUntil = time.Now().UTC().Add(150 * time.Millisecond)
-					if _, err := db.Exec(`UPDATE fan_out_intents SET lease_expires_at=$1`, command.Claim.LeaseUntil); err != nil {
+				if outcome != "not_committed" {
+					persistFanOutReadbackChunk(t, db, command)
+				}
+				if outcome == "contradictory" {
+					if _, err := db.Exec(`DELETE FROM fan_out_outcomes`); err != nil {
 						t.Fatal(err)
 					}
 				}
-				if _, err := db.Exec(`UPDATE fan_out_intents SET next_chunk_size=1`); err != nil {
-					t.Fatal(err)
-				}
-				ackLost := errors.New("injected fan-out commit acknowledgement loss")
-				run := func(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-					tx, err := db.BeginTx(ctx, nil)
-					if err != nil {
-						return false, err
-					}
-					if err := operation(ctx, tx, nil); err != nil {
-						_ = tx.Rollback()
-						return false, err
-					}
-					if outcome == "expired_after_admission" {
-						// Admission was valid under the lock. Expiry cannot split an
-						// already-admitted atomic publication transaction.
-						if remaining := time.Until(command.Claim.LeaseUntil.Add(10 * time.Millisecond)); remaining > 0 {
-							time.Sleep(remaining)
-						}
-					}
-					if outcome == "rolled_back" {
-						if err := tx.Rollback(); err != nil {
-							return false, err
-						}
-						return false, ackLost
-					}
-					if err := tx.Commit(); err != nil {
-						return false, err
-					}
-					if outcome == "committed" {
-						time.Sleep(1100 * time.Millisecond)
-					}
-					if outcome == "neutral_success" {
-						time.Sleep(300 * time.Millisecond)
-					}
-					if outcome == "contradictory" {
-						if _, err := db.ExecContext(ctx, `DELETE FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, command.Claim.Key.RunID, command.Claim.Key.TriggeringDeliveryID, command.Claim.Key.ElementRef.FlowPath, command.Claim.Key.ElementRef.Family, command.Claim.Key.ElementRef.SemanticPath); err != nil {
-							return false, err
-						}
-					}
-					if outcome == "neutral_success" || outcome == "fast_success" || outcome == "expired_after_admission" {
-						return true, nil
-					}
-					return outcome == "acknowledged_cleanup", ackLost
-				}
-				var readback pipelineQueryer = db
-				if outcome == "acknowledged_cleanup" {
-					// Acknowledged COMMIT must not require another successful read.
-					readback = nil
-				}
-				committed, err := commitFanOutChunk(
-					context.Background(), nil, backend == "postgres", run,
-					time.Now,
-					func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error {
-						return nil
-					},
-					func(context.Context, *sql.Tx, string) (runtimerunlifecycle.CandidateRequestResult, error) {
-						return runtimerunlifecycle.CandidateRequestResult{}, fmt.Errorf("non-terminal chunk must not request completion")
-					},
-					readback, command,
-				)
-				var cursor, count, nextChunk int
-				if queryErr := db.QueryRow(`SELECT cursor,next_chunk_size,(SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path) FROM fan_out_intents i`).Scan(&cursor, &nextChunk, &count); queryErr != nil {
-					t.Fatal(queryErr)
-				}
+				committed, err := reconcileFanOutChunk(context.Background(), db, backend == "postgres", command)
 				switch outcome {
-				case "committed", "neutral_success", "fast_success", "expired_after_admission":
-					if err != nil || cursor != 1 || count != 1 || nextChunk != 32 || committed.Intent.Cursor != 1 || committed.Intent.Status != fanoutobligation.StatusOpen || committed.Intent.NextChunkSize != 32 {
-						t.Fatalf("committed readback = cursor:%d outcomes:%d next:%d result:%#v err:%v", cursor, count, nextChunk, committed.Intent, err)
+				case "committed":
+					if !committed || err != nil {
+						t.Fatalf("exact commit = %t, %v", committed, err)
 					}
-					if outcome == "committed" && !errors.Is(committed.PostCommitFailure, ackLost) {
-						t.Fatalf("reconciled commit lost acknowledgement error: %v", committed.PostCommitFailure)
-					}
-					if committed.Intent.ClaimOwner != "" || !committed.Intent.LeaseExpiresAt.IsZero() || committed.Intent.LastServedAt.IsZero() {
-						t.Fatalf("publication did not atomically release and advance fairness: %+v", committed.Intent)
-					}
-				case "acknowledged_cleanup":
-					if err != nil || cursor != 1 || count != 1 || committed.Intent.Cursor != 1 || !errors.Is(committed.PostCommitFailure, ackLost) || committed.Intent.ClaimOwner != "" {
-						t.Fatalf("acknowledged commit lost result or independent errors: result=%+v cursor=%d count=%d err=%v", committed, cursor, count, err)
-					}
-				case "rolled_back":
-					if !errors.Is(err, ackLost) || cursor != 0 || count != 0 || committed.Intent.Cursor != 0 {
-						t.Fatalf("no-commit readback = cursor:%d outcomes:%d result:%#v err:%v", cursor, count, committed.Intent, err)
+				case "not_committed":
+					if committed || err != nil {
+						t.Fatalf("exact no-commit = %t, %v", committed, err)
 					}
 				case "contradictory":
-					failure, ok := runtimefailures.EnvelopeFromError(err)
-					if !ok || failure.Class != runtimefailures.ClassOutcomeUncertain || cursor != 1 || count != 0 || committed.Intent.Cursor != 0 {
-						t.Fatalf("contradictory readback = cursor:%d outcomes:%d result:%#v failure:%#v err:%v", cursor, count, committed.Intent, failure, err)
+					if committed || err == nil {
+						t.Fatalf("contradictory readback = %t, %v", committed, err)
 					}
 				}
 			})
 		}
+	}
+}
+
+func persistFanOutReadbackChunk(t *testing.T, db *sql.DB, command runtimepipeline.FanOutChunkCommand) {
+	t.Helper()
+	key := command.Claim.Key
+	if _, err := db.Exec(`UPDATE fan_out_intents SET cursor=cursor+1,claim_owner=NULL,lease_expires_at=NULL,last_served_at=$1,next_chunk_size=$2 WHERE run_id=$3`, command.Now, fanoutobligation.MaxChunkSize, key.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, command.Outcomes[0].Ordinal, string(fanoutobligation.OutcomeSemanticRejected), string(command.Outcomes[0].Failure), command.Now); err != nil {
+		t.Fatal(err)
 	}
 }
 

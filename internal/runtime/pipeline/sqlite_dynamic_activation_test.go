@@ -711,16 +711,16 @@ func (o *singleTurnFanOutOwner) CommitFanOutChunk(_ context.Context, command Fan
 	return committed, nil
 }
 
-func (*singleTurnFanOutOwner) ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) error {
-	return fmt.Errorf("successful fan-out turn must not release its committed claim")
+func (*singleTurnFanOutOwner) ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, fmt.Errorf("successful fan-out turn must not release its committed claim")
 }
 
-func (*singleTurnFanOutOwner) ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) error {
-	return fmt.Errorf("successful fan-out turn must not enter retry release")
+func (*singleTurnFanOutOwner) ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, fmt.Errorf("successful fan-out turn must not enter retry release")
 }
 
-func (*singleTurnFanOutOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) error {
-	return fmt.Errorf("successful fan-out turn must not block")
+func (*singleTurnFanOutOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) (FanOutClaimSettlement, error) {
+	return FanOutClaimSettlement{}, fmt.Errorf("successful fan-out turn must not block")
 }
 
 func (*singleTurnFanOutOwner) CancelRunFanOut(context.Context, string, string, time.Time) error {

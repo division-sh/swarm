@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"reflect"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -86,18 +85,16 @@ func TestForkMaterializedDecisionPrincipalBothStores(t *testing.T) {
 					}
 					materialize := func(p runForkEntityProjection) error {
 						bindings := []runForkGateActivationBinding{{Source: source, Fork: fork}}
-						switch s := selected.(type) {
-						case *PostgresStore:
-							return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-								return s.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, tx, story, forkRunID, p, bindings, now.Add(2*time.Second))
-							})
-						case *SQLiteRuntimeStore:
-							return s.runPrivateAuthorActivityMutation(ctx, "historical mailbox principal proof", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-								return s.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, tx, story, forkRunID, p, bindings, now.Add(2*time.Second))
-							})
-						default:
-							panic("unexpected selected store")
-						}
+						return runSelectedFixtureMutation(ctx, selected, "historical mailbox principal proof", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+							switch s := selected.(type) {
+							case *PostgresStore:
+								return s.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, p, bindings, now.Add(2*time.Second))
+							case *SQLiteRuntimeStore:
+								return s.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, p, bindings, now.Add(2*time.Second))
+							default:
+								panic("unexpected selected store")
+							}
+						})
 					}
 					wrong := projection
 					wrong.Source.EntityID = uuid.NewString()

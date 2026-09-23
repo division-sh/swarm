@@ -70,12 +70,12 @@ func TestFanOutExactEffectsChunkBlockCancellationBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("missing typed block failure")
 			}
-			if err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failure}); err != nil {
+			if _, err := owner.BlockFanOutClaim(ctx, pipeline.FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failure}); err != nil {
 				t.Fatal(err)
 			}
 			requireExactFanOutHistory(t, ctx, db, fixture, 2, 32, 0)
-			if _, err := raw.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID}); err != nil {
-				t.Fatal(err)
+			if outcome, err := raw.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID}); err != nil || !outcome.Acknowledged {
+				t.Fatalf("stop outcome=%+v err=%v", outcome, err)
 			}
 			requireExactFanOutHistory(t, ctx, db, fixture, 3, 32, 0)
 			if got := countP16RunRevisions(t, db, fixture.runID); got != beforeClaim+2 {

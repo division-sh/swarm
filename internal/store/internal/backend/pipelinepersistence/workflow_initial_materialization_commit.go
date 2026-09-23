@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,110 +13,103 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func commitWorkflowInitialMaterialization(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
-	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowInitialMaterialization, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowInitialMaterialization],
 	command runtimepipeline.WorkflowInitialMaterializationCommand,
 ) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, err
 	}
-	result := runtimepipeline.CommittedWorkflowInitialMaterialization{
-		Result: runtimepipeline.WorkflowInitialMaterializationAlreadyExists,
-	}
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		record := command.Record
-		if postgres {
-			if err := requirePostgresRunActive(txctx, tx, record.State.Identity.RunID); err != nil {
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
+		result := runtimepipeline.CommittedWorkflowInitialMaterialization{Result: runtimepipeline.WorkflowInitialMaterializationAlreadyExists}
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			record := command.Record
+			if postgres {
+				if err := requirePostgresRunActive(txctx, tx, record.State.Identity.RunID); err != nil {
+					return err
+				}
+				lockIdentity := fmt.Sprintf("%d:%s%s", len(record.State.Identity.RunID), record.State.Identity.RunID, record.State.Identity.Route.InstancePath)
+				if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
+					return fmt.Errorf("lock workflow initial materialization route: %w", err)
+				}
+			} else if err := requireSQLiteRunActive(txctx, tx, record.State.Identity.RunID); err != nil {
 				return err
 			}
-			lockIdentity := fmt.Sprintf("%d:%s%s", len(record.State.Identity.RunID), record.State.Identity.RunID, record.State.Identity.Route.InstancePath)
-			if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
-				return fmt.Errorf("lock workflow initial materialization route: %w", err)
-			}
-		} else if err := requireSQLiteRunActive(txctx, tx, record.State.Identity.RunID); err != nil {
-			return err
-		}
 
-		equal, found, err := loadWorkflowInitialMaterializationEqual(txctx, tx, postgres, record)
-		if err != nil {
-			return err
-		}
-		if found {
-			if !equal {
-				return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
-			}
-			complete, err := workflowInitialMaterializationSnapshotExists(txctx, tx, postgres, record)
+			equal, found, err := loadWorkflowInitialMaterializationEqual(txctx, tx, postgres, record)
 			if err != nil {
 				return err
 			}
-			if !complete {
+			if found {
+				if !equal {
+					return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
+				}
+				complete, err := workflowInitialMaterializationSnapshotExists(txctx, tx, postgres, record)
+				if err != nil {
+					return err
+				}
+				if !complete {
+					return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
+				}
+				return nil
+			}
+			occupancy, err := loadWorkflowInitialMaterializationOccupancy(txctx, tx, postgres, record)
+			if err != nil {
+				return err
+			}
+			if occupancy.Entity || occupancy.Initial || occupancy.Readiness {
+				return fmt.Errorf(
+					"workflow initial materialization identity occupied (entity=%t initial=%t readiness=%t): %w",
+					occupancy.Entity,
+					occupancy.Initial,
+					occupancy.Readiness,
+					workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath),
+				)
+			}
+			if occupancy.Flow {
 				return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
 			}
-			return nil
-		}
-		occupancy, err := loadWorkflowInitialMaterializationOccupancy(txctx, tx, postgres, record)
-		if err != nil {
-			return err
-		}
-		if occupancy.Entity || occupancy.Initial || occupancy.Readiness {
-			return fmt.Errorf(
-				"workflow initial materialization identity occupied (entity=%t initial=%t readiness=%t): %w",
-				occupancy.Entity,
-				occupancy.Initial,
-				occupancy.Readiness,
-				workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath),
-			)
-		}
-		if occupancy.Flow {
-			return workflowInitialMaterializationConflict(record.State.Identity.Route.InstancePath)
-		}
 
-		if err := commitWorkflowEngineState(txctx, tx, postgres, effects, record.State); err != nil {
-			return err
-		}
-		if err := insertWorkflowInitialMaterializationRecord(txctx, tx, postgres, record); err != nil {
-			return err
-		}
-		if err := insertWorkflowInitialReadinessRecord(txctx, tx, postgres, record); err != nil {
-			return err
-		}
-		before, err := commitWorkflowEngineInitialValues(
-			txctx,
-			tx,
-			story,
-			store,
-			postgres,
-			effects,
-			record.State,
-			runtimemutationlog.EntityStateProjection{},
-		)
-		if err != nil {
-			return err
-		}
-		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, effects, command.Lifecycle)
-		if err != nil {
-			return err
-		}
-		if err := commitWorkflowEngineMutationLog(txctx, tx, story, store, postgres, effects, record.State, before); err != nil {
-			return err
-		}
-		result.Result = runtimepipeline.WorkflowInitialMaterializationCreated
-		return nil
+			if err := commitWorkflowEngineState(txctx, attempt, postgres, record.State); err != nil {
+				return err
+			}
+			if err := insertWorkflowInitialMaterializationRecord(txctx, tx, postgres, record); err != nil {
+				return err
+			}
+			if err := insertWorkflowInitialReadinessRecord(txctx, tx, postgres, record); err != nil {
+				return err
+			}
+			before, err := commitWorkflowEngineInitialValues(txctx, attempt, store, postgres, record.State, runtimemutationlog.EntityStateProjection{})
+			if err != nil {
+				return err
+			}
+			result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, attempt, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
+			if err != nil {
+				return err
+			}
+			if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, record.State, before); err != nil {
+				return err
+			}
+			result.Result = runtimepipeline.WorkflowInitialMaterializationCreated
+			return nil
+		})
+		return result, err
 	})
-	if err != nil {
-		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, outcome.Err()
 	}
+	result.Committed = true
 	if err := result.Validate(); err != nil {
-		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, err
+		return result, errors.Join(outcome.Err(), err)
 	}
-	return result, nil
+	return result, outcome.Err()
 }
 
 func workflowInitialMaterializationSnapshotExists(
@@ -154,16 +148,14 @@ func workflowInitialMaterializationSnapshotExists(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowInitialMaterialization(ctx context.Context, command runtimepipeline.WorkflowInitialMaterializationCommand) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
-	effects := newRevisionEffects()
-	return commitWorkflowInitialMaterialization(ctx, s, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	return commitWorkflowInitialMaterialization(ctx, s, true, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowInitialMaterialization, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowInitialMaterialization] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowInitialMaterialization(ctx context.Context, command runtimepipeline.WorkflowInitialMaterializationCommand) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
-	effects := newRevisionEffects()
-	return commitWorkflowInitialMaterialization(ctx, s, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow initial materialization", effects, fn)
+	return commitWorkflowInitialMaterialization(ctx, s, false, func(ctx context.Context, write func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowInitialMaterialization, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowInitialMaterialization] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite workflow initial materialization", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 	}, command)
 }
 

@@ -16,6 +16,7 @@ import (
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/google/uuid"
 )
 
 // Evidence names the mutation's ordering obligation, not a choice of finalizer order.
@@ -88,17 +89,27 @@ type CandidateWriter interface {
 	WriteCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time) (runtimelifecycle.CandidateRequestResult, error)
 }
 
+// ClaimRetirement closes a settled pipeline claim before its committed
+// completion candidate becomes executable.
+type ClaimRetirement interface {
+	RetireCommittedClaim(context.Context) error
+}
+
 type Attempt struct {
-	tx         *sql.Tx
-	dialect    privateactivity.Dialect
-	evidence   Evidence
-	kind       Kind
-	story      *privateactivity.Mutation
-	effects    *privatefork.Effects
-	handoff    *runhandoff.CandidateHandoff
-	candidates *runhandoff.CandidateCoordinator
-	active     bool
-	cleanup    bool
+	tx              *sql.Tx
+	dialect         privateactivity.Dialect
+	evidence        Evidence
+	kind            Kind
+	story           *privateactivity.Mutation
+	effects         *privatefork.Effects
+	handoff         *runhandoff.CandidateHandoff
+	candidates      *runhandoff.CandidateCoordinator
+	active          bool
+	cleanup         bool
+	discardRunID    string
+	discardRetained bool
+	discardSelected bool
+	claimRetirement ClaimRetirement
 }
 
 var _ runtimeactivity.Mutation = (*Attempt)(nil)
@@ -155,6 +166,16 @@ func (a *Attempt) AddFact(runID string, family privatefork.Family, key string) e
 	return a.effects.AddFact(runID, family, key)
 }
 
+func (a *Attempt) AddFacts(runID string, refs ...privatefork.FactRef) error {
+	if err := a.requireActive(); err != nil {
+		return err
+	}
+	if a.kind == WholeParentDeletion {
+		return errors.New("whole-parent deletion does not publish revision facts")
+	}
+	return a.effects.AddFacts(runID, refs...)
+}
+
 func (a *Attempt) AddWholeFamily(runID string, family privatefork.Family) error {
 	if err := a.requireActive(); err != nil {
 		return err
@@ -191,6 +212,43 @@ func (a *Attempt) RequestCompletion(ctx context.Context, writer CandidateWriter,
 	return result, nil
 }
 
+// RetireClaimBeforeCandidateHandoff binds the exact settled claim to this
+// attempt. Retirement runs after acknowledged COMMIT, before candidate handoff.
+func (a *Attempt) RetireClaimBeforeCandidateHandoff(retirement ClaimRetirement) error {
+	if err := a.requireActive(); err != nil {
+		return err
+	}
+	if retirement == nil || a.claimRetirement != nil {
+		return errors.New("one claim retirement is required per attempt")
+	}
+	a.claimRetirement = retirement
+	return nil
+}
+
+// SelectForkDiscardRetention binds the destructive kind to the canonical
+// retained-execution row inside this attempt. The caller cannot choose a
+// finalization order from a previously observed boolean.
+func (a *Attempt) SelectForkDiscardRetention(ctx context.Context, runID string) (bool, error) {
+	if err := a.requireActive(); err != nil {
+		return false, err
+	}
+	if a.kind != RetainedForkCleanup || a.cleanup || a.discardSelected {
+		return false, errors.New("selected fork discard retention can be classified only once before cleanup")
+	}
+	runID = strings.TrimSpace(runID)
+	if _, err := uuid.Parse(runID); err != nil {
+		return false, fmt.Errorf("selected fork discard requires a UUID run_id: %w", err)
+	}
+	var retained bool
+	if err := a.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = $1)`, runID).Scan(&retained); err != nil {
+		return false, fmt.Errorf("select selected fork completion evidence: %w", err)
+	}
+	a.discardRunID = runID
+	a.discardRetained = retained
+	a.discardSelected = true
+	return retained, nil
+}
+
 // BeginDestructiveCleanup finalizes the terminalization story before deleting
 // the fork's state. The two destructive kinds are explicit, not a caller-chosen
 // ordering flag on ordinary mutations.
@@ -204,8 +262,17 @@ func (a *Attempt) BeginDestructiveCleanup(ctx context.Context) error {
 	if a.cleanup || a.story == nil {
 		return errors.New("destructive cleanup activity was already finalized")
 	}
+	if a.kind == RetainedForkCleanup && !a.discardSelected {
+		return errors.New("selected fork discard retention was not classified")
+	}
 	if err := a.story.Finalize(ctx); err != nil {
 		return err
+	}
+	if a.kind == RetainedForkCleanup && !a.discardRetained {
+		if err := a.effects.DiscardDeletedRun(a.discardRunID); err != nil {
+			return err
+		}
+		a.kind = WholeParentDeletion
 	}
 	a.cleanup = true
 	return nil
@@ -231,14 +298,16 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 	if a.kind == RetainedForkCleanup && !a.cleanup {
 		return errors.New("retained fork cleanup did not finalize activity before deletion")
 	}
-	*phase = RevisionFinalize
-	if a.dialect == privateactivity.DialectPostgres {
-		if _, err := privatefork.FinalizePostgres(ctx, a.tx, a.effects); err != nil {
-			return err
-		}
-	} else {
-		if _, err := privatefork.FinalizeSQLite(ctx, a.tx, a.effects); err != nil {
-			return err
+	if a.effects.HasDeclarations() {
+		*phase = RevisionFinalize
+		if a.dialect == privateactivity.DialectPostgres {
+			if _, err := privatefork.FinalizePostgres(ctx, a.tx, a.effects); err != nil {
+				return err
+			}
+		} else {
+			if _, err := privatefork.FinalizeSQLite(ctx, a.tx, a.effects); err != nil {
+				return err
+			}
 		}
 	}
 	if a.story != nil && !a.cleanup {
@@ -327,6 +396,9 @@ func RunRetainedPostgresWithOptions[T any](ctx context.Context, session *postgre
 
 func failed[T any](err error) Result[T] { return Result[T]{err: err, phase: BeforeAttempt} }
 
+// Reject reports an admission failure before a transaction attempt exists.
+func Reject[T any](err error) Result[T] { return failed[T](err) }
+
 func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence Evidence, kind Kind, baseline *Baseline, candidates *runhandoff.CandidateCoordinator, native nativeRunner, write func(context.Context, *Attempt) (T, error)) Result[T] {
 	if write == nil || native == nil {
 		return failed[T](errors.New("selected-store mutation writer and native runner are required"))
@@ -336,6 +408,9 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 	}
 	if kind != Ordinary && kind != RetainedForkCleanup && kind != WholeParentDeletion {
 		return failed[T](fmt.Errorf("unsupported mutation kind %d", kind))
+	}
+	if kind == WholeParentDeletion {
+		return failed[T](errors.New("whole-parent deletion must be selected from durable fork retention evidence"))
 	}
 	if kind != Ordinary && evidence != Story {
 		return failed[T](errors.New("destructive fork mutation requires activity story"))
@@ -405,7 +480,13 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 		return nil
 	})
 	if !acknowledged {
+		if nativeErr == nil {
+			nativeErr = errors.New("selected-store mutation commit was not acknowledged")
+		}
 		return Result[T]{err: nativeErr, phase: phase}
+	}
+	if previous != nil && previous.claimRetirement != nil {
+		nativeErr = errors.Join(nativeErr, previous.claimRetirement.RetireCommittedClaim(context.WithoutCancel(ctx)))
 	}
 	if handoff != nil {
 		nativeErr = errors.Join(nativeErr, handoff.Commit())

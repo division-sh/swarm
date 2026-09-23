@@ -226,8 +226,9 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRu
 	return result, nil
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
-	return p.store.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
+	err := p.store.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
+	return DynamicFlowRuntimeTopologyReadyResult{Acknowledged: err == nil}, err
 }
 
 type pipelineTestWorkflowTimerPersistence struct {
@@ -429,7 +430,9 @@ func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sq
 			t.Fatalf("seed canonical pipeline event %s: unsupported dialect %q", event.ID(), dialect)
 		}
 	}
-	if err := eventfixture.Insert(ctx, db, dialect, event); err != nil {
+	if err := eventfixture.RunMutation(ctx, db, dialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return eventfixture.Insert(ctx, attempt, dialect, event)
+	}).Err(); err != nil {
 		t.Fatalf("seed canonical pipeline event %s: %v", event.ID(), err)
 	}
 }

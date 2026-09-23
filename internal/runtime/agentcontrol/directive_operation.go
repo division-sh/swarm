@@ -64,6 +64,8 @@ type DirectiveOperation struct {
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 	ExpiresAt               time.Time
+	// Acknowledged is set only on a returned mutation after its commit is acknowledged.
+	Acknowledged bool `json:"-"`
 }
 
 func (o DirectiveOperation) Normalized() DirectiveOperation {
@@ -129,8 +131,9 @@ type ReserveDirectiveOperationRequest struct {
 }
 
 type DirectiveOperationReservation struct {
-	Operation DirectiveOperation
-	Created   bool
+	Operation    DirectiveOperation
+	Created      bool
+	Acknowledged bool
 }
 
 type DirectiveOperationReconcileResult struct {
@@ -150,8 +153,9 @@ type DirectiveExecutionAdmissionRequest struct {
 }
 
 type DirectiveExecutionAdmission struct {
-	Operation DirectiveOperation
-	Event     events.AdmittedEvent
+	Operation    DirectiveOperation
+	Event        events.AdmittedEvent
+	Acknowledged bool
 }
 
 // DirectiveExecutionOrigin is the exact durable authority for provider work

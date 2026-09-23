@@ -8,15 +8,13 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefanoutbarrier "github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	deliverystore "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
@@ -41,15 +39,15 @@ type RunLifecycleSQLiteOwner struct {
 }
 
 type pipelineTerminalizer interface {
-	TerminalizeRunTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
+	TerminalizeRunTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
 	SummarizeRunTx(context.Context, *sql.Tx, string) (runtimepipelineobligation.RunSummary, error)
 	SummarizeFanOutRunTx(context.Context, *sql.Tx, string, time.Time) (runtimefanout.RunSummary, error)
-	AdvanceFanOutDeliveryBarriersTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error)
+	AdvanceFanOutDeliveryBarriersTx(context.Context, *mutationprotocol.Attempt, string, time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error)
 	SummarizeFanOutDeliveryBarriersRunTx(context.Context, *sql.Tx, string) (runtimefanoutbarrier.RunSummary, error)
 }
 
 type decisionCardTerminalizer interface {
-	SupersedeRunTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, string, string, time.Time, bool) error
+	SupersedeRunTx(context.Context, *mutationprotocol.Attempt, string, string, time.Time, bool) error
 }
 
 func (s *RunLifecyclePostgresOwner) BindPipeline(owner pipelineTerminalizer) error {
@@ -141,6 +139,20 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, cand
 	return &RunLifecycleSQLiteOwner{backend: backend, requireCurrent: requireCurrent, runLifecycleCandidates: candidates, nowFn: now}, nil
 }
 
+func (s *RunLifecyclePostgresOwner) CompletionCandidateCoordinator() *storerunhandoff.CandidateCoordinator {
+	if s == nil {
+		return nil
+	}
+	return s.runLifecycleCandidates
+}
+
+func (s *RunLifecycleSQLiteOwner) CompletionCandidateCoordinator() *storerunhandoff.CandidateCoordinator {
+	if s == nil {
+		return nil
+	}
+	return s.runLifecycleCandidates
+}
+
 func (s *RunLifecyclePostgresOwner) requireCurrentSchema() error {
 	if s == nil || s.requireCurrent == nil {
 		return errors.New("run lifecycle PostgreSQL owner is required")
@@ -162,30 +174,6 @@ func (s *RunLifecycleSQLiteOwner) now() time.Time {
 	return s.nowFn().UTC()
 }
 
-func (s *RunLifecyclePostgresOwner) runPostgresRuntimeMutation(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
-	_, err := s.runPostgresRuntimeMutationOutcome(ctx, operation)
-	return err
-}
-
-func (s *RunLifecyclePostgresOwner) runPostgresRuntimeMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	return s.backend.RunTransactionOutcome(ctx, operation)
-}
-
-func (s *RunLifecycleSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
-	_, err := s.runRuntimeMutationOutcome(ctx, label, operation)
-	return err
-}
-
-func (s *RunLifecycleSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	return s.backend.RunTransactionOutcome(ctx, label, operation)
-}
-
 func (s *RunLifecyclePostgresOwner) runRead(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
@@ -198,96 +186,6 @@ func (s *RunLifecycleSQLiteOwner) runRead(ctx context.Context, operation func(co
 		return err
 	}
 	return s.backend.RunReadTransaction(ctx, operation)
-}
-
-func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutation(
-	ctx context.Context,
-	effects *privaterunforkrevision.Effects,
-	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
-) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, effects, operation)
-	return err
-}
-
-func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-	return s.runPrivateAuthorActivityMutationObserved(ctx, effects, operation, nil)
-}
-
-func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutationObserved(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error, stage *string) (bool, error) {
-	return s.runPostgresRuntimeMutationOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		observeMutationStage(stage, "activity_begin")
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		observeMutationStage(stage, "transition")
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		observeMutationStage(stage, "revision_finalize")
-		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
-			return err
-		}
-		observeMutationStage(stage, "activity_finalize")
-		if err := story.Finalize(txctx); err != nil {
-			return err
-		}
-		observeMutationStage(stage, "commit")
-		return nil
-	})
-}
-
-func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutation(
-	ctx context.Context,
-	label string,
-	effects *privaterunforkrevision.Effects,
-	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
-) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, effects, operation)
-	return err
-}
-
-func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-	return s.runPrivateAuthorActivityMutationObserved(ctx, label, effects, operation, nil)
-}
-
-func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutationObserved(ctx context.Context, label string, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error, stage *string) (bool, error) {
-	resetEffects := effects.AttemptReset()
-	return s.runRuntimeMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		resetEffects()
-		observeMutationStage(stage, "activity_begin")
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		observeMutationStage(stage, "transition")
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		observeMutationStage(stage, "revision_finalize")
-		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
-			return err
-		}
-		observeMutationStage(stage, "activity_finalize")
-		if err := story.Finalize(txctx); err != nil {
-			return err
-		}
-		observeMutationStage(stage, "commit")
-		return nil
-	})
-}
-
-func observeMutationStage(stage *string, value string) {
-	if stage != nil {
-		*stage = value
-	}
-}
-
-func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {
-	if story == nil {
-		return nil
-	}
-	return story
 }
 
 type rowQueryer interface {
@@ -322,7 +220,16 @@ func parseSQLiteTime(raw string) (time.Time, bool, error) {
 	if raw == "" {
 		return time.Time{}, false, nil
 	}
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05 -0700 MST"} {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05",
+	} {
 		if parsed, err := time.Parse(layout, raw); err == nil {
 			return parsed.UTC(), true, nil
 		}

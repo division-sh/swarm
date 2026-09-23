@@ -585,7 +585,7 @@ type Store interface {
 	OpenScan(context.Context, ScanRequest) (Scan, error)
 	ClaimBatch(context.Context, Scan, int) (ScanBatch, error)
 	CloseScan(context.Context, Scan) error
-	MarkDecisionProcessed(context.Context, Claim) error
+	MarkDecisionProcessed(context.Context, Claim) (SettlementOutcome, error)
 	Settle(context.Context, Claim, Disposition) (SettlementOutcome, error)
 	Release(context.Context, Claim) error
 	GlobalWorkPresence(context.Context) (GlobalWorkPresence, error)

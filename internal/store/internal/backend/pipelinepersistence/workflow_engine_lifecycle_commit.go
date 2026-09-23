@@ -2,28 +2,25 @@ package pipelinepersistence
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func commitWorkflowEngineLifecycle(
 	ctx context.Context,
-	tx *sql.Tx,
-	story runtimeauthoractivity.Mutation,
+	attempt *mutationprotocol.Attempt,
 	decisions workflowDecisionLifecycleTxOwner,
 	genericSchedules GenericScheduleTxOwner,
 	postgres bool,
-	effects *revisionEffects,
 	plan runtimepipeline.WorkflowLifecycleMutationPlan,
 ) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	result := runtimepipeline.CommittedWorkflowLifecycleMutation{}
 	for index, mutation := range plan.Timers {
-		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, tx, postgres, effects, mutation)
+		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, attempt, postgres, mutation)
 		if err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine timer mutation %d: %w", index, err)
 		}
@@ -42,13 +39,13 @@ func commitWorkflowEngineLifecycle(
 	for index, mutation := range plan.Schedules {
 		switch mutation.Kind {
 		case runtimepipeline.WorkflowScheduleMutationUpsert:
-			admitted, err := genericSchedules.AdmitTx(ctx, tx, effects, mutation.Command)
+			admitted, err := genericSchedules.AdmitTx(ctx, attempt, mutation.Command)
 			if err != nil {
 				return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine schedule admission %d: %w", index, err)
 			}
 			result.GenericScheduleActivations = append(result.GenericScheduleActivations, admitted.Activation)
 		case runtimepipeline.WorkflowScheduleMutationCancel:
-			cancelled, err := genericSchedules.CancelAdmissionTx(ctx, tx, effects, mutation.Command, mutation.CancelCause, mutation.CancelledAt)
+			cancelled, err := genericSchedules.CancelAdmissionTx(ctx, attempt, mutation.Command, mutation.CancelCause, mutation.CancelledAt)
 			if err != nil {
 				return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine schedule cancellation %d: %w", index, err)
 			}
@@ -58,7 +55,7 @@ func commitWorkflowEngineLifecycle(
 		}
 	}
 	for index, mutation := range plan.GateCards {
-		if err := commitWorkflowEngineGateCardMutation(ctx, tx, story, decisions, mutation); err != nil {
+		if err := commitWorkflowEngineGateCardMutation(ctx, attempt, decisions, mutation); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine gate card mutation %d: %w", index, err)
 		}
 	}
@@ -66,28 +63,28 @@ func commitWorkflowEngineLifecycle(
 }
 
 type workflowDecisionLifecycleTxOwner interface {
-	InsertTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.Card) error
-	InsertProposedEffectTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
-	LoadByActivationTx(context.Context, *sql.Tx, string, string, string) (decisioncard.Card, error)
-	SupersedeStageTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, string, string, string, string, time.Time) (bool, error)
+	InsertTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card) error
+	InsertProposedEffectTx(context.Context, *mutationprotocol.Attempt, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
+	LoadByActivationTx(context.Context, *mutationprotocol.Attempt, string, string, string) (decisioncard.Card, error)
+	SupersedeStageTx(context.Context, *mutationprotocol.Attempt, string, string, string, string, time.Time) (bool, error)
 }
 
-func commitWorkflowEngineGateCardMutation(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, decisions workflowDecisionLifecycleTxOwner, mutation runtimepipeline.WorkflowGateCardMutation) error {
+func commitWorkflowEngineGateCardMutation(ctx context.Context, attempt *mutationprotocol.Attempt, decisions workflowDecisionLifecycleTxOwner, mutation runtimepipeline.WorkflowGateCardMutation) error {
 	if decisions == nil {
 		return fmt.Errorf("workflow gate card decision owner is required")
 	}
 	switch mutation.Kind {
 	case runtimepipeline.WorkflowGateCardMutationCreate:
-		return decisions.InsertTx(ctx, story, tx, mutation.Card)
+		return decisions.InsertTx(ctx, attempt, mutation.Card)
 	case runtimepipeline.WorkflowGateCardMutationSupersede:
-		persisted, err := decisions.LoadByActivationTx(ctx, tx, mutation.Card.RunID, mutation.EntityID, mutation.ActivationID)
+		persisted, err := decisions.LoadByActivationTx(ctx, attempt, mutation.Card.RunID, mutation.EntityID, mutation.ActivationID)
 		if err != nil {
 			return err
 		}
 		if !sameWorkflowEngineGateCard(persisted, mutation.Card) {
 			return fmt.Errorf("workflow gate card changed before supersession")
 		}
-		changed, err := decisions.SupersedeStageTx(ctx, story, tx, mutation.Card.RunID, mutation.EntityID, mutation.ActivationID, mutation.Reason, mutation.OccurredAt)
+		changed, err := decisions.SupersedeStageTx(ctx, attempt, mutation.Card.RunID, mutation.EntityID, mutation.ActivationID, mutation.Reason, mutation.OccurredAt)
 		if err != nil {
 			return err
 		}

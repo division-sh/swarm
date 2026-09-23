@@ -29,6 +29,8 @@ import (
 type completionDispatch struct {
 	handle        *runtimeeffects.Handle
 	state         runtimeeffects.State
+	mutationErr   error
+	callerCtx     context.Context
 	evidence      map[string]any
 	providerModel llmselection.ResolvedModel
 	invocation    completionProviderInvocation
@@ -57,6 +59,34 @@ func (d *completionDispatch) markProviderInvocationStarted() {
 	if d != nil {
 		d.invocation = completionProviderInvocationStarted
 	}
+}
+
+func (d *completionDispatch) retainCommittedMutation(err error, phase runtimeeffects.MutationPhase) bool {
+	if err == nil {
+		return true
+	}
+	if d == nil || d.handle == nil || !runtimeeffects.CommittedMutationPhase(err, phase, d.handle.Attempt()) {
+		return false
+	}
+	d.mutationErr = errors.Join(d.mutationErr, err)
+	return true
+}
+
+func (d *completionDispatch) noDispatchError(err error) error {
+	if d == nil {
+		return err
+	}
+	return errors.Join(err, d.mutationErr)
+}
+
+func completionInvocationGate(caller, heartbeat context.Context) error {
+	if caller != nil && caller.Err() != nil {
+		return caller.Err()
+	}
+	if heartbeat != nil && heartbeat.Err() != nil {
+		return errors.Join(heartbeat.Err(), context.Cause(heartbeat))
+	}
+	return nil
 }
 
 const completionContinuationVersion = "provider-response-continuation.v1"
@@ -495,11 +525,23 @@ func completionBudgetScopes(cfg *config.Config, entityID string) []runtimeeffect
 	return scopes
 }
 
+func unacknowledgedCompletionError(err error) error {
+	if err != nil {
+		return err
+	}
+	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_settlement_not_acknowledged", "llm-completion-authority", "settle_completion", nil)
+}
+
 func settleCompletionTurn(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any) (runtimeeffects.CompletionSettlementResult, error) {
 	return settleCompletionTurnWithProviderHead(ctx, dispatch, targetID, turn, response, profile, usage, state, failure, evidence, nil)
 }
 
-func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any, providerHead *runtimeeffects.CompletionProviderHead) (runtimeeffects.CompletionSettlementResult, error) {
+func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any, providerHead *runtimeeffects.CompletionProviderHead) (_ runtimeeffects.CompletionSettlementResult, retErr error) {
+	defer func() {
+		if dispatch != nil {
+			retErr = errors.Join(retErr, dispatch.mutationErr)
+		}
+	}()
 	if dispatch == nil || dispatch.handle == nil {
 		return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
@@ -600,7 +642,7 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		settlement.AgentTurn = completionAgentTurn(targetID, turn)
 	}
 	result, err := dispatch.handle.SettleCompletion(ctx, settlement)
-	if result.Committed && err == nil && result.Disposition == runtimeeffects.CompletionSettlementCurrent && state == runtimeeffects.StateSettled && response != nil &&
+	if result.Committed && result.Disposition == runtimeeffects.CompletionSettlementCurrent && state == runtimeeffects.StateSettled && response != nil &&
 		dispatch.handle.Attempt().Authority.Kind == runtimeeffects.AuthorityNormalAgent &&
 		dispatch.handle.Attempt().Origin.Kind == runtimeeffects.CompletionOriginDelivery {
 		snapshot, ok := dispatch.handle.CompletionContinuation()

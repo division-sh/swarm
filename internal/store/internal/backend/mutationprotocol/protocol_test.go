@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/google/uuid"
 )
 
 func mutationTestDB(t *testing.T) *sql.DB {
@@ -129,6 +131,19 @@ func TestMissingAcknowledgementHidesAttemptValue(t *testing.T) {
 	}
 }
 
+func TestMissingAcknowledgementWithoutNativeErrorFailsClosed(t *testing.T) {
+	result := run(context.Background(), privateactivity.DialectSQLite, RevisionOnly, Ordinary, NewBaseline(), nil,
+		func(context.Context, func(context.Context, *sql.Tx) error) (bool, error) {
+			return false, nil
+		}, func(context.Context, *Attempt) (int, error) { return 21, nil })
+	if result.Acknowledged() || result.Err() == nil {
+		t.Fatalf("missing commit acknowledgement was accepted: %+v", result)
+	}
+	if value, ok := result.Value(); ok || value != 0 {
+		t.Fatalf("unacknowledged value escaped: %d, %v", value, ok)
+	}
+}
+
 func TestDestructiveKindRequiresStoryAndExplicitCleanup(t *testing.T) {
 	ctx := context.Background()
 	called := false
@@ -139,6 +154,18 @@ func TestDestructiveKindRequiresStoryAndExplicitCleanup(t *testing.T) {
 		}, func(context.Context, *Attempt) (struct{}, error) { return struct{}{}, nil })
 	if result.Err() == nil || called {
 		t.Fatal("whole-parent deletion entered an un-fenced transaction")
+	}
+}
+
+func TestWholeParentDeletionCannotBeSelectedByCaller(t *testing.T) {
+	called := false
+	result := run(context.Background(), privateactivity.DialectSQLite, Story, WholeParentDeletion, NewBaseline(), nil,
+		func(context.Context, func(context.Context, *sql.Tx) error) (bool, error) {
+			called = true
+			return false, nil
+		}, func(context.Context, *Attempt) (struct{}, error) { return struct{}{}, nil })
+	if result.Err() == nil || called {
+		t.Fatal("caller-selected whole-parent deletion entered transaction")
 	}
 }
 
@@ -174,5 +201,113 @@ func TestCandidateReservationRejectsDifferentDurableRun(t *testing.T) {
 	var rows int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM mutation_protocol_probe`).Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("candidate mismatch persisted request: rows=%d err=%v", rows, err)
+	}
+}
+
+func TestWholeParentDeletionHasNamedEarlyStoryCut(t *testing.T) {
+	ctx := context.Background()
+	db := mutationTestDB(t)
+	for _, ddl := range []string{
+		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY, last_sequence BIGINT NOT NULL)`,
+		`CREATE TABLE run_fork_selected_contract_runtime_executions (fork_run_id TEXT NOT NULL)`,
+		`CREATE TABLE parents (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE children (parent_id TEXT NOT NULL REFERENCES parents(id))`,
+		`INSERT INTO parents (id) VALUES ('parent')`,
+		`INSERT INTO children (parent_id) VALUES ('parent')`,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runID := uuid.NewString()
+	result := run(ctx, privateactivity.DialectSQLite, Story, RetainedForkCleanup, NewBaseline(), nil,
+		mutationTestRunner(t, db, true), func(ctx context.Context, attempt *Attempt) (string, error) {
+			retained, err := attempt.SelectForkDiscardRetention(ctx, runID)
+			if err != nil || retained {
+				return "", fmt.Errorf("whole-parent retention=%v err=%v", retained, err)
+			}
+			if err := attempt.BeginDestructiveCleanup(ctx); err != nil {
+				return "", err
+			}
+			err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM children WHERE parent_id='parent'`); err != nil {
+					return err
+				}
+				_, err := tx.ExecContext(ctx, `DELETE FROM parents WHERE id='parent'`)
+				return err
+			})
+			return "deleted", err
+		})
+	if !result.Acknowledged() || result.Err() != nil {
+		t.Fatalf("named whole-parent deletion failed: %+v", result)
+	}
+	if value, ok := result.Value(); !ok || value != "deleted" {
+		t.Fatalf("whole-parent result = %q, %v", value, ok)
+	}
+	var parents, children, head int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM parents`).Scan(&parents); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM children`).Scan(&children); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&head); err != nil {
+		t.Fatal(err)
+	}
+	if parents != 0 || children != 0 || head != 0 {
+		t.Fatalf("wrong destructive cut: parents=%d children=%d head=%d", parents, children, head)
+	}
+}
+
+func TestForkDiscardKindFollowsDurableRetentionEvidence(t *testing.T) {
+	ctx := context.Background()
+	db := mutationTestDB(t)
+	for _, ddl := range []string{
+		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY, last_sequence BIGINT NOT NULL)`,
+		`CREATE TABLE run_fork_selected_contract_runtime_executions (fork_run_id TEXT NOT NULL)`,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deletedRunID, retainedRunID := uuid.NewString(), uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_runtime_executions (fork_run_id) VALUES (?)`, retainedRunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		runID    string
+		retained bool
+		kind     Kind
+	}{
+		{deletedRunID, false, WholeParentDeletion},
+		{retainedRunID, true, RetainedForkCleanup},
+	} {
+		result := run(ctx, privateactivity.DialectSQLite, Story, RetainedForkCleanup, NewBaseline(), nil,
+			mutationTestRunner(t, db, true), func(ctx context.Context, attempt *Attempt) (Kind, error) {
+				if !tc.retained {
+					if err := attempt.AddFact(tc.runID, "events", uuid.NewString()); err != nil {
+						return 0, err
+					}
+				}
+				retained, err := attempt.SelectForkDiscardRetention(ctx, tc.runID)
+				if err != nil || retained != tc.retained {
+					return 0, fmt.Errorf("retention=%v err=%v, want %v", retained, err, tc.retained)
+				}
+				if err := attempt.BeginDestructiveCleanup(ctx); err != nil {
+					return 0, err
+				}
+				if attempt.kind != tc.kind {
+					return 0, fmt.Errorf("kind=%d, want %d", attempt.kind, tc.kind)
+				}
+				if tc.kind == WholeParentDeletion {
+					if err := attempt.AddFact(tc.runID, "events", uuid.NewString()); err == nil {
+						return 0, errors.New("whole-parent deletion accepted a new revision fact")
+					}
+				}
+				return attempt.kind, nil
+			})
+		if result.Err() != nil || !result.Acknowledged() {
+			t.Fatalf("selected fork discard kind failed: %+v", result)
+		}
 	}
 }

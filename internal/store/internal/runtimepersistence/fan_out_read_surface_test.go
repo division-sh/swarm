@@ -203,7 +203,7 @@ func TestFanOutReadLeaseRetryAndRestartBothStores(t *testing.T) {
 			if row.DurableState != "leased" || row.ClaimOwner != claim.Owner || row.ClaimGeneration != claim.Generation || row.LeaseExpiresAt == nil {
 				t.Fatalf("lease=%+v", row)
 			}
-			if err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
+			if _, err := owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
 				t.Fatal(err)
 			}
 			page, err = reader.ListFanOutIntents(ctx, fanoutobligation.ListQuery{RunID: base.runID})

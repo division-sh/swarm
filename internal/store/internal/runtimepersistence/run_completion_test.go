@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -34,7 +35,8 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 	if flowTemplate == "" {
 		flowTemplate = "example"
 	}
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{
+	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		RunID: runID, Origin: semanticEventRunOriginForTest(t, eventID, "example.started"),
 		StartedAt: time.Now().UTC(),
 	})
@@ -42,16 +44,10 @@ func seedNormalRunCompletionFixture(t *testing.T, db *sql.DB, state, flowInstanc
 		t, ctx, db, eventID, runID, events.EventType("example.started"),
 		events.EventProducerExternal, "test", entityID, flowInstance, time.Now().UTC(),
 	)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin pipeline scope fixture: %v", err)
-	}
-	if err := insertCommittedPipelineScopeTx(ctx, tx, runforkrevision.NewEffects(), eventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
-		_ = tx.Rollback()
+	if err := runSelectedFixtureMutation(ctx, selected, "completion pipeline scope fixture", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return insertCommittedPipelineScopeTx(txctx, attempt, eventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC())
+	}); err != nil {
 		t.Fatalf("seed committed pipeline scope: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit pipeline scope fixture: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -114,7 +115,10 @@ func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, a
 		return nil, err
 	}
 	if err := handle.MarkResponseObserved(ctx, map[string]any{"surface_id": observed.ID, "integrity_hash": observed.IntegrityHash}); err != nil {
-		return nil, err
+		if !runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationObservation, handle.Attempt()) {
+			return nil, err
+		}
+		slog.WarnContext(ctx, "startup probe response observation committed with cleanup error", "error", err)
 	}
 	if err := handle.Succeed(ctx, map[string]any{"surface_id": observed.ID, "integrity_hash": observed.IntegrityHash}); err != nil {
 		return nil, err
@@ -154,9 +158,17 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 	}
 	cmd.Stdin = strings.NewReader(input)
 
+	var launchCleanupErr error
 	if err := handle.MarkLaunched(ctx); err != nil {
-		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "startup_probe_launch_mark_failed", "claude-cli-adapter", "startup_probe", nil, err)
-		return nil, err
+		if !runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationLaunch, handle.Attempt()) {
+			_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "startup_probe_launch_mark_failed", "claude-cli-adapter", "startup_probe", nil, err)
+			return nil, err
+		}
+		launchCleanupErr = err
+		slog.WarnContext(ctx, "startup probe launch committed with cleanup error", "error", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, handle.Fail(context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict, "startup_probe_cancelled_before_dispatch", "claude-cli-adapter", "startup_probe", map[string]any{"prelaunch": true}, errors.Join(err, launchCleanupErr))
 	}
 	if err := cmd.Start(); err != nil {
 		_ = handle.Fail(ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassConnectorFailure, "claude_cli_startup_launch_rejected", "claude-cli-adapter", "startup_probe", nil, err)

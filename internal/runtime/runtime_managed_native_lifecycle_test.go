@@ -137,8 +137,8 @@ func (managedNativeDurableRoles) ListFlowInstanceRoutes(context.Context) ([]runt
 func (managedNativeDurableRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance, []runtimebus.FlowInstanceRouteRecord) error {
 	return nil
 }
-func (managedNativeDurableRoles) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error {
-	return nil
+func (managedNativeDurableRoles) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 func (managedNativeDurableRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
 	return nil, nil
@@ -173,6 +173,9 @@ func (managedNativeDurableRoles) LoadPreparedPublishEvent(context.Context, strin
 func (managedNativeDurableRoles) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
 	return nil
 }
+func (managedNativeDurableRoles) RecordDeadLetterOutcome(context.Context, runtimedeadletters.Record) (runtimedeadletters.RecordOutcome, error) {
+	return runtimedeadletters.RecordOutcome{Acknowledged: true}, nil
+}
 func (managedNativeDurableRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
@@ -196,6 +199,13 @@ func (*managedNativeRecoveryDeliveryStore) ActivateDeliveryAuthority(
 	runtimedelivery.ExecutionAuthority,
 ) error {
 	return nil
+}
+
+func (*managedNativeRecoveryDeliveryStore) ActivateDeliveryAuthorityOutcome(
+	context.Context,
+	runtimedelivery.ExecutionAuthority,
+) (runtimedelivery.ActivationCommit, error) {
+	return runtimedelivery.ActivationCommit{Acknowledged: true}, nil
 }
 
 func (*managedNativeRecoveryDeliveryStore) InspectDeliveryRecovery(

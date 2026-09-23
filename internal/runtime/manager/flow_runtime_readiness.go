@@ -1082,6 +1082,8 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	admission dynamicFlowRuntimeReadinessAdmission,
 ) (retErr error) {
 	ctx := admission.ctx
+	var acknowledgedCleanupErr error
+	defer func() { retErr = errors.Join(retErr, acknowledgedCleanupErr) }()
 	if err := am.requireRunExecutionOwnership(ctx, admission.key.runID); err != nil {
 		return err
 	}
@@ -1199,8 +1201,15 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			return fmt.Errorf("resolve dynamic flow route identity %s: %w", readiness.InstancePath, err)
 		}
 		if !admission.topologyDurable {
-			if err := am.installFlowInstanceRoute(ctx, flowIdentity, req); err != nil {
-				return fmt.Errorf("persist dynamic flow route %s: %w", readiness.InstancePath, err)
+			committed, commitErr := am.installFlowInstanceRoute(ctx, flowIdentity, req)
+			if !committed.Acknowledged {
+				return fmt.Errorf("persist dynamic flow route %s: %w", readiness.InstancePath, errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged")))
+			}
+			if commitErr != nil {
+				acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, fmt.Errorf("persist dynamic flow route %s: %w", readiness.InstancePath, commitErr))
+				followupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+				defer cancel()
+				ctx = followupCtx
 			}
 		}
 		if eligible, err := am.dynamicFlowRuntimeReadinessStillEligible(ctx, key, plan, retirement); err != nil {
@@ -1268,8 +1277,15 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return nil
 	}
 	now := time.Now().UTC()
-	if err := am.workflowInstances.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, now); err != nil {
-		return fmt.Errorf("record dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
+	committed, commitErr := am.workflowInstances.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, now)
+	if !committed.Acknowledged {
+		return fmt.Errorf("record dynamic flow runtime readiness %s: %w", readiness.InstancePath, errors.Join(commitErr, errors.New("dynamic flow topology readiness commit was not acknowledged")))
+	}
+	if commitErr != nil {
+		acknowledgedCleanupErr = errors.Join(acknowledgedCleanupErr, fmt.Errorf("record dynamic flow runtime readiness %s: %w", readiness.InstancePath, commitErr))
+		followupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dynamicFlowRuntimeReadinessCleanupTimeout)
+		defer cancel()
+		ctx = followupCtx
 	}
 	fresh, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 	if err != nil {

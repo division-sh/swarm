@@ -18,11 +18,15 @@ import (
 
 type scriptedWorkflowNodeDeliveryStore struct {
 	runtimedelivery.Store
-	result runtimedelivery.ClaimResult
-	err    error
+	result      runtimedelivery.ClaimResult
+	err         error
+	exactResult bool
 }
 
 func (s scriptedWorkflowNodeDeliveryStore) ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	if s.err == nil && !s.exactResult {
+		s.result.Acknowledged = true
+	}
 	return s.result, s.err
 }
 
@@ -194,5 +198,58 @@ func TestWorkflowNodeDeliveryCarrierGuardReportsReturnFailureWithoutPolling(t *t
 				t.Fatalf("admission error/returns/reports = %v/%d/%d, want error/1/1", err, continuation.returns.Load(), reports.Load())
 			}
 		})
+	}
+}
+
+func TestWorkflowNodeDeliveryClaimAcknowledgementPreservesAcquiredCarrier(t *testing.T) {
+	for authorityName, authority := range workflowNodeCarrierAuthorities(t) {
+		for _, test := range []struct {
+			name         string
+			acknowledged bool
+			claimErr     error
+		}{
+			{name: "acknowledged postcommit error", acknowledged: true, claimErr: errors.New("postcommit claim failure")},
+			{name: "unacknowledged error", claimErr: errors.New("unacknowledged claim failure")},
+			{name: "unacknowledged without error"},
+		} {
+			t.Run(authorityName+"/"+test.name, func(t *testing.T) {
+				evt, route, deliveryID := workflowNodeCarrierTestEventAndRoute(t)
+				identity, err := route.Identity()
+				if err != nil {
+					t.Fatal(err)
+				}
+				node, ok := route.Recipient.Node()
+				if !ok {
+					t.Fatal("test delivery recipient is not a node")
+				}
+				claim, err := runtimedelivery.AdmitPersistedClaim(deliveryID, evt.RunID(), events.EncodeDeliveryRouteIdentity(identity), uuid.NewString(), 1, runtimedelivery.SubscriberNode, node.Key())
+				if err != nil {
+					t.Fatal(err)
+				}
+				continuation := &scriptedWorkflowNodeContinuation{deliveryID: deliveryID}
+				provider := &scriptedWorkflowNodeAuthority{authority: authority, continuation: continuation}
+				result := runtimedelivery.ClaimResult{
+					Acknowledged: test.acknowledged, Disposition: runtimedelivery.ClaimAcquired,
+					Claimed: runtimedelivery.ClaimedObligation{Claim: claim},
+				}
+				admission, err := admitWorkflowNodeDelivery(context.Background(), evt, route, provider,
+					scriptedWorkflowNodeDeliveryStore{result: result, err: test.claimErr, exactResult: true}, func(error) {})
+				if test.acknowledged {
+					if err != nil || !admission.claim.Same(claim) || !errors.Is(admission.postCommitErr, test.claimErr) {
+						t.Fatalf("acknowledged admission = %+v, %v; want acquired claim and original postcommit error", admission, err)
+					}
+					if continuation.consumes.Load() != 1 || continuation.returns.Load() != 0 {
+						t.Fatalf("acknowledged carrier consume/return = %d/%d, want 1/0", continuation.consumes.Load(), continuation.returns.Load())
+					}
+				} else {
+					if err == nil || (test.claimErr != nil && !errors.Is(err, test.claimErr)) || admission.claim.Validate() == nil {
+						t.Fatalf("unacknowledged admission = %+v, %v; want no claim and original failure", admission, err)
+					}
+					if continuation.consumes.Load() != 0 || continuation.returns.Load() != 1 {
+						t.Fatalf("unacknowledged carrier consume/return = %d/%d, want 0/1", continuation.consumes.Load(), continuation.returns.Load())
+					}
+				}
+			})
+		}
 	}
 }

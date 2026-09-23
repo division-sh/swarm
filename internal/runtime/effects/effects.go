@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -256,22 +257,24 @@ type AuthorizeRequest struct {
 }
 
 type Attempt struct {
-	OperationID         string
-	AttemptID           string
-	Token               LifecycleToken
-	Authority           Authority
-	Kind                Kind
-	Class               EffectClass
-	Adapter             string
-	Transport           string
-	Ordinal             int
-	AuthorizedAt        time.Time
-	Origin              CompletionOrigin
-	completionRequest   []byte
-	completionPayload   json.RawMessage
-	completionSurface   *managedcapabilities.Surface
-	completionPhase     CompletionProjectionPhase
-	completionSuccessor *agentframe.ToolContinuation
+	OperationID string
+	AttemptID   string
+	// AuthorizationAcknowledged is set only after the authorization commit is acknowledged.
+	AuthorizationAcknowledged bool `json:"-"`
+	Token                     LifecycleToken
+	Authority                 Authority
+	Kind                      Kind
+	Class                     EffectClass
+	Adapter                   string
+	Transport                 string
+	Ordinal                   int
+	AuthorizedAt              time.Time
+	Origin                    CompletionOrigin
+	completionRequest         []byte
+	completionPayload         json.RawMessage
+	completionSurface         *managedcapabilities.Surface
+	completionPhase           CompletionProjectionPhase
+	completionSuccessor       *agentframe.ToolContinuation
 }
 
 type CompletionProjectionPhase string
@@ -656,6 +659,124 @@ type Handle struct {
 	differentOwner DifferentOwner
 }
 
+type MutationPhase uint8
+
+const (
+	MutationAuthorization MutationPhase = iota + 1
+	MutationLaunch
+	MutationObservation
+	MutationSettlement
+	MutationHeartbeat
+	MutationProjection
+)
+
+func (p MutationPhase) String() string {
+	switch p {
+	case MutationAuthorization:
+		return "authorization"
+	case MutationLaunch:
+		return "launch"
+	case MutationObservation:
+		return "observation"
+	case MutationSettlement:
+		return "settlement"
+	case MutationHeartbeat:
+		return "heartbeat"
+	case MutationProjection:
+		return "projection"
+	default:
+		return "invalid"
+	}
+}
+
+// PostCommitMutationError preserves the committed phase and attempt identity
+// when native COMMIT succeeded but cleanup or follow-up failed.
+type PostCommitMutationError struct {
+	Phase       MutationPhase
+	OperationID string
+	AttemptID   string
+	Cause       error
+}
+
+func (e *PostCommitMutationError) Error() string {
+	if e == nil {
+		return "external-effect post-commit error"
+	}
+	return fmt.Sprintf("external-effect %s committed for attempt %s; post-commit cleanup failed", e.Phase.String(), e.AttemptID)
+}
+
+func (e *PostCommitMutationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func NewPostCommitMutationError(phase MutationPhase, attempt Attempt, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	return &PostCommitMutationError{Phase: phase, OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Cause: cause}
+}
+
+func CommittedMutationPhase(err error, phase MutationPhase, attempt Attempt) bool {
+	if attempt.OperationID == "" || attempt.AttemptID == "" || err == nil {
+		return false
+	}
+	if committed, ok := err.(*PostCommitMutationError); ok {
+		return committed.Phase == phase && committed.OperationID == attempt.OperationID && committed.AttemptID == attempt.AttemptID
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return CommittedMutationPhase(wrapped.Unwrap(), phase, attempt)
+	}
+	return false
+}
+
+func visitPostCommitMutations(err error, visit func(*PostCommitMutationError)) {
+	if err == nil {
+		return
+	}
+	if committed, ok := err.(*PostCommitMutationError); ok {
+		visit(committed)
+		return
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, cause := range joined.Unwrap() {
+			visitPostCommitMutations(cause, visit)
+		}
+		return
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		visitPostCommitMutations(wrapped.Unwrap(), visit)
+	}
+}
+
+func reportPostCommitMutation(err error) error {
+	visitPostCommitMutations(err, func(committed *PostCommitMutationError) {
+		cause := "unknown post-commit failure"
+		if committed.Cause != nil {
+			cause = committed.Cause.Error()
+		}
+		diaglog.ProcessLog(diaglog.LevelWarn, "external-effects", "committed effect mutation cleanup failed",
+			"phase", committed.Phase.String(), "operation_id", committed.OperationID,
+			"attempt_id", committed.AttemptID, "error", cause)
+	})
+	return err
+}
+
+func authorizedHandle(controller *Controller, attempt Attempt, err error) (*Handle, error) {
+	if !attempt.AuthorizationAcknowledged {
+		if err == nil {
+			err = runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "external_effect_authorization_acknowledgment_missing", "external-effects", "authorize_attempt", map[string]any{"operation_id": attempt.OperationID})
+		}
+		return nil, err
+	}
+	if err != nil {
+		return nil, reportPostCommitMutation(NewPostCommitMutationError(MutationAuthorization, attempt, err))
+	}
+	return &Handle{controller: controller, attempt: attempt}, nil
+}
+
 func Begin(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
@@ -684,10 +805,7 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 			return nil, err
 		}
 		attempt, err := controller.Authorize(ctx, AuthorizeRequest{OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), CapabilitySurface: &surface, Lineage: lineage})
-		if err != nil {
-			return nil, err
-		}
-		return &Handle{controller: controller, attempt: attempt}, nil
+		return authorizedHandle(controller, attempt, err)
 	}
 	if !hasToken {
 		if hasDifferentOwner {
@@ -715,10 +833,7 @@ func Begin(ctx context.Context, adapter string, request []byte, lineage map[stri
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: fingerprint, CapabilitySurface: &surface, Lineage: lineage,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &Handle{controller: controller, attempt: attempt}, nil
+	return authorizedHandle(controller, attempt, err)
 }
 
 // BeginServeRegistration authorizes one provider callback-registration write.
@@ -747,10 +862,7 @@ func BeginServeRegistration(ctx context.Context, request []byte, lineage map[str
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &Handle{controller: controller, attempt: attempt}, nil
+	return authorizedHandle(controller, attempt, err)
 }
 
 // BeginChannelConfirmation authorizes one operator-origin channel delivery.
@@ -775,10 +887,7 @@ func BeginChannelConfirmation(ctx context.Context, request []byte, lineage map[s
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &Handle{controller: controller, attempt: attempt}, nil
+	return authorizedHandle(controller, attempt, err)
 }
 
 func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (managedcapabilities.Surface, error) {
@@ -884,10 +993,7 @@ func beginCompletion(ctx context.Context, adapter string, request []byte, frame 
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
 		CapabilitySurface: capabilitySurface, AgentFrame: frame, Origin: origin, Lineage: lineage,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &Handle{controller: controller, attempt: attempt}, nil
+	return authorizedHandle(controller, attempt, err)
 }
 
 func BeginStartupProbe(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
@@ -913,10 +1019,7 @@ func BeginStartupProbe(ctx context.Context, adapter string, request []byte, line
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
 		CapabilitySurface: &cloned, Lineage: lineage,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &Handle{controller: controller, attempt: attempt}, nil
+	return authorizedHandle(controller, attempt, err)
 }
 
 func admitExecutionMode(ctx context.Context, adapter string) error {
@@ -1016,7 +1119,7 @@ func (h *Handle) MarkLaunched(ctx context.Context) error {
 	if _, continuation := h.attempt.CompletionContinuation(); continuation {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_dispatch_forbidden", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	return h.controller.MarkLaunched(ctx, h.attempt)
+	return reportPostCommitMutation(h.controller.MarkLaunched(ctx, h.attempt))
 }
 
 func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
@@ -1033,7 +1136,7 @@ func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
 	if store == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_heartbeat_store_missing", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	return store.HeartbeatCompletionAttempt(ctx, h.attempt, time.Now().UTC(), lease)
+	return reportPostCommitMutation(store.HeartbeatCompletionAttempt(ctx, h.attempt, time.Now().UTC(), lease))
 }
 
 func (h *Handle) MarkResponseObserved(ctx context.Context, evidence map[string]any) error {
@@ -1046,7 +1149,7 @@ func (h *Handle) MarkResponseObserved(ctx context.Context, evidence map[string]a
 	if _, continuation := h.attempt.CompletionContinuation(); continuation {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_observation_forbidden", "external-effects", "observe_response", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	return h.controller.MarkResponseObserved(ctx, h.attempt, evidence)
+	return reportPostCommitMutation(h.controller.MarkResponseObserved(ctx, h.attempt, evidence))
 }
 
 func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailures.Envelope, evidence map[string]any) error {
@@ -1059,11 +1162,11 @@ func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailur
 	if _, continuation := h.attempt.CompletionContinuation(); continuation {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_settlement_forbidden", "external-effects", "settle_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	return h.controller.Settle(ctx, Settlement{
+	return reportPostCommitMutation(h.controller.Settle(ctx, Settlement{
 		OperationID: h.attempt.OperationID, AttemptID: h.attempt.AttemptID,
 		Authority: h.attempt.Authority,
 		State:     state, Failure: failure, Evidence: evidence,
-	})
+	}))
 }
 
 func (h *Handle) Succeed(ctx context.Context, evidence map[string]any) error {
@@ -1116,21 +1219,21 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	if result.Committed && result.continuation != nil {
 		h.attempt = *result.continuation
 	}
-	return result, err
+	return result, reportPostCommitMutation(err)
 }
 
 func (h *Handle) ProjectCompletionConversation(ctx context.Context, projection CompletionConversationProjection) error {
 	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "project_completion", nil)
 	}
-	return h.controller.completionContinuationStore.ProjectCompletionConversation(context.WithoutCancel(ctx), h.attempt, projection)
+	return reportPostCommitMutation(h.controller.completionContinuationStore.ProjectCompletionConversation(context.WithoutCancel(ctx), h.attempt, projection))
 }
 
 func (h *Handle) ConsumeCompletionResponse(ctx context.Context, successor *agentframe.ToolContinuation) error {
 	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "consume_completion", nil)
 	}
-	return h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt, successor)
+	return reportPostCommitMutation(h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt, successor))
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {

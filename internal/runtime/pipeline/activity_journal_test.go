@@ -39,8 +39,9 @@ func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
 					if status != ActivityAttemptStatusSucceeded {
 						terminal.Failure, terminal.ResultEventType = &failure, intent.FailureEvent
 					}
-					terminal, err = store.CompleteActivityAttempt(ctx, terminal)
-					if err != nil {
+					var committed bool
+					terminal, committed, err = store.CompleteActivityAttempt(ctx, terminal)
+					if err != nil || !committed {
 						t.Fatal(err)
 					}
 					var beforeCount, beforeHead int64
@@ -54,14 +55,14 @@ func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
 					if err != nil || inserted || !reflect.DeepEqual(again, terminal) {
 						t.Fatalf("duplicate start: %v inserted=%v", err, inserted)
 					}
-					again, err = store.CompleteActivityAttempt(ctx, terminal)
-					if err != nil || !reflect.DeepEqual(again, terminal) {
+					again, committed, err = store.CompleteActivityAttempt(ctx, terminal)
+					if err != nil || !committed || !reflect.DeepEqual(again, terminal) {
 						t.Fatalf("duplicate completion: %v", err)
 					}
 					uncertain := terminal
 					uncertain.Failure, uncertain.ResultEventType = &failure, intent.FailureEvent
-					again, err = store.MarkActivityAttemptUncertain(ctx, uncertain)
-					if err != nil || !reflect.DeepEqual(again, terminal) {
+					again, committed, err = store.MarkActivityAttemptUncertain(ctx, uncertain)
+					if err != nil || !committed || !reflect.DeepEqual(again, terminal) {
 						t.Fatalf("terminal uncertainty: %v", err)
 					}
 					var afterCount, afterHead int64
@@ -141,11 +142,11 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 			terminal := started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, nil)
 			conflictingTerminal := terminal
 			conflictingTerminal.ExecutionMode = executionmode.Mock
-			if _, err := journal.CompleteActivityAttempt(ctx, conflictingTerminal); err == nil {
+			if _, _, err := journal.CompleteActivityAttempt(ctx, conflictingTerminal); err == nil {
 				t.Fatal("cross-mode terminal transition was accepted")
 			}
-			completed, err := journal.CompleteActivityAttempt(ctx, terminal)
-			if err != nil {
+			completed, committed, err := journal.CompleteActivityAttempt(ctx, terminal)
+			if err != nil || !committed {
 				t.Fatalf("CompleteActivityAttempt: %v", err)
 			}
 			if completed.Status != ActivityAttemptStatusSucceeded || completed.ResultEventID == "" {

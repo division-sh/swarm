@@ -2,7 +2,6 @@ package pipelinepersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"reflect"
 	"sort"
@@ -11,9 +10,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func requireFanOutPublicationGroup(admission FanOutAdmission, group *publicationGroup, command pipeline.FanOutChunkCommand) error {
@@ -121,24 +117,4 @@ func (g *publicationGroup) lockAttempt(command pipeline.FanOutChunkCommand) (fun
 		}
 	}
 	return unlock, nil
-}
-
-func (g *publicationGroup) runPostgresPublication(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) (bool, error) {
-	if err := g.postgres.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	return postgresbackend.RunAuthorityTransactionOutcome(ctx, g.session, func(ctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(ctx, tx, story); err != nil {
-			return err
-		}
-		if err := story.Finalize(ctx); err != nil {
-			return err
-		}
-		_, err = privaterunforkrevision.FinalizePostgres(ctx, tx, effects)
-		return err
-	})
 }

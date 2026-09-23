@@ -879,18 +879,14 @@ func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, own
 		return WorkflowInitialMaterializationUnknown, err
 	}
 	committed, err := s.initialCommits.CommitWorkflowInitialMaterialization(ctx, WorkflowInitialMaterializationCommand{Record: record, Lifecycle: lifecycle})
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
+	if !committed.Committed {
+		return WorkflowInitialMaterializationUnknown, errors.Join(err, fmt.Errorf("workflow initial materialization has no acknowledged result"))
 	}
-	if err := committed.Validate(); err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
+	validationErr := committed.Validate()
 	if committed.Result == WorkflowInitialMaterializationCreated {
-		if err := s.finalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
-			return WorkflowInitialMaterializationUnknown, err
-		}
+		err = errors.Join(err, s.finalizeInitialEntryLifecycle(context.WithoutCancel(ctx), committed.Lifecycle))
 	}
-	return committed.Result, nil
+	return committed.Result, errors.Join(err, validationErr)
 }
 
 func (s *workflowInstanceStore) prepareInitialEntryLifecycle(

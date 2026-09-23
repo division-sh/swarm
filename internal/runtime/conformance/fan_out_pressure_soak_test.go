@@ -381,9 +381,9 @@ func (o *pressureSoakOwner) BeginFanOutPublicationGroup(ctx context.Context, cla
 	return o.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
 }
 
-func (o *pressureSoakOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+func (o *pressureSoakOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {
 	started := time.Now()
-	err := o.FanOutObligationOwner.ReleaseFanOutClaim(ctx, claim)
+	settlement, err := o.FanOutObligationOwner.ReleaseFanOutClaim(ctx, claim)
 	if g := o.control.reservationGate; g != nil && o.timing.ReserveSequence == 1 {
 		select {
 		case g.cleanup <- pressureReservationCleanup{Claim: claim, Started: started, Returned: time.Now(), Err: err}:
@@ -391,7 +391,7 @@ func (o *pressureSoakOwner) ReleaseFanOutClaim(ctx context.Context, claim fanout
 		case <-ctx.Done():
 		}
 	}
-	return err
+	return settlement, err
 }
 
 func (o *pressureSoakOwner) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (out pipeline.CommittedFanOutChunk, err error) {

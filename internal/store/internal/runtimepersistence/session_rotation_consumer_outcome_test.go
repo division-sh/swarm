@@ -37,7 +37,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := store.Release(ctx, lease); err != nil {
+				if _, err := store.ReleaseOutcome(ctx, lease); err != nil {
 					t.Fatal(err)
 				}
 				oldID := lease.SessionID
@@ -136,7 +136,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				}
 				registration.Release()
 				if !prepared {
-					if err := store.Release(ctx, result); err != nil {
+					if _, err := store.ReleaseOutcome(ctx, result); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -147,7 +147,7 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				if current.SessionID != session.ID {
 					t.Fatalf("successor changed on reacquire: %+v session=%s", current, session.ID)
 				}
-				if err := store.Release(context.WithoutCancel(ctx), current); err != nil {
+				if _, err := store.ReleaseOutcome(context.WithoutCancel(ctx), current); err != nil {
 					t.Fatal(err)
 				}
 				t.Logf("real commits: sessions=%d rotation_handoffs=%d release_handoffs=%d total_handoffs=%d", count, rotationSubmits, releaseSubmits, submits)

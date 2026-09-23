@@ -94,7 +94,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if err != nil {
 		t.Fatalf("acquire active session: %v", err)
 	}
-	if err := store.Release(staleCtx, active); err != nil {
+	if _, err := store.ReleaseOutcome(staleCtx, active); err != nil {
 		t.Fatalf("release active session: %v", err)
 	}
 	suspendedID := uuid.NewString()

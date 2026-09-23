@@ -29,7 +29,7 @@ const genericScheduleConsumerTestBundleHash = sourceartifactfixture.BundleHash
 type genericScheduleLifecycleConsumerStore interface {
 	runtimegenericschedule.Store
 	ApplyActiveRunQuiescence(context.Context, runtimerunquiescence.Request) (runtimerunquiescence.Result, error)
-	StopRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
+	StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 }
 
 type recordingGenericScheduleReconciler struct {
@@ -97,15 +97,15 @@ func seedGenericScheduleTimerFamilies(
 		t, runID, "lifecycle-agent", "lifecycle/instance", uuid.NewString(), "lifecycle-generic",
 		runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
 	)
-	admitted, err := selected.AdmitGenericSchedule(ctx, command)
-	if err != nil {
-		t.Fatalf("admit generic schedule lifecycle fixture: %v", err)
+	admitted, err := selected.AdmitGenericScheduleOutcome(ctx, command)
+	if err != nil || !admitted.Acknowledged {
+		t.Fatalf("admit generic schedule lifecycle fixture: commit=%+v err=%v", admitted, err)
 	}
 	workflow := newWorkflowTimerDDLProofRow(runID)
 	if err := insertWorkflowTimerDDLProofRow(ctx, db, selected, workflow); err != nil {
 		t.Fatalf("insert workflow timer lifecycle fixture: %v", err)
 	}
-	return admitted.Activation, workflow
+	return admitted.Result.Activation, workflow
 }
 
 func authorGenericScheduleConsumerContext(runID string) context.Context {
@@ -187,13 +187,13 @@ func TestRunControlStopCancelsExactGenericAndWorkflowTimerFamiliesOnBothStores(t
 			runID := runtimecorrelation.RunIDFromContext(seedCtx)
 			ctx := authorGenericScheduleConsumerContext(runID)
 			generic, workflow := seedGenericScheduleTimerFamilies(t, selected, db, ctx)
-			state, err := selected.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+			state, err := selected.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 				RunID: runID, Reason: "test_stop", ControlledBy: "test", Now: time.Now().UTC(),
 			})
-			if err != nil {
+			if err != nil || !state.Acknowledged {
 				t.Fatalf("stop run control: %v", err)
 			}
-			assertGenericScheduleTimerFamilyCancellation(t, selected, db, ctx, generic, workflow, state.TimerCancellations)
+			assertGenericScheduleTimerFamilyCancellation(t, selected, db, ctx, generic, workflow, state.State.TimerCancellations)
 		})
 	}
 }

@@ -132,7 +132,7 @@ func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.D
 	if err != nil {
 		t.Fatalf("Acquire(%+v): %v", identity, err)
 	}
-	if err := registry.Release(ctx, lease); err != nil {
+	if _, err := registry.ReleaseOutcome(ctx, lease); err != nil {
 		t.Fatalf("Release(%s,%s): %v", identity.AgentID(), lease.SessionID, err)
 	}
 	return lease.SessionID
@@ -989,7 +989,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
-	if _, err := pg.AdmitGenericSchedule(ctx, runtimegenericschedule.AdmissionCommand{
+	if _, err := pg.AdmitGenericScheduleOutcome(ctx, runtimegenericschedule.AdmissionCommand{
 		ScheduleKey: "recover-me", OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime",
 		EventType: "timer.check", Payload: semanticvalue.EmptyObject(),
 		RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live,

@@ -3,27 +3,27 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type decisionCardMutationTxOwner interface {
-	LoadTx(context.Context, *sql.Tx, string, bool) (decisioncard.Card, error)
-	DecideTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error)
-	DeferTx(context.Context, runtimeauthoractivity.Mutation, *sql.Tx, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error)
-	BeginInputTx(context.Context, *sql.Tx, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error)
-	CancelInputTx(context.Context, *sql.Tx, decisioncard.CancelInputRequest) (decisioncard.InputDraft, error)
+	LoadTx(context.Context, *mutationprotocol.Attempt, string, bool) (decisioncard.Card, error)
+	DecideTx(context.Context, *mutationprotocol.Attempt, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error)
+	DeferTx(context.Context, *mutationprotocol.Attempt, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error)
+	BeginInputTx(context.Context, *mutationprotocol.Attempt, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error)
+	CancelInputTx(context.Context, *mutationprotocol.Attempt, decisioncard.CancelInputRequest) (decisioncard.InputDraft, error)
 }
 
 func commitDecisionCardOperation(
@@ -31,122 +31,123 @@ func commitDecisionCardOperation(
 	store eventCommitTxStore,
 	decisions decisionCardMutationTxOwner,
 	postgres bool,
-	effects *revisionEffects,
-	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedDecisionCardMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedDecisionCardMutation],
 	command runtimepipeline.DecisionCardMutationCommand,
 	storeCompletion func(context.Context, *sql.Tx, apiidempotency.Completion) error,
 ) (runtimepipeline.CommittedDecisionCardMutation, error) {
 	if err := command.Validate(); err != nil {
 		return runtimepipeline.CommittedDecisionCardMutation{}, err
 	}
-	result := runtimepipeline.CommittedDecisionCardMutation{Kind: command.Mutation.Kind()}
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		if err := admitDecisionCardAnchorTx(txctx, tx, decisions, command.Mutation, postgres); err != nil {
-			return err
-		}
-		var selected runtimeengine.DurablePublicationPlan
-		switch command.Mutation.Kind() {
-		case runtimepipeline.DecisionCardMutationDecide:
-			req, ok := command.Mutation.Decision()
-			if !ok {
-				return fmt.Errorf("decision-card decision request is missing")
-			}
-			outcome, err := decisions.DecideTx(txctx, runtimeAuthorActivityMutation(story), tx, req)
-			if err != nil {
+	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedDecisionCardMutation, error) {
+		result := runtimepipeline.CommittedDecisionCardMutation{Kind: command.Mutation.Kind()}
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := admitDecisionCardAnchorTx(txctx, tx, attempt, decisions, command.Mutation, postgres); err != nil {
 				return err
 			}
-			result.Outcome = outcome
-			txctx = runtimecorrelation.WithRunID(txctx, outcome.Card.RunID)
-			if outcome.ForcedDeferred {
-				if command.GateState != nil {
-					return fmt.Errorf("forced decision-card deferral cannot commit gate state")
+			var selected runtimeengine.DurablePublicationPlan
+			switch command.Mutation.Kind() {
+			case runtimepipeline.DecisionCardMutationDecide:
+				req, ok := command.Mutation.Decision()
+				if !ok {
+					return fmt.Errorf("decision-card decision request is missing")
 				}
-				selected = command.ForcedDeferralPublication
-				if selected == nil {
-					return fmt.Errorf("forced decision-card deferral requires its publication plan")
-				}
-			} else {
-				selected = command.Publication
-				if err := validateDecisionCardGateState(command.GateState, outcome.Card); err != nil {
+				outcome, err := decisions.DecideTx(txctx, attempt, req)
+				if err != nil {
 					return err
 				}
-				if command.GateState != nil {
-					if err := commitDecisionCardGateState(txctx, tx, story, store, postgres, effects, *command.GateState); err != nil {
+				result.Outcome = outcome
+				txctx = runtimecorrelation.WithRunID(txctx, outcome.Card.RunID)
+				if outcome.ForcedDeferred {
+					if command.GateState != nil {
+						return fmt.Errorf("forced decision-card deferral cannot commit gate state")
+					}
+					selected = command.ForcedDeferralPublication
+					if selected == nil {
+						return fmt.Errorf("forced decision-card deferral requires its publication plan")
+					}
+				} else {
+					selected = command.Publication
+					if err := validateDecisionCardGateState(command.GateState, outcome.Card); err != nil {
 						return err
 					}
+					if command.GateState != nil {
+						if err := commitDecisionCardGateState(txctx, tx, attempt, store, postgres, *command.GateState); err != nil {
+							return err
+						}
+					}
 				}
+			case runtimepipeline.DecisionCardMutationDefer:
+				req, ok := command.Mutation.Deferral()
+				if !ok {
+					return fmt.Errorf("decision-card deferral request is missing")
+				}
+				outcome, err := decisions.DeferTx(txctx, attempt, req)
+				if err != nil {
+					return err
+				}
+				result.Outcome = outcome
+				txctx = runtimecorrelation.WithRunID(txctx, outcome.Card.RunID)
+				selected = command.Publication
+			case runtimepipeline.DecisionCardMutationBeginInput:
+				req, _, ok := command.Mutation.InputBegin()
+				if !ok {
+					return fmt.Errorf("decision-card input request is missing")
+				}
+				draft, err := decisions.BeginInputTx(txctx, attempt, req)
+				if err != nil {
+					return err
+				}
+				result.Draft = draft
+			case runtimepipeline.DecisionCardMutationCancelInput:
+				req, ok := command.Mutation.InputCancellation()
+				if !ok {
+					return fmt.Errorf("decision-card input cancellation is missing")
+				}
+				draft, err := decisions.CancelInputTx(txctx, attempt, req)
+				if err != nil {
+					return err
+				}
+				result.Draft = draft
+			default:
+				return fmt.Errorf("decision-card mutation kind is required")
 			}
-		case runtimepipeline.DecisionCardMutationDefer:
-			req, ok := command.Mutation.Deferral()
-			if !ok {
-				return fmt.Errorf("decision-card deferral request is missing")
+			if selected != nil {
+				plan, ok := selected.(runtimebus.EnginePublicationPlan)
+				if !ok {
+					return fmt.Errorf("decision-card publication has unexpected type %T", selected)
+				}
+				committed, err := store.commitPublicationTx(txctx, attempt, plan.PublicationCommand())
+				if err != nil {
+					return err
+				}
+				evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+				if err != nil {
+					return err
+				}
+				result.Publication = evidence
+				result.HasPublication = true
 			}
-			outcome, err := decisions.DeferTx(txctx, runtimeAuthorActivityMutation(story), tx, req)
+			completion, err := result.ProjectCompletion()
 			if err != nil {
 				return err
 			}
-			result.Outcome = outcome
-			txctx = runtimecorrelation.WithRunID(txctx, outcome.Card.RunID)
-			selected = command.Publication
-		case runtimepipeline.DecisionCardMutationBeginInput:
-			req, _, ok := command.Mutation.InputBegin()
-			if !ok {
-				return fmt.Errorf("decision-card input request is missing")
-			}
-			draft, err := decisions.BeginInputTx(txctx, tx, req)
-			if err != nil {
+			if err := storeCompletion(txctx, tx, completion); err != nil {
 				return err
 			}
-			result.Draft = draft
-		case runtimepipeline.DecisionCardMutationCancelInput:
-			req, ok := command.Mutation.InputCancellation()
-			if !ok {
-				return fmt.Errorf("decision-card input cancellation is missing")
-			}
-			draft, err := decisions.CancelInputTx(txctx, tx, req)
-			if err != nil {
-				return err
-			}
-			result.Draft = draft
-		default:
-			return fmt.Errorf("decision-card mutation kind is required")
-		}
-		if selected != nil {
-			plan, ok := selected.(runtimebus.EnginePublicationPlan)
-			if !ok {
-				return fmt.Errorf("decision-card publication has unexpected type %T", selected)
-			}
-			committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), nil)
-			if err != nil {
-				return err
-			}
-			evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
-			if err != nil {
-				return err
-			}
-			result.Publication = evidence
-			result.HasPublication = true
-		}
-		completion, err := result.ProjectCompletion()
-		if err != nil {
-			return err
-		}
-		if err := storeCompletion(txctx, tx, completion); err != nil {
-			return err
-		}
-		result.Completion = completion
-		return nil
+			result.Completion = completion
+			return nil
+		})
+		return result, err
 	})
-	if err != nil {
-		return runtimepipeline.CommittedDecisionCardMutation{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimepipeline.CommittedDecisionCardMutation{}, outcome.Err()
 	}
-	if err := result.Validate(); err != nil {
-		return runtimepipeline.CommittedDecisionCardMutation{}, err
-	}
-	return result, nil
+	result.Acknowledged = true
+	return result, errors.Join(outcome.Err(), result.Validate())
 }
 
-func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, decisions decisionCardMutationTxOwner, mutation runtimepipeline.DecisionCardMutation, postgres bool) error {
+func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, decisions decisionCardMutationTxOwner, mutation runtimepipeline.DecisionCardMutation, postgres bool) error {
 	var cardID string
 	switch mutation.Kind() {
 	case runtimepipeline.DecisionCardMutationDecide:
@@ -165,7 +166,7 @@ func admitDecisionCardAnchorTx(ctx context.Context, tx *sql.Tx, decisions decisi
 	}
 	// The run/source fence is already held. Read immutable card identity, then
 	// lock the workflow anchor before the card mutation takes its row lock.
-	card, err := decisions.LoadTx(ctx, tx, cardID, false)
+	card, err := decisions.LoadTx(ctx, attempt, cardID, false)
 	if err != nil {
 		return err
 	}
@@ -227,24 +228,23 @@ func validateDecisionCardGateState(state *runtimepipeline.WorkflowEngineStateRec
 func commitDecisionCardGateState(
 	ctx context.Context,
 	tx *sql.Tx,
-	story *privateauthoractivity.Mutation,
+	attempt *mutationprotocol.Attempt,
 	store eventCommitTxStore,
 	postgres bool,
-	effects *revisionEffects,
 	record runtimepipeline.WorkflowEngineStateRecord,
 ) error {
 	before, err := loadWorkflowEngineStateProjection(ctx, tx, postgres, record)
 	if err != nil {
 		return err
 	}
-	if err := commitWorkflowEngineState(ctx, tx, postgres, effects, record); err != nil {
+	if err := commitWorkflowEngineState(ctx, attempt, postgres, record); err != nil {
 		return err
 	}
-	before, err = commitWorkflowEngineInitialValues(ctx, tx, story, store, postgres, effects, record, before)
+	before, err = commitWorkflowEngineInitialValues(ctx, attempt, store, postgres, record, before)
 	if err != nil {
 		return err
 	}
-	return commitWorkflowEngineMutationLog(ctx, tx, story, store, postgres, effects, record, before)
+	return commitWorkflowEngineMutationLog(ctx, attempt, store, postgres, record, before)
 }
 
 var _ runtimepipeline.DecisionCardMutationOwner = (*PipelinePostgresOwner)(nil)

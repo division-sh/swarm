@@ -298,14 +298,14 @@ func (s *targetRouteMemoryStore) LoadPreparedPublishEvent(_ context.Context, eve
 	return PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, true, nil
 }
 
-func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
+func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
 	if err := validateFlowInstanceRouteTopology(sets); err != nil {
-		return err
+		return FlowInstanceRouteTopologyResult{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.replaceFlowInstanceRouteTopologyLocked(sets)
-	return nil
+	return FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (s *targetRouteMemoryStore) replaceFlowInstanceRouteTopologyLocked(sets []FlowInstanceRouteRecordSet) {
@@ -487,8 +487,8 @@ func (s *targetRouteMemoryStore) claimPipelineWork(eventID string, purpose runti
 	return runtimepipelineobligation.ClaimedWork{Event: evt, Scope: scope, Claim: claim}, nil
 }
 
-func (s *targetRouteMemoryStore) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) error {
-	return runtimepipelineobligation.ErrIneligible
+func (s *targetRouteMemoryStore) MarkDecisionProcessed(context.Context, runtimepipelineobligation.Claim) (runtimepipelineobligation.SettlementOutcome, error) {
+	return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrIneligible
 }
 
 func (s *targetRouteMemoryStore) Settle(_ context.Context, claim runtimepipelineobligation.Claim, disposition runtimepipelineobligation.Disposition) (runtimepipelineobligation.SettlementOutcome, error) {

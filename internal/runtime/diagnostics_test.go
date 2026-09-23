@@ -26,7 +26,6 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -92,16 +91,22 @@ func (s runtimeLogPersistenceStub) PersistRuntimeLog(ctx context.Context, record
 	), record.ExecutionMode)
 	runID := strings.TrimSpace(record.RunID)
 	if runID == "" {
-		return eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectPostgres, constructed)
+		return eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectPostgres, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+			return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectPostgres, constructed)
+		}).Err()
 	}
-	return runRuntimeLogStoryForTest(ctx, s.db, func(storyctx context.Context, tx *sql.Tx) error {
-		if err := ensureRuntimeLogRunRowInStoryForTest(storyctx, tx, runID); err != nil {
+	return runRuntimeLogStoryForTest(ctx, s.db, func(storyctx context.Context, attempt *eventfixture.Attempt) error {
+		if err := attempt.WithSQL(storyctx, func(ctx context.Context, tx *sql.Tx) error {
+			return ensureRuntimeLogRunRowInStoryForTest(ctx, tx, runID)
+		}); err != nil {
 			return err
 		}
-		if err := eventfixture.Insert(storyctx, tx, authoractivityfixture.DialectPostgres, constructed); err != nil {
+		if err := eventfixture.Insert(storyctx, attempt, authoractivityfixture.DialectPostgres, constructed); err != nil {
 			return err
 		}
-		return syncRuntimeLogRunCountsForTest(storyctx, tx, runID)
+		return attempt.WithSQL(storyctx, func(ctx context.Context, tx *sql.Tx) error {
+			return syncRuntimeLogRunCountsForTest(ctx, tx, runID)
+		})
 	})
 }
 
@@ -863,11 +868,13 @@ func TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent(t *testing.T)
 	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
 		t.Fatalf("ensure run row: %v", err)
 	}
-	if err := eventfixture.Insert(ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedChildForProducer(
-		subjectEventID, events.EventType("validation/validation.package_ready"),
-		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
-		"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
-	)); err != nil {
+	if err := eventfixture.RunMutation(ctx, db, authoractivityfixture.DialectPostgres, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectPostgres, eventtest.PersistedChildForProducer(
+			subjectEventID, events.EventType("validation/validation.package_ready"),
+			eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
+			"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+		))
+	}).Err(); err != nil {
 		t.Fatalf("seed subject event: %v", err)
 	}
 
@@ -951,11 +958,13 @@ func TestRuntimeLogger_Log_PersistsTypedRuntimeLineage(t *testing.T) {
 	if err := ensureRuntimeLogRunRowForTest(ctx, db, runID); err != nil {
 		t.Fatalf("ensure run row: %v", err)
 	}
-	if err := eventfixture.Insert(ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedChildForProducer(
-		subjectEventID, events.EventType("validation/validation.package_ready"),
-		eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
-		"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
-	)); err != nil {
+	if err := eventfixture.RunMutation(ctx, db, authoractivityfixture.DialectPostgres, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		return eventfixture.Insert(ctx, attempt, authoractivityfixture.DialectPostgres, eventtest.PersistedChildForProducer(
+			subjectEventID, events.EventType("validation/validation.package_ready"),
+			eventtest.Producer(events.EventProducerAgent, "runtime.run_fork.selected_contract_execution"),
+			"", []byte(`{}`), 0, runID, eventtest.UUID("diagnostic-subject-parent:"+subjectEventID), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
+		))
+	}).Err(); err != nil {
 		t.Fatalf("seed subject event: %v", err)
 	}
 
@@ -1075,21 +1084,21 @@ func countRuntimeLogRowsForRun(t *testing.T, db *sql.DB, runID string) int {
 }
 
 func ensureRuntimeLogRunRowForTest(ctx context.Context, db *sql.DB, runID string) error {
-	return runRuntimeLogStoryForTest(ctx, db, func(storyctx context.Context, tx *sql.Tx) error {
-		return ensureRuntimeLogRunRowInStoryForTest(storyctx, tx, runID)
+	return runRuntimeLogStoryForTest(ctx, db, func(storyctx context.Context, attempt *eventfixture.Attempt) error {
+		return attempt.WithSQL(storyctx, func(ctx context.Context, tx *sql.Tx) error {
+			return ensureRuntimeLogRunRowInStoryForTest(ctx, tx, runID)
+		})
 	})
 }
 
-func runRuntimeLogStoryForTest(ctx context.Context, db *sql.DB, fn func(context.Context, *sql.Tx) error) error {
+func runRuntimeLogStoryForTest(ctx context.Context, db *sql.DB, fn func(context.Context, *eventfixture.Attempt) error) error {
 	if db == nil {
 		return nil
 	}
-	return runlifecyclefixture.RunPostgresMutation(ctx, db, func(txctx context.Context, tx *sql.Tx, _ runlifecyclefixture.ActiveRunSourceOwner) error {
-		return fn(runtimepipelinefixture.WithSQLTx(txctx, tx), tx)
-	})
+	return eventfixture.RunMutation(ctx, db, authoractivityfixture.DialectPostgres, fn).Err()
 }
 
-func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, rawTx any, runID string) error {
+func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, tx *sql.Tx, runID string) error {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return nil
@@ -1104,8 +1113,7 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, rawTx any, runID 
 	if err := source.Validate(); err != nil {
 		return err
 	}
-	tx, ok := rawTx.(*sql.Tx)
-	if !ok || tx == nil {
+	if tx == nil {
 		return errors.New("runtime log run fixture requires transaction")
 	}
 	_, err := runlifecyclefixture.PostgresCreateRunInMutation(ctx, tx, storerunlifecycle.CreateRequest{
@@ -1117,9 +1125,8 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, rawTx any, runID 
 	return err
 }
 
-func syncRuntimeLogRunCountsForTest(ctx context.Context, rawTx any, runID string) error {
-	tx, ok := rawTx.(*sql.Tx)
-	if !ok || tx == nil {
+func syncRuntimeLogRunCountsForTest(ctx context.Context, tx *sql.Tx, runID string) error {
+	if tx == nil {
 		return errors.New("runtime log counter fixture requires transaction")
 	}
 	return runlifecyclefixture.PostgresSyncCountersInMutation(ctx, tx, runID)

@@ -239,7 +239,7 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 	if err != nil {
 		return nil, err
 	}
-	if err := attempt.MarkLaunched(ctx); err != nil {
+	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return nil, err
 	}
 	resp, err := e.httpClient.Do(req)

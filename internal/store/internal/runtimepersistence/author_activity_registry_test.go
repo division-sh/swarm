@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"sort"
 	"strings"
 	"testing"
@@ -19,9 +18,11 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -165,6 +166,10 @@ func (r dynamicAuthoredEventDescriptorResolver) AuthorActivityEventCatalogRegist
 
 func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *testing.T) {
 	db := openAuthorActivityAdapterDB(t)
+	backend, err := sqlitebackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
 	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v2:sha256:"+strings.Repeat("d", 64))
 	registry := runtimeauthoractivity.NewEventCatalogRegistry()
 	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "static.event", Disposition: runtimeauthoractivity.StoryDifferent}})
@@ -185,25 +190,14 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	)
 
-	tx, err := db.BeginTx(base, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	story, err := privateauthoractivity.Begin(base, tx, privateauthoractivity.DialectSQLite)
-	if err != nil {
-		t.Fatal(err)
-	}
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storeactivityjournal.RecordPersistedEvent(base, story, resolver, admitted, "sender", "agent"); err != nil {
-		t.Fatal(err)
-	}
-	if err := story.Finalize(base); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
+	result := mutationprotocol.RunSQLite(base, backend, "dynamic event descriptor", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, storeactivityjournal.RecordPersistedEvent(ctx, attempt, resolver, admitted, "sender", "agent")
+	})
+	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
 	page, err := authoractivityadapter.List(base, db, authoractivityadapter.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
@@ -215,14 +209,6 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	}
 
 	lease.Release()
-	tx, err = db.BeginTx(base, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	story, err = privateauthoractivity.Begin(base, tx, privateauthoractivity.DialectSQLite)
-	if err != nil {
-		t.Fatal(err)
-	}
 	stale := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"stale"}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 1, 0, time.UTC),
@@ -231,10 +217,12 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storeactivityjournal.RecordPersistedEvent(base, story, resolver, staleAdmitted, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
+	result = mutationprotocol.RunSQLite(base, backend, "stale dynamic event descriptor", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, storeactivityjournal.RecordPersistedEvent(ctx, attempt, resolver, staleAdmitted, "sender", "agent")
+	})
+	if err := result.Err(); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
 		t.Fatalf("stale lease error = %v", err)
 	}
-	_ = tx.Rollback()
 }
 
 func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T) {
@@ -267,20 +255,15 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 
 func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	db := openAuthorActivityAdapterDB(t)
+	backend, err := sqlitebackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), uuid.NewString())
 	ctx = runtimecorrelation.WithSourceArtifactFact(
 		ctx,
 		mustStoreTestSourceArtifactFact("bundle-v2:sha256:"+strings.Repeat("a", 64)),
 	)
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	event := eventtest.PersistedProjection(
 		uuid.NewString(), events.EventType("phrase.completed"), "phrase-completer", "", []byte(`{}`), 0,
@@ -288,34 +271,25 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	)
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{})
 	if err != nil {
-		_ = tx.Rollback()
 		t.Fatal(err)
 	}
 	draft, ok, err := storeactivityjournal.PersistedEventDraft(ctx, authoredEventOutputClassifier{}, admitted, "phrase-completer", "agent")
 	if err != nil {
-		_ = tx.Rollback()
 		t.Fatal(err)
 	}
 	if !ok {
-		_ = tx.Rollback()
 		t.Fatal("event author activity draft was not projected")
 	}
-	if err := story.Record(ctx, draft); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := recordExternalEffectStory(ctx, story, externalEffectStorySource{
-		AttemptID: uuid.NewString(), Kind: "provider_turn", Class: "provider_call", Adapter: "anthropic_api",
-		Transport: "https", AuthorityKind: "normal_agent", AuthorityID: "normalizer", AgentID: "normalizer", Ordinal: 1,
-	}, runtimeeffects.StateLaunched, nil, now.Add(time.Second)); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := story.Finalize(ctx); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
+	result := mutationprotocol.RunSQLite(ctx, backend, "event and effect author activity", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		if err := attempt.Record(txctx, draft); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, recordExternalEffectStory(txctx, attempt, externalEffectStorySource{
+			AttemptID: uuid.NewString(), Kind: "provider_turn", Class: "provider_call", Adapter: "anthropic_api",
+			Transport: "https", AuthorityKind: "normal_agent", AuthorityID: "normalizer", AgentID: "normalizer", Ordinal: 1,
+		}, runtimeeffects.StateLaunched, nil, now.Add(time.Second))
+	})
+	if err := result.Err(); err != nil {
 		t.Fatal(err)
 	}
 

@@ -14,7 +14,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 type flowInstanceDescriptorQueryer interface {
@@ -30,17 +30,31 @@ type flowInstanceRouteExecutor interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-type flowInstanceRouteDatabase interface {
-	RunTransaction(context.Context, func(context.Context, *sql.Tx) error) error
+func runPostgresFlowInstanceRouteMutation(ctx context.Context, owner *PipelinePostgresOwner, runID string, fn func(context.Context, flowInstanceRouteExecutor) error) error {
+	return standalonePipelineMutationError(mutationprotocol.RunPostgres(ctx, owner.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
+			if err := requirePostgresRunActive(sqlCtx, tx, runID); err != nil {
+				return err
+			}
+			return fn(sqlCtx, tx)
+		})
+		return struct{}{}, err
+	}))
 }
 
-func runPostgresFlowInstanceRouteMutation(ctx context.Context, db flowInstanceRouteDatabase, runID string, fn func(context.Context, flowInstanceRouteExecutor) error) error {
-	return db.RunTransaction(ctx, func(sqlCtx context.Context, tx *sql.Tx) error {
-		if err := requirePostgresRunActive(sqlCtx, tx, runID); err != nil {
-			return err
-		}
-		return fn(sqlCtx, tx)
-	})
+func (s *PipelineSQLiteOwner) runSQLiteFlowInstanceRouteMutation(ctx context.Context, label, runID string, fn func(context.Context, *sql.Tx) error) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return standalonePipelineMutationError(mutationprotocol.RunSQLite(ctx, s.backend, label, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
+				return err
+			}
+			return fn(txctx, tx)
+		})
+		return struct{}{}, err
+	}))
 }
 
 func (s *PipelinePostgresOwner) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
@@ -52,7 +66,7 @@ func (s *PipelinePostgresOwner) UpsertFlowInstanceRoute(ctx context.Context, rou
 	if err != nil {
 		return err
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, route.Identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s, route.Identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
 		return upsertPostgresFlowInstanceRoute(sqlCtx, exec, route)
 	})
 }
@@ -197,10 +211,7 @@ func (s *PipelineSQLiteOwner) UpsertFlowInstanceRoute(ctx context.Context, route
 	if err != nil {
 		return err
 	}
-	return s.runRuntimeMutation(ctx, "sqlite flow instance route upsert", newRevisionEffects(), func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireSQLiteRunActive(txctx, tx, route.Identity.RunID); err != nil {
-			return err
-		}
+	return s.runSQLiteFlowInstanceRouteMutation(ctx, "sqlite flow instance route upsert", route.Identity.RunID, func(txctx context.Context, tx *sql.Tx) error {
 		return upsertSQLiteFlowInstanceRoute(txctx, tx, route)
 	})
 }
@@ -365,7 +376,7 @@ func (s *PipelinePostgresOwner) ReplaceFlowInstanceRouteRecords(
 	if err != nil {
 		return err
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
 		if _, err := exec.ExecContext(sqlCtx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
@@ -400,10 +411,7 @@ func (s *PipelineSQLiteOwner) ReplaceFlowInstanceRouteRecords(
 	if err != nil {
 		return err
 	}
-	return s.runRuntimeMutation(ctx, "sqlite exact flow instance route replacement", newRevisionEffects(), func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
-			return err
-		}
+	return s.runSQLiteFlowInstanceRouteMutation(ctx, "sqlite exact flow instance route replacement", identity.RunID, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(txctx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
@@ -425,27 +433,43 @@ func (s *PipelineSQLiteOwner) ReplaceFlowInstanceRouteRecords(
 func (s *PipelinePostgresOwner) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
-) error {
+) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	if s == nil || s.backend == nil {
-		return fmt.Errorf("postgres store is required for flow-instance route topology")
+		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("postgres store is required for flow-instance route topology")
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, newRevisionEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		_, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, true, sets)
-		return err
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.FlowInstanceRouteTopologyResult{}, err
+	}
+	outcome := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			_, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, true, sets)
+			return err
+		})
+		return struct{}{}, err
 	})
+	_, acknowledged := outcome.Value()
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: acknowledged}, standalonePipelineMutationError(outcome)
 }
 
 func (s *PipelineSQLiteOwner) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
-) error {
+) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	if s == nil || s.backend == nil {
-		return fmt.Errorf("sqlite runtime store is required for flow-instance route topology")
+		return runtimebus.FlowInstanceRouteTopologyResult{}, fmt.Errorf("sqlite runtime store is required for flow-instance route topology")
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite flow-instance route topology replacement", newRevisionEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		_, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, false, sets)
-		return err
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimebus.FlowInstanceRouteTopologyResult{}, err
+	}
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite flow-instance route topology replacement", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			_, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, false, sets)
+			return err
+		})
+		return struct{}{}, err
 	})
+	_, acknowledged := outcome.Value()
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: acknowledged}, standalonePipelineMutationError(outcome)
 }
 
 func replaceFlowInstanceRouteTopologyTx(
@@ -593,7 +617,7 @@ func (s *PipelinePostgresOwner) DeleteFlowInstanceRoute(ctx context.Context, ide
 	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
 		var status string
 		err := exec.QueryRowContext(sqlCtx, `
 		SELECT status
@@ -630,10 +654,7 @@ func (s *PipelineSQLiteOwner) DeleteFlowInstanceRoute(ctx context.Context, ident
 	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return s.runRuntimeMutation(ctx, "sqlite flow instance route delete", newRevisionEffects(), func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
-			return err
-		}
+	return s.runSQLiteFlowInstanceRouteMutation(ctx, "sqlite flow instance route delete", identity.RunID, func(txctx context.Context, tx *sql.Tx) error {
 		var status string
 		err := tx.QueryRowContext(txctx, `SELECT status FROM flow_instances WHERE run_id = ? AND instance_path = ?`, identity.RunID, identity.Route.InstancePath).Scan(&status)
 		if err != nil {
@@ -663,7 +684,7 @@ func (s *PipelinePostgresOwner) RollbackFlowInstanceRoute(ctx context.Context, i
 	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return runPostgresFlowInstanceRouteMutation(ctx, s.backend, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
+	return runPostgresFlowInstanceRouteMutation(ctx, s, identity.RunID, func(sqlCtx context.Context, exec flowInstanceRouteExecutor) error {
 		if _, err := exec.ExecContext(sqlCtx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
@@ -685,10 +706,7 @@ func (s *PipelineSQLiteOwner) RollbackFlowInstanceRoute(ctx context.Context, ide
 	if err := identity.Validate(); err != nil {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	return s.runRuntimeMutation(ctx, "sqlite flow instance route rollback", newRevisionEffects(), func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
-			return err
-		}
+	return s.runSQLiteFlowInstanceRouteMutation(ctx, "sqlite flow instance route rollback", identity.RunID, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(txctx, `
 			UPDATE routing_rules SET status = 'inactive'
 			WHERE run_id = ? AND flow_instance = ? AND is_materialized = TRUE AND status = 'active'

@@ -26,6 +26,63 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/testsql/event.go":                                                                "named hostile rollback injection used only by tests",
 }
 
+const unrevisionedDeliveryFixturePath = "internal/store/storetest/event.go"
+
+var unrevisionedDeliveryFixtureSQL = map[string]struct{ scope, query string }{
+	"handoff": {
+		scope: "commitUnrevisionedSemanticEventFixture",
+		query: `UPDATE event_deliveries SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP) WHERE event_id = $1`,
+	},
+	"postgres": {
+		scope: "insertUnrevisionedDeliveryFixture",
+		query: `INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
+			agent_name_owner, agent_name_source, agent_route_presence,
+			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
+			delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
+			receiver_materialization_plan, execution_authority_kind, authority_bundle_hash,
+			execution_authority_id, execution_authority_generation,
+			status, retry_count, max_retries, next_eligible_at, claim_version, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12,
+			$13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
+			$17::jsonb, $18, $19, $20, $21,
+			'pending', 0, $22, $23, 0, $23, $23
+		) ON CONFLICT (event_id, route_identity) DO NOTHING`,
+	},
+	"sqlite": {
+		scope: "insertUnrevisionedDeliveryFixture",
+		query: `INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
+			agent_name_owner, agent_name_source, agent_route_presence,
+			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
+			delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
+			receiver_materialization_plan, execution_authority_kind, authority_bundle_hash,
+			execution_authority_id, execution_authority_generation,
+			status, retry_count, max_retries, next_eligible_at, claim_version, created_at, updated_at
+		) VALUES (
+			?1, ?2, ?3, ?4, ?5, ?6,
+			?7, ?8, ?9, ?10, ?11, ?12,
+			?13, ?14, ?15, ?16,
+			?17, ?18, ?19, ?20, ?21,
+			'pending', 0, ?22, ?23, 0, ?23, ?23
+		) ON CONFLICT(event_id, route_identity) DO NOTHING`,
+	},
+}
+
+func classifiedUnrevisionedDeliveryFixtureSQL(path, scope, query string) string {
+	if path != unrevisionedDeliveryFixturePath {
+		return ""
+	}
+	for name, allowed := range unrevisionedDeliveryFixtureSQL {
+		if scope == allowed.scope && strings.Join(strings.Fields(query), " ") == strings.Join(strings.Fields(allowed.query), " ") {
+			return name
+		}
+	}
+	return ""
+}
+
 func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
 	repoRoot := eventBoundaryRepositoryRoot(t)
 	retired := []string{"SnapshotsForRun", "SnapshotsForAgent", "EligibleAgentSnapshots"}
@@ -61,6 +118,7 @@ func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
 func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 	repoRoot := eventBoundaryRepositoryRoot(t)
 	found := map[string]int{}
+	fixtureFound := map[string]int{}
 	for _, rootName := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, rootName)
 		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -90,7 +148,11 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 					return true
 				}
 				found[relative]++
-				if _, allowed := executableDeliverySQLOwners[relative]; !allowed && !closedReceiverMaterializationSQL(relative, eventBoundaryEnclosingScope(file, literal.Pos()), raw) {
+				fixture := classifiedUnrevisionedDeliveryFixtureSQL(relative, eventBoundaryEnclosingScope(file, literal.Pos()), raw)
+				if fixture != "" {
+					fixtureFound[fixture]++
+				}
+				if _, allowed := executableDeliverySQLOwners[relative]; !allowed && !closedReceiverMaterializationSQL(relative, eventBoundaryEnclosingScope(file, literal.Pos()), raw) && fixture == "" {
 					t.Errorf("%s:%d owns executable-delivery SQL outside the closed lifecycle boundary", relative, fset.Position(literal.Pos()).Line)
 				}
 				return true
@@ -107,6 +169,30 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 		if found[path] == 0 {
 			t.Errorf("closed executable-delivery SQL owner %s (%s) has no classified SQL", path, reason)
 		}
+	}
+	for name := range unrevisionedDeliveryFixtureSQL {
+		if fixtureFound[name] != 1 {
+			t.Errorf("test-only unrevisioned delivery fixture %s has %d exact SQL statements, want 1", name, fixtureFound[name])
+		}
+	}
+}
+
+func TestUnrevisionedDeliveryFixtureSQLAllowanceIsExact(t *testing.T) {
+	for name, allowed := range unrevisionedDeliveryFixtureSQL {
+		t.Run(name, func(t *testing.T) {
+			if got := classifiedUnrevisionedDeliveryFixtureSQL(unrevisionedDeliveryFixturePath, allowed.scope, allowed.query); got != name {
+				t.Fatalf("fixture SQL classification = %q, want %q", got, name)
+			}
+			for _, hostile := range []struct{ path, scope, query string }{
+				{"internal/store/storetest/sibling.go", allowed.scope, allowed.query},
+				{unrevisionedDeliveryFixturePath, "siblingFixture", allowed.query},
+				{unrevisionedDeliveryFixturePath, allowed.scope, allowed.query + " RETURNING delivery_id"},
+			} {
+				if got := classifiedUnrevisionedDeliveryFixtureSQL(hostile.path, hostile.scope, hostile.query); got != "" {
+					t.Fatalf("hostile fixture SQL classified as %q: %#v", got, hostile)
+				}
+			}
+		})
 	}
 }
 

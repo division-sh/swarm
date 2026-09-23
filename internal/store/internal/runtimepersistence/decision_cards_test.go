@@ -14,7 +14,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -26,7 +25,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -778,18 +777,16 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 }
 
 func freezeDecisionCardRunInTestMutation(ctx context.Context, cards decisioncard.Store, runID string, at time.Time) error {
-	switch selected := cards.(type) {
-	case *PostgresStore:
-		return selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return selected.decisionPostgresOwner.SupersedeRunTx(txctx, tx, runtimeAuthorActivityMutation(story), privaterunforkrevision.NewEffects(), runID, "run_forked", at, true)
-		})
-	case *SQLiteRuntimeStore:
-		return selected.runPrivateAuthorActivityMutation(ctx, "sqlite test decision-card run freeze", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return selected.decisionSQLiteOwner.SupersedeRunTx(txctx, tx, runtimeAuthorActivityMutation(story), privaterunforkrevision.NewEffects(), runID, "run_forked", at, true)
-		})
-	default:
-		return fmt.Errorf("unexpected decision card store %T", cards)
-	}
+	return runSelectedFixtureMutation(ctx, cards, "test decision-card run freeze", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		switch selected := cards.(type) {
+		case *PostgresStore:
+			return selected.decisionPostgresOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
+		case *SQLiteRuntimeStore:
+			return selected.decisionSQLiteOwner.SupersedeRunTx(txctx, attempt, runID, "run_forked", at, true)
+		default:
+			return fmt.Errorf("unexpected decision card store %T", cards)
+		}
+	})
 }
 
 func decisionGateStatusMutationExists(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, status string) bool {
@@ -1189,10 +1186,16 @@ func stopDecisionCardRun(ctx context.Context, cards decisioncard.Store, runID st
 	req := runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test_stop", ControlledBy: "test", Now: now}
 	switch selected := cards.(type) {
 	case *PostgresStore:
-		_, err := selected.StopRunControl(ctx, req)
+		outcome, err := selected.StopRunControlOutcome(ctx, req)
+		if !outcome.Acknowledged && err == nil {
+			return fmt.Errorf("decision card run stop was not acknowledged")
+		}
 		return err
 	case *SQLiteRuntimeStore:
-		_, err := selected.StopRunControl(ctx, req)
+		outcome, err := selected.StopRunControlOutcome(ctx, req)
+		if !outcome.Acknowledged && err == nil {
+			return fmt.Errorf("decision card run stop was not acknowledged")
+		}
 		return err
 	default:
 		return fmt.Errorf("unexpected decision card store %T", cards)
@@ -1417,22 +1420,19 @@ func requireDecisionCardPipelineReceipt(t *testing.T, ctx context.Context, cards
 
 func appendDecisionCardChangeInStore(ctx context.Context, cards decisioncard.Store, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time) (int64, error) {
 	var changeID int64
-	appendChange := func(postgres bool) func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error {
-		return func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
-			var err error
-			changeID, err = appendDecisionCardChangeWithStory(txctx, story, tx, runID, cardID, changeType, payload, now, postgres)
-			return err
-		}
+	raw, err := canonicaljson.Encode(payload)
+	if err != nil {
+		return 0, err
 	}
-	var err error
-	switch store := cards.(type) {
-	case *PostgresStore:
-		err = runPostgresDecisionCardMutation(ctx, store.decisionPostgresOwner, appendChange(true))
-	case *SQLiteRuntimeStore:
-		err = store.decisionSQLiteOwner.RunDecisionCardMutation(ctx, "test append decision card change", appendChange(false))
-	default:
-		return 0, fmt.Errorf("unexpected decision card store %T", cards)
-	}
+	err = runSelectedFixtureMutation(ctx, cards, "test append decision card change", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			query := `INSERT INTO decision_card_changes (run_id, card_id, change_type, payload, created_at) VALUES (?, ?, ?, ?, ?) RETURNING change_id`
+			if _, ok := cards.(*PostgresStore); ok {
+				query = `INSERT INTO decision_card_changes (run_id, card_id, change_type, payload, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING change_id`
+			}
+			return tx.QueryRowContext(txctx, query, runID, cardID, changeType, string(raw), now).Scan(&changeID)
+		})
+	})
 	return changeID, err
 }
 

@@ -190,7 +190,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 				t.Fatalf("materialized worker route has no declared worker-agent plan: %#v", resolvedWorkerRoutes)
 			}
 
-			if _, err := selected.PauseRunControl(catalogRunContext(h, sourceRunID), runtimeruncontrol.TransitionRequest{
+			if _, err := selected.PauseRunControlOutcome(catalogRunContext(h, sourceRunID), runtimeruncontrol.TransitionRequest{
 				RunID: sourceRunID, Reason: "selected-fork run-scoped identity proof", ControlledBy: "cataloge2e",
 			}); err != nil {
 				t.Fatalf("pause selected-fork source run: %v", err)

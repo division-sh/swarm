@@ -29,7 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -49,6 +49,15 @@ func TestReceiverFirstMaterializationRawTriggerHistoryBoundaryBothStores(t *test
 			if err := insertCanonicalEventRecordFixture(ctx, fixture.store, trigger); err != nil {
 				t.Fatal(err)
 			}
+			// Corrupt only this fixture's revision fact to prove the loader rejects
+			// an otherwise canonical event with missing historical evidence.
+			result, err := fixture.db.ExecContext(ctx, `DELETE FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2`, runID, trigger.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+				t.Fatalf("remove trigger revision fact: rows=%d err=%v", rows, err)
+			}
 			tx, err := fixture.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 			if err != nil {
 				t.Fatal(err)
@@ -62,7 +71,7 @@ func TestReceiverFirstMaterializationRawTriggerHistoryBoundaryBothStores(t *test
 				t.Fatal(err)
 			}
 			if current != 1 || history != 0 {
-				t.Fatalf("raw trigger event=%s current=%d history=%d, want1/0", trigger.ID(), current, history)
+				t.Fatalf("unrevisioned trigger event=%s current=%d history=%d, want1/0", trigger.ID(), current, history)
 			}
 			err = validateRunForkRevisionMatrix(ctx, tx, backend.name == "postgres", runID)
 			if err == nil || !strings.Contains(err.Error(), "unsupported unrevisioned events facts") {
@@ -87,29 +96,36 @@ func commitReceiverMaterializationTriggerFixture(t *testing.T, ctx context.Conte
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := fixture.db.BeginTx(ctx, nil)
+	err = runSelectedFixtureMutation(ctx, fixture.store, "receiver materialization trigger", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var inserted bool
+		var insertErr error
+		if postgres {
+			inserted, insertErr = eventrecordpostgres.Insert(txctx, attempt, record)
+		} else {
+			inserted, insertErr = eventrecordsqlite.Insert(txctx, attempt, record)
+		}
+		if insertErr != nil {
+			return insertErr
+		}
+		if !inserted {
+			return fmt.Errorf("receiver trigger %s was not inserted", trigger.ID())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := fixture.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	effects := runforkrevision.NewEffects()
-	var inserted bool
-	if postgres {
-		inserted, err = eventrecordpostgres.Insert(ctx, tx, effects, record)
-	} else {
-		inserted, err = eventrecordsqlite.Insert(ctx, tx, effects, record)
-	}
-	if err != nil || !inserted {
-		t.Fatalf("insert receiver trigger: inserted=%t err=%v", inserted, err)
-	}
-	// This is the already-persisted root precondition, not a receiver publication.
-	// Capture only the canonical writer's own effects at the same seed boundary.
-	results, err := finalizeRunForkRevisionMatrix(ctx, tx, postgres, effects)
-	if err != nil || len(results) != 1 || !results[trigger.RunID()].Changed {
-		t.Fatalf("finalize receiver trigger: results=%+v err=%v", results, err)
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1`, trigger.RunID()).Scan(&revision); err != nil {
+		t.Fatal(err)
 	}
 	var total, exact int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2`, trigger.RunID(), results[trigger.RunID()].Revision).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2`, trigger.RunID(), revision).Scan(&total); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present=TRUE`, trigger.RunID(), trigger.ID()).Scan(&exact); err != nil {
@@ -120,9 +136,6 @@ func commitReceiverMaterializationTriggerFixture(t *testing.T, ctx context.Conte
 	}
 	if err := validateRunForkRevisionMatrix(ctx, tx, postgres, trigger.RunID()); err != nil {
 		t.Fatalf("receiver trigger history before preparation: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
 	}
 }
 

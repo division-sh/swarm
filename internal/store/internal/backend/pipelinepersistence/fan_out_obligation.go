@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
@@ -17,9 +18,8 @@ import (
 
 func commitFanOutIntentTx(
 	ctx context.Context,
-	tx *sql.Tx,
+	attempt *mutationprotocol.Attempt,
 	postgres bool,
-	effects *revisionEffects,
 	request fanoutobligation.IntentRequest,
 	stateRunID string,
 	stateFields json.RawMessage,
@@ -27,16 +27,24 @@ func commitFanOutIntentTx(
 	createdAt time.Time,
 ) error {
 	transactiontest.Mark(ctx, transactiontest.FanOutProducer)
-	if tx == nil {
-		return fmt.Errorf("fan-out intent requires private transaction")
-	}
 	if err := request.Validate(); err != nil {
 		return err
 	}
 	if request.Key.RunID != strings.TrimSpace(stateRunID) {
 		return fmt.Errorf("fan-out intent run disagrees with engine mutation")
 	}
-	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, effects, request, stateFields, triggerEventID, createdAt)
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return insertFanOutIntentSQL(ctx, tx, postgres, attempt, request, stateFields, triggerEventID, createdAt)
+	})
+}
+
+type fanOutRevisionSink interface {
+	AddFact(string, privaterunforkrevision.Family, string) error
+	AddFacts(string, ...privaterunforkrevision.FactRef) error
+}
+
+func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, facts fanOutRevisionSink, request fanoutobligation.IntentRequest, stateFields json.RawMessage, triggerEventID string, createdAt time.Time) error {
+	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, facts, request, stateFields, triggerEventID, createdAt)
 	if err != nil {
 		return err
 	}
@@ -78,7 +86,7 @@ func commitFanOutIntentTx(
 	if err != nil {
 		return err
 	}
-	return effects.AddFacts(request.Key.RunID, ref)
+	return facts.AddFacts(request.Key.RunID, ref)
 }
 
 func fanOutIntentSQLArgs(request fanoutobligation.IntentRequest, source fanoutobligation.SourceRef, capsule []byte, status fanoutobligation.Status, createdAt time.Time) []any {
@@ -119,7 +127,7 @@ func bindFanOutSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	effects *revisionEffects,
+	facts fanOutRevisionSink,
 	request fanoutobligation.IntentRequest,
 	stateFields json.RawMessage,
 	triggerEventID string,
@@ -154,7 +162,7 @@ func bindFanOutSourceTx(
 		if !ok || len(items) != request.Cardinality {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source cardinality changed before persistence: got %d items, want %d", len(items), request.Cardinality)
 		}
-		mutationID, err := insertFanOutEntitySourceRevisionTx(ctx, tx, postgres, effects, request.Key.RunID, source.EntityID, source.Field, value, triggerEventID, createdAt)
+		mutationID, err := insertFanOutEntitySourceRevisionTx(ctx, tx, postgres, facts, request.Key.RunID, source.EntityID, source.Field, value, triggerEventID, createdAt)
 		if err != nil {
 			return fanoutobligation.SourceRef{}, err
 		}
@@ -193,7 +201,7 @@ func insertFanOutEntitySourceRevisionTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	effects *revisionEffects,
+	facts fanOutRevisionSink,
 	runID, entityID, field string,
 	value any,
 	triggerEventID string,
@@ -221,7 +229,7 @@ func insertFanOutEntitySourceRevisionTx(
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return "", fmt.Errorf("insert fan-out entity source revision: %w", err)
 	}
-	if err := effects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
+	if err := facts.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID); err != nil {
 		return "", err
 	}
 	return mutationID, nil

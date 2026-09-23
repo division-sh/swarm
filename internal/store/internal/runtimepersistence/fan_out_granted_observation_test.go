@@ -124,29 +124,29 @@ func TestFanOutGrantedBatchObservationReadOnlyBothStores(t *testing.T) {
 			if err := tx.Rollback(); err != nil {
 				t.Fatal(err)
 			}
-			if err := turn.owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+			if _, err := turn.owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
 			assertReason("eligible", true)
 			control := selected.(interface {
-				PauseRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
-				ContinueRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
+				PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
+				ContinueRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 			})
 			controlCtx := testAuthorActivityContextForBundle(fixture.bundleHash)
 			transition := runcontrol.TransitionRequest{RunID: fixture.runID, Now: time.Now().UTC(), Reason: "batch-observation", ControlledBy: "test"}
-			if _, err := control.PauseRunControl(controlCtx, transition); err != nil {
-				t.Fatal(err)
+			if outcome, err := control.PauseRunControlOutcome(controlCtx, transition); err != nil || !outcome.Acknowledged {
+				t.Fatalf("pause outcome=%+v err=%v", outcome, err)
 			}
 			assertReason("run_paused", false)
-			if _, err := control.ContinueRunControl(controlCtx, transition); err != nil {
-				t.Fatal(err)
+			if outcome, err := control.ContinueRunControlOutcome(controlCtx, transition); err != nil || !outcome.Acknowledged {
+				t.Fatalf("continue outcome=%+v err=%v", outcome, err)
 			}
 			assertReason("eligible", true)
 			_, claim, found, err = turn.owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "retry-observation", BundleHash: fixture.bundleHash, Candidate: &turn.key, Now: time.Now().UTC(), Lease: time.Minute})
 			if err != nil || !found {
 				t.Fatalf("retry claim: found=%v err=%v", found, err)
 			}
-			if err := turn.owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
+			if _, err := turn.owner.ReleaseFanOutRetryable(ctx, pipeline.FanOutRetryableRelease{Claim: claim, Now: time.Now().UTC(), Failure: fanOutRetryFailureForTest()}); err != nil {
 				t.Fatal(err)
 			}
 			assertReason("retry_wait", false)
@@ -350,7 +350,7 @@ func TestFanOutGrantedSourceRefreshRegistrationWindowBothStores(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
-			if err := turn.owner.ReleaseFanOutClaim(ctx, claim); err != nil {
+			if _, err := turn.owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatalf("retired off-head predecessor could not discard its exact claim: %v", err)
 			}
 			next := &fanOutSelectionExecutor{bundle: fixture.bundleHash, started: make(chan capturedFanOutTurn, 2), completed: make(chan fanoutobligation.Intent, 2), errors: make(chan error, 8)}

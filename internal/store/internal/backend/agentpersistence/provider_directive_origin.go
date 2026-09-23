@@ -7,11 +7,10 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func (s *AgentPostgresOwner) ValidateProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, origin runtimeagentcontrol.DirectiveExecutionOrigin, runID string, identity runtimeagentidentity.Identity) error {
@@ -44,96 +43,104 @@ func requireProviderDirectiveOrigin(op runtimeagentcontrol.DirectiveOperation, o
 	return nil
 }
 
-func (s *AgentPostgresOwner) RenewProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, origin runtimeagentcontrol.DirectiveExecutionOrigin, now time.Time, lease time.Duration) error {
-	if err := s.ValidateProviderDirectiveOriginTx(ctx, tx, origin, "", runtimeagentidentity.Identity{}); err != nil {
-		return err
-	}
-	expires := now.UTC().Add(normalizeDirectiveLease(lease))
-	res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET execution_lease_expires_at=GREATEST(execution_lease_expires_at,$3),updated_at=$4 WHERE operation_id=$1::uuid AND execution_owner_id=$2 AND state='executing'`, origin.OperationID, origin.ExecutionOwnerID, expires, now.UTC())
-	return requireDirectiveTransition(res, err)
+func (s *AgentPostgresOwner) RenewProviderDirectiveOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, origin runtimeagentcontrol.DirectiveExecutionOrigin, now time.Time, lease time.Duration) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := s.ValidateProviderDirectiveOriginTx(ctx, tx, origin, "", runtimeagentidentity.Identity{}); err != nil {
+			return err
+		}
+		expires := now.UTC().Add(normalizeDirectiveLease(lease))
+		res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET execution_lease_expires_at=GREATEST(execution_lease_expires_at,$3),updated_at=$4 WHERE operation_id=$1::uuid AND execution_owner_id=$2 AND state='executing'`, origin.OperationID, origin.ExecutionOwnerID, expires, now.UTC())
+		return requireDirectiveTransition(res, err)
+	})
 }
 
-func (s *AgentSQLiteOwner) RenewProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, origin runtimeagentcontrol.DirectiveExecutionOrigin, now time.Time, lease time.Duration) error {
-	if err := s.ValidateProviderDirectiveOriginTx(ctx, tx, origin, "", runtimeagentidentity.Identity{}); err != nil {
-		return err
-	}
-	expires := now.UTC().Add(normalizeDirectiveLease(lease))
-	res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET execution_lease_expires_at=CASE WHEN execution_lease_expires_at>? THEN execution_lease_expires_at ELSE ? END,updated_at=? WHERE operation_id=? AND execution_owner_id=? AND state='executing'`, expires, expires, now.UTC(), origin.OperationID, origin.ExecutionOwnerID)
-	return requireDirectiveTransition(res, err)
+func (s *AgentSQLiteOwner) RenewProviderDirectiveOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, origin runtimeagentcontrol.DirectiveExecutionOrigin, now time.Time, lease time.Duration) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := s.ValidateProviderDirectiveOriginTx(ctx, tx, origin, "", runtimeagentidentity.Identity{}); err != nil {
+			return err
+		}
+		expires := now.UTC().Add(normalizeDirectiveLease(lease))
+		res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET execution_lease_expires_at=CASE WHEN execution_lease_expires_at>? THEN execution_lease_expires_at ELSE ? END,updated_at=? WHERE operation_id=? AND execution_owner_id=? AND state='executing'`, expires, expires, now.UTC(), origin.OperationID, origin.ExecutionOwnerID)
+		return requireDirectiveTransition(res, err)
+	})
 }
 
-func (s *AgentPostgresOwner) SettleProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
-	op, ok, err := loadPostgresDirectiveOperationByID(ctx, tx, origin.OperationID, true)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("directive operation not found")
-	}
-	if err := requireProviderDirectiveOriginOrExactTerminal(op, origin, state, failure); err != nil {
-		return err
-	}
-	if op.State == state {
+func (s *AgentPostgresOwner) SettleProviderDirectiveOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		op, ok, err := loadPostgresDirectiveOperationByID(ctx, tx, origin.OperationID, true)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("directive operation not found")
+		}
+		if err := requireProviderDirectiveOriginOrExactTerminal(op, origin, state, failure); err != nil {
+			return err
+		}
+		if op.State == state {
+			return nil
+		}
+		if err := s.pipeline.TerminalizePipelineObligationTx(ctx, attempt, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
+			return err
+		}
+		raw, err := runtimefailures.MarshalEnvelope(failure)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET state=$3,failure=$4::jsonb,execution_lease_expires_at=NULL,completed_at=$5,updated_at=$5,expires_at=$6 WHERE operation_id=$1::uuid AND execution_owner_id=$2 AND state='executing'`, origin.OperationID, origin.ExecutionOwnerID, string(state), string(raw), now.UTC(), terminalDirectiveExpiry(state, now, directiveOperationDefaultTTL))
+		if err := requireDirectiveTransition(res, err); err != nil {
+			return err
+		}
+		op.State, op.Failure = state, runtimefailures.CloneEnvelope(&failure)
+		op.ExecutionLeaseExpiresAt = time.Time{}
+		op.CompletedAt, op.UpdatedAt = now.UTC(), now.UTC()
+		if state == runtimeagentcontrol.DirectiveOperationFailed {
+			op.ExpiresAt = now.Add(directiveOperationDefaultTTL).UTC()
+		}
+		if err := recordDirectiveAuthorActivity(ctx, attempt, op, now, &failure); err != nil {
+			return err
+		}
 		return nil
-	}
-	if err := s.pipeline.TerminalizePipelineObligationTx(ctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
-		return err
-	}
-	raw, err := runtimefailures.MarshalEnvelope(failure)
-	if err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET state=$3,failure=$4::jsonb,execution_lease_expires_at=NULL,completed_at=$5,updated_at=$5,expires_at=$6 WHERE operation_id=$1::uuid AND execution_owner_id=$2 AND state='executing'`, origin.OperationID, origin.ExecutionOwnerID, string(state), string(raw), now.UTC(), terminalDirectiveExpiry(state, now, directiveOperationDefaultTTL))
-	if err := requireDirectiveTransition(res, err); err != nil {
-		return err
-	}
-	op.State, op.Failure = state, runtimefailures.CloneEnvelope(&failure)
-	op.ExecutionLeaseExpiresAt = time.Time{}
-	op.CompletedAt, op.UpdatedAt = now.UTC(), now.UTC()
-	if state == runtimeagentcontrol.DirectiveOperationFailed {
-		op.ExpiresAt = now.Add(directiveOperationDefaultTTL).UTC()
-	}
-	if err := recordDirectiveAuthorActivity(ctx, story, op, now, &failure); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
-func (s *AgentSQLiteOwner) SettleProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
-	op, ok, err := loadSQLiteDirectiveOperationByID(ctx, tx, origin.OperationID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("directive operation not found")
-	}
-	if err := requireProviderDirectiveOriginOrExactTerminal(op, origin, state, failure); err != nil {
-		return err
-	}
-	if op.State == state {
+func (s *AgentSQLiteOwner) SettleProviderDirectiveOriginTx(ctx context.Context, attempt *mutationprotocol.Attempt, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		op, ok, err := loadSQLiteDirectiveOperationByID(ctx, tx, origin.OperationID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("directive operation not found")
+		}
+		if err := requireProviderDirectiveOriginOrExactTerminal(op, origin, state, failure); err != nil {
+			return err
+		}
+		if op.State == state {
+			return nil
+		}
+		if err := s.pipeline.TerminalizePipelineObligationTx(ctx, attempt, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
+			return err
+		}
+		raw, err := runtimefailures.MarshalEnvelope(failure)
+		if err != nil {
+			return err
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET state=?,failure=?,execution_lease_expires_at=NULL,completed_at=?,updated_at=?,expires_at=? WHERE operation_id=? AND execution_owner_id=? AND state='executing'`, string(state), string(raw), now.UTC(), now.UTC(), terminalDirectiveExpiry(state, now, directiveOperationDefaultTTL), origin.OperationID, origin.ExecutionOwnerID)
+		if err := requireDirectiveTransition(res, err); err != nil {
+			return err
+		}
+		op.State, op.Failure = state, runtimefailures.CloneEnvelope(&failure)
+		op.ExecutionLeaseExpiresAt = time.Time{}
+		op.CompletedAt, op.UpdatedAt = now.UTC(), now.UTC()
+		if state == runtimeagentcontrol.DirectiveOperationFailed {
+			op.ExpiresAt = now.Add(directiveOperationDefaultTTL).UTC()
+		}
+		if err := recordDirectiveAuthorActivity(ctx, attempt, op, now, &failure); err != nil {
+			return err
+		}
 		return nil
-	}
-	if err := s.pipeline.TerminalizePipelineObligationTx(ctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
-		return err
-	}
-	raw, err := runtimefailures.MarshalEnvelope(failure)
-	if err != nil {
-		return err
-	}
-	res, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET state=?,failure=?,execution_lease_expires_at=NULL,completed_at=?,updated_at=?,expires_at=? WHERE operation_id=? AND execution_owner_id=? AND state='executing'`, string(state), string(raw), now.UTC(), now.UTC(), terminalDirectiveExpiry(state, now, directiveOperationDefaultTTL), origin.OperationID, origin.ExecutionOwnerID)
-	if err := requireDirectiveTransition(res, err); err != nil {
-		return err
-	}
-	op.State, op.Failure = state, runtimefailures.CloneEnvelope(&failure)
-	op.ExecutionLeaseExpiresAt = time.Time{}
-	op.CompletedAt, op.UpdatedAt = now.UTC(), now.UTC()
-	if state == runtimeagentcontrol.DirectiveOperationFailed {
-		op.ExpiresAt = now.Add(directiveOperationDefaultTTL).UTC()
-	}
-	if err := recordDirectiveAuthorActivity(ctx, story, op, now, &failure); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 func requireProviderDirectiveOriginOrExactTerminal(op runtimeagentcontrol.DirectiveOperation, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope) error {

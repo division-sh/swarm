@@ -1,6 +1,7 @@
 package storetest
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -20,7 +22,10 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
@@ -66,22 +71,26 @@ func InsertCanonicalEventRecord(
 		existing eventrecord.Record
 		found    bool
 	)
-	// Raw preconditions deliberately do not capture a revision frontier.
-	effects := runforkrevision.NewEffects()
-	switch dialect {
-	case authoractivityfixture.DialectPostgres:
-		inserted, err = eventrecordpostgres.Insert(ctx, db, effects, record)
-		if err == nil && !inserted {
-			existing, found, err = eventrecordpostgres.Load(ctx, db, record.EventID)
+	err = runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		switch dialect {
+		case authoractivityfixture.DialectPostgres:
+			inserted, err = eventrecordpostgres.Insert(txctx, attempt, record)
+		case authoractivityfixture.DialectSQLite:
+			inserted, err = eventrecordsqlite.Insert(txctx, attempt, record)
 		}
-	case authoractivityfixture.DialectSQLite:
-		inserted, err = eventrecordsqlite.Insert(ctx, db, effects, record)
-		if err == nil && !inserted {
-			existing, found, err = eventrecordsqlite.Load(ctx, db, record.EventID)
+		if err != nil || inserted {
+			return err
 		}
-	default:
-		t.Fatalf("canonical event record fixture dialect %q is unsupported", dialect)
-	}
+		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			switch dialect {
+			case authoractivityfixture.DialectPostgres:
+				existing, found, err = eventrecordpostgres.Load(txctx, tx, record.EventID)
+			case authoractivityfixture.DialectSQLite:
+				existing, found, err = eventrecordsqlite.Load(txctx, tx, record.EventID)
+			}
+			return err
+		})
+	})
 	if err != nil {
 		t.Fatalf("insert canonical event record fixture: %v", err)
 	}
@@ -92,6 +101,34 @@ func InsertCanonicalEventRecord(
 		t.Fatalf("canonical event record fixture %s conflicts with its persisted record", record.EventID)
 	}
 	return runtimebus.EventAppendExactDuplicate
+}
+
+func runCanonicalEventMutation(ctx context.Context, db *sql.DB, dialect authoractivityfixture.Dialect, write func(context.Context, *mutationprotocol.Attempt) error) error {
+	if db == nil {
+		return fmt.Errorf("canonical event record fixture requires a database")
+	}
+	if write == nil {
+		return fmt.Errorf("canonical event record fixture requires a mutation writer")
+	}
+	apply := func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, write(txctx, attempt)
+	}
+	switch dialect {
+	case authoractivityfixture.DialectPostgres:
+		backend, err := postgresbackend.New(db)
+		if err != nil {
+			return err
+		}
+		return mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, apply).Err()
+	case authoractivityfixture.DialectSQLite:
+		backend, err := sqlitebackend.New(db)
+		if err != nil {
+			return err
+		}
+		return mutationprotocol.RunSQLite(ctx, backend, "canonical event fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, apply).Err()
+	default:
+		return fmt.Errorf("canonical event record fixture dialect %q is unsupported", dialect)
+	}
 }
 
 // CommitDeliveryObligationsForPersistedEvent seeds exact executable routes for
@@ -180,7 +217,11 @@ func InsertExistingRunRootEventRecord(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event, err := eventfixture.ExistingRunRoot(ctx, db, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	var event events.Event
+	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
+		event, err = eventfixture.ExistingRunRoot(txctx, attempt, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
+		return err
+	})
 	if err != nil {
 		t.Fatalf("construct canonical root event record %s: %v", eventID, err)
 	}
@@ -202,9 +243,45 @@ func InsertChildEventRecord(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event, err := eventfixture.Child(ctx, db, dialect, eventID, runID, parentEventID, eventType, producer, payload, envelope, createdAt)
+	var event events.Event
+	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
+		event, err = eventfixture.Child(txctx, attempt, dialect, eventID, runID, parentEventID, eventType, producer, payload, envelope, createdAt)
+		return err
+	})
 	if err != nil {
 		t.Fatalf("construct canonical child event record %s: %v", eventID, err)
+	}
+	return event
+}
+
+// InsertUnrevisionedChildEventRecord leaves the child in the same first
+// revision as other test-only facts captured later by the caller.
+func InsertUnrevisionedChildEventRecord(
+	t testing.TB,
+	ctx context.Context,
+	db *sql.DB,
+	dialect authoractivityfixture.Dialect,
+	eventID string,
+	runID string,
+	parentEventID string,
+	eventType events.EventType,
+	producer events.ProducerIdentity,
+	payload []byte,
+	envelope events.EventEnvelope,
+	createdAt time.Time,
+) events.Event {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin unrevisioned child event fixture: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	event, err := eventfixture.InsertUnrevisionedChild(ctx, tx, dialect, eventID, runID, parentEventID, eventType, producer, payload, envelope, createdAt)
+	if err != nil {
+		t.Fatalf("insert unrevisioned child event fixture %s: %v", eventID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit unrevisioned child event fixture %s: %v", eventID, err)
 	}
 	return event
 }
@@ -220,7 +297,11 @@ func InsertDiagnosticDirectEventRecord(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event, err := eventfixture.DiagnosticDirect(ctx, db, dialect, eventID, producerID, payload, createdAt)
+	var event events.Event
+	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
+		event, err = eventfixture.DiagnosticDirect(txctx, attempt, dialect, eventID, producerID, payload, createdAt)
+		return err
+	})
 	if err != nil {
 		t.Fatalf("construct canonical diagnostic-direct event record %s: %v", eventID, err)
 	}
@@ -240,7 +321,11 @@ func InsertDiagnosticDirectEventRecordForRun(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event, err := eventfixture.DiagnosticDirectForRun(ctx, db, dialect, eventID, runID, parentEventID, producerID, payload, createdAt)
+	var event events.Event
+	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
+		event, err = eventfixture.DiagnosticDirectForRun(txctx, attempt, dialect, eventID, runID, parentEventID, producerID, payload, createdAt)
+		return err
+	})
 	if err != nil {
 		t.Fatalf("construct canonical diagnostic-direct event record %s: %v", eventID, err)
 	}
@@ -331,27 +416,26 @@ func commitSemanticEventWithInitialFacts(
 	var (
 		db              *sql.DB
 		deliveryAdapter *deliveryadapter.Adapter
-		insert          func(context.Context, *sql.Tx, *runforkrevision.Effects, eventrecord.Record) (bool, error)
+		insert          func(context.Context, *mutationprotocol.Attempt, eventrecord.Record) (bool, error)
 		load            func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error)
 		postgres        bool
+		dialect         authoractivityfixture.Dialect
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
 		db = DatabaseForTest(selected)
 		postgres = true
+		dialect = authoractivityfixture.DialectPostgres
 		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
-		insert = func(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
-			return eventrecordpostgres.Insert(ctx, tx, effects, record)
-		}
+		insert = eventrecordpostgres.Insert
 		load = func(ctx context.Context, tx *sql.Tx, eventID string) (eventrecord.Record, bool, error) {
 			return eventrecordpostgres.Load(ctx, tx, eventID)
 		}
 	case *store.SQLiteRuntimeStore:
 		db = DatabaseForTest(selected)
+		dialect = authoractivityfixture.DialectSQLite
 		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectSQLite)
-		insert = func(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record eventrecord.Record) (bool, error) {
-			return eventrecordsqlite.Insert(ctx, tx, effects, record)
-		}
+		insert = eventrecordsqlite.Insert
 		load = func(ctx context.Context, tx *sql.Tx, eventID string) (eventrecord.Record, bool, error) {
 			return eventrecordsqlite.Load(ctx, tx, eventID)
 		}
@@ -393,62 +477,276 @@ func commitSemanticEventWithInitialFacts(
 			t.Fatalf("release semantic event fixture publication: %v", err)
 		}
 	}()
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin semantic event fixture: %v", err)
+	if !captureForkFrontier {
+		inserted, err := commitUnrevisionedSemanticEventFixture(ctx, selectedStore, db, dialect, record, routes, scope, pipelineDisposition, deliveryAdapter)
+		if err != nil {
+			t.Fatalf("commit unrevisioned semantic event fixture: %v", err)
+		}
+		if !inserted {
+			return runtimebus.EventAppendExactDuplicate
+		}
+		return runtimebus.EventAppendInserted
 	}
-	defer func() { _ = tx.Rollback() }()
-	// Every contributor shares the collector finalized by the frontier variant;
-	// ordinary semantic preconditions retain their unrevisioned fixture policy.
-	effects := runforkrevision.NewEffects()
-	inserted, err := insert(ctx, tx, effects, record)
+
+	inserted := false
+	err = runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		inserted, err = insert(txctx, attempt, record)
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			var existing eventrecord.Record
+			var found bool
+			if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+				existing, found, err = load(txctx, tx, record.EventID)
+				return err
+			}); err != nil {
+				return err
+			}
+			if !found || !record.Equal(existing) {
+				return fmt.Errorf("semantic event fixture %s conflicts with its persisted record", record.EventID)
+			}
+			return nil
+		}
+		var authority runtimedelivery.ExecutionAuthority
+		if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var err error
+			authority, err = deliveryFixtureAuthority(txctx, tx, record.RunID, deliveryAdapter)
+			return err
+		}); err != nil {
+			return err
+		}
+		if _, err := deliveryAdapter.CommitInitial(txctx, attempt, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes), authority); err != nil {
+			return err
+		}
+		if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			return insertPipelineScopeFixture(txctx, tx, record.EventID, scope, postgres, time.Now().UTC())
+		}); err != nil {
+			return err
+		}
+		if record.RunID != "" {
+			if err := attempt.AddFact(record.RunID, runforkrevision.FamilyCommittedReplayScopes, record.EventID); err != nil {
+				return err
+			}
+		}
+		if pipelineDisposition != nil {
+			if err := insertPipelineDispositionFixture(txctx, attempt, record.RunID, record.EventID, *pipelineDisposition, postgres, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
+		if captureForkFrontier {
+			if !postgres {
+				return fmt.Errorf("semantic fork frontier fixture requires PostgreSQL, got %T", selectedStore)
+			}
+			for _, family := range []runforkrevision.Family{
+				runforkrevision.FamilyEvents,
+				runforkrevision.FamilyEventDeliveries,
+				runforkrevision.FamilyCommittedReplayScopes,
+				runforkrevision.FamilyEventReceipts,
+			} {
+				if err := attempt.AddWholeFamily(record.RunID, family); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("insert semantic event fixture: %v", err)
+		t.Fatalf("commit semantic event fixture: %v", err)
 	}
 	if !inserted {
-		existing, found, loadErr := load(ctx, tx, record.EventID)
-		if loadErr != nil {
-			t.Fatalf("load duplicate semantic event fixture: %v", loadErr)
-		}
-		if !found || !record.Equal(existing) {
-			t.Fatalf("semantic event fixture %s conflicts with its persisted record", record.EventID)
-		}
 		return runtimebus.EventAppendExactDuplicate
 	}
-	authority := deliveryFixtureAuthority(t, ctx, tx, record.RunID, deliveryAdapter)
-	if _, err := deliveryAdapter.CommitInitial(ctx, tx, effects, record.EventID, record.RunID, events.NormalizeDeliveryRoutes(routes), authority); err != nil {
-		t.Fatalf("commit semantic event fixture routes: %v", err)
+	return runtimebus.EventAppendInserted
+}
+
+func commitUnrevisionedSemanticEventFixture(
+	ctx context.Context,
+	selectedStore any,
+	db *sql.DB,
+	dialect authoractivityfixture.Dialect,
+	record eventrecord.Record,
+	routes []events.DeliveryRoute,
+	scope runtimepipelineobligation.CommittedScope,
+	pipelineDisposition *runtimepipelineobligation.Disposition,
+	adapter *deliveryadapter.Adapter,
+) (bool, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
 	}
+	defer func() { _ = tx.Rollback() }()
+	inserted, err := eventfixture.InsertUnrevisioned(ctx, tx, dialect, record)
+	if err != nil || !inserted {
+		return inserted, err
+	}
+	authority, err := deliveryFixtureAuthority(ctx, tx, record.RunID, adapter)
+	if err != nil {
+		return false, err
+	}
+	if err := events.ValidateDeliveryRoutes(routes); err != nil {
+		return false, err
+	}
+	admitted, err := record.Decode()
+	if err != nil {
+		return false, err
+	}
+	if err := events.ValidateReceiverMaterializations(admitted.Event(), routes); err != nil {
+		return false, err
+	}
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if err := insertUnrevisionedDeliveryFixture(ctx, tx, dialect, adapter, record.EventID, record.RunID, route, authority); err != nil {
+			return false, err
+		}
+	}
+	postgres := dialect == authoractivityfixture.DialectPostgres
 	if err := insertPipelineScopeFixture(ctx, tx, record.EventID, scope, postgres, time.Now().UTC()); err != nil {
-		t.Fatalf("commit semantic event fixture pipeline scope: %v", err)
+		return false, err
 	}
 	if pipelineDisposition != nil {
-		if err := insertPipelineDispositionFixture(ctx, tx, effects, record.EventID, *pipelineDisposition, postgres, time.Now().UTC()); err != nil {
-			t.Fatalf("commit semantic event fixture pipeline disposition: %v", err)
+		if _, err := insertPipelineDispositionFixtureTx(ctx, tx, record.EventID, *pipelineDisposition, postgres, time.Now().UTC()); err != nil {
+			return false, err
 		}
-	}
-	if captureForkFrontier {
-		if _, ok := selectedStore.(*store.PostgresStore); !ok {
-			t.Fatalf("semantic fork frontier fixture requires PostgreSQL, got %T", selectedStore)
-		}
-		if err := effects.Add(
-			record.RunID,
-			runforkrevision.FamilyEvents,
-			runforkrevision.FamilyEventDeliveries,
-			runforkrevision.FamilyCommittedReplayScopes,
-			runforkrevision.FamilyEventReceipts,
-		); err != nil {
-			t.Fatalf("declare semantic fork frontier fixture: %v", err)
-		}
-		if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-			t.Fatalf("finalize semantic fork frontier fixture: %v", err)
+		if pipelineDisposition.Successful() {
+			if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP) WHERE event_id = $1`, record.EventID); err != nil {
+				return false, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit semantic event fixture: %v", err)
+		return false, err
 	}
-	return runtimebus.EventAppendInserted
+	reader, ok := selectedStore.(interface {
+		Snapshot(context.Context, string) (runtimedelivery.Snapshot, error)
+	})
+	if !ok {
+		return false, fmt.Errorf("unrevisioned semantic fixture store %T cannot read delivery snapshots", selectedStore)
+	}
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		obligation, err := runtimedelivery.NewObligation(record.EventID, record.RunID, route, authority)
+		if err != nil {
+			return false, err
+		}
+		snapshot, err := reader.Snapshot(ctx, obligation.DeliveryID())
+		if err != nil {
+			return false, fmt.Errorf("read unrevisioned delivery fixture %s: %w", obligation.DeliveryID(), err)
+		}
+		wantRoute, err := json.Marshal(obligation.Route())
+		if err != nil {
+			return false, err
+		}
+		gotRoute, err := json.Marshal(snapshot.Route.Normalized())
+		if err != nil {
+			return false, err
+		}
+		if snapshot.DeliveryID != obligation.DeliveryID() || snapshot.EventID != record.EventID || snapshot.RunID != record.RunID ||
+			events.EncodeDeliveryRouteIdentity(snapshot.RouteIdentity) != events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()) ||
+			snapshot.SubscriberClass != obligation.SubscriberClass() || snapshot.SubscriberID != obligation.SubscriberID() ||
+			snapshot.Status != runtimedelivery.StatusPending || snapshot.RetryCount != 0 || snapshot.MaxRetries != obligation.MaxRetries() ||
+			snapshot.ClaimVersion != 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.Authority.Equal(authority) ||
+			!bytes.Equal(gotRoute, wantRoute) {
+			return false, fmt.Errorf("unrevisioned delivery fixture %s differs from canonical route/authority projection", obligation.DeliveryID())
+		}
+	}
+	return true, nil
+}
+
+func insertUnrevisionedDeliveryFixture(ctx context.Context, tx *sql.Tx, dialect authoractivityfixture.Dialect, adapter *deliveryadapter.Adapter, eventID, runID string, route events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) error {
+	obligation, err := runtimedelivery.NewObligation(eventID, runID, route, authority)
+	if err != nil {
+		return err
+	}
+	route = obligation.Route()
+	fields := agentidentity.StorageFields{}
+	if route.Recipient.IsAgent() {
+		fields, err = route.AgentIdentity.StorageFields()
+		if err != nil {
+			return err
+		}
+		if fields.AgentID != route.Recipient.ID() {
+			return fmt.Errorf("unrevisioned delivery fixture agent identity conflicts with subscriber")
+		}
+	} else if !route.AgentIdentity.IsZero() {
+		return fmt.Errorf("unrevisioned node delivery fixture carries agent identity")
+	}
+	target, err := json.Marshal(route.Target)
+	if err != nil {
+		return err
+	}
+	deliveryContext, err := json.Marshal(route.Context)
+	if err != nil {
+		return err
+	}
+	projection, err := json.Marshal(route.PayloadProjection)
+	if err != nil {
+		return err
+	}
+	connectClaim, err := json.Marshal(route.ConnectClaim)
+	if err != nil {
+		return err
+	}
+	materialization, err := events.EncodeReceiverMaterializationRecord(route)
+	if err != nil {
+		return err
+	}
+	now, err := adapter.CaptureSnapshotTime(ctx, tx)
+	if err != nil {
+		return err
+	}
+	query := `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
+			agent_name_owner, agent_name_source, agent_route_presence,
+			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
+			delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
+			receiver_materialization_plan, execution_authority_kind, authority_bundle_hash,
+			execution_authority_id, execution_authority_generation,
+			status, retry_count, max_retries, next_eligible_at, claim_version, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
+			$7, $8, $9, $10, $11, $12,
+			$13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
+			$17::jsonb, $18, $19, $20, $21,
+			'pending', 0, $22, $23, 0, $23, $23
+		) ON CONFLICT (event_id, route_identity) DO NOTHING`
+	if dialect == authoractivityfixture.DialectSQLite {
+		query = `
+			INSERT INTO event_deliveries (
+				delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
+				agent_name_owner, agent_name_source, agent_route_presence,
+				agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
+				delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
+				receiver_materialization_plan, execution_authority_kind, authority_bundle_hash,
+				execution_authority_id, execution_authority_generation,
+				status, retry_count, max_retries, next_eligible_at, claim_version, created_at, updated_at
+			) VALUES (
+				?1, ?2, ?3, ?4, ?5, ?6,
+				?7, ?8, ?9, ?10, ?11, ?12,
+				?13, ?14, ?15, ?16,
+				?17, ?18, ?19, ?20, ?21,
+				'pending', 0, ?22, ?23, 0, ?23, ?23
+			) ON CONFLICT(event_id, route_identity) DO NOTHING`
+	}
+	result, err := tx.ExecContext(ctx, query,
+		obligation.DeliveryID(), runID, eventID, events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()),
+		string(obligation.SubscriberClass()), obligation.SubscriberID(),
+		fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		string(target), string(deliveryContext), string(projection), string(connectClaim),
+		string(materialization), string(authority.Kind()), authority.SourceArtifact().BundleHash(),
+		authority.ExecutionID(), authority.Generation(), obligation.MaxRetries(), now)
+	if err != nil {
+		return fmt.Errorf("insert unrevisioned delivery fixture: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("unrevisioned delivery fixture affected %d rows, want 1", rows)
+	}
+	return nil
 }
 
 func canonicalFixtureSettlement(t testing.TB, event events.Event, routes []events.DeliveryRoute) events.RouteSettlement {
@@ -482,25 +780,24 @@ func canonicalFixtureSettlement(t testing.TB, event events.Event, routes []event
 	return settlement
 }
 
-func deliveryFixtureAuthority(t testing.TB, ctx context.Context, tx *sql.Tx, runID string, adapter *deliveryadapter.Adapter) runtimedelivery.ExecutionAuthority {
-	t.Helper()
+func deliveryFixtureAuthority(ctx context.Context, tx *sql.Tx, runID string, adapter *deliveryadapter.Adapter) (runtimedelivery.ExecutionAuthority, error) {
 	query := `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`
 	if adapter.Dialect() == deliveryadapter.DialectSQLite {
 		query = `SELECT bundle_hash FROM runs WHERE run_id=?`
 	}
 	var bundleHash string
 	if err := tx.QueryRowContext(ctx, query, runID).Scan(&bundleHash); err != nil {
-		t.Fatalf("load delivery fixture run source artifact: %v", err)
+		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("load delivery fixture run source artifact: %w", err)
 	}
 	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
-		t.Fatalf("construct delivery fixture source: %v", err)
+		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("construct delivery fixture source: %w", err)
 	}
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "storetest:"+runID, 1)
 	if err != nil {
-		t.Fatalf("construct delivery fixture authority: %v", err)
+		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("construct delivery fixture authority: %w", err)
 	}
-	return authority
+	return authority, nil
 }
 
 func insertPipelineScopeFixture(
@@ -542,15 +839,49 @@ func insertPipelineScopeFixture(
 
 func insertPipelineDispositionFixture(
 	ctx context.Context,
-	tx *sql.Tx,
-	effects *runforkrevision.Effects,
+	attempt *mutationprotocol.Attempt,
+	runID string,
 	eventID string,
 	disposition runtimepipelineobligation.Disposition,
 	postgres bool,
 	now time.Time,
 ) error {
-	if err := disposition.ValidateFor(runtimepipelineobligation.PurposeRecovery); err != nil {
+	var receiptID string
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) (err error) {
+		receiptID, err = insertPipelineDispositionFixtureTx(ctx, tx, eventID, disposition, postgres, now)
 		return err
+	}); err != nil {
+		return err
+	}
+	if runID != "" {
+		if err := attempt.AddFact(runID, runforkrevision.FamilyEventReceipts, receiptID); err != nil {
+			return err
+		}
+	}
+	if disposition.Successful() {
+		dialect := deliveryadapter.DialectSQLite
+		if postgres {
+			dialect = deliveryadapter.DialectPostgres
+		}
+		adapter, err := deliveryadapter.NewAdapter(dialect)
+		if err != nil {
+			return err
+		}
+		return adapter.CommitPipelineHandoff(ctx, attempt, eventID)
+	}
+	return nil
+}
+
+func insertPipelineDispositionFixtureTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	eventID string,
+	disposition runtimepipelineobligation.Disposition,
+	postgres bool,
+	now time.Time,
+) (string, error) {
+	if err := disposition.ValidateFor(runtimepipelineobligation.PurposeRecovery); err != nil {
+		return "", err
 	}
 	outcome := "success"
 	managerStatus := "processed"
@@ -573,7 +904,7 @@ func insertPipelineDispositionFixture(
 	if failure := disposition.Failure(); failure != nil {
 		raw, err := runtimefailures.MarshalEnvelope(*failure)
 		if err != nil {
-			return err
+			return "", err
 		}
 		failureJSON = string(raw)
 	}
@@ -582,7 +913,7 @@ func insertPipelineDispositionFixture(
 		"reason_code":    reasonCode,
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	query := `
 		INSERT INTO event_receipts (
@@ -592,7 +923,8 @@ func insertPipelineDispositionFixture(
 		SELECT ?, e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance, ?, ?, ?, ?, ?
 		FROM events e WHERE e.event_id = ?
 		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO NOTHING`
-	args := []any{uuid.NewString(), outcome, reasonCode, failureJSON, string(sideEffects), now, eventID}
+	receiptID := uuid.NewString()
+	args := []any{receiptID, outcome, reasonCode, failureJSON, string(sideEffects), now, eventID}
 	if postgres {
 		query = `
 			INSERT INTO event_receipts (
@@ -606,27 +938,14 @@ func insertPipelineDispositionFixture(
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		return err
+		return "", err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if rows != 1 {
-		return fmt.Errorf("pipeline disposition fixture affected %d rows, want 1", rows)
+		return "", fmt.Errorf("pipeline disposition fixture affected %d rows, want 1", rows)
 	}
-	if disposition.Successful() {
-		dialect := deliveryadapter.DialectSQLite
-		if postgres {
-			dialect = deliveryadapter.DialectPostgres
-		}
-		adapter, err := deliveryadapter.NewAdapter(dialect)
-		if err != nil {
-			return err
-		}
-		if err := adapter.CommitPipelineHandoff(ctx, tx, effects, eventID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return receiptID, nil
 }

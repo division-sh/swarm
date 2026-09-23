@@ -2,7 +2,9 @@ package tools
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,9 +14,33 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
+
+type managedEffectCommittedProbe struct {
+	*effecttest.Harness
+}
+
+func (p managedEffectCommittedProbe) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+	attempt, err := p.Harness.AuthorizeExternalAttempt(ctx, authority, req)
+	if err != nil {
+		return attempt, err
+	}
+	if attempt.OperationID != req.OperationID || attempt.AttemptID != req.AttemptID {
+		return runtimeeffects.Attempt{}, fmt.Errorf("managed-effect fake returned a different authorization")
+	}
+	attempt.AuthorizationAcknowledged = true
+	return attempt, nil
+}
+
+func managedEffectCommittedContext(harness *effecttest.Harness, identity string) context.Context {
+	ctx := harness.CompletionContext(identity)
+	probe := managedEffectCommittedProbe{Harness: harness}
+	controller := runtimeeffects.NewCompletionController(probe, probe, probe, probe).WithExecutionPosture(executionposture.Live)
+	return runtimeeffects.WithController(ctx, controller)
+}
 
 type managedEffectRoundTripper struct {
 	t       *testing.T
@@ -42,7 +68,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
 			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.ToolInputSchema{}),
 		)
-		_, err := executor.execHTTPRequestOnce(harness.CompletionContext("authored-http"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil)
+		_, err := executor.execHTTPRequestOnce(managedEffectCommittedContext(harness, "authored-http"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil)
 		if err == nil {
 			t.Fatal("authored HTTP transport failure returned nil")
 		}
@@ -52,7 +78,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		stale := effecttest.New()
 		stale.AuthorizeErr = errors.New("superseded generation")
 		staleExecutor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{t: t, harness: stale, adapter: "authored_http_tool"}}}
-		if _, err := staleExecutor.execHTTPRequestOnce(stale.CompletionContext("authored-http-stale"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil); err == nil {
+		if _, err := staleExecutor.execHTTPRequestOnce(managedEffectCommittedContext(stale, "authored-http-stale"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil); err == nil {
 			t.Fatal("stale authored HTTP effect was admitted")
 		}
 		if _, launched := stale.StateForAdapter("authored_http_tool"); launched {
@@ -65,7 +91,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		launchFencedExecutor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{
 			t: t, harness: supersededAtLaunch, adapter: "authored_http_tool", calls: &dispatches,
 		}}}
-		if _, err := launchFencedExecutor.execHTTPRequestOnce(supersededAtLaunch.CompletionContext("authored-http-launch-fence"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil); err == nil {
+		if _, err := launchFencedExecutor.execHTTPRequestOnce(managedEffectCommittedContext(supersededAtLaunch, "authored-http-launch-fence"), http.MethodPost, "http://effect.test/tool", nil, bytes.NewReader([]byte(`{"x":1}`)), time.Second, tool, nil); err == nil {
 			t.Fatal("superseded launch boundary admitted authored HTTP dispatch")
 		}
 		if dispatches != 0 {
@@ -83,7 +109,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = executor.doNormalizedSearch(harness.CompletionContext("native-search"), req, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{})
+		_, err = executor.doNormalizedSearch(managedEffectCommittedContext(harness, "native-search"), req, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{})
 		if err == nil {
 			t.Fatal("native search transport failure returned nil")
 		}
@@ -94,7 +120,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		stale.AuthorizeErr = errors.New("superseded generation")
 		staleExecutor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{t: t, harness: stale, adapter: "native_web_search"}}}
 		staleReq, _ := http.NewRequest(http.MethodPost, "http://effect.test/search", bytes.NewReader([]byte(`{"query":"x"}`)))
-		if _, err := staleExecutor.doNormalizedSearch(stale.CompletionContext("native-search-stale"), staleReq, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{}); err == nil {
+		if _, err := staleExecutor.doNormalizedSearch(managedEffectCommittedContext(stale, "native-search-stale"), staleReq, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{}); err == nil {
 			t.Fatal("stale native search was admitted")
 		}
 		if _, launched := stale.StateForAdapter("native_web_search"); launched {
@@ -114,7 +140,7 @@ func TestManagedNativeEffectOutcomes(t *testing.T) {
 	t.Run("bash_start_rejection", func(t *testing.T) {
 		harness := effecttest.New()
 		executor := &Executor{}
-		_, _, _, err := executor.runWorkspaceCommand(harness.CompletionContext("native-bash"), hostTarget(t.TempDir()), "native_bash", time.Second, "", "/definitely/missing/swarm-command")
+		_, _, _, err := executor.runWorkspaceCommand(managedEffectCommittedContext(harness, "native-bash"), hostTarget(t.TempDir()), "native_bash", time.Second, "", "/definitely/missing/swarm-command")
 		if err == nil {
 			t.Fatal("missing native command returned nil")
 		}
@@ -124,7 +150,7 @@ func TestManagedNativeEffectOutcomes(t *testing.T) {
 		stale := effecttest.New()
 		stale.AuthorizeErr = errors.New("superseded generation")
 		marker := filepath.Join(t.TempDir(), "started")
-		if _, _, _, err := executor.runWorkspaceCommand(stale.CompletionContext("native-bash-stale"), hostTarget(t.TempDir()), "native_bash", time.Second, "", "sh", "-lc", "touch "+marker); err == nil {
+		if _, _, _, err := executor.runWorkspaceCommand(managedEffectCommittedContext(stale, "native-bash-stale"), hostTarget(t.TempDir()), "native_bash", time.Second, "", "sh", "-lc", "touch "+marker); err == nil {
 			t.Fatal("stale native command was admitted")
 		}
 		if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -135,7 +161,7 @@ func TestManagedNativeEffectOutcomes(t *testing.T) {
 	t.Run("read_start_rejection", func(t *testing.T) {
 		harness := effecttest.New()
 		executor := &Executor{}
-		_, _, _, err := executor.runWorkspaceCommand(harness.CompletionContext("native-read"), hostTarget(t.TempDir()), "native_read_file", time.Second, "", "/definitely/missing/swarm-command")
+		_, _, _, err := executor.runWorkspaceCommand(managedEffectCommittedContext(harness, "native-read"), hostTarget(t.TempDir()), "native_read_file", time.Second, "", "/definitely/missing/swarm-command")
 		if err == nil {
 			t.Fatal("missing native read command returned nil")
 		}
@@ -144,7 +170,7 @@ func TestManagedNativeEffectOutcomes(t *testing.T) {
 		}
 		stale := effecttest.New()
 		stale.AuthorizeErr = errors.New("superseded generation")
-		if _, _, _, err := executor.runWorkspaceCommand(stale.CompletionContext("native-read-stale"), hostTarget(t.TempDir()), "native_read_file", time.Second, "", "sh", "-lc", "cat /dev/null"); err == nil {
+		if _, _, _, err := executor.runWorkspaceCommand(managedEffectCommittedContext(stale, "native-read-stale"), hostTarget(t.TempDir()), "native_read_file", time.Second, "", "sh", "-lc", "cat /dev/null"); err == nil {
 			t.Fatal("stale native read was admitted")
 		}
 		if _, launched := stale.StateForAdapter("native_read_file"); launched {
@@ -156,7 +182,7 @@ func TestManagedNativeEffectOutcomes(t *testing.T) {
 		harness := effecttest.New()
 		root := t.TempDir()
 		target := hostTarget(root).ExecutionTarget()
-		if _, err := execNativeHostWriteFile(harness.CompletionContext("native-write"), target, "/workspace/result.txt", "written"); err != nil {
+		if _, err := execNativeHostWriteFile(managedEffectCommittedContext(harness, "native-write"), target, "/workspace/result.txt", "written"); err != nil {
 			t.Fatalf("host write: %v", err)
 		}
 		if err := harness.RequireState("native_write_file", runtimeeffects.StateSettled); err != nil {
@@ -167,7 +193,7 @@ func TestManagedNativeEffectOutcomes(t *testing.T) {
 		}
 		stale := effecttest.New()
 		stale.AuthorizeErr = errors.New("superseded generation")
-		if _, err := execNativeHostWriteFile(stale.CompletionContext("native-write-stale"), target, "/workspace/stale.txt", "forbidden"); err == nil {
+		if _, err := execNativeHostWriteFile(managedEffectCommittedContext(stale, "native-write-stale"), target, "/workspace/stale.txt", "forbidden"); err == nil {
 			t.Fatal("stale native write was admitted")
 		}
 		if _, err := os.Stat(filepath.Join(root, "stale.txt")); !os.IsNotExist(err) {
@@ -184,7 +210,7 @@ func TestManagedRelayEffectOutcomes(t *testing.T) {
 		Mounts: []workspace.ExecutionMount{{LogicalPath: workspace.LogicalWorkspaceMount, HostPath: root, Access: workspace.MountAccessReadWrite}},
 	}
 	executor := &Executor{}
-	if err := executor.writeToolResultRelayFile(harness.CompletionContext("tool-relay"), target, target.ExecutionTarget(), "/workspace/relay.txt", []byte("relay")); err != nil {
+	if err := executor.writeToolResultRelayFile(managedEffectCommittedContext(harness, "tool-relay"), target, target.ExecutionTarget(), "/workspace/relay.txt", []byte("relay")); err != nil {
 		t.Fatalf("write relay: %v", err)
 	}
 	if err := harness.RequireState("tool_result_relay", runtimeeffects.StateSettled); err != nil {
@@ -192,7 +218,7 @@ func TestManagedRelayEffectOutcomes(t *testing.T) {
 	}
 	stale := effecttest.New()
 	stale.AuthorizeErr = errors.New("superseded generation")
-	if err := executor.writeToolResultRelayFile(stale.CompletionContext("tool-relay-stale"), target, target.ExecutionTarget(), "/workspace/stale-relay.txt", []byte("relay")); err == nil {
+	if err := executor.writeToolResultRelayFile(managedEffectCommittedContext(stale, "tool-relay-stale"), target, target.ExecutionTarget(), "/workspace/stale-relay.txt", []byte("relay")); err == nil {
 		t.Fatal("stale tool relay was admitted")
 	}
 	if _, err := os.Stat(filepath.Join(root, "stale-relay.txt")); !os.IsNotExist(err) {

@@ -26,6 +26,7 @@ type Request struct {
 }
 
 type Result struct {
+	Acknowledged         bool
 	OperationName        string
 	DryRun               bool
 	AppliedAt            time.Time

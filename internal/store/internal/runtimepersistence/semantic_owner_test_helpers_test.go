@@ -12,7 +12,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -23,6 +22,7 @@ import (
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	storeevent "github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
@@ -62,7 +62,6 @@ var insertRunForkReplayDelivery = storerunfork.InsertRunForkReplayDelivery
 var deterministicRunForkMaterializationID = storerunfork.DeterministicRunForkMaterializationID
 var deterministicRunForkReplayEventID = storerunfork.DeterministicRunForkReplayEventID
 var decisionCardAuthorActivityIdentity = storedecision.DecisionCardAuthorActivityIdentity
-var appendDecisionCardChangeWithStory = storedecision.AppendDecisionCardChangeWithStory
 var runPostgresDecisionCardMutation = storedecision.RunPostgresDecisionCardMutation
 var recordExternalEffectStory = storeeffect.RecordExternalEffectStory
 var externalEffectStoryDispositions = storeeffect.ExternalEffectStoryDispositionKeys()
@@ -141,18 +140,14 @@ func requestSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID s
 }
 
 type eventCommitTxStore interface {
-	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	AppendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
-	CommitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
-	CommitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
-	CommitInitialPipelineDispositionTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
-	RecordDeadLetterTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedeadletters.Record, bool) error
-	CreateWithinTransaction(context.Context, *sql.Tx, runtimereplycontext.Record) error
-	ClaimWithinTransaction(context.Context, *sql.Tx, runtimereplycontext.ClaimCommand) error
-	PrepareDynamicFlowCreationOccurrenceCommitTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) (bool, error)
-	CommitFlowInstanceActivationsTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
-	ReplaceFlowInstanceRouteTopologyTx(context.Context, *sql.Tx, []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error)
-	MarkDynamicFlowCreationOccurrenceCommittedTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error
+	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
+	CommitInitialPipelineScopeTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope) error
+	CommitInitialPipelineDispositionTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
+	RecordDeadLetterTx(context.Context, *mutationprotocol.Attempt, runtimedeadletters.Record, bool) error
+	CreateWithinTransaction(context.Context, *mutationprotocol.Attempt, runtimereplycontext.Record) error
+	ClaimWithinTransaction(context.Context, *mutationprotocol.Attempt, runtimereplycontext.ClaimCommand) error
 }
 
 func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {
@@ -163,19 +158,18 @@ func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtim
 }
 
 type sqlPublishCommitter struct {
-	tx    *sql.Tx
-	store eventCommitTxStore
-	story runtimeauthoractivity.Mutation
+	attempt *mutationprotocol.Attempt
+	store   eventCommitTxStore
 }
 
 func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation string, class events.EventAdmissionClass, eventType events.EventType, req runtimebus.CommitPublishRequest) (runtimebus.EventAppendOutcome, error) {
-	if c.tx == nil || c.store == nil {
+	if c.attempt == nil || c.store == nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s event commit transaction is required", operation)
 	}
 	if err := events.ValidateNamedEvent(req.Event, class, eventType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.AppendAdmittedEventTxOutcome(ctx, c.tx, c.story, req.Event, req.RouteSettlement)
+	outcome, err := c.store.AppendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -247,34 +241,36 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 
 func (c sqlPublishCommitter) commitInitialSideEffectEvidence(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) ([]runtimedelivery.DurableHandoffProof, error) {
 	for _, record := range req.ReplyCreations {
-		if err := c.store.CreateWithinTransaction(ctx, c.tx, record); err != nil {
+		if err := c.store.CreateWithinTransaction(ctx, c.attempt, record); err != nil {
 			return nil, fmt.Errorf("commit reply context creation: %w", err)
 		}
 	}
 	for _, claim := range req.ReplyClaims {
-		if err := c.store.ClaimWithinTransaction(ctx, c.tx, claim); err != nil {
+		if err := c.store.ClaimWithinTransaction(ctx, c.attempt, claim); err != nil {
 			return nil, fmt.Errorf("commit reply context claim: %w", err)
 		}
 	}
 	if requirePublicationClaim {
-		if err := c.store.RequirePipelinePublicationClaimTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim); err != nil {
+		if err := c.attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			return c.store.RequirePipelinePublicationClaimTx(ctx, tx, req.Event.ID(), req.PipelineClaim)
+		}); err != nil {
 			return nil, fmt.Errorf("executable event commit requires its current publication claim: %w", err)
 		}
 	}
-	proofs, err := c.store.CommitInitialDeliveryObligationsTx(ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes, req.DeliveryAuthority)
+	proofs, err := c.store.CommitInitialDeliveryObligationsTx(ctx, c.attempt, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes, req.DeliveryAuthority)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.store.CommitInitialPipelineScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {
+	if err := c.store.CommitInitialPipelineScopeTx(ctx, c.attempt, req.Event.ID(), req.ReplayScope); err != nil {
 		return nil, err
 	}
 	if req.Disposition != nil {
-		if err := c.store.CommitInitialPipelineDispositionTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim, *req.Disposition); err != nil {
+		if err := c.store.CommitInitialPipelineDispositionTx(ctx, c.attempt, req.Event.ID(), req.PipelineClaim, *req.Disposition); err != nil {
 			return nil, err
 		}
 	}
 	if req.DeadLetter != nil {
-		if err := c.store.RecordDeadLetterTx(ctx, c.tx, c.story, *req.DeadLetter, true); err != nil {
+		if err := c.store.RecordDeadLetterTx(ctx, c.attempt, *req.DeadLetter, true); err != nil {
 			return nil, err
 		}
 	}

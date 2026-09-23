@@ -792,7 +792,7 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 							t.Fatalf("%s pin mutated route state: before=%#v after=%#v", resolution.name, before, afterPin)
 						}
 					}
-					err = eventBus.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+					_, err = eventBus.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
 						Identity: flowIdentity,
 						ActivationVariables: map[string]string{
 							"account_id": "current",

@@ -119,12 +119,12 @@ func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, sys
 	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		if lease != nil {
-			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+			err = releasePreProviderSessionLease(ctx, r.sessions, lease, agentID, r.events, err)
 		}
 		return nil, err
 	}
 	if resolved.Enabled() {
-		if err := r.sessions.Release(context.WithoutCancel(ctx), lease); err != nil {
+		if err := releasePreProviderSessionLease(ctx, r.sessions, lease, agentID, r.events, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -205,12 +205,12 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	lease, resolved, err := acquireContinuedMemory(ctx, r.sessions, s, r.lockOwner)
 	if err != nil {
 		if lease != nil {
-			err = errors.Join(err, r.sessions.Release(context.WithoutCancel(ctx), lease))
+			err = releasePreProviderSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, err)
 		}
 		return nil, sessionAcquireFailure(err, s.AgentID)
 	}
 	if resolved.Enabled() {
-		defer func() { retErr = errors.Join(retErr, r.sessions.Release(context.WithoutCancel(ctx), lease)) }()
+		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the OpenAI-compatible session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
 				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
@@ -364,34 +364,35 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 		Latency:        latency,
 	}, &resp)
 	usage.Model = reqBody.Model
-	settled, err := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
-	if err != nil {
-		return nil, err
+	settled, settlementErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, &resp, profile, completionUsage(usage.InputTokens, usage.OutputTokens, usage.Model, runtimeeffects.CompletionUsageExact), runtimeeffects.StateSettled, nil, map[string]any{"stage": "complete"})
+	if !settled.Committed {
+		return nil, unacknowledgedCompletionError(settlementErr)
 	}
+	handoffCtx := context.WithoutCancel(ctx)
 	if settled.Drained() {
-		return nil, nil
+		return nil, settlementErr
 	}
 
-	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
-		return nil, err
+	if err := requireCurrentProviderProjection(handoffCtx, s.AgentID); err != nil {
+		return nil, errors.Join(settlementErr, err)
 	}
-	projected, err := projectCompletionContinuation(ctx, dispatch, s, &resp)
+	projected, err := projectCompletionContinuation(handoffCtx, dispatch, s, &resp)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(settlementErr, err)
 	}
 	if !projected {
+		if resolved.Enabled() {
+			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, resolved.Identity, s.ID, s.AgentID, r.events); err != nil {
+				return nil, errors.Join(settlementErr, err)
+			}
+		}
 		s.Messages = append(s.Messages, message, resp.Message)
 		s.TurnCount++
 		s.ParseFailures = 0
-		if resolved.Enabled() {
-			if err := r.sessions.IncrementTurn(ctx, resolved.Identity, s.ID); err != nil {
-				return nil, err
-			}
-		}
-		r.persistConversation(ctx, s)
+		r.persistConversation(handoffCtx, s)
 	}
 
-	return &resp, nil
+	return &resp, settlementErr
 }
 
 func (r *OpenAICompatibleRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte, managed *managedProviderCall) ([]byte, openAICompatibleResponse, *completionDispatch, error) {
@@ -494,9 +495,13 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 		return nil, openAICompatibleResponse{}, dispatch, err
 	}
 	req = req.WithContext(heartbeatCtx)
-	if err := attempt.MarkLaunched(heartbeatCtx); err != nil {
+	if err := attempt.MarkLaunched(heartbeatCtx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
 		dispatch.state = runtimeeffects.StateTerminalFailure
 		return nil, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
+	}
+	if gateErr := completionInvocationGate(ctx, heartbeatCtx); gateErr != nil {
+		dispatch.state = runtimeeffects.StateTerminalFailure
+		return nil, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, dispatch.noDispatchError(gateErr))
 	}
 
 	dispatch.markProviderInvocationStarted()
@@ -513,7 +518,7 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 		return nil, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 	dispatch.evidence = map[string]any{"status": httpResp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(body)}
-	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); err != nil {
+	if err := attempt.MarkResponseObserved(heartbeatCtx, dispatch.evidence); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return body, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 

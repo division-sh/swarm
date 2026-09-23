@@ -283,24 +283,26 @@ func (p *semanticProofProbe) verifyNoAttemptRows(ctx context.Context, command pi
 	return nil
 }
 
-func (turn *semanticProofTurn) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) error {
-	if err := turn.FanOutObligationOwner.BlockFanOutClaim(ctx, request); err != nil {
-		return err
+func (turn *semanticProofTurn) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) (pipeline.FanOutClaimSettlement, error) {
+	settlement, err := turn.FanOutObligationOwner.BlockFanOutClaim(ctx, request)
+	if !settlement.Acknowledged {
+		return settlement, err
 	}
 	turn.probe.mu.Lock()
 	turn.probe.blocks[turn.intent.Request.Capsule.Lineage.ParentEventID] = request
 	turn.probe.mu.Unlock()
-	return nil
+	return settlement, err
 }
 
-func (turn *semanticProofTurn) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) error {
-	if err := turn.FanOutObligationOwner.ReleaseFanOutRetryable(ctx, request); err != nil {
-		return err
+func (turn *semanticProofTurn) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) (pipeline.FanOutClaimSettlement, error) {
+	settlement, err := turn.FanOutObligationOwner.ReleaseFanOutRetryable(ctx, request)
+	if !settlement.Acknowledged {
+		return settlement, err
 	}
 	turn.probe.mu.Lock()
 	turn.probe.retries[turn.intent.Request.Capsule.Lineage.ParentEventID] = request
 	turn.probe.mu.Unlock()
-	return nil
+	return settlement, err
 }
 
 type semanticProofFixture struct {

@@ -45,7 +45,10 @@ func TestB16IndependentPostgresParentStopRetainedGroup(t *testing.T) {
 	assertDirectiveReceipt(t, db, members[0].Claim.EventID(), "processed", nil)
 	held := readB16Snapshot(t, db)
 	stop := func() error {
-		_, err := other.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+		outcome, err := other.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
+		if !outcome.Acknowledged && err == nil {
+			return errors.New("run stop was not acknowledged")
+		}
 		return err
 	}
 	err = stop()

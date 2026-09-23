@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
@@ -56,64 +54,6 @@ func (s *DeadLetterSQLiteOwner) requireCurrentSchema() error {
 		return errors.New("dead-letter SQLite owner is required")
 	}
 	return s.requireCurrent()
-}
-
-func (s *DeadLetterPostgresOwner) runPrivateAuthorActivityMutation(
-	ctx context.Context,
-	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error,
-) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, operation)
-	return err
-}
-
-func (s *DeadLetterPostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		effects := privaterunforkrevision.NewEffects()
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story, effects); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
-func (s *DeadLetterSQLiteOwner) runPrivateAuthorActivityMutation(
-	ctx context.Context,
-	label string,
-	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error,
-) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, operation)
-	return err
-}
-
-func (s *DeadLetterSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
-	}
-	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		// A busy operation or commit can replay this callback after rollback.
-		effects := privaterunforkrevision.NewEffects()
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story, effects); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
 }
 
 func requireActiveRunForEvent(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) error {

@@ -11,8 +11,8 @@ import (
 type ActivityAttemptJournal interface {
 	StartActivityAttempt(context.Context, ActivityAttemptRecord) (ActivityAttemptRecord, bool, error)
 	ClaimActivityAttemptForLoopGeneration(context.Context, ActivityAttemptRecord) (ActivityAttemptRecord, bool, error)
-	CompleteActivityAttempt(context.Context, ActivityAttemptRecord) (ActivityAttemptRecord, error)
-	MarkActivityAttemptUncertain(context.Context, ActivityAttemptRecord) (ActivityAttemptRecord, error)
+	CompleteActivityAttempt(context.Context, ActivityAttemptRecord) (ActivityAttemptRecord, bool, error)
+	MarkActivityAttemptUncertain(context.Context, ActivityAttemptRecord) (ActivityAttemptRecord, bool, error)
 	LoadActivityAttempt(context.Context, string) (ActivityAttemptRecord, bool, error)
 }
 
@@ -50,16 +50,16 @@ func (s *workflowInstanceStore) ClaimActivityAttemptForLoopGeneration(ctx contex
 	return s.activityJournal.ClaimActivityAttemptForLoopGeneration(ctx, record)
 }
 
-func (s *workflowInstanceStore) CompleteActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, error) {
+func (s *workflowInstanceStore) CompleteActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
 	if s == nil || s.activityJournal == nil {
-		return ActivityAttemptRecord{}, fmt.Errorf("activity attempt journal is required")
+		return ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt journal is required")
 	}
 	return s.activityJournal.CompleteActivityAttempt(ctx, record)
 }
 
-func (s *workflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, error) {
+func (s *workflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
 	if s == nil || s.activityJournal == nil {
-		return ActivityAttemptRecord{}, fmt.Errorf("activity attempt journal is required")
+		return ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt journal is required")
 	}
 	return s.activityJournal.MarkActivityAttemptUncertain(ctx, record)
 }

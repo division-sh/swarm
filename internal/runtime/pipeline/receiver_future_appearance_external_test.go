@@ -62,7 +62,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				}, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				if err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, unrelatedReadiness, time.Now().UTC()); err != nil {
+				if _, err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, unrelatedReadiness, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedIdentity}); err != nil {
@@ -90,7 +90,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				if _, err := pc.MaterializeInitialEntry(ctx, identity, instance, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				if err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, readiness, time.Now().UTC()); err != nil {
+				if _, err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, readiness, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {

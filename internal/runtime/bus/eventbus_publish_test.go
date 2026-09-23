@@ -951,8 +951,8 @@ type routeSetEventStore struct {
 	routes map[string][]events.DeliveryRoute
 }
 
-func (s *routeSetEventStore) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error {
-	return nil
+func (s *routeSetEventStore) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (s *routeSetEventStore) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {

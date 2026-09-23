@@ -37,6 +37,7 @@ func (c HumanTaskExpiryCommand) Validate() error {
 }
 
 type CommittedHumanTaskExpiry struct {
+	Acknowledged bool
 	Publications []runtimeengine.CommittedDurablePublication
 }
 

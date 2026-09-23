@@ -6,25 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storereplycontext "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -32,8 +31,6 @@ import (
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
-
-type revisionEffects = privaterunforkrevision.Effects
 
 type selectedForkLineageOwner interface {
 	ValidateLifecycleDiagnosticOriginTx(context.Context, *sql.Tx, runtimemanager.AgentLifecycleTransitionResult, bool) (string, error)
@@ -142,73 +139,46 @@ func (s *EventSQLiteOwner) BindOperatorChannelClaims(owner operatorChannelClaimS
 func (s *EventPostgresOwner) requireCurrentSchema() error { return s.requireCurrent() }
 func (s *EventSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
 
-func (s *EventPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, operation)
-	return err
-}
-
-func (s *EventPostgresOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) (bool, error) {
-	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
+func runPostgresEventMutation[T any](ctx context.Context, s *EventPostgresOwner, candidates bool, write func(context.Context, *mutationprotocol.Attempt) (T, error)) (T, error) {
+	result := runPostgresEventMutationResult(ctx, s, candidates, write)
+	value, acknowledged := result.Value()
+	if !acknowledged {
+		var zero T
+		return zero, result.Err()
 	}
-	return s.backend.RunTransactionOutcome(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		effects := privaterunforkrevision.NewEffects()
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story, effects); err != nil {
-			return err
-		}
-		if err := story.Finalize(txctx); err != nil {
-			return err
-		}
-		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
-		return err
-	})
+	return value, result.Err()
 }
 
-func (s *EventSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *revisionEffects) error) error {
-	_, err := s.runRuntimeMutationOutcome(ctx, label, operation)
-	return err
-}
-
-func (s *EventSQLiteOwner) runRuntimeMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *revisionEffects) error) (bool, error) {
+func runPostgresEventMutationResult[T any](ctx context.Context, s *EventPostgresOwner, candidates bool, write func(context.Context, *mutationprotocol.Attempt) (T, error)) mutationprotocol.Result[T] {
 	if err := s.requireCurrentSchema(); err != nil {
-		return false, err
+		return mutationprotocol.Reject[T](err)
 	}
-	return s.backend.RunTransactionOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		effects := privaterunforkrevision.NewEffects()
-		if err := operation(txctx, tx, effects); err != nil {
-			return err
-		}
-		_, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects)
-		return err
-	})
+	var coordinator *storerunhandoff.CandidateCoordinator
+	if candidates {
+		coordinator = s.RunLifecyclePostgresOwner.CompletionCandidateCoordinator()
+	}
+	return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, coordinator, write)
 }
 
-func (s *EventSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
-	_, err := s.runPrivateAuthorActivityMutationOutcome(ctx, label, operation)
-	return err
+func runSQLiteEventMutation[T any](ctx context.Context, s *EventSQLiteOwner, label string, candidates bool, write func(context.Context, *mutationprotocol.Attempt) (T, error)) (T, error) {
+	result := runSQLiteEventMutationResult(ctx, s, label, candidates, write)
+	value, acknowledged := result.Value()
+	if !acknowledged {
+		var zero T
+		return zero, result.Err()
+	}
+	return value, result.Err()
 }
 
-func (s *EventSQLiteOwner) runPrivateAuthorActivityMutationOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) (bool, error) {
-	return s.runRuntimeMutationOutcome(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
-type runLifecycleCandidateHandoffReservation = storerunhandoff.CandidateHandoff
-
-func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
-	return storerunhandoff.ReserveCandidateHandoff(ctx)
+func runSQLiteEventMutationResult[T any](ctx context.Context, s *EventSQLiteOwner, label string, candidates bool, write func(context.Context, *mutationprotocol.Attempt) (T, error)) mutationprotocol.Result[T] {
+	if err := s.requireCurrentSchema(); err != nil {
+		return mutationprotocol.Reject[T](err)
+	}
+	var coordinator *storerunhandoff.CandidateCoordinator
+	if candidates {
+		coordinator = s.RunLifecycleSQLiteOwner.CompletionCandidateCoordinator()
+	}
+	return mutationprotocol.RunSQLite(ctx, s.backend, label, mutationprotocol.Story, mutationprotocol.Ordinary, nil, coordinator, write)
 }
 
 func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -293,10 +263,6 @@ func mustDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapter {
 	return adapter
 }
 
-func withRunLifecycleCandidateHandoffResult[T any](ctx context.Context, operation func(*runLifecycleCandidateHandoffReservation) (T, bool, error)) (T, error) {
-	return storerunhandoff.WithCandidateHandoffOutcomeResult(ctx, operation)
-}
-
 func (s *EventPostgresOwner) BindRunFork(owner selectedForkLineageOwner) error {
 	if s == nil || owner == nil {
 		return errors.New("event PostgreSQL run-fork owner is required")
@@ -319,18 +285,18 @@ func (s *EventSQLiteOwner) BindRunFork(owner selectedForkLineageOwner) error {
 	return nil
 }
 
-func (s *EventPostgresOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimereplycontext.Record) error {
-	return s.ReplyPostgresOwner.CreateWithinTransaction(ctx, tx, effects, record)
+func (s *EventPostgresOwner) createReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplyPostgresOwner.CreateWithinTransaction(ctx, attempt, record)
 }
 
-func (s *EventSQLiteOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimereplycontext.Record) error {
-	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, tx, effects, record)
+func (s *EventSQLiteOwner) createReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {
+	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, attempt, record)
 }
 
-func (s *EventPostgresOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, command runtimereplycontext.ClaimCommand) error {
-	return s.ReplyPostgresOwner.ClaimWithinTransaction(ctx, tx, effects, command)
+func (s *EventPostgresOwner) claimReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
+	return s.ReplyPostgresOwner.ClaimWithinTransaction(ctx, attempt, command)
 }
 
-func (s *EventSQLiteOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, command runtimereplycontext.ClaimCommand) error {
-	return s.ReplySQLiteOwner.ClaimWithinTransaction(ctx, tx, effects, command)
+func (s *EventSQLiteOwner) claimReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimereplycontext.ClaimCommand) error {
+	return s.ReplySQLiteOwner.ClaimWithinTransaction(ctx, attempt, command)
 }

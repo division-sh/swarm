@@ -174,6 +174,11 @@ type directiveEventStore struct {
 	events               []events.Event
 	admittedEvents       map[string]events.AdmittedEvent
 	operations           map[string]runtimeagentcontrol.DirectiveOperation
+	reservePostCommitErr error
+	admitPostCommitErr   error
+	recordPostCommitErr  error
+	successPostCommitErr error
+	failurePostCommitErr error
 	recordExecutedErr    error
 	finalizeSuccessErr   error
 	renewStarted         chan struct{}
@@ -205,7 +210,7 @@ func (s *directiveEventStore) ReserveDirectiveOperation(_ context.Context, req r
 	}
 	for _, existing := range s.operations {
 		if req.Operation.IdempotencyKey != "" && existing.Method == req.Operation.Method && existing.ActorTokenID == req.Operation.ActorTokenID && existing.IdempotencyKey == req.Operation.IdempotencyKey {
-			return runtimeagentcontrol.DirectiveOperationReservation{Operation: existing}, nil
+			return runtimeagentcontrol.DirectiveOperationReservation{Operation: existing, Acknowledged: true}, nil
 		}
 	}
 	op := req.Operation
@@ -216,7 +221,7 @@ func (s *directiveEventStore) ReserveDirectiveOperation(_ context.Context, req r
 		s.admittedEvents = map[string]events.AdmittedEvent{}
 	}
 	s.admittedEvents[req.Event.ID()] = req.Event
-	return runtimeagentcontrol.DirectiveOperationReservation{Operation: op, Created: true}, nil
+	return runtimeagentcontrol.DirectiveOperationReservation{Operation: op, Created: true, Acknowledged: true}, s.reservePostCommitErr
 }
 
 func (s *directiveEventStore) AdmitDirectiveExecution(_ context.Context, req runtimeagentcontrol.DirectiveExecutionAdmissionRequest) (runtimeagentcontrol.DirectiveExecutionAdmission, error) {
@@ -238,7 +243,7 @@ func (s *directiveEventStore) AdmitDirectiveExecution(_ context.Context, req run
 	op.ExecutionLeaseExpiresAt = req.Now.Add(req.Lease)
 	op.ExecutionAdmittedAt, op.UpdatedAt = req.Now, req.Now
 	s.operations[req.OperationID] = op
-	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event}, nil
+	return runtimeagentcontrol.DirectiveExecutionAdmission{Operation: op, Event: event, Acknowledged: true}, s.admitPostCommitErr
 }
 
 func (s *directiveEventStore) RenewDirectiveExecutionLease(ctx context.Context, _ string, _ string, _ time.Time, _ time.Duration) error {
@@ -290,7 +295,8 @@ func (s *directiveEventStore) RecordDirectiveExecuted(_ context.Context, operati
 	op.Response = append(json.RawMessage(nil), response...)
 	op.ExecutedAt, op.UpdatedAt = now, now
 	s.operations[operationID] = op
-	return op, nil
+	op.Acknowledged = true
+	return op, s.recordPostCommitErr
 }
 
 func (s *directiveEventStore) FinalizeDirectiveSuccess(_ context.Context, operationID string, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
@@ -308,7 +314,8 @@ func (s *directiveEventStore) FinalizeDirectiveSuccess(_ context.Context, operat
 	op.State = runtimeagentcontrol.DirectiveOperationSucceeded
 	op.CompletedAt, op.UpdatedAt, op.ExpiresAt = now, now, now.Add(ttl)
 	s.operations[operationID] = op
-	return op, nil
+	op.Acknowledged = true
+	return op, s.successPostCommitErr
 }
 
 func (s *directiveEventStore) FinalizeDirectiveFailure(_ context.Context, operationID, ownerID string, failure runtimefailures.Envelope, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
@@ -325,7 +332,8 @@ func (s *directiveEventStore) FinalizeDirectiveFailure(_ context.Context, operat
 	op.Failure = runtimefailures.CloneEnvelope(&failure)
 	op.CompletedAt, op.UpdatedAt, op.ExpiresAt = now, now, now.Add(ttl)
 	s.operations[operationID] = op
-	return op, nil
+	op.Acknowledged = true
+	return op, s.failurePostCommitErr
 }
 
 func (s *directiveEventStore) LoadDirectiveOperation(_ context.Context, operationID string) (runtimeagentcontrol.DirectiveOperation, bool, error) {
@@ -472,6 +480,86 @@ func TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardSte
 	}
 	if agent.calls != 1 || agent.runID != runID || agent.directiveEvent != evt.ID() {
 		t.Fatalf("board step saw calls=%d run=%q event=%q, want event %q", agent.calls, agent.runID, agent.directiveEvent, evt.ID())
+	}
+}
+
+func TestAgentManager_SendDirectiveAcknowledgedReserveAndAdmitContinue(t *testing.T) {
+	for _, fault := range []string{"reserve", "admit"} {
+		t.Run(fault, func(t *testing.T) {
+			runID := "00000000-0000-0000-0000-000000000702"
+			postCommitErr := errors.New("injected postcommit cleanup failure")
+			directiveStore := &directiveEventStore{}
+			if fault == "reserve" {
+				directiveStore.reservePostCommitErr = postCommitErr
+			} else {
+				directiveStore.admitPostCommitErr = postCommitErr
+			}
+			bus := &directiveTestBus{store: directiveStore}
+			target := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{
+				RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified,
+			}}
+			agent := &chatTestAgent{id: "campaign-coordinator"}
+			am := newTestAgentManager(t, bus, nil, target)
+			installDirectiveTestAgent(t, am, agent, runID)
+			req := runtimeagentcontrol.SendDirectiveRequest{
+				AgentID: agent.id, Directive: "run corpus", RunID: runID,
+				ActorTokenID: "operator-token", IdempotencyKey: "same-key", RequestHash: "same-hash",
+			}
+			result, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
+			if err != nil || !result.OK {
+				t.Fatalf("acknowledged %s result = %#v err=%v", fault, result, err)
+			}
+			replayed, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
+			if err != nil || replayed.OperationID != result.OperationID {
+				t.Fatalf("same-key replay = %#v err=%v", replayed, err)
+			}
+			if agent.calls != 1 || len(directiveStore.events) != 1 || len(directiveStore.operations) != 1 {
+				t.Fatalf("directive effects board/events/operations = %d/%d/%d, want 1/1/1", agent.calls, len(directiveStore.events), len(directiveStore.operations))
+			}
+		})
+	}
+}
+
+func TestAgentManager_SendDirectiveAcknowledgedTerminalWritesDoNotReportPending(t *testing.T) {
+	for _, fault := range []string{"record", "success", "failure"} {
+		t.Run(fault, func(t *testing.T) {
+			runID := "00000000-0000-0000-0000-000000000703"
+			postCommitErr := errors.New("injected postcommit cleanup failure")
+			directiveStore := &directiveEventStore{}
+			agent := &chatTestAgent{id: "campaign-coordinator"}
+			switch fault {
+			case "record":
+				directiveStore.recordPostCommitErr = postCommitErr
+			case "success":
+				directiveStore.successPostCommitErr = postCommitErr
+			case "failure":
+				directiveStore.failurePostCommitErr = postCommitErr
+				agent.err = errors.New("provider failed")
+			}
+			bus := &directiveTestBus{store: directiveStore}
+			target := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{
+				RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified,
+			}}
+			am := newTestAgentManager(t, bus, nil, target)
+			installDirectiveTestAgent(t, am, agent, runID)
+			req := runtimeagentcontrol.SendDirectiveRequest{
+				AgentID: agent.id, Directive: "run corpus", RunID: runID,
+				ActorTokenID: "operator-token", IdempotencyKey: "same-key", RequestHash: "same-hash",
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				result, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
+				if fault == "failure" {
+					if !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) || errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+						t.Fatalf("attempt %d acknowledged failure = %#v err=%v", attempt, result, err)
+					}
+				} else if err != nil || !result.OK {
+					t.Fatalf("attempt %d acknowledged success = %#v err=%v", attempt, result, err)
+				}
+			}
+			if agent.calls != 1 || len(directiveStore.events) != 1 || len(directiveStore.operations) != 1 {
+				t.Fatalf("directive effects board/events/operations = %d/%d/%d, want 1/1/1", agent.calls, len(directiveStore.events), len(directiveStore.operations))
+			}
+		})
 	}
 }
 
@@ -819,6 +907,7 @@ func TestAgentManager_SendDirectiveCompletionRepairDoesNotRepeatBoardStep(t *tes
 	}
 	directiveStore.mu.Lock()
 	directiveStore.finalizeSuccessErr = nil
+	directiveStore.successPostCommitErr = errors.New("injected repair cleanup failure")
 	directiveStore.mu.Unlock()
 	result, err := am.SendDirective(testAuthorActivityContext(context.Background()), req)
 	if err != nil {

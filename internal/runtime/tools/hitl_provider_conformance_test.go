@@ -245,7 +245,8 @@ func newManagedHITLProviderFixture(t *testing.T, backend string, actor models.Ag
 	if err != nil {
 		t.Fatalf("select %s execution: %v", backend, err)
 	}
-	controller := runtimeeffects.NewCompletionController(fixture.harness, fixture.harness, fixture.harness, fixture.harness).WithExecutionPosture(posture)
+	probe := managedEffectCommittedProbe{Harness: fixture.harness}
+	controller := runtimeeffects.NewCompletionController(probe, probe, probe, probe).WithExecutionPosture(posture)
 	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{
 		Cfg: cfg, Sessions: registry, LiveSessions: llm.NewTransientLiveSessionAcquirer(registry), LockOwner: "hitl-provider-test",
 		Credentials: runtimecredentials.NewEnvStore(), CompletionController: controller,
@@ -334,7 +335,7 @@ func managedHITLProviderSeed(t *testing.T, actor models.AgentConfig, runtime llm
 
 func managedHITLProviderContext(t *testing.T, harness *effecttest.Harness, actor models.AgentConfig) context.Context {
 	t.Helper()
-	ctx := harness.CompletionContext("managed-hitl-provider:" + actor.ID)
+	ctx := managedEffectCommittedContext(harness, "managed-hitl-provider:"+actor.ID)
 	admission, ok := managedexecution.FromContext(ctx)
 	if !ok {
 		t.Fatal("managed HITL provider context requires execution admission")

@@ -333,16 +333,16 @@ func TestIssue2394D3EvidenceControlsBothStores(t *testing.T) {
 						f.assertSettled(t, 0, waitingRun, 1)
 					case "paused_preclaim":
 						controlOwner := f.selected.(interface {
-							PauseRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
-							ContinueRunControl(context.Context, runcontrol.TransitionRequest) (runcontrol.State, error)
+							PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
+							ContinueRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 						})
 						transition := runcontrol.TransitionRequest{RunID: runID, Now: time.Now().UTC(), Reason: "d3-control", ControlledBy: "conformance"}
-						if _, err := controlOwner.PauseRunControl(ctx, transition); err != nil {
+						if _, err := controlOwner.PauseRunControlOutcome(ctx, transition); err != nil {
 							t.Fatal(err)
 						}
 						assertServingD3Quiet(t, logger)
 						transition.Now = time.Now().UTC()
-						if _, err := controlOwner.ContinueRunControl(ctx, transition); err != nil {
+						if _, err := controlOwner.ContinueRunControlOutcome(ctx, transition); err != nil {
 							t.Fatal(err)
 						}
 						turn.release()

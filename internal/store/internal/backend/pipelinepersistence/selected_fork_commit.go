@@ -9,9 +9,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
 func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, request runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
@@ -27,26 +25,14 @@ func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, req
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	defer state.operationMu.Unlock()
-	effects := newRevisionEffects()
-	var result runtimebus.CommittedSelectedForkEvent
-	committed, err := postgresbackend.RunAuthorityTransactionOutcome(ctx, state.postgresLease.Session(), func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		result, err = s.selectedFork.CommitSelectedForkTx(txctx, tx, story, effects, request)
-		if err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
+	outcome := mutationprotocol.RunRetainedPostgresWithOptions(ctx, state.postgresLease.Session(), &sql.TxOptions{Isolation: sql.LevelSerializable}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedSelectedForkEvent, error) {
+		return s.selectedFork.CommitSelectedForkTx(txctx, attempt, request)
 	})
-	if !committed {
-		return runtimebus.CommittedSelectedForkEvent{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimebus.CommittedSelectedForkEvent{}, outcome.Err()
 	}
-	return result, err
+	return result, outcome.Err()
 }
 
 func (s *PipelineSQLiteOwner) CommitSelectedForkEvent(ctx context.Context, request runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error) {
@@ -62,26 +48,14 @@ func (s *PipelineSQLiteOwner) CommitSelectedForkEvent(ctx context.Context, reque
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	defer state.operationMu.Unlock()
-	var result runtimebus.CommittedSelectedForkEvent
-	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-fork event commit", func(txctx context.Context, tx *sql.Tx) error {
-		effects := newRevisionEffects()
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		result, err = s.selectedFork.CommitSelectedForkTx(txctx, tx, story, effects, request)
-		if err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
+	outcome := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected-fork event commit", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimebus.CommittedSelectedForkEvent, error) {
+		return s.selectedFork.CommitSelectedForkTx(txctx, attempt, request)
 	})
-	if !committed {
-		return runtimebus.CommittedSelectedForkEvent{}, err
+	result, acknowledged := outcome.Value()
+	if !acknowledged {
+		return runtimebus.CommittedSelectedForkEvent{}, outcome.Err()
 	}
-	return result, err
+	return result, outcome.Err()
 }
 
 func selectedForkCommitContext(ctx context.Context, request runtimebus.CommitSelectedForkEventRequest) (context.Context, error) {

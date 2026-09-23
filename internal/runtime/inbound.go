@@ -464,7 +464,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			Request: publicationRequest, Finalization: runtimeinbound.Finalization{EvidenceEvent: evidence},
 			OperatorChannelClaim: operatorClaim,
 		})
-		if err != nil {
+		if err != nil && !commitResult.Acknowledged {
 			writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, err)
 			return
 		}
@@ -476,6 +476,10 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		if commitResult.OperatorChannelClaim != nil {
 			response["operator_channel_claim_disposition"] = commitResult.OperatorChannelClaim.Disposition
 			response["operator_channel_operation_id"] = commitResult.OperatorChannelClaim.Operation.OperationID
+		}
+		if err != nil {
+			writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, err)
+			return
 		}
 		writeJSON(w, http.StatusAccepted, response)
 		return
@@ -510,20 +514,30 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		Request: publicationRequest, Finalization: finalization,
 		Publications: batchPlan.CommitCommands(), AuthorProjection: authorProjection,
 	})
+	commitErr := err
 	record := commitResult.Record
-	if err != nil {
+	if commitErr != nil && !commitResult.Acknowledged {
 		err = errors.Join(err, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
 		writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, err)
 		return
 	}
 	if !record.Created {
-		_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+		commitErr = errors.Join(commitErr, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
+		if commitErr != nil {
+			writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, commitErr)
+			return
+		}
 		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", record, admitted.ProviderEventType, entityID, entitySlug))
 		return
 	}
-	prepared, err = g.bus.ApplyInboundDeliveryCommit(pubCtx, batchPlan, commitResult.Publications)
+	handoffCtx := pubCtx
+	if commitErr != nil {
+		handoffCtx = context.WithoutCancel(pubCtx)
+	}
+	prepared, err = g.bus.ApplyInboundDeliveryCommit(handoffCtx, batchPlan, commitResult.Publications)
 	if err != nil {
 		_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+		err = errors.Join(commitErr, err)
 		if g.logger != nil {
 			handleRuntimeLogPersistenceError("inbound-gateway", "invalid_commit_evidence", g.logger.Error(requestCtx, "inbound-gateway", "invalid_commit_evidence", map[string]any{
 				"provider": provider, "entity_id": entityID, "provider_event_id": providerEventID,
@@ -544,7 +558,8 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}
 	if record.AcknowledgementMode == runtimeinbound.AcknowledgementDurableBeforeDispatch {
 		for index, item := range prepared {
-			if err := g.bus.DispatchPreparedPublishAsync(pubCtx, item); err != nil {
+			if err := g.bus.DispatchPreparedPublishAsync(handoffCtx, item); err != nil {
+				err = errors.Join(commitErr, err)
 				for _, pending := range prepared[index+1:] {
 					_ = g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending)
 				}
@@ -559,7 +574,8 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		}
 	} else {
 		for index, item := range prepared {
-			if err := g.bus.DispatchPreparedPublish(pubCtx, item); err != nil {
+			if err := g.bus.DispatchPreparedPublish(handoffCtx, item); err != nil {
+				err = errors.Join(commitErr, err)
 				for _, pending := range prepared[index+1:] {
 					_ = g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending)
 				}
@@ -572,6 +588,10 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 				return
 			}
 		}
+	}
+	if commitErr != nil {
+		writeInboundCommitError(w, g.logger, requestCtx, provider, entityID, providerEventID, commitErr)
+		return
 	}
 	writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType, entityID, entitySlug))
 }

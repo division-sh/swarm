@@ -70,21 +70,25 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared runf
 	})
 	ctx = runtimellm.WithConversationForkSandboxInvocationPolicy(ctx, prepared.SandboxPolicy.AvailableToolNames())
 	resp, err := conv.RunForkChat(ctx, message)
-	if err != nil {
+	if err != nil && !resp.ForkChatCompletionAcknowledged() {
 		return runfork.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: %w", err)
+	}
+	if resp == nil {
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: missing assistant response")
 	}
 	assistant := strings.TrimSpace(resp.Message.Content)
 	if assistant == "" {
 		assistant = "Forkchat sandbox turn completed."
 	}
 	return runfork.ConversationForkChatExecution{
-		AssistantMessage: assistant,
-		ToolCalls:        toolExec.toolCalls(),
-		ToolResults:      toolExec.toolResults(),
-		AvailableTools:   toolNamesFromDefinitions(tools),
-		ExecutionOwner:   prepared.ExecutionOwner,
-		FenceGeneration:  prepared.FenceGeneration,
-	}, nil
+		AssistantMessage:                assistant,
+		AssistantCompletionAcknowledged: resp.ForkChatCompletionAcknowledged(),
+		ToolCalls:                       toolExec.toolCalls(),
+		ToolResults:                     toolExec.toolResults(),
+		AvailableTools:                  toolNamesFromDefinitions(tools),
+		ExecutionOwner:                  prepared.ExecutionOwner,
+		FenceGeneration:                 prepared.FenceGeneration,
+	}, err
 }
 
 func conversationForkChatActor(prepared runfork.ConversationForkChatPrepared) runtimeactors.AgentConfig {

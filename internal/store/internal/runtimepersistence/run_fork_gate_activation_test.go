@@ -31,7 +31,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -212,36 +212,23 @@ func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runF
 	if err != nil {
 		return err
 	}
-	operation := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, decisionMaterializer func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error, effectMaterializer func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		if err := decisionMaterializer(txctx, tx, story); err != nil {
-			return err
+	return runSelectedFixtureMutation(ctx, selected, "materialize run-fork gate authorities", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		bindings := []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}
+		switch store := selected.(type) {
+		case *PostgresStore:
+			if err := store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, decisionProjection, bindings, now); err != nil {
+				return err
+			}
+			return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
+		case *SQLiteRuntimeStore:
+			if err := store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, decisionProjection, bindings, now); err != nil {
+				return err
+			}
+			return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
+		default:
+			return fmt.Errorf("unsupported selected-store gate test owner %T", selected)
 		}
-		return effectMaterializer(txctx, tx, story)
-	}
-	switch store := selected.(type) {
-	case *PostgresStore:
-		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return operation(txctx, tx, story,
-				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-					return store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(ctx, tx, story, forkRunID, decisionProjection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now)
-				},
-				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-					return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
-				})
-		})
-	case *SQLiteRuntimeStore:
-		return store.runPrivateAuthorActivityMutation(ctx, "test materialize SQLite run-fork gate authorities", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return operation(txctx, tx, story,
-				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-					return store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(ctx, tx, story, forkRunID, decisionProjection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now)
-				},
-				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-					return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectProjection, point, correspondence, now)
-				})
-		})
-	default:
-		return fmt.Errorf("unsupported selected-store gate test owner %T", selected)
-	}
+	})
 }
 
 func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStoreParity(t *testing.T) {
@@ -572,8 +559,8 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cardStore.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, tx, story, forkRunID, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
+	if err := runSelectedFixtureMutation(ctx, cardStore, "materialize decision cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
 	}); err != nil {
 		t.Fatalf("materialize fork cards: %v", err)
 	}
@@ -653,8 +640,8 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cardStore.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, tx, story, forkRunID, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
+	if err := runSelectedFixtureMutation(ctx, cardStore, "materialize committed decision cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return cardStore.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(txctx, attempt, forkRunID, projection, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatalf("materialize committed fork card: %v", err)
 	}
@@ -702,8 +689,8 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cards.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return cards.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, tx, story, sourceRunID, forkRunID, projection, point, correspondence, now.Add(2*time.Minute))
+	if err := runSelectedFixtureMutation(ctx, cards, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return cards.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, projection, point, correspondence, now.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatal(err)
 	}

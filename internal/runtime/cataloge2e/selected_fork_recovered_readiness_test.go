@@ -34,7 +34,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				const path = "worker-flow/worker-001"
 				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
 				ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
-				if _, err := selected.PauseRunControl(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "recovered readiness proof", ControlledBy: "cataloge2e"}); err != nil {
+				if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "recovered readiness proof", ControlledBy: "cataloge2e"}); err != nil {
 					t.Fatal(err)
 				}
 				event := catalogRunScopedWorkerReadyEvent(t, catalogRuntimeRunID, path, entity, uuid.NewString())
@@ -54,15 +54,8 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				cfg := testRuntimeConfig()
 				cfg.LLM.Backend = "anthropic"
 				options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
-				staged, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-					SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
-					Owner:        selectedContractExecutionOwnerForCatalogHarness(t, h, stopAfterSelectedForkCommit{forkStore}),
-					SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
-				})
-				child := staged.Materialization.ForkRunID
-				if !errors.Is(err, errStopAfterSelectedForkCommit) || child == "" {
-					t.Fatalf("stage real child before recovery: %#v, %v", staged, err)
-				}
+				staged := stageCatalogSelectedContractFork(t, ctx, forkStore, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, options, catalogRuntimeRunID, event.ID())
+				child := staged.ForkRunID
 				readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, child, flowidentity.RouteForInstancePath(path))
 				if err != nil || !found || readiness.RunStatus != runfork.RunForkMaterializedStatus || !readiness.Eligible() {
 					t.Fatalf("canonical paused child is not eligible for staged binding: %#v, %t, %v", readiness, found, err)
@@ -79,7 +72,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						t.Fatalf("retire loaded runtime before selected recovery: %v", err)
 					}
 				} else if change == "terminal_run" {
-					if _, err := selected.StopRunControl(ctx, runcontrol.TransitionRequest{RunID: child, Reason: "terminal recovery refusal", ControlledBy: "cataloge2e"}); err != nil {
+					if _, err := selected.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: child, Reason: "terminal recovery refusal", ControlledBy: "cataloge2e"}); err != nil {
 						t.Fatal(err)
 					}
 					readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, child, flowidentity.RouteForInstancePath(path))

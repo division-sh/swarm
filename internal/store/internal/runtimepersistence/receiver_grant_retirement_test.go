@@ -104,9 +104,9 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					t.Fatalf("exact lifecycle/grant: state=%+v grant=%+v found=%v err=%v", state, evidence, found, err)
 				}
 				writer := selected.(interface {
-					CreateEntity(context.Context, tools.EntityCreateRecord) error
+					CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
 				})
-				if err := writer.CreateEntity(ctx, tools.EntityCreateRecord{
+				if _, err := writer.CreateEntity(ctx, tools.EntityCreateRecord{
 					RunID: runID, EntityID: entityID, FlowInstance: identity.FlowInstance(),
 					EntityType: "receiver", CurrentState: "active", FieldsJSON: []byte(`{}`), CreatedAt: time.Now().UTC(),
 					Writer: tools.EntityMutationWriter{Type: "agent", ID: identity.AgentID(), HandlerStep: "grant_probe_setup"},
@@ -179,7 +179,7 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				switch store := selected.(type) {
 				case *PostgresStore:
 					barrier.owner = store.agentPostgresOwner
-					owner, err := deliveryowner.NewDeliveryPostgresOwner(store.deliveryPostgresOwner.DeadLetterPostgresOwner, store.runLifecyclePostgresOwner, barrier)
+					owner, err := deliveryowner.NewDeliveryPostgresOwner(store.deliveryPostgresOwner.DeadLetterPostgresOwner, store.runLifecyclePostgresOwner, store.runLifecycleCandidates, barrier)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -189,7 +189,7 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					claimStore, db = owner, store.backend.ConstructionHandle()
 				case *SQLiteRuntimeStore:
 					barrier.owner = store.agentSQLiteOwner
-					owner, err := deliveryowner.NewDeliverySQLiteOwner(store.deliverySQLiteOwner.DeadLetterSQLiteOwner, store.runLifecycleSQLiteOwner, barrier, nil)
+					owner, err := deliveryowner.NewDeliverySQLiteOwner(store.deliverySQLiteOwner.DeadLetterSQLiteOwner, store.runLifecycleSQLiteOwner, store.runLifecycleCandidates, barrier, nil)
 					if err != nil {
 						t.Fatal(err)
 					}

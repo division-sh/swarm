@@ -34,7 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type TargetFailureDeadLetterRecorder = runtimedeadletters.Recorder
+type TargetFailureDeadLetterRecorder = runtimedeadletters.AcknowledgedRecorder
 
 func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *runtimefailures.Envelope {
 	if failure.Empty() {
@@ -158,11 +158,11 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
-	if err != nil {
+	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
+	if !ready {
 		return err
 	}
-	return eb.dispatchPreparedPublish(ctx, prepared)
+	return errors.Join(err, eb.dispatchPreparedPublish(publicationHandoffContext(ctx, err), prepared))
 }
 
 // PublishAndWait persists and dispatches one event, then joins the exact tree
@@ -180,17 +180,17 @@ func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error 
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
-	if err != nil {
+	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
+	if !ready {
 		return err
 	}
 	group := newLocalDeliveryCompletionGroup()
 	waitCtx := ctx
 	prepared.receiver = prepared.receiver.withCompletion(group)
-	return eb.dispatchPreparedPublishWithCompletion(ctx, prepared, func() error {
+	return errors.Join(err, eb.dispatchPreparedPublishWithCompletion(publicationHandoffContext(ctx, err), prepared, func() error {
 		group.releaseDispatch()
 		return group.wait(waitCtx)
-	})
+	}))
 }
 
 // PublishAcknowledged persists the event, recipient manifest, and replay scope
@@ -209,14 +209,15 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
-	if err != nil {
+	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
+	if !ready {
 		return err
 	}
+	handoffCtx := publicationHandoffContext(ctx, err)
 	if prepared.exactDuplicate {
-		return eb.DispatchPreparedPublish(ctx, prepared)
+		return errors.Join(err, eb.DispatchPreparedPublish(handoffCtx, prepared))
 	}
-	return eb.DispatchPreparedPublishAsync(ctx, prepared)
+	return errors.Join(err, eb.DispatchPreparedPublishAsync(handoffCtx, prepared))
 }
 
 // PublishAPIEventAcknowledged commits an event.publish publication and its
@@ -276,15 +277,19 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	if err != nil {
 		return apiidempotency.Completion{}, false, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
 	}
-	committed, err := owner.CommitAPIEventPublication(preparedCtx, APIEventPublicationCommand{
+	committed, commitErr := owner.CommitAPIEventPublication(preparedCtx, APIEventPublicationCommand{
 		Publication: command,
 		Idempotency: idempotency,
 		Completion:  completion,
 		RunCreation: runCreation,
 	})
-	if err != nil {
-		return apiidempotency.Completion{}, false, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	if commitErr != nil && !committed.Acknowledged && !committed.Replay {
+		return apiidempotency.Completion{}, false, errors.Join(commitErr, prepared.publicationClaim.Release(preparedCtx))
 	}
+	if err := committed.Validate(); err != nil {
+		return apiidempotency.Completion{}, false, errors.Join(commitErr, err, prepared.publicationClaim.Release(publicationHandoffContext(preparedCtx, commitErr)))
+	}
+	handoffCtx := publicationHandoffContext(preparedCtx, commitErr)
 	if committed.RunCreation != nil && committed.RunCreation.Summary.Outcome != "created" {
 		code := durabledata.CodeRunDataRejected
 		if committed.RunCreation.Summary.Outcome == "head_conflict" {
@@ -293,27 +298,34 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 		details := map[string]any{"run_id": committed.RunCreation.Summary.RunID, "operation": committed.RunCreation.Summary}
 		return apiidempotency.Completion{}, committed.Replay, errors.Join(
 			durabledata.NewDomainErrorWithDetails(code, details, "run creation %s", committed.RunCreation.Summary.Outcome),
-			prepared.publicationClaim.Release(preparedCtx),
+			commitErr,
+			prepared.publicationClaim.Release(handoffCtx),
 		)
 	}
 	if committed.Replay {
-		return committed.Completion, true, prepared.publicationClaim.Release(preparedCtx)
+		return committed.Completion, true, errors.Join(commitErr, prepared.publicationClaim.Release(handoffCtx))
 	}
-	prepared, err = eb.applyCommittedPublication(preparedCtx, prepared, committed.Publication)
+	prepared, err = eb.applyCommittedPublication(handoffCtx, prepared, committed.Publication)
 	if err != nil {
 		eb.reportLocalDispatchFailure("api_event_publication_finalize_failed", evt, err)
+		if commitErr != nil {
+			return committed.Completion, false, errors.Join(commitErr, err)
+		}
 		return committed.Completion, false, nil
 	}
 	if prepared.exactDuplicate {
-		err = eb.DispatchPreparedPublish(preparedCtx, prepared)
+		err = eb.DispatchPreparedPublish(handoffCtx, prepared)
 	} else {
-		err = eb.DispatchPreparedPublishAsync(preparedCtx, prepared)
+		err = eb.DispatchPreparedPublishAsync(handoffCtx, prepared)
 	}
 	if err != nil {
 		eb.reportLocalDispatchFailure("api_event_publication_dispatch_failed", evt, err)
+		if commitErr != nil {
+			return committed.Completion, false, errors.Join(commitErr, err)
+		}
 		return committed.Completion, false, nil
 	}
-	return committed.Completion, false, nil
+	return committed.Completion, false, commitErr
 }
 
 // LookupAPIEventPublication returns a durable keyed completion before request
@@ -344,20 +356,35 @@ type eventBusCommitPublishPlan struct {
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
 }
 
-func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, error) {
+func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
 	owner, ok := eb.store.(CommitPublicationOwner)
 	if !ok || owner == nil {
-		return PreparedPublish{}, errors.New("selected store does not support the closed CommitPublish operation")
+		return PreparedPublish{}, false, errors.New("selected store does not support the closed CommitPublish operation")
 	}
 	preparedCtx, prepared, command, err := eb.preparePublishCommand(ctx, plan)
 	if err != nil {
-		return PreparedPublish{}, err
+		return PreparedPublish{}, false, err
 	}
-	committed, err := owner.CommitPublication(preparedCtx, command)
+	committed, commitErr := owner.CommitPublication(preparedCtx, command)
+	if commitErr != nil && !committed.Acknowledged {
+		return PreparedPublish{}, false, errors.Join(commitErr, prepared.publicationClaim.Release(preparedCtx))
+	}
+	if err := committed.Validate(); err != nil {
+		return PreparedPublish{}, false, errors.Join(commitErr, err, prepared.publicationClaim.Release(publicationHandoffContext(preparedCtx, commitErr)))
+	}
+	prepared, err = eb.applyCommittedPublication(publicationHandoffContext(preparedCtx, commitErr), prepared, committed)
 	if err != nil {
-		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+		return PreparedPublish{}, false, errors.Join(commitErr, err)
 	}
-	return eb.applyCommittedPublication(preparedCtx, prepared, committed)
+	return prepared, true, commitErr
+}
+
+func publicationHandoffContext(ctx context.Context, commitErr error) context.Context {
+	if commitErr != nil {
+		// A committed publication still owns its local handoff after request cancellation.
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
 }
 
 func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusCommitPublishPlan) (context.Context, PreparedPublish, PublicationCommand, error) {
@@ -700,13 +727,16 @@ func (eb *EventBus) CommitFlowInstanceActivation(
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
 	committed, err := owner.CommitFlowInstanceActivation(ctx, FlowInstanceActivationCommand{Plan: plan, RouteTopology: topology})
-	if err != nil {
+	if err != nil && !committed.Acknowledged {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
-	if err := committed.Validate(); err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	if validationErr := committed.Validate(); validationErr != nil {
+		if !committed.Acknowledged {
+			return runtimepipeline.CommittedFlowInstanceActivation{}, errors.Join(err, validationErr)
+		}
+		return committed, errors.Join(err, validationErr)
 	}
-	return committed, nil
+	return committed, err
 }
 
 func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtimeauthoractivity.EventDescriptor, bool, error) {
@@ -1187,18 +1217,19 @@ func (eb *EventBus) CommitDynamicFlowRuntimeCreationOccurrence(
 		return err
 	}
 	request := req
-	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
+	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
 		bus:                 eb,
 		event:               req.Event,
 		dynamicFlowCreation: &request,
 	})
-	if err != nil {
+	if !ready {
 		return err
 	}
+	handoffCtx := publicationHandoffContext(ctx, err)
 	if prepared.exactDuplicate {
-		return eb.DispatchPreparedPublish(ctx, prepared)
+		return errors.Join(err, eb.DispatchPreparedPublish(handoffCtx, prepared))
 	}
-	return eb.DispatchPreparedPublishAsync(ctx, prepared)
+	return errors.Join(err, eb.DispatchPreparedPublishAsync(handoffCtx, prepared))
 }
 
 // DispatchPreparedPublish consumes only a plan finalized by a closed named
@@ -1431,15 +1462,23 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		return errors.Join(deferredErr, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(deferredErr, "publish_deferred"))))
 	}
 	if evt.Type() == events.EventType("mailbox.card_decided") {
-		if err := publicationClaim.MarkDecisionProcessed(ctx); err != nil {
-			return err
-		}
-		return eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("decision_route_settled"))
+		return eb.settleCommittedDecisionPublish(ctx, publicationClaim)
 	}
 	if err := eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (eb *EventBus) settleCommittedDecisionPublish(ctx context.Context, claim *pipelinePublicationClaim) error {
+	if claim == nil {
+		return errors.New("committed decision publication requires its claim")
+	}
+	mark, markErr := claim.MarkDecisionProcessedOutcome(ctx)
+	if !mark.Committed() {
+		return markErr
+	}
+	return errors.Join(markErr, eb.settleCommittedPublish(ctx, claim, runtimepipelineobligation.Acknowledged("decision_route_settled")))
 }
 
 func (eb *EventBus) settleCommittedPublish(ctx context.Context, claim *pipelinePublicationClaim, disposition runtimepipelineobligation.Disposition) error {
@@ -2203,11 +2242,11 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt, direct: true, directRecipients: uniqueStrings(recipients)})
-	if err != nil {
+	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt, direct: true, directRecipients: uniqueStrings(recipients)})
+	if !ready {
 		return err
 	}
-	return eb.dispatchPreparedPublish(ctx, prepared)
+	return errors.Join(err, eb.dispatchPreparedPublish(publicationHandoffContext(ctx, err), prepared))
 }
 
 // PublishDirectRoutes persists and dispatches exactly the caller-supplied
@@ -2225,13 +2264,13 @@ func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, r
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
-	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
+	prepared, ready, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
 		bus: eb, event: evt, direct: true, directRoutes: events.NormalizeDeliveryRoutes(routes),
 	})
-	if err != nil {
+	if !ready {
 		return err
 	}
-	return eb.dispatchPreparedPublish(ctx, prepared)
+	return errors.Join(err, eb.dispatchPreparedPublish(publicationHandoffContext(ctx, err), prepared))
 }
 
 func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *worklifetime.Lease, error) {
@@ -2660,8 +2699,14 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	if recorder == nil {
 		return
 	}
-	if err := recorder.RecordDeadLetter(ctx, record); err != nil {
+	committed, err := recorder.RecordDeadLetterOutcome(ctx, record)
+	if !committed.Acknowledged {
+		if err == nil {
+			err = errors.New("target failure dead-letter record was not acknowledged")
+		}
 		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, eventBusDependencyFailure(err, "target_failure_dead_letter_persist_failed", "record_target_failure"), 0)
+	} else if err != nil {
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record committed with a post-commit failure", "eventbus", "target_resolution_failed_dead_letter_post_commit_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, eventBusDependencyFailure(err, "target_failure_dead_letter_post_commit_failed", "record_target_failure"), 0)
 	}
 }
 

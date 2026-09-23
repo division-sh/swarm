@@ -29,6 +29,15 @@ type Recorder interface {
 	RecordDeadLetter(context.Context, Record) error
 }
 
+// RecordOutcome is populated only from an acknowledged selected-store attempt.
+type RecordOutcome struct {
+	Acknowledged bool
+}
+
+type AcknowledgedRecorder interface {
+	RecordDeadLetterOutcome(context.Context, Record) (RecordOutcome, error)
+}
+
 type InsertResult struct {
 	DeadLetterID string
 	Inserted     bool

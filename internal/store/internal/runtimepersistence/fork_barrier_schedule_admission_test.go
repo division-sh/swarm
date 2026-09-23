@@ -41,8 +41,8 @@ func TestForkBarrierScheduleHostileAdmissionBothStores(t *testing.T) {
 						query = `UPDATE fan_out_obligation_barriers SET status='fired' WHERE schedule_activation_id=$1`
 					case "extra_schedule":
 						command := testRootGenericScheduleCommand(t, fixture.runID, fixture.runID, "unrelated-timer", genericschedule.AbsoluteDue(at))
-						if _, err := owner.(genericschedule.Store).AdmitGenericSchedule(ctx, command); err != nil {
-							t.Fatal(err)
+						if admitted, err := owner.(genericschedule.Store).AdmitGenericScheduleOutcome(ctx, command); err != nil || !admitted.Acknowledged {
+							t.Fatalf("admission=%+v err=%v", admitted, err)
 						}
 					}
 					if query != "" {

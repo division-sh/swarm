@@ -8,53 +8,30 @@ import (
 	"strings"
 	"time"
 
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
 )
 
-func (s *AgentPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *privaterunforkrevision.Effects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *AgentPostgresOwner) runDirectiveMutation(ctx context.Context, evidence mutationprotocol.Evidence, fn func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := fn(txctx, tx, story); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
+	result := mutationprotocol.RunPostgres(ctx, s.backend, evidence, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error { return fn(ctx, tx, attempt) })
+		return struct{}{}, err
 	})
+	return result.Acknowledged(), result.Err()
 }
 
-func (s *AgentSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
+func (s *AgentSQLiteOwner) runDirectiveMutation(ctx context.Context, label string, evidence mutationprotocol.Evidence, fn func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return err
+		return false, err
 	}
-	return s.backend.RunTransaction(ctx, label, fn)
-}
-
-func (s *AgentSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *privaterunforkrevision.Effects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	resetEffects := effects.AttemptReset()
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		resetEffects()
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := fn(txctx, tx, story); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
+	result := mutationprotocol.RunSQLite(ctx, s.backend, label, evidence, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error { return fn(ctx, tx, attempt) })
+		return struct{}{}, err
 	})
+	return result.Acknowledged(), result.Err()
 }
 
 func sqliteNullString(raw string) any {

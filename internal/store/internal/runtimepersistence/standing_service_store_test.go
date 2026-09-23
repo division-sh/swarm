@@ -29,7 +29,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -100,20 +100,18 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 			}
 			route := testEntitylessNodeDeliveryRoute("standing-startup-node")
 			evt := eventtest.RuntimeControl(uuid.NewString(), "standing.signal.startup", "test", candidate.EntityID, []byte(`{}`), 0, created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC())
-			if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
+			if err := runDeliveryFixtureAttempt(ctx, deliveryStore, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				return eventfixture.Insert(txctx, attempt, dialect, evt)
+			}); err != nil {
 				t.Fatalf("insert startup-order event: %v", err)
 			}
 			var proofs []runtimedelivery.DurableHandoffProof
-			commit := func(txctx context.Context, tx *sql.Tx) error {
+			commit := func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 				var err error
-				proofs, err = adapter.CommitInitial(txctx, tx, runforkrevision.NewEffects(), evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
+				proofs, err = adapter.CommitInitial(txctx, attempt, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
 				return err
 			}
-			if backend == "sqlite" {
-				err = deliveryStore.(*SQLiteRuntimeStore).runEventTransaction(ctx, commit)
-			} else {
-				err = deliveryStore.(*PostgresStore).runEventTransaction(ctx, commit)
-			}
+			err = runDeliveryFixtureAttempt(ctx, deliveryStore, commit)
 			if err != nil {
 				t.Fatalf("commit startup-order delivery: %v", err)
 			}
@@ -973,9 +971,9 @@ func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
-	if err == nil || !strings.Contains(err.Error(), "swarm standing suspend "+serviceID) || !strings.Contains(err.Error(), "swarm standing reset "+serviceID) {
-		t.Fatalf("StopRunControl error = %v", err)
+	outcome, err := store.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
+	if outcome.Acknowledged || err == nil || !strings.Contains(err.Error(), "swarm standing suspend "+serviceID) || !strings.Contains(err.Error(), "swarm standing reset "+serviceID) {
+		t.Fatalf("StopRunControl outcome=%+v error=%v", outcome, err)
 	}
 	var status string
 	if err := store.backend.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&status); err != nil {
@@ -1007,7 +1005,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 				workflow = newPostgresWorkflowTestCoordinator(t, db, store)
 			}
 			stopper := selected.(interface {
-				StopRunControl(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error)
+				StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 			})
 			ctx := testAuthorActivityRuntimeContext()
 			flowPath := "run-stop-guidance/" + backend
@@ -1023,26 +1021,26 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create standing service: %v", err)
 			}
-			_, err = stopper.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
-			if err == nil || !strings.Contains(err.Error(), "swarm standing suspend "+serviceID) || !strings.Contains(err.Error(), "swarm standing reset "+serviceID) {
-				t.Fatalf("active run-stop guidance = %v", err)
+			outcome, err := stopper.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
+			if outcome.Acknowledged || err == nil || !strings.Contains(err.Error(), "swarm standing suspend "+serviceID) || !strings.Contains(err.Error(), "swarm standing reset "+serviceID) {
+				t.Fatalf("active run-stop guidance: outcome=%+v err=%v", outcome, err)
 			}
 
 			orphaned, err := workflow.ReconcileStandingServiceSet(ctx, nil)
 			if err != nil || len(orphaned) != 1 || orphaned[0].RestartDisposition.Kind != runtimepipeline.StandingRestartOrphaned {
 				t.Fatalf("orphan standing service = %#v err=%v", orphaned, err)
 			}
-			_, err = stopper.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
-			if err == nil || !strings.Contains(err.Error(), "restore the standing declaration") || strings.Contains(err.Error(), "standing suspend") {
-				t.Fatalf("orphan run-stop guidance = %v", err)
+			outcome, err = stopper.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
+			if outcome.Acknowledged || err == nil || !strings.Contains(err.Error(), "restore the standing declaration") || strings.Contains(err.Error(), "standing suspend") {
+				t.Fatalf("orphan run-stop guidance: outcome=%+v err=%v", outcome, err)
 			}
 
 			if _, err := markRunTerminalStatusForTest(ctx, selected, created.RunID, string(runtimerunlifecycle.StateCancelled), nil, time.Now().UTC()); err != nil {
 				t.Fatalf("terminalize orphaned standing run: %v", err)
 			}
-			_, err = stopper.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
-			if err == nil || !strings.Contains(err.Error(), "restore the standing declaration, then use `swarm standing reset "+serviceID+"`") {
-				t.Fatalf("terminal orphan run-stop guidance = %v", err)
+			outcome, err = stopper.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: created.RunID})
+			if outcome.Acknowledged || err == nil || !strings.Contains(err.Error(), "restore the standing declaration, then use `swarm standing reset "+serviceID+"`") {
+				t.Fatalf("terminal orphan run-stop guidance: outcome=%+v err=%v", outcome, err)
 			}
 		})
 	}

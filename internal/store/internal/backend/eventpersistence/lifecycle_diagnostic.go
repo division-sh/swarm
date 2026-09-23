@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +36,7 @@ func sameDiagnosticJSON(a, b []byte) bool {
 	return ae == nil && be == nil && bytes.Equal(ac, bc)
 }
 
-func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, store eventCommitTxStore, evidence lifecycleDiagnosticEvidenceReader, origins selectedForkLineageOwner, postgres bool, item diaglog.LifecycleDiagnostic, record runtimepkg.RuntimeLogPersistenceRecord) (bool, error) {
+func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, evidence lifecycleDiagnosticEvidenceReader, origins selectedForkLineageOwner, postgres bool, item diaglog.LifecycleDiagnostic, record runtimepkg.RuntimeLogPersistenceRecord) (bool, error) {
 	if err := item.Validate(); err != nil {
 		return false, err
 	}
@@ -171,7 +171,7 @@ func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, story *privat
 	if err != nil {
 		return false, err
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, runtimeAuthorActivityMutation(story), effects, admitted, settlement)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
 	if err != nil {
 		return false, err
 	}
@@ -205,13 +205,15 @@ func (s *EventPostgresOwner) PersistLifecycleDiagnostic(ctx context.Context, ite
 	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
-	inserted := false
-	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-		var err error
-		inserted, err = persistLifecycleDiagnosticTx(txctx, tx, story, effects, s, s, s.runFork, true, item, record)
-		return err
+	return runPostgresEventMutation(ctx, s, false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (bool, error) {
+		var inserted bool
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var writeErr error
+			inserted, writeErr = persistLifecycleDiagnosticTx(txctx, tx, attempt, s, s, s.runFork, true, item, record)
+			return writeErr
+		})
+		return inserted, err
 	})
-	return inserted && err == nil, err
 }
 
 func (s *EventSQLiteOwner) PersistLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic, record runtimepkg.RuntimeLogPersistenceRecord) (bool, error) {
@@ -221,11 +223,13 @@ func (s *EventSQLiteOwner) PersistLifecycleDiagnostic(ctx context.Context, item 
 	if err := s.requireCurrentSchema(); err != nil {
 		return false, err
 	}
-	inserted := false
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite lifecycle diagnostic settlement", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-		var err error
-		inserted, err = persistLifecycleDiagnosticTx(txctx, tx, story, effects, s, s, s.runFork, false, item, record)
-		return err
+	return runSQLiteEventMutation(ctx, s, "sqlite lifecycle diagnostic settlement", false, func(txctx context.Context, attempt *mutationprotocol.Attempt) (bool, error) {
+		var inserted bool
+		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			var writeErr error
+			inserted, writeErr = persistLifecycleDiagnosticTx(txctx, tx, attempt, s, s, s.runFork, false, item, record)
+			return writeErr
+		})
+		return inserted, err
 	})
-	return inserted && err == nil, err
 }

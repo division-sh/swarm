@@ -17,17 +17,16 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
 
 // The existing constructor dependency still delegates to the real lifecycle
 // owner. Only the final SQL statement introduces native SQLite lock contention.
 type llmCandidateRetryProbe struct {
-	request func(context.Context, *sql.Tx, string, *time.Time, *runhandoff.CandidateHandoff) (runlifecycle.CandidateRequestResult, error)
+	request func(context.Context, *sql.Tx, string, *time.Time) (runlifecycle.CandidateRequestResult, error)
 }
 
-func (p llmCandidateRetryProbe) RequestCompletionCandidateTx(ctx context.Context, tx *sql.Tx, run string, due *time.Time, handoff *runhandoff.CandidateHandoff) (runlifecycle.CandidateRequestResult, error) {
-	return p.request(ctx, tx, run, due, handoff)
+func (p llmCandidateRetryProbe) WriteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, run string, due *time.Time) (runlifecycle.CandidateRequestResult, error) {
+	return p.request(ctx, tx, run, due)
 }
 
 func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string) *sql.Tx {
@@ -83,14 +82,14 @@ func llmSQLiteBusyBlocker(t *testing.T, db *sql.DB, path, phase string) *sql.Tx 
 func newLLMRetryOwner(t *testing.T, store *SQLiteRuntimeStore, blocker *sql.Tx, phase string, perAttempt int, observe func(context.Context, *sql.Tx) error) (*llmpersistence.LLMSQLiteOwner, *int) {
 	t.Helper()
 	calls := 0
-	probe := llmCandidateRetryProbe{request: func(ctx context.Context, tx *sql.Tx, run string, due *time.Time, handoff *runhandoff.CandidateHandoff) (runlifecycle.CandidateRequestResult, error) {
+	probe := llmCandidateRetryProbe{request: func(ctx context.Context, tx *sql.Tx, run string, due *time.Time) (runlifecycle.CandidateRequestResult, error) {
 		calls++
 		if calls == perAttempt+1 {
 			if err := blocker.Rollback(); err != nil {
 				return runlifecycle.CandidateRequestResult{}, err
 			}
 		}
-		result, err := store.runLifecycleSQLiteOwner.RequestCompletionCandidateTx(ctx, tx, run, due, handoff)
+		result, err := store.runLifecycleSQLiteOwner.WriteCompletionCandidateTx(ctx, tx, run, due)
 		if err != nil {
 			return result, err
 		}

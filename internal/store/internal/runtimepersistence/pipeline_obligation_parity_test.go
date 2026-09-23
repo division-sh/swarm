@@ -3,7 +3,6 @@ package runtimepersistence
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -18,7 +17,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
@@ -318,7 +317,7 @@ func provePipelineClaimLifecycle(
 	if err != nil {
 		t.Fatalf("ClaimEvent after release: %v", err)
 	}
-	if err := owner.MarkDecisionProcessed(ctx, work.Claim); !errors.Is(err, runtimepipelineobligation.ErrWrongClaim) {
+	if _, err := owner.MarkDecisionProcessed(ctx, work.Claim); !errors.Is(err, runtimepipelineobligation.ErrWrongClaim) {
 		t.Fatalf("wrong-purpose decision settlement error = %v, want ErrWrongClaim", err)
 	}
 	if err := owner.Release(ctx, work.Claim); err != nil {
@@ -520,7 +519,7 @@ func provePipelineDecisionRouteDispositions(
 	if err != nil || !ok || processed.Event.ID() != processedID {
 		t.Fatalf("claim processed decision route: work=%s ok=%v err=%v", processed.Event.ID(), ok, err)
 	}
-	if err := owner.MarkDecisionProcessed(ctx, processed.Claim); err != nil {
+	if _, err := owner.MarkDecisionProcessed(ctx, processed.Claim); err != nil {
 		t.Fatalf("MarkDecisionProcessed: %v", err)
 	}
 	requireCompleteRunForkRevision(t, ctx, fixture, runID)
@@ -621,29 +620,18 @@ func terminalizePipelineRunForTest(
 	at time.Time,
 ) (int, error) {
 	var count int
-	var err error
-	switch store := selected.(type) {
-	case *PostgresStore:
-		effects := runforkrevision.NewEffects()
-		err = store.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			count, err = store.TerminalizeRunTx(txctx, tx, effects, runID, disposition, at)
-			if err == nil {
-				_, err = runforkrevision.FinalizePostgres(txctx, tx, effects)
-			}
-			return err
-		})
-	case *SQLiteRuntimeStore:
-		effects := runforkrevision.NewEffects()
-		err = store.runRuntimeMutation(ctx, "sqlite pipeline terminalization fixture", func(txctx context.Context, tx *sql.Tx) error {
-			count, err = store.TerminalizeRunTx(txctx, tx, effects, runID, disposition, at)
-			if err == nil {
-				_, err = runforkrevision.FinalizeSQLite(txctx, tx, effects)
-			}
-			return err
-		})
-	default:
-		err = fmt.Errorf("unexpected pipeline store %T", selected)
-	}
+	err := runSelectedFixtureMutation(ctx, selected, "pipeline terminalization fixture", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		switch store := selected.(type) {
+		case *PostgresStore:
+			count, err = store.TerminalizeRunTx(txctx, attempt, runID, disposition, at)
+		case *SQLiteRuntimeStore:
+			count, err = store.TerminalizeRunTx(txctx, attempt, runID, disposition, at)
+		default:
+			err = fmt.Errorf("unexpected pipeline store %T", selected)
+		}
+		return err
+	})
 	return count, err
 }
 

@@ -530,11 +530,8 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 			activitySuccessPayload(intent, result),
 			nil,
 		)
-		stored, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
-		if err != nil {
-			return activityDependencyFailure(err, intent.Tool, "complete_activity_attempt")
-		}
-		return d.publishJournaledActivityResult(ctx, intent, stored)
+		stored, committed, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_activity_attempt")
 	}
 	client := d.client
 	if client == nil {
@@ -550,11 +547,8 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 			activityFailurePayload(intent, cause),
 			&cause.Failure,
 		)
-		stored, journalErr := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
-		if journalErr != nil {
-			return activityDependencyFailure(journalErr, intent.Tool, "complete_activity_attempt")
-		}
-		return d.publishJournaledActivityResult(ctx, intent, stored)
+		stored, committed, journalErr := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, journalErr, "complete_activity_attempt")
 	}
 	result, err := executePreparedActivityHTTPTool(ctx, prepared)
 	var terminal ActivityAttemptRecord
@@ -575,15 +569,13 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		terminal = started.withTerminal(ActivityAttemptStatusSucceeded, success.eventID, string(success.eventType), payload, nil)
 	}
 	var stored ActivityAttemptRecord
+	var committed bool
 	if terminal.Status == ActivityAttemptStatusUncertain {
-		stored, err = d.coordinator.workflowStore.MarkActivityAttemptUncertain(ctx, terminal)
+		stored, committed, err = d.coordinator.workflowStore.MarkActivityAttemptUncertain(ctx, terminal)
 	} else {
-		stored, err = d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		stored, committed, err = d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
 	}
-	if err != nil {
-		return activityDependencyFailure(err, intent.Tool, "complete_activity_attempt")
-	}
-	return d.publishJournaledActivityResult(ctx, intent, stored)
+	return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_activity_attempt")
 }
 
 func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Context, intent runtimeengine.ActivityIntent, cause error) error {
@@ -622,11 +614,18 @@ func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Cont
 		activityFailurePayload(intent, failure),
 		&failure.Failure,
 	)
-	stored, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
-	if err != nil {
-		return activityDependencyFailure(err, intent.Tool, "complete_rejected_channel_activity_target")
+	stored, committed, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+	return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_rejected_channel_activity_target")
+}
+
+func (d pipelineActivityDispatcher) publishCommittedActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent, stored ActivityAttemptRecord, committed bool, commitErr error, operation string) error {
+	if !committed {
+		return activityDependencyFailure(errors.Join(commitErr, errors.New("activity attempt terminal mutation has no acknowledged result")), intent.Tool, operation)
 	}
-	return d.publishJournaledActivityResult(ctx, intent, stored)
+	if commitErr != nil {
+		commitErr = activityDependencyFailure(commitErr, intent.Tool, operation)
+	}
+	return errors.Join(commitErr, d.publishJournaledActivityResult(context.WithoutCancel(ctx), intent, stored))
 }
 
 func activityDependencyFailure(err error, tool, operation string) error {

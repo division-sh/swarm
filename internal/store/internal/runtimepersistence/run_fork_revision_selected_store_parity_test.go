@@ -19,8 +19,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -674,10 +674,6 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 
 func seedRunForkRevisionMatrixEvent(t *testing.T, ctx context.Context, tx *sql.Tx, runID, eventID string, at time.Time, postgres bool) {
 	t.Helper()
-	dialect := authoractivityfixture.DialectSQLite
-	if postgres {
-		dialect = authoractivityfixture.DialectPostgres
-	}
 	event := eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("matrix.event"),
@@ -689,8 +685,45 @@ func seedRunForkRevisionMatrixEvent(t *testing.T, ctx context.Context, tx *sql.T
 		events.EventEnvelope{Scope: events.EventScopeGlobal},
 		at,
 	)
-	if err := eventfixture.Insert(ctx, tx, dialect, event); err != nil {
-		t.Fatalf("seed canonical run-fork revision event: %v", err)
+	event, err := eventfixture.BindPayload(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if postgres {
+		if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
+			t.Fatalf("seed canonical run-fork revision event: %v", err)
+		}
+		return
+	}
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := eventrecord.FromAdmitted(admitted, testRouteSettlement(admitted.Event(), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO events (
+			event_class, event_id, run_id, event_name, task_id, entity_id, flow_instance, scope, payload, payload_bytes,
+			payload_schema_bundle_hash, payload_schema_flow_id, payload_schema_event_key, payload_schema_digest, payload_schema_class,
+			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
+			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
+			route_settlement, operator_reference_event_id, inherited_fan_out_origin
+		) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
+	`, record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
+		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
+		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID, record.PayloadSchemaEventKey,
+		record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode, record.ChainDepth,
+		record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
+		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
+		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement),
+		record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
+	if err != nil {
+		t.Fatalf("seed SQLite run-fork revision event: %v", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		t.Fatalf("seed SQLite run-fork revision event rows=%d err=%v", rows, err)
 	}
 }
 

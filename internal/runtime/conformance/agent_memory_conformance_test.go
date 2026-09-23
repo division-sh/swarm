@@ -78,7 +78,7 @@ func acquireAndReleaseMemory(t *testing.T, registry runtimesessions.Registry, id
 	if err != nil {
 		t.Fatalf("Acquire(%+v): %v", identity, err)
 	}
-	if err := registry.Release(testAuthorActivityContext(context.Background()), lease); err != nil {
+	if _, err := registry.ReleaseOutcome(testAuthorActivityContext(context.Background()), lease); err != nil {
 		t.Fatalf("Release(%+v): %v", identity, err)
 	}
 	return lease.SessionID

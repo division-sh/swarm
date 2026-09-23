@@ -145,9 +145,9 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 
 	command := testAgentGenericScheduleCommand(t, runID, "agent-1", "test-flow/instance", entityID, "task-1", runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)))
-	admitted, err := store.AdmitGenericSchedule(ctx, command)
-	if err != nil {
-		t.Fatalf("AdmitGenericSchedule: %v", err)
+	admitted, err := store.AdmitGenericScheduleOutcome(ctx, command)
+	if err != nil || !admitted.Acknowledged {
+		t.Fatalf("AdmitGenericScheduleOutcome: commit=%+v err=%v", admitted, err)
 	}
 	schedules, err := store.ListActiveGenericScheduleActivations(ctx)
 	if err != nil {
@@ -156,8 +156,8 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if len(schedules) != 1 || schedules[0].Command.TaskID != "task-1" {
 		t.Fatalf("active schedules = %#v, want task-1", schedules)
 	}
-	if _, err := store.CancelGenericSchedule(ctx, runtimegenericschedule.CancelCommand{ActivationID: admitted.Activation.ID, Cause: "smoke_test", CancelledAt: time.Now()}); err != nil {
-		t.Fatalf("CancelGenericSchedule: %v", err)
+	if cancelled, err := store.CancelGenericScheduleOutcome(ctx, runtimegenericschedule.CancelCommand{ActivationID: admitted.Result.Activation.ID, Cause: "smoke_test", CancelledAt: time.Now()}); err != nil || !cancelled.Acknowledged {
+		t.Fatalf("CancelGenericScheduleOutcome: commit=%+v err=%v", cancelled, err)
 	}
 	schedules, err = store.ListActiveGenericScheduleActivations(ctx)
 	if err != nil {
@@ -182,11 +182,11 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		t.Fatalf("paused ingress state=%+v changed=%v, want paused changed", pausedIngress, changed)
 	}
 
-	pausedRun, err := store.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "pause", ControlledBy: "operator", Now: time.Now().UTC()})
+	pausedRun, err := store.PauseRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "pause", ControlledBy: "operator", Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatalf("PauseRunControl: %v", err)
 	}
-	if pausedRun.Status != "paused" || pausedRun.ControlStatus != "paused" {
+	if !pausedRun.Acknowledged || pausedRun.State.Status != "paused" || pausedRun.State.ControlStatus != "paused" {
 		t.Fatalf("paused run state = %+v, want paused", pausedRun)
 	}
 	blocked, err := store.RunDispatchBlocked(ctx, runID)
@@ -196,18 +196,18 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if !blocked {
 		t.Fatal("RunDispatchBlocked = false, want true for paused run")
 	}
-	runningRun, err := store.ContinueRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "continue", ControlledBy: "operator", Now: time.Now().UTC()})
+	runningRun, err := store.ContinueRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "continue", ControlledBy: "operator", Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatalf("ContinueRunControl: %v", err)
 	}
-	if runningRun.Status != "running" {
+	if !runningRun.Acknowledged || runningRun.State.Status != "running" {
 		t.Fatalf("continued run state = %+v, want running", runningRun)
 	}
-	stoppedRun, err := store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "stop", ControlledBy: "operator", Now: time.Now().UTC()})
+	stoppedRun, err := store.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "stop", ControlledBy: "operator", Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatalf("StopRunControl: %v", err)
 	}
-	if stoppedRun.Status != "cancelled" || stoppedRun.ControlStatus != "stopped" {
+	if !stoppedRun.Acknowledged || stoppedRun.State.Status != "cancelled" || stoppedRun.State.ControlStatus != "stopped" {
 		t.Fatalf("stopped run state = %+v, want cancelled/stopped", stoppedRun)
 	}
 
@@ -306,7 +306,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 		t.Fatalf("seed sqlite event: %v", err)
 	}
 
-	state, err := store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+	state, err := store.StopRunControlOutcome(ctx, runtimeruncontrol.TransitionRequest{
 		RunID:        runID,
 		Reason:       "test",
 		ControlledBy: "test",
@@ -315,7 +315,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StopRunControl: %v", err)
 	}
-	if state.Status != "cancelled" || state.ControlStatus != "stopped" || state.AbandonedDeliveries != 2 {
+	if !state.Acknowledged || state.State.Status != "cancelled" || state.State.ControlStatus != "stopped" || state.State.AbandonedDeliveries != 2 {
 		t.Fatalf("stop state = %+v, want cancelled/stopped/2", state)
 	}
 
@@ -811,11 +811,11 @@ func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(req runtimebus.FlowInstan
 	return b.AddFlowInstanceRouteContext(context.Background(), req)
 }
 
-func (b *sqliteFlowActivationBus) StageFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
+func (b *sqliteFlowActivationBus) StageFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.stagedRequests = append(b.stagedRequests, req.Normalized())
-	return nil
+	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
@@ -845,7 +845,7 @@ func (b *sqliteFlowActivationBus) RetirePublishedFlowInstanceRoute(identity runt
 }
 
 func (b *sqliteFlowActivationBus) AddFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	if err := b.StageFlowInstanceRouteContext(context.Background(), req); err != nil {
+	if _, err := b.StageFlowInstanceRouteContext(context.Background(), req); err != nil {
 		return err
 	}
 	return b.PublishPersistedFlowInstanceRoute(req)
@@ -1558,7 +1558,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err := store.AdoptSessionID(ctx, identity, "owner-1", "provider-session-1"); err != nil {
 		t.Fatalf("AdoptSessionID: %v", err)
 	}
-	if err := store.IncrementTurn(ctx, identity, lease.SessionID); err != nil {
+	if _, err := store.IncrementTurnOutcome(ctx, identity, lease.SessionID); err != nil {
 		t.Fatalf("IncrementTurn: %v", err)
 	}
 	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
@@ -1641,7 +1641,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if len(logs.Logs) != 1 || logs.Logs[0].LogID != logID || logs.Logs[0].SessionID != lease.SessionID {
 		t.Fatalf("runtime logs = %#v, want persisted runtime log", logs)
 	}
-	if err := store.Release(ctx, lease); err != nil {
+	if _, err := store.ReleaseOutcome(ctx, lease); err != nil {
 		t.Fatalf("Release session: %v", err)
 	}
 }
