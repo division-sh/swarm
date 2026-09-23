@@ -317,8 +317,10 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.BindAgentSession(fixtureCtx, claimed.Claim, sessionID); err != nil {
+	if bound, err := store.BindAgentSession(fixtureCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatal(err)
+	} else if !bound.Acknowledged {
+		t.Fatal("bind agent session was not acknowledged")
 	}
 	genericActivation, workflowActivation := seedGenericScheduleTimerFamilies(
 		t, store, store.backend.ConstructionHandle(), fixtureCtx,

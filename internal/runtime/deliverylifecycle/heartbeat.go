@@ -2,30 +2,34 @@ package deliverylifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 )
 
 // ClaimHeartbeat retains one exact claim while its handler is executing. Its
 // process-local loop is admitted to and joined by the same runtime generation.
 type ClaimHeartbeat struct {
-	ctx       context.Context
-	cancel    context.CancelCauseFunc
-	stop      chan struct{}
-	done      chan struct{}
-	stopOnce  sync.Once
-	leaseOnce sync.Once
-	renewMu   sync.Mutex
-	errMu     sync.Mutex
-	renewErr  error
-	workLease *worklifetime.Lease
-	store     Store
-	claim     Claim
-	startedAt time.Time
-	settled   bool
+	ctx        context.Context
+	cancel     context.CancelCauseFunc
+	stop       chan struct{}
+	done       chan struct{}
+	stopOnce   sync.Once
+	leaseOnce  sync.Once
+	renewMu    sync.Mutex
+	errMu      sync.Mutex
+	renewErr   error
+	cleanupErr error
+	workLease  *worklifetime.Lease
+	store      Store
+	claim      Claim
+	startedAt  time.Time
+	settled    bool
 }
 
 type claimHeartbeatContextKey struct{}
@@ -97,10 +101,15 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 	if err != nil {
 		return nil, fmt.Errorf("admit delivery claim heartbeat: %w", err)
 	}
-	snapshot, err := store.RenewClaim(workLease.Context(), claim)
-	if err != nil {
+	commit, err := store.RenewClaim(workLease.Context(), claim)
+	if !commit.Acknowledged {
 		_ = workLease.Done()
-		return nil, fmt.Errorf("renew delivery claim before execution: %w", err)
+		return nil, fmt.Errorf("renew delivery claim before execution: %w", unacknowledgedRenewalError(err))
+	}
+	snapshot := commit.Snapshot
+	if !renewalSnapshotMatchesClaim(snapshot, claim) {
+		_ = workLease.Done()
+		return nil, errors.Join(err, fmt.Errorf("renew delivery claim before execution: acknowledged snapshot does not match exact claim"))
 	}
 	leaseTTL := snapshot.ClaimExpiresAt.Sub(snapshot.UpdatedAt)
 	if leaseTTL <= 0 {
@@ -120,6 +129,9 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 		store: store, claim: claim, startedAt: time.Now(),
 	}
 	h.ctx = WithClaim(context.WithValue(h.ctx, claimHeartbeatContextKey{}, h), claim)
+	if err != nil {
+		h.recordRenewalDiagnostic("renew delivery claim before execution", err)
+	}
 	go h.run(store, claim, interval)
 	return h, nil
 }
@@ -192,10 +204,19 @@ func (h *ClaimHeartbeat) BeginSettlement() (*ClaimSettlementGuard, error) {
 		h.renewMu.Unlock()
 		return nil, fmt.Errorf("delivery claim heartbeat is already settled")
 	}
-	if _, err := h.store.RenewClaim(context.WithoutCancel(h.ctx), h.claim); err != nil {
-		h.recordRenewalFailure("renew delivery claim before settlement", err)
+	commit, err := h.store.RenewClaim(context.WithoutCancel(h.ctx), h.claim)
+	if !commit.Acknowledged {
+		h.recordRenewalFailure("renew delivery claim before settlement", unacknowledgedRenewalError(err))
 		h.renewMu.Unlock()
 		return nil, h.currentRenewalError()
+	}
+	if !renewalSnapshotMatchesClaim(commit.Snapshot, h.claim) {
+		h.recordRenewalFailure("renew delivery claim before settlement", errors.Join(err, fmt.Errorf("acknowledged snapshot does not match exact claim")))
+		h.renewMu.Unlock()
+		return nil, h.currentRenewalError()
+	}
+	if err != nil {
+		h.recordRenewalDiagnostic("renew delivery claim before settlement", err)
 	}
 	return &ClaimSettlementGuard{heartbeat: h}, nil
 }
@@ -242,6 +263,17 @@ func (h *ClaimHeartbeat) Stop() error {
 	return h.renewErr
 }
 
+// CleanupDiagnostic reports acknowledged postcommit cleanup errors separately
+// from authority failures returned by Stop.
+func (h *ClaimHeartbeat) CleanupDiagnostic() error {
+	if h == nil {
+		return nil
+	}
+	h.errMu.Lock()
+	defer h.errMu.Unlock()
+	return h.cleanupErr
+}
+
 func (h *ClaimHeartbeat) run(store Store, claim Claim, interval time.Duration) {
 	defer close(h.done)
 	defer h.cancel(nil)
@@ -270,11 +302,46 @@ func (h *ClaimHeartbeat) renew(store Store, claim Claim, operation string) bool 
 	}
 	// An already-admitted renewal must settle even when retirement cancels
 	// execution. The selected store still fences the exact claim token.
-	if _, err := store.RenewClaim(context.WithoutCancel(h.ctx), claim); err != nil {
-		h.recordRenewalFailure(operation, err)
+	commit, err := store.RenewClaim(context.WithoutCancel(h.ctx), claim)
+	if !commit.Acknowledged {
+		h.recordRenewalFailure(operation, unacknowledgedRenewalError(err))
 		return false
 	}
+	if !renewalSnapshotMatchesClaim(commit.Snapshot, claim) {
+		h.recordRenewalFailure(operation, errors.Join(err, fmt.Errorf("acknowledged snapshot does not match exact claim")))
+		return false
+	}
+	if err != nil {
+		h.recordRenewalDiagnostic(operation, err)
+	}
 	return true
+}
+
+func unacknowledgedRenewalError(err error) error {
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("selected store did not acknowledge the delivery claim renewal")
+}
+
+func renewalSnapshotMatchesClaim(snapshot Snapshot, claim Claim) bool {
+	return snapshot.Status == StatusInProgress &&
+		snapshot.ClaimExpiresAt.After(snapshot.UpdatedAt) &&
+		snapshot.DeliveryID == claim.DeliveryID() && snapshot.RunID == claim.RunID() &&
+		snapshot.ClaimVersion == claim.Version() &&
+		snapshot.SubscriberClass == claim.SubscriberClass() && snapshot.SubscriberID == claim.SubscriberID() &&
+		events.EncodeDeliveryRouteIdentity(snapshot.RouteIdentity) == claim.RouteIdentity()
+}
+
+func (h *ClaimHeartbeat) recordRenewalDiagnostic(operation string, err error) {
+	if err == nil {
+		return
+	}
+	diagnostic := fmt.Errorf("%s: %w", operation, err)
+	h.errMu.Lock()
+	h.cleanupErr = errors.Join(h.cleanupErr, diagnostic)
+	h.errMu.Unlock()
+	diaglog.ProcessLog(diaglog.LevelWarn, "delivery-claim-heartbeat", "acknowledged renewal cleanup failed", "delivery_id", h.claim.DeliveryID(), "error", diagnostic.Error())
 }
 
 func (h *ClaimHeartbeat) currentRenewalError() error {

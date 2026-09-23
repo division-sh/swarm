@@ -142,8 +142,10 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		controlPlaneFields.FlowInstanceID, controlPlaneFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed delivery session: %v", err)
 	}
-	if _, err := pg.BindAgentSession(ctx, claimed.Claim, activeSessionID); err != nil {
+	if bound, err := pg.BindAgentSession(ctx, claimed.Claim, activeSessionID); err != nil {
 		t.Fatalf("bind delivery session: %v", err)
+	} else if !bound.Acknowledged {
+		t.Fatal("bind delivery session was not acknowledged")
 	}
 	var inProgressStatus, inProgressReason, gotActiveSession string
 	if err := db.QueryRowContext(ctx, `

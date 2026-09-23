@@ -16,6 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -38,7 +40,6 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 	columns = append(columns, "payload_bytes BLOB", "chain_depth INTEGER", "created_at TIMESTAMP", "handler_node TEXT", "idempotency_key TEXT", "UNIQUE(event_id)")
 	for _, ddl := range []string{
 		"CREATE TABLE events (" + strings.Join(columns, ",") + ")",
-		"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)",
 		"CREATE TABLE run_fork_revision_heads (run_id TEXT PRIMARY KEY, last_revision INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP)",
 		"CREATE TABLE run_fork_revisions (run_id TEXT, revision INTEGER, recorded_at TIMESTAMP)",
 		"CREATE TABLE run_fork_fact_revisions (run_id TEXT, revision INTEGER, family TEXT, fact_key TEXT, fact TEXT, present BOOLEAN)",
@@ -49,8 +50,22 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 			t.Fatal(err)
 		}
 	}
+	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "record.valid", "gateway", "task-1", []byte(`{"n":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond))
-	event, err = eventtest.AdmitPayload(event, "", "record.valid")
+	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: sourceartifactfixture.BundleHash, EventKey: "record.valid",
+		SchemaDigest: "sha256:" + strings.Repeat("0", 64), SchemaClass: events.PayloadSchemaSchemaLess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, err := events.NewPayloadAdmission(event.Payload(), binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err = events.ApplyPayloadAdmission(event, admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +85,9 @@ func singleEventReaderFixture(t *testing.T) (*sqlitebackend.Backend, eventrecord
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.ExecContext(context.Background(), "INSERT INTO runs (run_id, bundle_hash) VALUES (?, ?)", record.RunID, record.PayloadSchemaBundleHash); err != nil {
+	if err := runlifecyclefixture.Materialize(context.Background(), db, runlifecyclefixture.DialectSQLite, runlifecyclefixture.Fixture{
+		RunID: record.RunID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	return b, record

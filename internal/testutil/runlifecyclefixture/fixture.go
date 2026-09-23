@@ -64,6 +64,33 @@ func RequireSQLite(t testing.TB, ctx context.Context, db *sql.DB, fixture Fixtur
 	require(t, ctx, db, DialectSQLite, fixture)
 }
 
+// CreateSQLiteScenarioSchema supports focused fixtures that do not bootstrap
+// the full runtime schema but still seed runs through this lifecycle fixture.
+func CreateSQLiteScenarioSchema(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return errors.New("scenario run fixture requires database")
+	}
+	for _, ddl := range []string{
+		`CREATE TABLE runs (
+			run_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'running', bundle_hash TEXT NOT NULL,
+			origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT,
+			origin_service_id TEXT, origin_generation INTEGER,
+			forked_from_run_id TEXT, forked_from_event_id TEXT,
+			started_at TIMESTAMP, ended_at TIMESTAMP, failure TEXT,
+			continued_as_run_id TEXT, event_count INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE TABLE source_artifacts (
+			bundle_hash TEXT PRIMARY KEY, source_blob BLOB NOT NULL,
+			member_count INTEGER NOT NULL, total_bytes INTEGER NOT NULL, created_at TIMESTAMP NOT NULL
+		)`,
+	} {
+		if _, err := db.ExecContext(ctx, ddl); err != nil {
+			return fmt.Errorf("create scenario run fixture schema: %w", err)
+		}
+	}
+	return nil
+}
+
 func RunPostgresMutation(
 	ctx context.Context,
 	db *sql.DB,

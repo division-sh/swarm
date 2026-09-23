@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -40,10 +41,6 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	for _, ddl := range []string{
-		`CREATE TABLE runs (
-			run_id TEXT PRIMARY KEY,
-			bundle_hash TEXT
-		)`,
 		`CREATE TABLE run_fork_revision_heads (
 			run_id TEXT PRIMARY KEY,
 			last_revision INTEGER NOT NULL DEFAULT 0,
@@ -214,6 +211,9 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			t.Fatalf("create manager delivery test schema: %v", err)
 		}
 	}
+	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
+		t.Fatalf("create manager delivery lifecycle schema: %v", err)
+	}
 	if err := deliveryfixture.CreateSQLiteDeadLetterSchema(context.Background(), db); err != nil {
 		t.Fatalf("create manager delivery-dependent schema: %v", err)
 	}
@@ -308,8 +308,9 @@ func (s *managerDeliveryTestStore) ensureRun(ctx context.Context, runID string) 
 	if runID == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash) VALUES (?, ?) ON CONFLICT (run_id) DO NOTHING`, runID, sourceartifactfixture.BundleHash)
-	return err
+	return runlifecyclefixture.Materialize(ctx, s.db, runlifecyclefixture.DialectSQLite, runlifecyclefixture.Fixture{
+		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
+	})
 }
 
 func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt) error) error {

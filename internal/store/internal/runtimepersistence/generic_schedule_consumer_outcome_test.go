@@ -16,10 +16,23 @@ import (
 
 type scheduleConsumerOutcomeStore struct {
 	runtimegenericschedule.Store
-	postCommitErr error
-	calls         atomic.Int32
-	reads         atomic.Int32
-	commitErr     error
+	postCommitErr        error
+	preparePostCommitErr error
+	calls                atomic.Int32
+	prepareCalls         atomic.Int32
+	reads                atomic.Int32
+	commitErr            error
+	prepareErr           error
+}
+
+func (s *scheduleConsumerOutcomeStore) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
+	s.prepareCalls.Add(1)
+	result, err := s.Store.PrepareGenericScheduleOccurrence(ctx, wakeup)
+	if result.Acknowledged {
+		err = errors.Join(err, s.preparePostCommitErr)
+	}
+	s.prepareErr = err
+	return result, err
 }
 
 func (s *scheduleConsumerOutcomeStore) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
@@ -54,11 +67,7 @@ func (p *scheduleConsumerOutcomePlanner) FinalizeEnginePublications(ctx context.
 
 func TestGenericScheduleSchedulerConsumesCommittedErrorOnBothStores(t *testing.T) {
 	for _, backend := range selectedScheduleStoreCases() {
-		for _, fail := range []bool{false, true} {
-			phase := "healthy"
-			if fail {
-				phase = "postcommit_error"
-			}
+		for _, phase := range []string{"healthy", "preparation_postcommit_error", "settlement_postcommit_error"} {
 			t.Run(backend.name+"/"+phase, func(t *testing.T) {
 				selected, db, ctx := backend.open(t)
 				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
@@ -68,7 +77,10 @@ func TestGenericScheduleSchedulerConsumesCommittedErrorOnBothStores(t *testing.T
 				}
 				store := &scheduleConsumerOutcomeStore{Store: selected}
 				injected := errors.New("injected after selected schedule COMMIT")
-				if fail {
+				if phase == "preparation_postcommit_error" {
+					store.preparePostCommitErr = injected
+				}
+				if phase == "settlement_postcommit_error" {
 					store.postCommitErr = injected
 				}
 				planner := &scheduleConsumerOutcomePlanner{PublicationPlanner: bus}
@@ -102,8 +114,11 @@ func TestGenericScheduleSchedulerConsumesCommittedErrorOnBothStores(t *testing.T
 				if err := lifecycle.Stop(context.Background()); err != nil {
 					t.Fatal(err)
 				}
-				if store.calls.Load() != 1 || store.reads.Load() != 2 {
-					t.Fatalf("commit calls=%d activation reads=%d, want one fire and one terminal projection", store.calls.Load(), store.reads.Load())
+				if store.prepareCalls.Load() != 1 || store.calls.Load() != 1 || store.reads.Load() != 2 {
+					t.Fatalf("preparation calls=%d commit calls=%d activation reads=%d, want one fire and one terminal projection", store.prepareCalls.Load(), store.calls.Load(), store.reads.Load())
+				}
+				if phase == "preparation_postcommit_error" && !errors.Is(store.prepareErr, injected) {
+					t.Fatalf("preparation error = %v, want injected postcommit failure", store.prepareErr)
 				}
 				activation, found, err := selected.LoadGenericScheduleActivation(ctx, admitted.Activation.ID)
 				if err != nil || !found || activation.Status != runtimegenericschedule.StatusFired {

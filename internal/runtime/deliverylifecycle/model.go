@@ -871,6 +871,11 @@ type ActivationCommit struct {
 	Acknowledged bool
 }
 
+type ClaimCommit struct {
+	Snapshot     Snapshot
+	Acknowledged bool
+}
+
 // Store is the narrow selected-store semantic port consumed by runtime code.
 // Raw rows, status strings, SQL transactions, and caller-selected retry limits
 // do not cross this boundary.
@@ -881,8 +886,8 @@ type Store interface {
 	ClaimDelivery(context.Context, ExecutionAuthority, events.Event, events.DeliveryRoute) (ClaimResult, error)
 	ScanDeliveryContinuations(context.Context, ExecutionAuthority, ContinuationCursor, int) (ContinuationPage, error)
 	ObserveDeliveryContinuation(context.Context, ExecutionAuthority, string) (ContinuationObservation, error)
-	RenewClaim(context.Context, Claim) (Snapshot, error)
-	BindAgentSession(context.Context, Claim, string) (Snapshot, error)
+	RenewClaim(context.Context, Claim) (ClaimCommit, error)
+	BindAgentSession(context.Context, Claim, string) (ClaimCommit, error)
 	SettleSuccess(context.Context, Claim, []string, time.Duration, HandlerRuleSelectionFact) (Snapshot, error)
 	SettleFailure(context.Context, Claim, Settlement) (Snapshot, error)
 	Snapshot(context.Context, string) (Snapshot, error)

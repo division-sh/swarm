@@ -402,21 +402,26 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	sessionID := uuid.NewString()
 	activeClaim := seedSelectedContractSourceConversationHistoryWithActiveDelivery(t, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
-	if _, err := pg.BindAgentSession(ctx, activeClaim, sessionID); err != nil {
+	if bound, err := pg.BindAgentSession(ctx, activeClaim, sessionID); err != nil {
 		t.Fatalf("bind active delivery session: %v", err)
+	} else if !bound.Acknowledged {
+		t.Fatal("bind active delivery session was not acknowledged")
 	}
+	selectedEventID := seedSelectedContractLaterEventPreRevision(t, db, sourceRunID, entityID, at.Add(time.Second), "")
 	captureRunForkTestRevision(t, db, sourceRunID)
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: selectedEventID})
+	if err != nil || !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerSessionHistoryUnproven) ||
+		!runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerActiveTurnHistoryUnproven) {
+		t.Fatalf("active coupling plan blockers = %#v err = %v", plan.UnsupportedBlockers, err)
+	}
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
-	if err == nil || (!strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) && !strings.Contains(err.Error(), runfork.RunForkBlockerActiveTurnHistoryUnproven)) {
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) ||
+		!strings.Contains(err.Error(), runfork.RunForkBlockerActiveTurnHistoryUnproven) {
 		t.Fatalf("materialization error = %v, want active session/turn blocker", err)
 	}
 	if materialized.ForkRunID != "" {
 		t.Fatalf("materialized fork despite active coupling: %#v", materialized)
-	}
-	if !runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerSessionHistoryUnproven) ||
-		!runForkTestHasMaterializationBlocker(materialized, runfork.RunForkBlockerActiveTurnHistoryUnproven) {
-		t.Fatalf("materialization blockers = %#v, want active session and turn blockers", materialized.UnsupportedBlockers)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -1038,13 +1043,15 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 	at := time.Unix(1700003615, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedRunForkSessionProjection(t, db, sourceRunID, "selected-session-agent", sessionID, "terminated", at)
+	selectedEventID := seedSelectedContractLaterEventPreRevision(t, db, sourceRunID, entityID, at.Add(time.Second), "")
 	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
+	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
+	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, selectedEventID, entityID, at)
 	mutateRunForkSessionExcludedColumns(t, db, sourceRunID, sessionID, at.Add(time.Minute))
 	var afterExcluded int64
 	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, sourceRunID).Scan(&afterExcluded); err != nil {
@@ -1057,13 +1064,13 @@ func TestSelectedContractActivation_IgnoresExcludedSourceSessionColumnChanges(t 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialized.ForkRunID,
 		AllowSourceFreeze:     true,
-		AllowedSourceEventIDs: []string{eventID},
+		AllowedSourceEventIDs: []string{eventID, selectedEventID},
 	})
 	if err != nil {
 		t.Fatalf("ActivateRunForkForSelectedContractExecution after excluded session update: %v", err)
 	}
 	if !activation.Activated || activation.SourceAdvancedAfterFork || activation.BranchDivergence != nil {
-		t.Fatalf("activation = %#v, want selected activation without branch divergence", activation)
+		t.Fatalf("activation = %#v, branch divergence = %+v, want selected activation without branch divergence", activation, activation.BranchDivergence)
 	}
 }
 
@@ -1586,6 +1593,38 @@ func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t 
 	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
 }
 
+// The initial source fixture commits its own revision. A later selected event
+// puts additional test preconditions at or before the actual fork cut.
+func seedSelectedContractLaterEventPreRevision(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time, rawFlowInstance string) string {
+	t.Helper()
+	selectedEventID := uuid.NewString()
+	event := semanticEventRecordFixture(
+		selectedEventID, sourceRunID, "item.received", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`),
+		semanticEventRecordFixtureEnvelope(entityID, ""), at,
+	)
+	ctx := testAuthorActivityContext()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
+		t.Fatalf("seed later selected event: %v", err)
+	}
+	if rawFlowInstance != "" {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE events SET flow_instance = $3
+			WHERE run_id = $1::uuid AND event_id = $2::uuid
+		`, sourceRunID, selectedEventID, rawFlowInstance); err != nil {
+			t.Fatalf("seed unversioned selected route context: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit later selected event fixture: %v", err)
+	}
+	return selectedEventID
+}
+
 func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRemoval(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -1595,19 +1634,13 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 	eventID := uuid.NewString()
 	at := time.Unix(1700002525, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
-	if _, err := db.ExecContext(ctx, `
-		UPDATE events
-		SET flow_instance = 'flow-a/1'
-		WHERE run_id = $1::uuid AND event_id = $2::uuid
-	`, sourceRunID, eventID); err != nil {
-		t.Fatalf("seed selected event route identity: %v", err)
-	}
+	selectedEventID := seedSelectedContractLaterEventPreRevision(t, db, sourceRunID, entityID, at.Add(time.Second), "flow-a/1")
 	captureRunForkTestRevision(t, db, sourceRunID)
-	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: selectedEventID})
 	if err != nil || plan.RouteHistory.State != runfork.RunForkRouteHistoryUnknownUnversioned {
 		t.Fatalf("route fixture must require selected resolution: state=%q err=%v", plan.RouteHistory.State, err)
 	}
-	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
+	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, selectedEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 	// Even with valid preparation, unversioned routes require their own proof.
 	request.FrontierAdmission = runfork.RunForkContractFrontierAdmission{}
 	before := snapshotForkHistoricalExecutionTables(t, db, true)
@@ -1889,8 +1922,10 @@ func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, 
 	activeRoute := testAgentDeliveryRoute(t, sourceRunID, "active-agent", "flow-a/1")
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, activeRoute)
 	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, activeRoute)
-	if _, err := postgresDeliveryFixtureStore(db).BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+	if bound, err := postgresDeliveryFixtureStore(db).BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind post-T active source delivery: %v", err)
+	} else if !bound.Acknowledged {
+		t.Fatal("bind post-T active source delivery was not acknowledged")
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 }

@@ -22,11 +22,11 @@ func (s *SQLiteRuntimeStore) ListActiveGenericScheduleActivations(ctx context.Co
 	return s.genericScheduleSQLiteOwner.ListActiveGenericScheduleActivations(ctx)
 }
 
-func (s *PostgresStore) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparedOccurrence, error) {
+func (s *PostgresStore) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
 	return s.genericSchedulePostgresOwner.PrepareGenericScheduleOccurrence(ctx, wakeup)
 }
 
-func (s *SQLiteRuntimeStore) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparedOccurrence, error) {
+func (s *SQLiteRuntimeStore) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
 	return s.genericScheduleSQLiteOwner.PrepareGenericScheduleOccurrence(ctx, wakeup)
 }
 

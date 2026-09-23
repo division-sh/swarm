@@ -11,6 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -39,7 +41,9 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 			}
 			sessionID, firstRunID, nextRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{firstRunID, nextRunID} {
-				if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,status,bundle_hash,origin_kind) VALUES ($1::uuid,'running',$2,'scenario_setup')`, runID, "bundle-v2:sha256:"+strings.Repeat("e", 64)); err != nil {
+				if err := runlifecyclefixture.Materialize(ctx, db, runlifecyclefixture.DialectPostgres, runlifecyclefixture.Fixture{
+					RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
+				}); err != nil {
 					t.Fatal(err)
 				}
 			}

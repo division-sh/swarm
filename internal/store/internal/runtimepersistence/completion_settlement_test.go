@@ -920,8 +920,10 @@ func proveDeliveryClaimRenewalPublishesCompleteRunForkRevision(t *testing.T, fix
 	setProviderOriginLease(t, fixture, fixture.origin, time.Now().UTC().Add(30*time.Second))
 	before := providerOriginLease(t, fixture, fixture.origin)
 	publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, !fixture.sqlite, fixture.authority.Target.RunID)
-	if _, err := fixture.store.RenewClaim(ctx, fixture.origin); err != nil {
+	if renewed, err := fixture.store.RenewClaim(ctx, fixture.origin); err != nil {
 		t.Fatalf("renew delivery claim: %v", err)
+	} else if !renewed.Acknowledged {
+		t.Fatal("renew delivery claim was not acknowledged")
 	}
 	after := providerOriginLease(t, fixture, fixture.origin)
 	if !after.After(before) {

@@ -24,7 +24,7 @@ type Store interface {
 	AdmitGenericScheduleOutcome(context.Context, AdmissionCommand) (AdmissionCommit, error)
 	LoadGenericScheduleActivation(context.Context, string) (Activation, bool, error)
 	ListActiveGenericScheduleActivations(context.Context) ([]Activation, error)
-	PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparedOccurrence, error)
+	PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparationCommit, error)
 	CommitGenericScheduleOccurrence(context.Context, CommitCommand) (CommitResult, error)
 	CancelGenericScheduleOutcome(context.Context, CancelCommand) (CancelCommit, error)
 	ClaimGenericScheduleWakeup(context.Context, Wakeup) (bool, error)
@@ -39,6 +39,11 @@ type AdmissionCommit struct {
 
 type CancelCommit struct {
 	Result       CancelResult
+	Acknowledged bool
+}
+
+type PreparationCommit struct {
+	Result       PreparedOccurrence
 	Acknowledged bool
 }
 
@@ -378,7 +383,7 @@ func (l *Lifecycle) handleWakeup(ctx context.Context, wakeup Wakeup) {
 	}
 }
 
-func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (CommitResult, error) {
+func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (outcome CommitResult, outcomeErr error) {
 	activation, found, err := l.store.LoadGenericScheduleActivation(ctx, wakeup.ActivationID())
 	if err != nil {
 		if !activation.Command.ExecutionMode.Valid() {
@@ -398,10 +403,17 @@ func (l *Lifecycle) fire(ctx context.Context, wakeup Wakeup) (CommitResult, erro
 			return CommitResult{Outcome: CommitRetry}, postureErr
 		}
 	}
-	prepared, err := l.store.PrepareGenericScheduleOccurrence(ctx, wakeup)
-	if err != nil {
-		return CommitResult{Outcome: CommitRetry}, err
+	commit, prepareErr := l.store.PrepareGenericScheduleOccurrence(ctx, wakeup)
+	if !commit.Acknowledged {
+		if prepareErr == nil {
+			prepareErr = errors.New("generic schedule occurrence preparation was not acknowledged")
+		}
+		return CommitResult{Outcome: CommitRetry}, prepareErr
 	}
+	if prepareErr != nil {
+		defer func() { outcomeErr = errors.Join(outcomeErr, prepareErr) }()
+	}
+	prepared := commit.Result
 	if err := prepared.Validate(); err != nil {
 		return CommitResult{Outcome: CommitRetry}, err
 	}

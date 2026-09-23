@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -595,10 +596,18 @@ type completionOriginHeartbeatStore struct {
 	renewals atomic.Int32
 }
 
-func (s *completionOriginHeartbeatStore) RenewClaim(context.Context, runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
+func (s *completionOriginHeartbeatStore) RenewClaim(_ context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	s.renewals.Add(1)
 	now := time.Now().UTC()
-	return runtimedelivery.Snapshot{UpdatedAt: now, ClaimExpiresAt: now.Add(30 * time.Millisecond)}, nil
+	routeIdentity, err := events.ParseDeliveryRouteIdentity(claim.RouteIdentity())
+	if err != nil {
+		return runtimedelivery.ClaimCommit{}, err
+	}
+	return runtimedelivery.ClaimCommit{Snapshot: runtimedelivery.Snapshot{
+		DeliveryID: claim.DeliveryID(), RunID: claim.RunID(), RouteIdentity: routeIdentity,
+		ClaimVersion: claim.Version(), SubscriberClass: claim.SubscriberClass(), SubscriberID: claim.SubscriberID(),
+		Status: runtimedelivery.StatusInProgress, UpdatedAt: now, ClaimExpiresAt: now.Add(30 * time.Millisecond),
+	}, Acknowledged: true}, nil
 }
 
 func TestCompletionHeartbeatYieldsExactOriginRenewal(t *testing.T) {
@@ -612,6 +621,14 @@ func TestCompletionHeartbeatYieldsExactOriginRenewal(t *testing.T) {
 	if !ok {
 		t.Fatal("completion context has no exact origin claim")
 	}
+	claim, err := runtimedelivery.AdmitPersistedClaim(
+		claim.DeliveryID(), claim.RunID(), "delivery-route-v2:sha256:"+strings.Repeat("a", 64),
+		claim.PersistenceToken(), claim.Version(), claim.SubscriberClass(), claim.SubscriberID(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimedelivery.WithClaim(ctx, claim)
 	deliveryStore := &completionOriginHeartbeatStore{}
 	deliveryHeartbeat, err := runtimedelivery.StartClaimHeartbeat(ctx, owner, deliveryStore, claim)
 	if err != nil {

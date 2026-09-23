@@ -61,11 +61,11 @@ func (unexpectedDurableTestRoles) ScanDeliveryContinuations(context.Context, run
 func (unexpectedDurableTestRoles) ObserveDeliveryContinuation(context.Context, runtimedelivery.ExecutionAuthority, string) (runtimedelivery.ContinuationObservation, error) {
 	return runtimedelivery.ContinuationObservation{}, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) RenewClaim(context.Context, runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
-	return runtimedelivery.Snapshot{}, errUnexpectedDurableTestRole
+func (unexpectedDurableTestRoles) RenewClaim(context.Context, runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
+	return runtimedelivery.ClaimCommit{}, errUnexpectedDurableTestRole
 }
-func (unexpectedDurableTestRoles) BindAgentSession(context.Context, runtimedelivery.Claim, string) (runtimedelivery.Snapshot, error) {
-	return runtimedelivery.Snapshot{}, errUnexpectedDurableTestRole
+func (unexpectedDurableTestRoles) BindAgentSession(context.Context, runtimedelivery.Claim, string) (runtimedelivery.ClaimCommit, error) {
+	return runtimedelivery.ClaimCommit{}, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	return runtimedelivery.Snapshot{}, errUnexpectedDurableTestRole

@@ -293,6 +293,7 @@ type completionAttemptHeartbeat struct {
 	renewMu      sync.Mutex
 	mu           sync.Mutex
 	err          error
+	diagnostic   error
 	stopped      bool
 }
 
@@ -343,15 +344,16 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 			}
 		}
 	}
-	if err := handle.Heartbeat(heartbeatParent, lease); err != nil {
+	initialRenewalErr := handle.Heartbeat(heartbeatParent, lease)
+	if initialRenewalErr != nil && !runtimeeffects.CommittedMutationPhase(initialRenewalErr, runtimeeffects.MutationHeartbeat, handle.Attempt()) {
 		claimHandoff.Finish()
 		_ = workLease.Done()
-		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "prelaunch"}, err)
+		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "prelaunch"}, initialRenewalErr)
 	}
 	heartbeatCtx, cancel := context.WithCancelCause(heartbeatParent)
 	heartbeat := &completionAttemptHeartbeat{
 		ctx: heartbeatCtx, cancel: cancel, done: make(chan struct{}), handle: handle, lease: lease,
-		claimHandoff: claimHandoff,
+		claimHandoff: claimHandoff, diagnostic: initialRenewalErr,
 	}
 	go func() {
 		defer close(heartbeat.done)
@@ -364,6 +366,9 @@ func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runt
 				return
 			case <-ticker.C:
 				if err := heartbeat.renew(); err != nil {
+					if heartbeat.retainCommittedRenewal(err) {
+						continue
+					}
 					if heartbeatCtx.Err() != nil {
 						return
 					}
@@ -403,7 +408,11 @@ func (h *completionAttemptHeartbeat) Stop() error {
 	if doStop {
 		renewErr := h.renew()
 		h.mu.Lock()
-		h.err = errors.Join(h.err, renewErr)
+		if runtimeeffects.CommittedMutationPhase(renewErr, runtimeeffects.MutationHeartbeat, h.handle.Attempt()) {
+			h.diagnostic = errors.Join(h.diagnostic, renewErr)
+		} else {
+			h.err = errors.Join(h.err, renewErr)
+		}
 		h.mu.Unlock()
 		h.cancel(nil)
 	}
@@ -412,6 +421,22 @@ func (h *completionAttemptHeartbeat) Stop() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.err
+}
+
+func (h *completionAttemptHeartbeat) retainCommittedRenewal(err error) bool {
+	if !runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationHeartbeat, h.handle.Attempt()) {
+		return false
+	}
+	h.mu.Lock()
+	h.diagnostic = errors.Join(h.diagnostic, err)
+	h.mu.Unlock()
+	return true
+}
+
+func (h *completionAttemptHeartbeat) committedDiagnostic() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.diagnostic
 }
 
 func (h *completionAttemptHeartbeat) renew() error {
@@ -428,6 +453,13 @@ func finishCompletionDispatchHeartbeat(dispatch *completionDispatch, heartbeat *
 		return prior
 	}
 	heartbeatErr := heartbeat.Stop()
+	if diagnostic := heartbeat.committedDiagnostic(); diagnostic != nil {
+		if dispatch != nil {
+			dispatch.mutationErr = errors.Join(dispatch.mutationErr, diagnostic)
+		} else {
+			prior = errors.Join(prior, diagnostic)
+		}
+	}
 	if heartbeatErr == nil {
 		return prior
 	}

@@ -1595,8 +1595,10 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery trace event: %v", err)
 	}
-	if _, err := store.BindAgentSession(ctx, claimed.Claim, lease.SessionID); err != nil {
+	if bound, err := store.BindAgentSession(ctx, claimed.Claim, lease.SessionID); err != nil {
 		t.Fatalf("BindAgentSession trace event: %v", err)
+	} else if !bound.Acknowledged {
+		t.Fatal("BindAgentSession trace event was not acknowledged")
 	}
 	if err := persistManagedAgentTurnReadbackFixture(t, runtimedelivery.WithClaim(ctx, claimed.Claim), store, runtimellm.AgentTurnRecord{
 		AgentID:          "agent-1",

@@ -176,10 +176,11 @@ func TestPostgresGenericScheduleOccurrenceUsesDatabaseClockAcrossPrepareAndCommi
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := selected.PrepareGenericScheduleOccurrence(ctx, wakeup)
-	if err != nil || prepared.Outcome != runtimegenericschedule.PrepareReady {
-		t.Fatalf("prepare skewed occurrence = %#v, %v", prepared, err)
+	commit, err := selected.PrepareGenericScheduleOccurrence(ctx, wakeup)
+	if err != nil || !commit.Acknowledged || commit.Result.Outcome != runtimegenericschedule.PrepareReady {
+		t.Fatalf("prepare skewed occurrence = %#v, %v", commit, err)
 	}
+	prepared := commit.Result
 	if !prepared.Occurrence.AdmittedAt.Before(admitted.Result.Activation.AdmittedAt) {
 		t.Fatalf("occurrence admission %s used process clock %s", prepared.Occurrence.AdmittedAt, admitted.Result.Activation.AdmittedAt)
 	}
@@ -640,13 +641,13 @@ func TestGenericScheduleRunStateAndGlobalAdmissionOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			prepared, err := selected.PrepareGenericScheduleOccurrence(ctx, wakeup)
-			if err != nil || prepared.Outcome != runtimegenericschedule.PrepareReady {
+			if err != nil || !prepared.Acknowledged || prepared.Result.Outcome != runtimegenericschedule.PrepareReady {
 				t.Fatalf("paused occurrence = %#v, %v", prepared, err)
 			}
 
 			transitionGenericScheduleRun(t, selected, runID, true)
 			stale, err := selected.PrepareGenericScheduleOccurrence(ctx, wakeup)
-			if err != nil || stale.Outcome != runtimegenericschedule.PrepareStaleCancelled || stale.Activation.Status != runtimegenericschedule.StatusCancelled {
+			if err != nil || !stale.Acknowledged || stale.Result.Outcome != runtimegenericschedule.PrepareStaleCancelled || stale.Result.Activation.Status != runtimegenericschedule.StatusCancelled {
 				t.Fatalf("terminal-run occurrence = %#v, %v", stale, err)
 			}
 			terminalCommand := activeCommand
@@ -777,7 +778,7 @@ func TestMalformedGenericScheduleTerminalizesLoudlyOnBothStores(t *testing.T) {
 				t.Fatalf("corrupt activation: %v", err)
 			}
 			prepared, err := store.PrepareGenericScheduleOccurrence(ctx, wakeup)
-			if err != nil || prepared.Outcome != runtimegenericschedule.PrepareTerminal {
+			if err != nil || !prepared.Acknowledged || prepared.Result.Outcome != runtimegenericschedule.PrepareTerminal {
 				t.Fatalf("prepare malformed activation = %#v, %v", prepared, err)
 			}
 			statusQuery := `SELECT status, failure_code, failure_message FROM timers WHERE timer_id = ?`

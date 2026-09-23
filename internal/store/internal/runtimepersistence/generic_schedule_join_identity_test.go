@@ -397,7 +397,7 @@ func TestJoinSchedulePostRegistrationPrepareRejectsMalformedRowWithoutMutationOn
 			)
 			before := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID)
 
-			if prepared, err := store.PrepareGenericScheduleOccurrence(ctx, wakeup); err == nil || prepared.Outcome != "" {
+			if prepared, err := store.PrepareGenericScheduleOccurrence(ctx, wakeup); err == nil || prepared.Acknowledged || prepared.Result.Outcome != "" {
 				t.Fatalf("prepare malformed registered join = %#v err:%v", prepared, err)
 			}
 			if after := selectedStoreFullTimerSnapshotForID(t, ctx, db, store, admitted.Activation.ID); before != after {
