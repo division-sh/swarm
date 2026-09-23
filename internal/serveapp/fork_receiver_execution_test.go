@@ -605,7 +605,7 @@ func requireForkReceiverStaleClaimStoreFence(t *testing.T, rt servedControlProof
 	if outcomes, err := owner.Outcomes(observation.ctx, old.DeliveryID()); err != nil || len(outcomes) != 0 {
 		t.Fatalf("stale attempt invented terminal evidence: outcomes=%+v err=%v", outcomes, err)
 	}
-	if renewed, err := owner.RenewClaim(observation.ctx, newer.Claim); err != nil || renewed.ClaimVersion != newer.Claim.Version() {
+	if renewed, err := owner.RenewClaim(observation.ctx, newer.Claim); err != nil || !renewed.Acknowledged || renewed.Snapshot.ClaimVersion != newer.Claim.Version() {
 		t.Fatalf("new claimant could not perform its own mutation: %+v err=%v", renewed, err)
 	}
 	continuation, err := owner.ObserveDeliveryContinuation(observation.ctx, snapshot.Authority, old.DeliveryID())
