@@ -150,6 +150,19 @@ func TestManagedCompletionCleanupRejectsForeignPhaseAndJoinedFailure(t *testing.
 	if committedCompletionCleanup(&Response{}, committed) {
 		t.Fatal("response without exact attempt borrowed acknowledgement")
 	}
+	projection := runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationProjection, attempt, cleanup)
+	if !committedCompletionCleanupPhase(errors.Join(projection, projection), attempt, runtimeeffects.MutationProjection) {
+		t.Fatal("same-attempt joined projection diagnostics lost acknowledgement")
+	}
+	for _, invalid := range []error{
+		errors.Join(projection, runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationProjection, other, cleanup)),
+		errors.Join(projection, committed),
+		errors.Join(projection, errors.New("independent failure")),
+	} {
+		if committedCompletionCleanupPhase(invalid, attempt, runtimeeffects.MutationProjection) {
+			t.Fatalf("joined projection borrowed acknowledgement from unrelated branch: %v", invalid)
+		}
+	}
 }
 
 func TestManagedCompletionCleanupDoesNotAuthorizeIndependentToolWork(t *testing.T) {

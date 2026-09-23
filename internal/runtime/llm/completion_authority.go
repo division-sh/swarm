@@ -65,7 +65,7 @@ func (d *completionDispatch) retainCommittedMutation(err error, phase runtimeeff
 	if err == nil {
 		return true
 	}
-	if d == nil || d.handle == nil || !runtimeeffects.CommittedMutationPhase(err, phase, d.handle.Attempt()) {
+	if d == nil || d.handle == nil || !committedCompletionCleanupPhase(err, d.handle.Attempt(), phase) {
 		return false
 	}
 	d.mutationErr = errors.Join(d.mutationErr, err)
@@ -220,7 +220,7 @@ func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffec
 	response := continuation.Response
 	attempt := handle.Attempt()
 	response.completionAttempt = &attempt
-	if projectionErr != nil && (!runtimeeffects.CommittedMutationPhase(projectionErr, runtimeeffects.MutationProjection, attempt) || !committedCompletionCleanup(&response, projectionErr)) {
+	if projectionErr != nil && (!committedCompletionCleanupPhase(projectionErr, attempt, runtimeeffects.MutationProjection) || !committedCompletionCleanup(&response, projectionErr)) {
 		return nil, true, projectionErr
 	}
 	session.Messages = append([]Message(nil), projection.Messages...)
@@ -266,7 +266,7 @@ func projectCompletionContinuation(ctx context.Context, dispatch *completionDisp
 	})
 	attempt = dispatch.handle.Attempt()
 	response.completionAttempt = &attempt
-	if projectionErr != nil && (!runtimeeffects.CommittedMutationPhase(projectionErr, runtimeeffects.MutationProjection, attempt) || !committedCompletionCleanup(response, projectionErr)) {
+	if projectionErr != nil && (!committedCompletionCleanupPhase(projectionErr, attempt, runtimeeffects.MutationProjection) || !committedCompletionCleanup(response, projectionErr)) {
 		return true, projectionErr
 	}
 	session.Messages = append([]Message(nil), projection.Messages...)
@@ -285,7 +285,7 @@ func consumeCompletionContinuation(ctx context.Context, response *Response, succ
 	if err != nil {
 		attempt := response.completionHandle.Attempt()
 		if response.completionAttempt == nil || response.completionAttempt.OperationID != attempt.OperationID || response.completionAttempt.AttemptID != attempt.AttemptID ||
-			!runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationProjection, attempt) || !committedCompletionCleanup(response, err) {
+			!committedCompletionCleanupPhase(err, attempt, runtimeeffects.MutationProjection) || !committedCompletionCleanup(response, err) {
 			return err
 		}
 		recordCompletionCleanup(response, err)
