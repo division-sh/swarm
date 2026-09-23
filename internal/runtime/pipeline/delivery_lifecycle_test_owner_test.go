@@ -127,6 +127,10 @@ func newPipelineTestDeliveryOwner(t interface {
 }
 
 func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt, *sql.Tx) error) error {
+	return s.mutateOutcome(ctx, fn).Err()
+}
+
+func (s *pipelineTestDeliveryOwner) mutateOutcome(ctx context.Context, fn func(context.Context, *eventfixture.Attempt, *sql.Tx) error) eventfixture.Result {
 	storyDialect := authoractivityfixture.DialectPostgres
 	if s.dialect == deliveryfixture.DialectSQLite {
 		storyDialect = authoractivityfixture.DialectSQLite
@@ -135,7 +139,7 @@ func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.
 		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			return fn(ctx, attempt, tx)
 		})
-	}).Err()
+	})
 }
 
 func (s *pipelineTestDeliveryOwner) commitInitial(ctx context.Context, event events.Event, route events.DeliveryRoute) error {
@@ -300,14 +304,15 @@ func (s *pipelineTestDeliveryOwner) InspectDeliveryRecovery(
 }
 
 func (s *pipelineTestDeliveryOwner) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (out runtimedelivery.ClaimResult, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+	result := s.mutateOutcome(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
 		out, err = s.adapter.ClaimExactResult(ctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
-	if err == nil {
-		out.Acknowledged = true
+	if !result.Acknowledged() {
+		return runtimedelivery.ClaimResult{}, result.Err()
 	}
-	return out, err
+	out.Acknowledged = result.Acknowledged()
+	return out, result.Err()
 }
 
 func (s *pipelineTestDeliveryOwner) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (out runtimedelivery.ContinuationPage, err error) {
@@ -335,20 +340,30 @@ func (s *pipelineTestDeliveryOwner) ObserveDeliveryContinuation(
 	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
 }
 
-func (s *pipelineTestDeliveryOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (out runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
-		out, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
+func (s *pipelineTestDeliveryOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.ClaimCommit, error) {
+	var snapshot runtimedelivery.Snapshot
+	result := s.mutateOutcome(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		var err error
+		snapshot, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
 		return err
 	})
-	return out, err
+	if !result.Acknowledged() {
+		return runtimedelivery.ClaimCommit{}, result.Err()
+	}
+	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: result.Acknowledged()}, result.Err()
 }
 
-func (s *pipelineTestDeliveryOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (out runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
-		out, err = s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
+func (s *pipelineTestDeliveryOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
+	var snapshot runtimedelivery.Snapshot
+	result := s.mutateOutcome(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
+		var err error
+		snapshot, err = s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
-	return out, err
+	if !result.Acknowledged() {
+		return runtimedelivery.ClaimCommit{}, result.Err()
+	}
+	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: result.Acknowledged()}, result.Err()
 }
 
 func (s *pipelineTestDeliveryOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (out runtimedelivery.Snapshot, err error) {

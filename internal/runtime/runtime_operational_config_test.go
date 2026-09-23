@@ -127,8 +127,8 @@ func (s *recoveryDisabledScheduleStore) ListActiveGenericScheduleActivations(con
 	s.loadCalls.Add(1)
 	return append([]runtimegenericschedule.Activation(nil), s.active...), nil
 }
-func (*recoveryDisabledScheduleStore) PrepareGenericScheduleOccurrence(context.Context, runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparedOccurrence, error) {
-	return runtimegenericschedule.PreparedOccurrence{}, errors.New("unexpected generic schedule occurrence")
+func (*recoveryDisabledScheduleStore) PrepareGenericScheduleOccurrence(context.Context, runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
+	return runtimegenericschedule.PreparationCommit{}, errors.New("unexpected generic schedule occurrence")
 }
 func (*recoveryDisabledScheduleStore) CommitGenericScheduleOccurrence(context.Context, runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
 	return runtimegenericschedule.CommitResult{}, errors.New("unexpected generic schedule commit")

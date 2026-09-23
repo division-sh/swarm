@@ -339,12 +339,17 @@ func (s *runtimeShutdownDeliveryStore) SettleSuccess(ctx context.Context, claim 
 	return snapshot, err
 }
 
-func (s *runtimeShutdownDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+func (s *runtimeShutdownDeliveryStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
+	var snapshot runtimedelivery.Snapshot
+	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(txctx context.Context, attempt *eventfixture.Attempt) error {
+		var err error
 		snapshot, err = s.adapter.RenewClaim(txctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
 		return err
 	})
-	return snapshot, err
+	if !result.Acknowledged() {
+		return runtimedelivery.ClaimCommit{}, result.Err()
+	}
+	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
 }
 
 func (s *runtimeShutdownDeliveryStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (snapshot runtimedelivery.Snapshot, err error) {

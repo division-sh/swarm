@@ -10575,7 +10575,10 @@ tool_model:
         Any failure rolls back the parent, every child, every event, and all derived state; no compensating marker deletion
         path or EventBus-owned claim remains. Commit precedes durable webhook acknowledgement. Runtime agent process startup
         is a post-commit side effect queued before event dispatch; persisted flow-instance and route authority remain
-        transaction participants.
+        transaction participants. When its exact post-commit handoff succeeds, a typed acknowledged commit with a later
+        independent cleanup error returns the committed accepted or duplicate webhook response and records an internal
+        diagnostic; that cleanup error must not invite a provider retry or re-dispatch the committed batch. A missing or
+        contradictory acknowledgement fails closed.
     pack_envelope_source_authority:
       owner: internal/packartifact explicit base/project/effective inventories, internal/packmodel universal envelope, and body-specific verifiers
       status: >

@@ -320,6 +320,23 @@ func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.C
 	return eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, fn).Err()
 }
 
+func (s *managerDeliveryTestStore) mutateClaim(ctx context.Context, fn func(context.Context, *eventfixture.Attempt) (runtimedelivery.Snapshot, error)) (runtimedelivery.ClaimCommit, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var snapshot runtimedelivery.Snapshot
+	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+		var err error
+		snapshot, err = fn(ctx, attempt)
+		return err
+	})
+	_, acknowledged := result.Value()
+	if !acknowledged {
+		return runtimedelivery.ClaimCommit{}, result.Err()
+	}
+	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
+}
+
 func (s *managerDeliveryTestStore) claimExact(ctx context.Context, evt events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
 	if err := s.ensureDelivery(evt, route, s.authority); err != nil {
 		return runtimedelivery.ClaimedObligation{}, err
@@ -401,20 +418,16 @@ func (s *managerDeliveryTestStore) ObserveDeliveryContinuation(
 	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
 }
 
-func (s *managerDeliveryTestStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		snapshot, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
-		return err
+func (s *managerDeliveryTestStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.ClaimCommit, error) {
+	return s.mutateClaim(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) (runtimedelivery.Snapshot, error) {
+		return s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
 	})
-	return snapshot, err
 }
 
-func (s *managerDeliveryTestStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (snapshot runtimedelivery.Snapshot, err error) {
-	err = s.mutate(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		snapshot, err = s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
-		return err
+func (s *managerDeliveryTestStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
+	return s.mutateClaim(ctx, func(ctx context.Context, attempt *eventfixture.Attempt) (runtimedelivery.Snapshot, error) {
+		return s.adapter.RenewClaim(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL)
 	})
-	return snapshot, err
 }
 
 func (s *managerDeliveryTestStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
