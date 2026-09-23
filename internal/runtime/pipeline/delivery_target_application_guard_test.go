@@ -34,11 +34,6 @@ func TestDurableHandlerConsumersStayOnDeliveryTargetApplication(t *testing.T) {
 			forbidden: []string{"prepareStampedSelectOrCreateState", "handler.SelectEntity", "handler.SelectOrCreateEntity"},
 		},
 		{
-			file: filepath.Join(dir, "node_declarative.go"), function: "ExecuteHandlerSteps",
-			required:  []string{"deliveryTargetApplicationFromContext", "prepareDeliveryTargetApplication", "application.Event()", "application.State()"},
-			forbidden: []string{"prepareStampedSelectOrCreateState", "handler.SelectEntity", "handler.SelectOrCreateEntity"},
-		},
-		{
 			file: filepath.Join(dir, "engine_adapter.go"), function: "CommitEngineMutation",
 			required:  []string{"deliveryTargetApplicationFromContext", "application.Validate()", "application.Route()", "application.EntityID()", "targetApplications..."},
 			forbidden: []string{"resolveHandlerEntityIDForFlow", "ensureHandlerEntityID"},
@@ -151,9 +146,8 @@ func TestReceiverElectionCannotReturnToHandlerExecution(t *testing.T) {
 
 func TestStampedTargetReaderCallsitesRemainFinite(t *testing.T) {
 	allowed := map[string]struct{}{
-		"engine_adapter.go":   {},
-		"engine_bridge.go":    {},
-		"node_declarative.go": {},
+		"engine_adapter.go": {},
+		"engine_bridge.go":  {},
 	}
 	found := map[string]struct{}{}
 	files, err := filepath.Glob("*.go")

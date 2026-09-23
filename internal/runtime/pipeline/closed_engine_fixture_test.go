@@ -120,6 +120,7 @@ func (b *recordingPipelineBus) FinalizeEnginePublications(_ context.Context, evi
 		b.mu.Lock()
 		b.outboxIntents = append(b.outboxIntents, cloneEmitIntents(intents)...)
 		b.mu.Unlock()
+		return b.finalizeErr
 	}
 	return nil
 }

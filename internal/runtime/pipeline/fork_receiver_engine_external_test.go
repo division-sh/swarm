@@ -21,7 +21,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -31,7 +30,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -71,223 +69,140 @@ func (p *forkEngineProbe) NotifyLifecycle(ctx context.Context, signal lifecyclep
 	})
 }
 
-// The declarative adapter currently has no production dispatch caller. Its arm
-// uses a separate real fork and executes once before canonical terminalization
-// fences its still-blocked bridge attempt; it is not a second served dispatch.
-func TestSelectedForkReceiverEngineAgreementBothStores(t *testing.T) {
+// The supported fork delivery path must retain exact receiver ownership and
+// selected-store mutation behavior on both backends.
+func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, engine := range []string{"bridge", "declarative"} {
-			for _, missing := range []bool{false, true} {
-				presence := "required_present"
-				if missing {
-					presence = "required_missing"
+		for _, missing := range []bool{false, true} {
+			presence := "required_present"
+			if missing {
+				presence = "required_missing"
+			}
+			t.Run(backend+"/"+presence, func(t *testing.T) {
+				root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
+				path := filepath.Join(root, "consumer", "nodes.yaml")
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
 				}
-				t.Run(backend+"/"+engine+"/"+presence, func(t *testing.T) {
-					root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
-					path := filepath.Join(root, "consumer", "nodes.yaml")
-					raw, err := os.ReadFile(path)
-					if err != nil {
-						t.Fatal(err)
-					}
-					old := "          - {target_field: processed_token, expression: payload.token}\n"
-					if strings.Count(string(raw), old) != 1 {
-						t.Fatal("canonical receiver fixture mutation changed")
-					}
-					write := "          - {target_field: marker, expression: \"'consumer-engine'\"}\n"
-					if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, write, 1)), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					rt, selected, db, repo, capability := startForkEngineRuntime(t, backend, root)
-					ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
-					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
-					ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
-					ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
-					ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
-					runID := uuid.NewString()
-					seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-					if err := rt.Bus.Publish(ctx, seed); err != nil {
-						t.Fatal(err)
-					}
-					waitForkEngineCompletion(t, db, runID)
-					requestEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "start.requested", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-					if err := rt.Bus.Publish(ctx, requestEvent); err != nil {
-						t.Fatal(err)
-					}
-					waitForkEngineCompletion(t, db, runID)
-					var frontier, sourceConsumer string
-					if err := db.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, runID).Scan(&frontier); err != nil {
-						t.Fatal(err)
-					}
-					if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, runID).Scan(&sourceConsumer); err != nil || forkEngineMarker(t, sourceConsumer) != "consumer-engine" {
-						t.Fatalf("normal receiver did not perform independently expected write: %s err=%v", sourceConsumer, err)
-					}
-					bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, filepath.Join(repo, "platform-spec.yaml"))
-					if err != nil {
-						t.Fatal(err)
-					}
-					family, ok := selected.RunFork()
-					if !ok {
-						t.Fatal("missing actual selected fork owner")
-					}
-					probe := &forkEngineProbe{claimed: make(chan forkEngineObservation, 1), resume: make(chan struct{})}
-					var resumeOnce sync.Once
-					resume := func() { resumeOnce.Do(func() { close(probe.resume) }) }
-					forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-					defer cancel()
-					finished := make(chan error, 1)
-					done := make(chan struct{})
-					go func() {
-						defer close(done)
-						_, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
-							SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
-							SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
-							ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
-							AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
-						})
-						finished <- err
-					}()
-					t.Cleanup(func() {
-						cancel()
-						resume()
-						select {
-						case <-done:
-						case <-time.After(10 * time.Second):
-							t.Error("fork engine proof did not join")
-						}
+				old := "          - {target_field: processed_token, expression: payload.token}\n"
+				if strings.Count(string(raw), old) != 1 {
+					t.Fatal("canonical receiver fixture mutation changed")
+				}
+				write := "          - {target_field: marker, expression: \"'consumer-engine'\"}\n"
+				if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, write, 1)), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				rt, selected, db, repo, capability := startForkEngineRuntime(t, backend, root)
+				ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
+				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, rt.Options.SourceArtifactFact)
+				ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.SourceArtifactFact.BundleHash()))
+				ctx = worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+				ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
+				runID := uuid.NewString()
+				seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+				if err := rt.Bus.Publish(ctx, seed); err != nil {
+					t.Fatal(err)
+				}
+				waitForkEngineCompletion(t, db, runID)
+				requestEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "start.requested", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+				if err := rt.Bus.Publish(ctx, requestEvent); err != nil {
+					t.Fatal(err)
+				}
+				waitForkEngineCompletion(t, db, runID)
+				var frontier, sourceConsumer string
+				if err := db.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, runID).Scan(&frontier); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, runID).Scan(&sourceConsumer); err != nil || forkEngineMarker(t, sourceConsumer) != "consumer-engine" {
+					t.Fatalf("normal receiver did not perform independently expected write: %s err=%v", sourceConsumer, err)
+				}
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, filepath.Join(repo, "platform-spec.yaml"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				family, ok := selected.RunFork()
+				if !ok {
+					t.Fatal("missing actual selected fork owner")
+				}
+				probe := &forkEngineProbe{claimed: make(chan forkEngineObservation, 1), resume: make(chan struct{})}
+				var resumeOnce sync.Once
+				resume := func() { resumeOnce.Do(func() { close(probe.resume) }) }
+				forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				finished := make(chan error, 1)
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					_, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
+						SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
+						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
+						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
+						AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
 					})
-					var observed forkEngineObservation
+					finished <- err
+				}()
+				t.Cleanup(func() {
+					cancel()
+					resume()
 					select {
-					case observed = <-probe.claimed:
-					case err := <-finished:
-						t.Fatalf("real fork did not reach engine claim: %v", err)
-					case <-forkCtx.Done():
-						t.Fatal(forkCtx.Err())
-					}
-					claim, ok := runtimedelivery.ClaimFromContext(observed.ctx)
-					admission, admitted := managedexecution.FromContext(observed.ctx)
-					if !ok || !admitted || admission.Kind != managedexecution.KindSelectedContractFork || admission.RunID != claim.RunID() || claim.RunID() == runID {
-						t.Fatal("engine lacks actual fresh-child fork authority")
-					}
-					deps := selected.RuntimeDeps()
-					snapshot, err := deps.DeliveryStore.Snapshot(observed.ctx, claim.DeliveryID())
-					if err != nil {
-						t.Fatal(err)
-					}
-					target := snapshot.Route.Target.Route()
-					var before string
-					var beforeRevision int64
-					if err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" {
-						t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s err=%v", before, err)
-					}
-					if missing {
-						result, err := db.Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
-						if err != nil {
-							t.Fatal(err)
-						}
-						if count, err := result.RowsAffected(); err != nil || count != 1 {
-							t.Fatalf("remove exact required child: %d %v", count, err)
-						}
-					}
-					if engine == "declarative" {
-						prepared, found, err := deps.EventBusDurable.PreparedEvents.LoadPreparedPublishEvent(observed.ctx, observed.id)
-						if err != nil || !found {
-							t.Fatalf("load actual fork publication: %t %v", found, err)
-						}
-						node, handlerEvent, ok := snapshot.Route.ConnectClaim.NodeHandlerOwner()
-						if !ok || node.FlowPath() != "consumer" || handlerEvent != "work.ready" {
-							t.Fatal("fork route lost exact compiled receiver handler")
-						}
-						record, ok := rt.Options.WorkflowModule.SemanticSource().ExecutableNode(node)
-						if !ok {
-							t.Fatal("receiver missing from loaded source")
-						}
-						authority, authorityOK := runtimeeffects.AuthorityFromContext(observed.ctx)
-						controller, controllerOK := runtimeeffects.ControllerFromContext(observed.ctx)
-						lineage, lineageOK := runtimecorrelation.RuntimeLineageFromContext(observed.ctx)
-						occurrence, occurrenceOK := worklifetime.OccurrenceFromContext(observed.ctx)
-						if !authorityOK || !controllerOK || !lineageOK || !occurrenceOK {
-							t.Fatal("captured fork context is incomplete")
-						}
-						variant, err := eventreceiver.SelectedContractForkExecution(authority, admission, controller, lineage)
-						if err != nil || variant.ValidateBound(observed.ctx, prepared.Event.Event().ExecutionMode()) != nil {
-							t.Fatalf("captured fork context does not retain exact execution binding: %v", err)
-						}
-						pc := runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
-							Module: rt.Options.WorkflowModule, Persistence: deps.WorkflowPersistence, DeliveryStore: deps.DeliveryStore,
-							SourceArtifactFact: rt.Options.SourceArtifactFact, ExecutionPosture: rt.ExecutionPosture, ReceiverExecution: variant, WorkOwner: occurrence,
-							DeadLetters: deps.EventBusDurable.TargetFailureRecorder, PipelineObligations: deps.PipelineObligations,
-							DecisionCards: deps.DecisionCards, ProposedEffects: deps.ProposedEffects, HumanTasks: deps.DecisionCardHumanTasks,
-							DecisionCardDraftExpiry: deps.DecisionCardDraftExpiry, HumanTaskExpiry: deps.HumanTaskExpiry,
-							DeliveryRuntime: rt.Bus, RunLifecycle: deps.EventBusDurable.RunLifecycle,
-						})
-						adapter := runtimepipeline.NewCoordinatorHandlerExecutionEngineForTest(pc, node)
-						if adapter == nil {
-							t.Fatal("real declarative adapter dependencies are incomplete")
-						}
-						heartbeat, err := runtimedelivery.StartClaimHeartbeat(observed.ctx, occurrence, deps.DeliveryStore, claim)
-						if err != nil {
-							t.Fatal(err)
-						}
-						t.Cleanup(func() { _ = heartbeat.Stop() })
-						outcome, err := adapter.ExecuteHandlerSteps(heartbeat.Context(), record.Entry.EventHandlers[string(handlerEvent)], prepared.Event.Event(), string(handlerEvent))
-						if missing {
-							if err == nil {
-								t.Fatal("declarative engine accepted missing required receiver")
-							}
-						} else if err != nil || outcome == nil || !outcome.Handled {
-							t.Fatalf("declarative engine: outcome=%+v err=%v", outcome, err)
-						}
-						if err := heartbeat.Stop(); err != nil {
-							t.Fatalf("join private-adapter heartbeat: %v", err)
-						}
-						current, err := deps.DeliveryStore.Snapshot(observed.ctx, claim.DeliveryID())
-						want := runtimedelivery.StatusDelivered
-						retireCount := 0
-						if missing {
-							want = runtimedelivery.StatusInProgress
-							retireCount = 1
-						}
-						if err != nil || current.Status != want || current.ClaimVersion != claim.Version() {
-							t.Fatalf("private-adapter exact settlement=%+v err=%v", current, err)
-						}
-						assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
-						// The real store fences the original claim before its bridge can
-						// run. No callback exception or execution-mode bypass is needed.
-						if retired, err := deps.DeliveryStore.TerminalizeRun(observed.ctx, claim.RunID(), "fork_engine_test_cleanup"); err != nil || len(retired) != retireCount {
-							t.Fatalf("retire private-adapter child claim: %+v err=%v", retired, err)
-						}
-						resume()
-						select {
-						case err := <-finished:
-							if err != nil {
-								t.Fatalf("fenced bridge cleanup failed: %v", err)
-							}
-						case <-forkCtx.Done():
-							t.Fatal(forkCtx.Err())
-						}
-						assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
-					} else {
-						resume()
-						select {
-						case err := <-finished:
-							if err != nil {
-								t.Fatalf("bridge fork did not finish: %v", err)
-							}
-						case <-forkCtx.Done():
-							t.Fatal(forkCtx.Err())
-						}
-						current, err := deps.DeliveryStore.Snapshot(ctx, claim.DeliveryID())
-						want := runtimedelivery.StatusDelivered
-						if missing {
-							want = runtimedelivery.StatusDeadLetter
-						}
-						if err != nil || current.Status != want || current.ClaimVersion != claim.Version() {
-							t.Fatalf("bridge exact settlement=%+v err=%v", current, err)
-						}
-						assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+					case <-done:
+					case <-time.After(10 * time.Second):
+						t.Error("fork engine proof did not join")
 					}
 				})
-			}
+				var observed forkEngineObservation
+				select {
+				case observed = <-probe.claimed:
+				case err := <-finished:
+					t.Fatalf("real fork did not reach engine claim: %v", err)
+				case <-forkCtx.Done():
+					t.Fatal(forkCtx.Err())
+				}
+				claim, ok := runtimedelivery.ClaimFromContext(observed.ctx)
+				admission, admitted := managedexecution.FromContext(observed.ctx)
+				if !ok || !admitted || admission.Kind != managedexecution.KindSelectedContractFork || admission.RunID != claim.RunID() || claim.RunID() == runID {
+					t.Fatal("engine lacks actual fresh-child fork authority")
+				}
+				deps := selected.RuntimeDeps()
+				snapshot, err := deps.DeliveryStore.Snapshot(observed.ctx, claim.DeliveryID())
+				if err != nil {
+					t.Fatal(err)
+				}
+				target := snapshot.Route.Target.Route()
+				var before string
+				var beforeRevision int64
+				if err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" {
+					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s err=%v", before, err)
+				}
+				if missing {
+					result, err := db.Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if count, err := result.RowsAffected(); err != nil || count != 1 {
+						t.Fatalf("remove exact required child: %d %v", count, err)
+					}
+				}
+				resume()
+				select {
+				case err := <-finished:
+					if err != nil {
+						t.Fatalf("bridge fork did not finish: %v", err)
+					}
+				case <-forkCtx.Done():
+					t.Fatal(forkCtx.Err())
+				}
+				current, err := deps.DeliveryStore.Snapshot(ctx, claim.DeliveryID())
+				want := runtimedelivery.StatusDelivered
+				if missing {
+					want = runtimedelivery.StatusDeadLetter
+				}
+				if err != nil || current.Status != want || current.ClaimVersion != claim.Version() {
+					t.Fatalf("bridge exact settlement=%+v err=%v", current, err)
+				}
+				assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+			})
 		}
 	}
 }

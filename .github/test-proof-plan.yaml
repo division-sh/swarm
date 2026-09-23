@@ -84,6 +84,7 @@ profiles:
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
+      - store-runtime-full-07
       - store-runtime-full-06
       - testpostgres-full
   pr-escalated:
@@ -141,6 +142,7 @@ profiles:
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
+      - store-runtime-full-07
       - store-runtime-full-06
       - testpostgres-full
   full:
@@ -198,6 +200,7 @@ profiles:
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
+      - store-runtime-full-07
       - store-runtime-full-06
       - testpostgres-full
   nightly:
@@ -255,6 +258,7 @@ profiles:
       - store-runtime-full-03
       - store-runtime-full-04
       - store-runtime-full-05
+      - store-runtime-full-07
       - store-runtime-full-06
       - testpostgres-full
 units:
@@ -650,7 +654,17 @@ units:
   store-runtime-full-05:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^TestR.*$
+    # CI 35876869610: the former TestR unit took 245s. Its 60 non-Ru
+    # top-level tests accounted for 84.85s of the 198.41s package test time.
+    run: ^TestR[^u].*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-07:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    # The other 176 TestR tests accounted for 113.56s in the same CI run.
+    run: ^TestRu.*$
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

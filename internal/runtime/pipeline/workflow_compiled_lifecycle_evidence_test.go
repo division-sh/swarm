@@ -426,7 +426,7 @@ func TestPipelineCompiledJoinTransitionEvidenceOnBothStores(t *testing.T) {
 						dialect = authoractivityfixture.DialectSQLite
 					}
 					seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, event)
-					result, err := pc.executeAuthoritativeNodeHandler(ctx, event, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, pc, ctx, route, entityID)})
+					result, err := executeResolvedJoinForTest(pc, ctx, event, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, pc, ctx, route, entityID)})
 					if err != nil || !result.Handled {
 						t.Fatalf("join outcome = %v, %v", result.Handled, err)
 					}

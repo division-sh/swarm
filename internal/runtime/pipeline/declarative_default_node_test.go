@@ -8,29 +8,27 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
+func TestRetainedNodeContractHandlerUsesRuntimeEnginePath(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
 		Module: handlerEngineProjectNodeModule(t),
 	})
 
-	engine := newCoordinatorHandlerExecutionEngine(pc, pipelineNode(t, "", "node-a"))
-	if engine == nil {
-		t.Fatal("expected engine")
-	}
-	outcome, err := engine.ExecuteHandlerSteps(testAuthorActivityContext(t, context.Background()), runtimecontracts.SystemNodeEventHandler{
-		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
-	}, eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngress(
 		"00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}), time.Unix(1, 0).UTC(),
-	), "custom.trigger")
+	)
+	outcome, err := pc.executeNodeContractHandler(testAuthorActivityContext(t, context.Background()), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
+	}, workflowTriggerContext{Event: evt, HandlerEventKey: "custom.trigger"}, false)
 	if err != nil {
-		t.Fatalf("ExecuteHandlerSteps: %v", err)
+		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
-	if outcome == nil || !outcome.Handled {
+	if !outcome.Handled {
 		t.Fatalf("handled outcome = %#v", outcome)
 	}
 	if got := bus.publishedCount(); got != 1 {
@@ -77,7 +75,7 @@ func TestEnsureHandlerEntityIDUsesCanonicalPrimaryForEntityMaterializingHandler(
 	}
 
 	runID := "77777777-7777-4777-8777-777777777777"
-	entityID, evt, resolveErr := ensureHandlerEntityID(source, "", handler, "", eventtest.RunCreatingRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
+	entityID, evt, resolveErr := ensureHandlerEntityIDAtNode(source, identity.ExecutableNode{}, events.EventType("custom.trigger"), "", handler, "", eventtest.RunCreatingRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
 	if resolveErr != nil {
 		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
 	}
@@ -105,7 +103,7 @@ func TestEnsureHandlerEntityIDCreateEntityUsesInboundPrimaryReference(t *testing
 		time.Time{},
 	)
 
-	entityID, evt, resolveErr := ensureHandlerEntityID(nil, "", handler, "ent-parent", inbound)
+	entityID, evt, resolveErr := ensureHandlerEntityIDAtNode(nil, identity.ExecutableNode{}, inbound.Type(), "", handler, "ent-parent", inbound)
 	if resolveErr != nil {
 		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
 	}

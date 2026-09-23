@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t *testing.T) {
+func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t *testing.T) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: first-event-transition\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\n",
 		"entities.yaml": "first_event_entity: {}\n",
@@ -55,14 +55,13 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
-			engine := newCoordinatorHandlerExecutionEngine(pc, pipelineSourceNode(t, pc.SemanticSource(), ".", "acceptor"))
-			outcome, err := engine.ExecuteHandlerSteps(ctx, runtimecontracts.SystemNodeEventHandler{
+			outcome, err := pc.executeNodeContractHandler(ctx, pipelineSourceNode(t, pc.SemanticSource(), ".", "acceptor"), runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",
-			}, evt, "request.accepted")
+			}, workflowTriggerContext{Event: evt, HandlerEventKey: "request.accepted"}, false)
 			if err != nil {
 				t.Fatalf("execute first event transition: %v", err)
 			}
-			if outcome == nil || !outcome.Handled {
+			if !outcome.Handled {
 				t.Fatalf("first event outcome = %#v, want handled", outcome)
 			}
 

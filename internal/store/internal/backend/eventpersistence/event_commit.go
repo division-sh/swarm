@@ -25,6 +25,7 @@ import (
 )
 
 type eventCommitTxStore interface {
+	standaloneCompletionOwner() standaloneCompletionCapability
 	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
@@ -37,6 +38,40 @@ type eventCommitTxStore interface {
 	CommitFlowInstanceActivationsTx(context.Context, *mutationprotocol.Attempt, []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error)
 	ReplaceFlowInstanceRouteTopologyTx(context.Context, *sql.Tx, []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error)
 	MarkDynamicFlowCreationOccurrenceCommittedTx(context.Context, *sql.Tx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest) error
+}
+
+type standaloneCompletionCapability interface {
+	mutationprotocol.CandidateWriter
+	IsStandaloneRuntimePlatformEventTx(context.Context, *sql.Tx, string) (bool, error)
+}
+
+func (s *EventPostgresOwner) standaloneCompletionOwner() standaloneCompletionCapability {
+	if s == nil || s.RunLifecyclePostgresOwner == nil {
+		return nil
+	}
+	return s.RunLifecyclePostgresOwner
+}
+
+func (s *EventSQLiteOwner) standaloneCompletionOwner() standaloneCompletionCapability {
+	if s == nil || s.RunLifecycleSQLiteOwner == nil {
+		return nil
+	}
+	return s.RunLifecycleSQLiteOwner
+}
+
+func requestStandalonePublicationCompletion(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, owner standaloneCompletionCapability, eventID, runID string) error {
+	if owner == nil {
+		return fmt.Errorf("publication requires standalone completion capability")
+	}
+	standalone, err := owner.IsStandaloneRuntimePlatformEventTx(ctx, tx, eventID)
+	if err != nil {
+		return err
+	}
+	if !standalone {
+		return nil
+	}
+	_, err = attempt.RequestCompletion(ctx, owner, runID, nil)
+	return err
 }
 
 func (s *EventPostgresOwner) CommitDirectiveEventTx(ctx context.Context, attempt *mutationprotocol.Attempt, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
@@ -588,30 +623,8 @@ func commitValidatedPublicationSQL(
 		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit returned invalid append outcome")
 	}
 	if request.Event.RunDisposition() == events.AdmittedRunCreateAuthorized {
-		var standalone bool
-		switch selected := store.(type) {
-		case *EventPostgresOwner:
-			var loadErr error
-			standalone, loadErr = selected.RunLifecyclePostgresOwner.IsStandaloneRuntimePlatformEventTx(ctx, tx, request.Event.Event().ID())
-			if loadErr != nil {
-				return runtimebus.CommittedPublication{}, loadErr
-			}
-			if standalone {
-				if _, err := attempt.RequestCompletion(ctx, selected.RunLifecyclePostgresOwner, request.Event.Event().RunID(), nil); err != nil {
-					return runtimebus.CommittedPublication{}, err
-				}
-			}
-		case *EventSQLiteOwner:
-			var loadErr error
-			standalone, loadErr = selected.RunLifecycleSQLiteOwner.IsStandaloneRuntimePlatformEventTx(ctx, tx, request.Event.Event().ID())
-			if loadErr != nil {
-				return runtimebus.CommittedPublication{}, loadErr
-			}
-			if standalone {
-				if _, err := attempt.RequestCompletion(ctx, selected.RunLifecycleSQLiteOwner, request.Event.Event().RunID(), nil); err != nil {
-					return runtimebus.CommittedPublication{}, err
-				}
-			}
+		if err := requestStandalonePublicationCompletion(ctx, tx, attempt, store.standaloneCompletionOwner(), request.Event.Event().ID(), request.Event.Event().RunID()); err != nil {
+			return runtimebus.CommittedPublication{}, err
 		}
 	}
 	if command.DynamicFlowCreation != nil && creationAlreadyCommitted {

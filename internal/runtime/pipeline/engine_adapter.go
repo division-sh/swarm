@@ -171,7 +171,11 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine mutation address disagrees with admitted delivery target application")
 			}
 			if application.Owner().EntitylessReceiver() {
-				return o.commitEntitylessEngineMutation(ctx, mutation, application.Owner())
+				command, publications, err := o.prepareEntitylessEngineMutation(ctx, mutation, application.Owner())
+				if err != nil {
+					return runtimeengine.CommittedEngineMutation{}, err
+				}
+				return o.commitPreparedEngineMutation(ctx, mutation, command, publications, nil)
 			}
 		} else if _, stamped := stampedDeliveryTargetOwnership(ctx); stamped {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("stamped engine mutation requires delivery target application")
@@ -263,89 +267,13 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			}
 			return runtimeengine.CommittedEngineMutation{}, err
 		}
-		terminalEvidence := false
-		if terminal != nil {
-			defer func() {
-				if terminalEvidence {
-					resultErr = errors.Join(resultErr, terminal.Commit())
-				} else {
-					resultErr = errors.Join(resultErr, terminal.Abort())
-				}
-			}()
-		}
-		deliverySuccess, settlementGuard, err := beginWorkflowEngineDeliverySuccess(ctx, mutation.HandlerRuleSelection)
-		if err != nil {
-			if o.publication != nil {
-				err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
-			}
-			return runtimeengine.CommittedEngineMutation{}, err
-		}
-		if settlementGuard != nil {
-			defer settlementGuard.Abort()
-		}
-		committed, commitErr := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
+		return o.commitPreparedEngineMutation(ctx, mutation, WorkflowEngineMutationCommand{
 			State: state, Lifecycle: lifecycle.Commit,
-			ProposedEffects: proposedEffects, Publications: publications, DeliverySuccess: deliverySuccess, PostCommit: postCommit,
+			ProposedEffects: proposedEffects, Publications: publications, PostCommit: postCommit,
 			FanOutIntent:            mutation.FanOutIntent,
 			FanOutBarrier:           mutation.FanOutBarrier,
 			FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
-		})
-		if !committed.Committed {
-			commitErr = errors.Join(commitErr, fmt.Errorf("workflow engine mutation has no acknowledged result"))
-			if o.publication != nil {
-				commitErr = errors.Join(commitErr, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
-			}
-			return runtimeengine.CommittedEngineMutation{}, commitErr
-		}
-		settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
-		commitErr = errors.Join(commitErr, settlementErr)
-		// A later panic must return the exact committed claim to the caller,
-		// which owns heartbeat and continuation release even on an error result.
-		result.SettledDeliveryClaim = settledClaim
-		result.Committed = committed.Committed
-		resultErr = commitErr
-		// Transfer committed terminal work before any auxiliary finalizer can
-		// fail or unwind. The reserved completion performs no fresh admission.
-		if committed.PostCommit.FlowDeactivation != nil && terminal != nil {
-			terminalEvidence = true
-			o.state.coordinator.notifyTestWorkflowTerminalCommitted(ctx)
-			terminalEvidence = false
-			commitErr = errors.Join(commitErr, terminal.Commit())
-		}
-		if committed.Committed && mutation.FanOutIntent != nil {
-			o.state.coordinator.signalFanOutWork()
-		}
-		engineCommit := runtimeengine.CommittedEngineMutation{Committed: true, SettledDeliveryClaim: settledClaim}
-		var postCommitErr error
-		if o.publication != nil {
-			if err := o.publication.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
-				postCommitErr = errors.Join(postCommitErr, err)
-			}
-		}
-		if err := o.state.coordinator.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
-			postCommitErr = errors.Join(postCommitErr, err)
-		}
-		if len(committed.Publications) < len(mutation.EmitIntents) {
-			postCommitErr = errors.Join(postCommitErr, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents)))
-			return engineCommit, errors.Join(commitErr, postCommitErr)
-		}
-		committedIntents := make([]runtimeengine.EmitIntent, 0, len(mutation.EmitIntents))
-		for index, publication := range committed.Publications[:len(mutation.EmitIntents)] {
-			if publication == nil {
-				return engineCommit, errors.Join(commitErr, postCommitErr, fmt.Errorf("committed engine publication %d is required", index))
-			}
-			intent := publication.CommittedDurablePublicationIntent()
-			if strings.TrimSpace(intent.Event.ID()) != strings.TrimSpace(publication.CommittedDurablePublicationEventID()) {
-				return engineCommit, errors.Join(commitErr, postCommitErr, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index))
-			}
-			committedIntents = append(committedIntents, intent)
-		}
-		engineCommit.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
-		engineCommit.EmitIntents = committedIntents
-		if err := errors.Join(commitErr, postCommitErr); err != nil {
-			return engineCommit, err
-		}
-		return engineCommit, nil
+		}, publications, terminal)
 	}
 	commit := func(txctx context.Context) error {
 		if mutation.FanOutIntent != nil {
@@ -389,97 +317,186 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 	}, nil
 }
 
-func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation, target events.DeliveryTargetOwnership) (runtimeengine.CommittedEngineMutation, error) {
+func (o pipelineEngineMutationOwner) prepareEntitylessEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation, target events.DeliveryTargetOwnership) (WorkflowEngineMutationCommand, []runtimeengine.DurablePublicationPlan, error) {
 	if entityID := mutation.Address.EntityID.String(); entityID != "" {
-		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation carries entity identity %q", entityID)
+		return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation carries entity identity %q", entityID)
 	}
 	if instancePath := mutation.Address.FlowInstance.Route.InstancePath; instancePath != target.Route().FlowInstance {
-		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation route %q disagrees with stamped receiver route %q", instancePath, target.Route().FlowInstance)
+		return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation route %q disagrees with stamped receiver route %q", instancePath, target.Route().FlowInstance)
 	}
 	if len(mutation.LifecycleEffects) > 0 || len(mutation.EmitPrerequisites.Fields) > 0 {
-		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation cannot carry state or lifecycle prerequisites")
+		return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation cannot carry state or lifecycle prerequisites")
 	}
 	emissionIntents := append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...)
 	for _, value := range mutation.ActivityIntents {
 		intent := value.Normalized()
 		if intent.ApprovalDecision != "" {
-			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("entityless engine mutation cannot carry approval-bound activity")
+			return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("entityless engine mutation cannot carry approval-bound activity")
 		}
 	}
 	activityPublications, err := activityRequestEmitIntents(mutation.ActivityIntents)
 	if err != nil {
-		return runtimeengine.CommittedEngineMutation{}, err
+		return WorkflowEngineMutationCommand{}, nil, err
 	}
 	emissionIntents = append(emissionIntents, activityPublications...)
 	var publications []runtimeengine.DurablePublicationPlan
 	if len(emissionIntents) > 0 {
 		if o.publication == nil {
-			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine publication planner is required")
+			return WorkflowEngineMutationCommand{}, nil, fmt.Errorf("engine publication planner is required")
 		}
 		publications, err = o.publication.PrepareEnginePublications(ctx, emissionIntents)
 		if err != nil {
-			return runtimeengine.CommittedEngineMutation{}, err
+			return WorkflowEngineMutationCommand{}, nil, err
 		}
 	}
 	flowOwner := mutation.Address.FlowInstance.Normalize()
 	if err := flowOwner.Validate(); err != nil {
-		return runtimeengine.CommittedEngineMutation{}, err
-	}
-	deliverySuccess, settlementGuard, err := beginWorkflowEngineDeliverySuccess(ctx, mutation.HandlerRuleSelection)
-	if err != nil {
 		if o.publication != nil {
 			err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
 		}
-		return runtimeengine.CommittedEngineMutation{}, err
+		return WorkflowEngineMutationCommand{}, nil, err
 	}
-	committed, commitErr := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
+	return WorkflowEngineMutationCommand{
 		EntitylessTarget:        target,
 		EntitylessRunID:         flowOwner.RunID,
 		Publications:            publications,
-		DeliverySuccess:         deliverySuccess,
 		FanOutIntent:            mutation.FanOutIntent,
 		FanOutBarrier:           mutation.FanOutBarrier,
 		FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
-	})
-	if !committed.Committed {
-		commitErr = errors.Join(commitErr, fmt.Errorf("workflow engine mutation has no acknowledged result"))
-		if settlementGuard != nil {
-			settlementGuard.Abort()
+	}, publications, nil
+}
+
+// commitPreparedEngineMutation is the single durable commit-result and publication
+// handoff path for stateful and entityless handler preparation.
+func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
+	ctx context.Context,
+	mutation runtimeengine.EngineMutation,
+	command WorkflowEngineMutationCommand,
+	publications []runtimeengine.DurablePublicationPlan,
+	terminal PreparedFlowInstanceDeactivation,
+) (result runtimeengine.CommittedEngineMutation, resultErr error) {
+	terminalPending := terminal != nil
+	terminalEvidence := false
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("workflow engine mutation panic: %v", recovered))
 		}
+		if terminalPending {
+			if terminalEvidence {
+				resultErr = errors.Join(resultErr, o.finishCommittedFlowDeactivation(ctx, terminal))
+			} else {
+				resultErr = errors.Join(resultErr, abortPreparedFlowDeactivation(terminal))
+			}
+		}
+	}()
+	moveOrReleasePlans := func(err error) error {
 		if o.publication != nil {
-			commitErr = errors.Join(commitErr, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+			return errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
 		}
-		return runtimeengine.CommittedEngineMutation{}, commitErr
+		return err
 	}
-	if committed.Committed && mutation.FanOutIntent != nil {
-		o.state.coordinator.signalFanOutWork()
+	deliverySuccess, settlementGuard, err := beginWorkflowEngineDeliverySuccess(ctx, mutation.HandlerRuleSelection)
+	if err != nil {
+		return runtimeengine.CommittedEngineMutation{}, moveOrReleasePlans(err)
+	}
+	if settlementGuard != nil {
+		defer settlementGuard.Abort()
+	}
+	command.DeliverySuccess = deliverySuccess
+	committed, commitErr := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, command)
+	if !committed.Committed {
+		return runtimeengine.CommittedEngineMutation{}, moveOrReleasePlans(errors.Join(commitErr, fmt.Errorf("workflow engine mutation has no acknowledged result")))
+	}
+	result.Committed = true
+	resultErr = commitErr
+	terminalEvidence = committed.PostCommit.FlowDeactivation != nil
+	// Retain exact committed claim evidence before a post-commit hook may fail.
+	if committed.DeliverySuccess != nil && deliverySuccess != nil && committed.DeliverySuccess.Same(deliverySuccess.Claim) {
+		claim := *committed.DeliverySuccess
+		result.SettledDeliveryClaim = &claim
 	}
 	settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
-	commitErr = errors.Join(commitErr, settlementErr)
-	engineCommit := runtimeengine.CommittedEngineMutation{Committed: true, SettledDeliveryClaim: settledClaim}
-	var postCommitErr error
+	result.SettledDeliveryClaim = settledClaim
+	resultErr = errors.Join(resultErr, settlementErr)
+	if terminal != nil && terminalEvidence {
+		terminalPending = false
+		resultErr = errors.Join(resultErr, o.finishCommittedFlowDeactivation(ctx, terminal))
+	}
+	if mutation.FanOutIntent != nil {
+		o.state.coordinator.signalFanOutWork()
+	}
 	if o.publication != nil {
-		if err := o.publication.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
-			postCommitErr = errors.Join(postCommitErr, err)
-		}
+		resultErr = errors.Join(resultErr, o.finishCommittedEnginePublications(ctx, committed.Publications))
+	}
+	if command.EntitylessTarget.Empty() {
+		resultErr = errors.Join(resultErr, o.finishCommittedWorkflowLifecycle(ctx, committed.Lifecycle))
 	}
 	if len(committed.Publications) < len(mutation.EmitIntents) {
-		return engineCommit, errors.Join(commitErr, postCommitErr, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents)))
+		return result, errors.Join(resultErr, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents)))
 	}
 	committedIntents := make([]runtimeengine.EmitIntent, 0, len(mutation.EmitIntents))
 	for index, publication := range committed.Publications[:len(mutation.EmitIntents)] {
 		if publication == nil {
-			return engineCommit, errors.Join(commitErr, postCommitErr, fmt.Errorf("committed engine publication %d is required", index))
+			return result, errors.Join(resultErr, fmt.Errorf("committed engine publication %d is required", index))
 		}
 		intent := publication.CommittedDurablePublicationIntent()
 		if strings.TrimSpace(intent.Event.ID()) != strings.TrimSpace(publication.CommittedDurablePublicationEventID()) {
-			return engineCommit, errors.Join(commitErr, postCommitErr, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index))
+			return result, errors.Join(resultErr, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index))
 		}
 		committedIntents = append(committedIntents, intent)
 	}
-	engineCommit.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
-	engineCommit.EmitIntents = committedIntents
-	return engineCommit, errors.Join(commitErr, postCommitErr)
+	result.ActivityIntents = append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...)
+	result.EmitIntents = committedIntents
+	return result, resultErr
+}
+
+func (o pipelineEngineMutationOwner) finishCommittedFlowDeactivation(ctx context.Context, terminal PreparedFlowInstanceDeactivation) (err error) {
+	notifyErr := func() (err error) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				err = fmt.Errorf("workflow terminal notification panic: %v", recovered)
+			}
+		}()
+		o.state.coordinator.notifyTestWorkflowTerminalCommitted(ctx)
+		return nil
+	}()
+	return errors.Join(notifyErr, commitPreparedFlowDeactivation(terminal))
+}
+
+func commitPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("workflow terminal finalization panic: %v", recovered), abortPreparedFlowDeactivation(terminal))
+		}
+	}()
+	return terminal.Commit()
+}
+
+func abortPreparedFlowDeactivation(terminal PreparedFlowInstanceDeactivation) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("workflow terminal reservation abort panic: %v", recovered))
+		}
+	}()
+	return terminal.Abort()
+}
+
+func (o pipelineEngineMutationOwner) finishCommittedEnginePublications(ctx context.Context, publications []runtimeengine.CommittedDurablePublication) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("workflow publication finalization panic: %v", recovered))
+		}
+	}()
+	return o.publication.FinalizeEnginePublications(ctx, publications)
+}
+
+func (o pipelineEngineMutationOwner) finishCommittedWorkflowLifecycle(ctx context.Context, lifecycle CommittedWorkflowLifecycleMutation) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("workflow lifecycle finalization panic: %v", recovered))
+		}
+	}()
+	return o.state.coordinator.finalizeWorkflowLifecycleMutation(ctx, lifecycle)
 }
 
 func verifyPreparedWorkflowEmitPersistence(instance WorkflowInstance, prerequisites runtimeengine.EmitPersistencePrerequisites) error {

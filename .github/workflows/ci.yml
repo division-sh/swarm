@@ -472,9 +472,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
           go run ./cmd/swarm-test-timing -assert-execution-sha \
             -plan test-results/plan/proof-plan.json -execution-sha "$(git rev-parse HEAD)"
+          # An attempt-scoped jobs list can lag the completed needs result.
+          # Refresh evidence only; never rerun a proof or replace the evaluator's
+          # exact run/attempt/head, success, timestamp, and missing-job checks.
+          for check in $(seq 1 12); do
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
+            if jq -e --slurpfile plan test-results/plan/proof-plan.json '
+              ([$plan[0].units[].id | "Go proof " + .]) as $expected
+              | ([.[].jobs[] | select(.name | startswith("Go proof "))]) as $actual
+              | ($expected | length > 0) and all($expected[]; . as $name
+                  | [$actual[] | select(.name == $name)]
+                  | length == 1 and .[0].status == "completed")
+            ' test-results/jobs.json >/dev/null; then
+              break
+            fi
+            if [ "$check" -lt 12 ]; then sleep 5; fi
+          done
           go run ./cmd/swarm-test-timing -evaluate-budget \
             -plan test-results/plan/proof-plan.json \
             -policy .github/test-timing-budgets.yaml \

@@ -3294,6 +3294,18 @@ handler_specification:
   atomicity:
     description: ALL side effects from one handler execution commit in a single database transaction. State advance, gate
       set, data write, and event persistence happen atomically. No external observer sees intermediate state.
+    execution_sequence: >-
+      Acquire the exact delivery authority, prepare its receiver and context, then load authoritative entity state,
+      evaluate the handler, and prepare its mutation under the entity lock. Commit business state, publication,
+      historical effects and exact delivery success through the named selected-store mutation operation. Consume
+      its typed COMMIT acknowledgement and exact settled-claim evidence before dispatching committed event or activity
+      follow-up. Release the entity lock before recursive dispatch and release or retain the exact delivery
+      continuation after its durable outcome. Entityless and stateful handlers have different preparation rules but
+      share acknowledgement, publication finalization and continuation handling. Guard reject/discard, guard-kill,
+      terminal-state rejection and preparation failure keep their distinct settlement and retry semantics. A
+      positively acknowledged result remains committed despite later cancellation, panic or cleanup failure; those
+      diagnostics do not authorize rollback, plan release or handler retry. Provider calls, asynchronous waits,
+      descendant execution and postcommit dispatch run under neither the handler SQL transaction nor its entity lock.
     consequence: Since independent steps (advances_to, sets_gate, data_accumulation) commit together, their relative execution
       order is cosmetic. The database sees one atomic write. An implementer may write data before or after state advance —
       the result is identical.
@@ -6064,6 +6076,7 @@ engine:
         scope: |
           Every runtime mutation enters one closed named selected-store operation. That operation owns its complete transaction and returns typed commit evidence for declared post-commit work; runtime never selects, joins, or reconstructs a transaction. The private SQLite backend owns process-local write serialization, elapsed-budgeted SQLITE_BUSY / database-locked retry, and context cancellation/deadline handling. It covers the selected runtime mutation row families named in this section: event/delivery/replay/receipt, runtime log, mailbox/idempotency, ingress/run control/quiescence, session/conversation/turn, schedule/timer, tool entity/human-task, budget/spend, manager/agent, and run-completion mutations. Postgres remains the production runtime backend and must not inherit SQLite global serialization or retry behavior.
         rules:
+          - A workflow engine state transition has one closed create/update/companion and historical-effect decision consumed by both selected-store dialect writers. PostgreSQL and SQLite retain their own SQL, locks, conflict detection and retry mechanics, but must not independently reinterpret the transition's business meaning. Standalone event completion uses a required selected-store capability; an absent capability fails closed rather than silently omitting completion.
           - SQLite runtime mutation producers must not implement local SQLITE_BUSY retry loops or open independent write transactions when a selected runtime store boundary is available.
           - WorkflowPersistence is constructed from a complete closed operation owner and fails closed when any required operation is absent. EventBus, PipelineCoordinator, manager, and other runtime consumers receive only named closed operations and must not receive or invoke a generic mutation callback.
           - SQLite driver busy_timeout must stay short; elapsed retry budget, cancellation, and backoff are owned by the selected mutation boundary rather than by long driver-level waits.

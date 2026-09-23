@@ -2,8 +2,8 @@ package testtiming
 
 import (
 	"encoding/json"
-
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -13,6 +13,73 @@ import (
 	"github.com/division-sh/swarm/internal/testplanning"
 	"gopkg.in/yaml.v3"
 )
+
+func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(testTimingRepoRoot(t), ".github/workflows/ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]ciWorkflowJob `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	step := findWorkflowStep(workflow.Jobs["timing-budget"].Steps, "Evaluate complete plan-bound evidence")
+	if step == nil {
+		t.Fatal("missing timing evaluation")
+	}
+	const start = "if jq -e --slurpfile plan test-results/plan/proof-plan.json '\n"
+	const end = "' test-results/jobs.json >/dev/null; then"
+	from := strings.Index(step.Run, start)
+	if from < 0 {
+		t.Fatal("missing planned-job terminal predicate")
+	}
+	from += len(start)
+	to := strings.Index(step.Run[from:], end)
+	if to < 0 {
+		t.Fatal("missing terminal predicate boundary")
+	}
+	predicate := step.Run[from : from+to]
+	assertAt := strings.Index(step.Run, "-assert-execution-sha")
+	fetchAt := strings.Index(step.Run, "gh api --paginate --slurp")
+	evaluateAt := strings.Index(step.Run, "-evaluate-budget")
+	if assertAt < 0 || fetchAt <= assertAt || evaluateAt <= fetchAt ||
+		!strings.Contains(step.Run, "attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100") ||
+		!strings.Contains(step.Run, "for check in $(seq 1 12)") ||
+		!strings.Contains(step.Run, "if [ \"$check\" -lt 12 ]; then sleep 5; fi") ||
+		strings.Count(step.Run, "-evaluate-budget") != 1 {
+		t.Fatal("job collection must be bounded, attempt-scoped, and precede one fail-closed evaluation")
+	}
+
+	dir := t.TempDir()
+	planPath := filepath.Join(dir, "plan.json")
+	jobsPath := filepath.Join(dir, "jobs.json")
+	for _, tc := range []struct {
+		name, plan, jobs string
+		ready            bool
+	}{
+		{"complete", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, true},
+		{"stale successful job", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"in_progress"}]}]`, false},
+		{"missing job", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"}]}]`, false},
+		{"duplicate job", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed"},{"name":"Go proof two","status":"completed"}]}]`, false},
+		{"terminal failure reaches evaluator", `{"units":[{"id":"one"},{"id":"two"}]}`, `[{"jobs":[{"name":"Go proof one","status":"completed"},{"name":"Go proof two","status":"completed","conclusion":"failure"}]}]`, true},
+		{"empty plan", `{"units":[]}`, `[{"jobs":[]}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(planPath, []byte(tc.plan), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(jobsPath, []byte(tc.jobs), 0600); err != nil {
+				t.Fatal(err)
+			}
+			output, err := exec.Command("jq", "-e", "--slurpfile", "plan", planPath, predicate, jobsPath).CombinedOutput()
+			if got := err == nil; got != tc.ready {
+				t.Fatalf("ready = %t, want %t; jq output: %s; error: %v", got, tc.ready, output, err)
+			}
+		})
+	}
+}
 
 type ciWorkflowStep struct {
 	ID              string            `yaml:"id"`
@@ -360,7 +427,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-06"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-07", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]
