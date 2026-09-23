@@ -36510,7 +36510,9 @@ process_local_work_lifetime_authority:
       handler return the ordinary stored success response for both first call and replay. A post-activation cleanup
       diagnostic from that same execution is reported internally, never substituted for the stored response or
       exposed as raw backend text. Missing or contradictory activation evidence, an independently failed execution,
-      and API completion-write failure do not become success. Completion-write loss and crash-window recovery remain
+      and API completion-write failure do not become success. A missing or normalized-empty idempotency key does not
+      create a keyed completion; healthy keyless calls remain supported, but a cleanup failure cannot use this
+      stored-success exception. Completion-write loss and crash-window recovery remain
       separately tracked under #1930; this rule does not reconstruct them from mutable run status.
     done: Every accepted lease settles exactly once after execution, error, cancellation, or exact durable handoff. Duplicate settlement is invalid and cannot decrement another occurrence.
     wait: Wait is event-driven and joins accepted work without counter polling, sleeps, or stable-tick heuristics. Quiescence waits for every finite lease admitted by the occurrence while allowing its typed standing machinery to remain live; retirement cancels and joins both finite and standing leases before releasing the parent occurrence. Both views consume the same gate and settlement records, never parallel counters. Scheduler ownership retains only active or currently draining tasks; completed one-shot history is removed at completion and cannot accumulate as a second lifetime ledger.

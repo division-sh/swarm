@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -146,6 +147,102 @@ func TestOperatorRunForkAcknowledgedCleanupCompletesSelectedStoreIdempotencyBoth
 			}
 			if calls != 1 {
 				t.Fatalf("selected execution repeated after committed API completion: %d calls", calls)
+			}
+		})
+	}
+}
+
+func TestOperatorRunForkKeylessCleanupCannotClaimStoredCompletionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var idempotency APIIdempotencyStore
+			var db *sql.DB
+			if backend == "sqlite" {
+				idempotency = storetest.StartSQLiteRuntimeStore(t)
+				db = storetest.DatabaseForTest(idempotency)
+			} else {
+				_, db, _ = testutil.StartPostgres(t)
+				idempotency = storetest.AdmitPostgresRuntimeStore(t, db)
+			}
+			cleanup := errors.New("selected fork cleanup after activation")
+			fault := false
+			calls := 0
+			executor := SelectedContractRunForkExecutor{ExecuteSelectedContractRunFork: func(_ context.Context, _ runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+				calls++
+				result := runforkexecution.SelectedContractExecutionResult{
+					Owner: runfork.RunForkSelectedContractExecutionOwner,
+					Materialization: runfork.RunForkMaterialization{
+						SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
+						ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+					},
+					Activation: runfork.RunForkActivation{
+						SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
+						ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+						Activated: true, ForkRunStatus: runfork.RunForkActivatedStatus,
+						SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
+					},
+				}
+				if fault {
+					return result, cleanup
+				}
+				return result, nil
+			}}
+			opts := RunForkHandlerOptions{
+				Availability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+					runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+				}},
+				Executor: executor, Idempotency: idempotency,
+			}
+			for _, mode := range []struct {
+				name       string
+				key        string
+				includeKey bool
+			}{
+				{name: "omitted"},
+				{name: "empty", includeKey: true},
+				{name: "whitespace", key: "   ", includeKey: true},
+			} {
+				for _, withFault := range []bool{false, true} {
+					name := "healthy"
+					if withFault {
+						name = "cleanup_fault"
+					}
+					t.Run(mode.name+"/"+name, func(t *testing.T) {
+						fault = withFault
+						params := map[string]any{
+							"source_run_id": runForkTestSourceRunID, "fork_event_id": runForkTestEventID,
+							"allow_source_freeze": true,
+						}
+						if mode.includeKey {
+							params["idempotency_key"] = mode.key
+						}
+						before := calls
+						value, err := executeRunFork(context.Background(), Request{
+							Method: "run.fork", ActorTokenID: "keyless-fork", RequestHash: mode.name + name,
+							Params: params,
+						}, opts, time.Now())
+						if calls != before+1 {
+							t.Fatalf("selected executor calls = %d, want %d", calls, before+1)
+						}
+						if withFault {
+							if err == nil || value != nil {
+								t.Fatalf("keyless cleanup returned unrecorded success: value=%#v err=%v", value, err)
+							}
+						} else {
+							result, ok := value.(RunForkExecutionResult)
+							if err != nil || !ok || result.ForkRunID != runForkTestForkRunID || result.ForkRunStatus != runfork.RunForkActivatedStatus {
+								t.Fatalf("healthy keyless fork: value=%#v err=%v", value, err)
+							}
+						}
+						var completions int
+						if err := db.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE method = 'run.fork'`).Scan(&completions); err != nil {
+							t.Fatal(err)
+						}
+						if completions != 0 {
+							t.Fatalf("keyless operation stored %d completions, want none", completions)
+						}
+					})
+				}
 			}
 		})
 	}
