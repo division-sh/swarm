@@ -25,12 +25,16 @@ func TestSelectedRunForkAdapterPreservesOutcomeAndError(t *testing.T) {
 						return runforkexecution.SelectedContractExecutionResult{}, failure
 					}
 					return runforkexecution.SelectedContractExecutionResult{
-						Owner: "selected-contract-owner",
+						Owner: runfork.RunForkSelectedContractExecutionOwner,
 						Materialization: runfork.RunForkMaterialization{
 							SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
 							ForkRunStatus: "paused", ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
 						},
-						Activation:         runfork.RunForkActivation{Activated: true, ForkRunStatus: "running", SourceFrozen: true, SourceRunStatus: "forked"},
+						Activation: runfork.RunForkActivation{
+							SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
+							ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+							Activated: true, ForkRunStatus: "running", SourceFrozen: true, SourceRunStatus: "forked",
+						},
 						ExecutedEventCount: 2,
 					}, failure
 				},
@@ -45,8 +49,55 @@ func TestSelectedRunForkAdapterPreservesOutcomeAndError(t *testing.T) {
 				}
 				return
 			}
-			if result.Owner != "selected-contract-owner" || result.SourceRunID != runForkTestSourceRunID || result.ForkRunID != runForkTestForkRunID || result.ForkEventID != runForkTestEventID || result.ForkRunStatus != "running" || result.SourceRunStatus != "forked" || !result.SourceFrozen || result.ExecutedEventCount != 2 || result.BundleHash != runForkTestBundleHash {
+			if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.SourceRunID != runForkTestSourceRunID || result.ForkRunID != runForkTestForkRunID || result.ForkEventID != runForkTestEventID || result.ForkRunStatus != "running" || result.SourceRunStatus != "forked" || !result.SourceFrozen || result.ExecutedEventCount != 2 || result.BundleHash != runForkTestBundleHash || !result.activationAcknowledged {
 				t.Fatalf("lost execution result: %+v", result)
+			}
+		})
+	}
+}
+
+func TestSelectedRunForkAdapterRefusesContradictoryActivationEvidence(t *testing.T) {
+	base := runforkexecution.SelectedContractExecutionResult{
+		Owner: runfork.RunForkSelectedContractExecutionOwner,
+		Materialization: runfork.RunForkMaterialization{
+			SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
+			ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+		},
+		Activation: runfork.RunForkActivation{
+			SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
+			ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+			Activated: true, ForkRunStatus: runfork.RunForkActivatedStatus,
+			SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
+		},
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*runforkexecution.SelectedContractExecutionResult)
+	}{
+		{"missing_ack", func(r *runforkexecution.SelectedContractExecutionResult) { r.Activation.Activated = false }},
+		{"foreign_source", func(r *runforkexecution.SelectedContractExecutionResult) {
+			r.Activation.SourceRunID = runForkTestForkRunID
+		}},
+		{"foreign_fork", func(r *runforkexecution.SelectedContractExecutionResult) {
+			r.Activation.ForkRunID = runForkTestSourceRunID
+		}},
+		{"foreign_event", func(r *runforkexecution.SelectedContractExecutionResult) {
+			r.Activation.ForkPoint.EventID = runForkTestSourceRunID
+		}},
+		{"wrong_status", func(r *runforkexecution.SelectedContractExecutionResult) { r.Activation.ForkRunStatus = "paused" }},
+		{"wrong_owner", func(r *runforkexecution.SelectedContractExecutionResult) { r.Owner = "foreign" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := base
+			tc.change(&result)
+			executor := SelectedContractRunForkExecutor{ExecuteSelectedContractRunFork: func(context.Context, runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+				return result, errors.New("postcommit diagnostic")
+			}}
+			got, err := executor.ExecuteRunFork(context.Background(), RunForkExecutionRequest{
+				SourceRunID: runForkTestSourceRunID, ForkEventID: runForkTestEventID,
+			})
+			if err == nil || got.activationAcknowledged {
+				t.Fatalf("contradictory activation admitted: result=%+v error=%v", got, err)
 			}
 		})
 	}
