@@ -16,13 +16,11 @@ type selectedForkSourceEventsCommit interface {
 	SelectedForkSourceEventsCommit() (string, string, []runfork.RunForkSelectedContractSourceEvent)
 }
 
-// A joined error can contain an independent cancellation or fence failure.
-// Only the isolated store postcommit error authorizes continuation.
+// Only a direct store postcommit carrier authorizes continuation. Its cause
+// may contain multiple native cleanup failures; an outer join can contain an
+// independent cancellation or fence failure and is not admitted.
 func isolatedSelectedForkMaterializationCommit(err error) (runfork.RunForkMaterialization, bool) {
 	if committed, ok := err.(selectedForkMaterializationCommit); ok {
-		if !singleSelectedForkErrorChain(err) {
-			return runfork.RunForkMaterialization{}, false
-		}
 		return committed.SelectedForkMaterializationCommit(), true
 	}
 	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
@@ -45,9 +43,6 @@ func requireExactSelectedForkMaterialization(req runforkreadiness.MaterializeReq
 
 func isolatedSelectedForkSourceEventsCommit(err error) (string, string, []runfork.RunForkSelectedContractSourceEvent, bool) {
 	if committed, ok := err.(selectedForkSourceEventsCommit); ok {
-		if !singleSelectedForkErrorChain(err) {
-			return "", "", nil, false
-		}
 		sourceRunID, forkRunID, events := committed.SelectedForkSourceEventsCommit()
 		return sourceRunID, forkRunID, events, true
 	}
@@ -55,20 +50,6 @@ func isolatedSelectedForkSourceEventsCommit(err error) (string, string, []runfor
 		return isolatedSelectedForkSourceEventsCommit(wrapped.Unwrap())
 	}
 	return "", "", nil, false
-}
-
-func singleSelectedForkErrorChain(err error) bool {
-	for err != nil {
-		if _, joined := err.(interface{ Unwrap() []error }); joined {
-			return false
-		}
-		wrapped, ok := err.(interface{ Unwrap() error })
-		if !ok {
-			return true
-		}
-		err = wrapped.Unwrap()
-	}
-	return true
 }
 
 func requireExactSelectedForkSourceEvents(requested []string, events []runfork.RunForkSelectedContractSourceEvent) error {

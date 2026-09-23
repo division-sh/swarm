@@ -18,9 +18,9 @@ func TestSelectedForkCommitOutcomeRequiresIsolatedTypedError(t *testing.T) {
 	if _, ok := isolatedSelectedForkMaterializationCommit(errors.Join(materializationErr, context.Canceled)); ok {
 		t.Fatal("joined cancellation authorized materialization continuation")
 	}
-	materializationErr.cause = errors.Join(cause, context.Canceled)
-	if _, ok := isolatedSelectedForkMaterializationCommit(materializationErr); ok {
-		t.Fatal("typed materialization error with joined cancellation authorized continuation")
+	materializationErr.cause = errors.Join(cause, errors.New("second native cleanup failure"))
+	if got, ok := isolatedSelectedForkMaterializationCommit(materializationErr); !ok || got.ForkRunID != "fork" {
+		t.Fatalf("native cleanup diagnostics displaced acknowledged materialization: %+v, %t", got, ok)
 	}
 	if _, ok := isolatedSelectedForkMaterializationCommit(cause); ok {
 		t.Fatal("untyped error authorized materialization continuation")
@@ -35,9 +35,9 @@ func TestSelectedForkCommitOutcomeRequiresIsolatedTypedError(t *testing.T) {
 	if _, _, _, ok := isolatedSelectedForkSourceEventsCommit(errors.Join(sourceErr, context.Canceled)); ok {
 		t.Fatal("joined cancellation authorized source-event continuation")
 	}
-	sourceErr.cause = errors.Join(cause, context.Canceled)
-	if _, _, _, ok := isolatedSelectedForkSourceEventsCommit(sourceErr); ok {
-		t.Fatal("typed source-event error with joined cancellation authorized continuation")
+	sourceErr.cause = errors.Join(cause, errors.New("second native cleanup failure"))
+	if source, fork, events, ok := isolatedSelectedForkSourceEventsCommit(sourceErr); !ok || source != "source" || fork != "fork" || len(events) != 1 {
+		t.Fatalf("native cleanup diagnostics displaced acknowledged source events: %s/%s %+v, %t", source, fork, events, ok)
 	}
 	if _, _, _, ok := isolatedSelectedForkSourceEventsCommit(cause); ok {
 		t.Fatal("untyped error authorized source-event continuation")
