@@ -11,35 +11,152 @@ import (
 	"testing"
 )
 
-type revisionRetryOwnerContract struct {
-	path, symbol, transaction string
-}
-
-func revisionResetOwners() []revisionRetryOwnerContract {
-	return []revisionRetryOwnerContract{
-		{"entityruntime/persistence.go", "EntitySQLiteOwner.runPrivateAuthorActivityMutation", "s.backend.RunTransaction"},
-		{"agentpersistence/directive_owner_support.go", "AgentSQLiteOwner.runPrivateAuthorActivityMutation", "s.runRuntimeMutation"},
-		{"llmpersistence/owner.go", "LLMSQLiteOwner.runRuntimeMutationOutcome", "s.backend.RunTransactionOutcome"},
-		{"runlifecycle/owner.go", "RunLifecycleSQLiteOwner.runPrivateAuthorActivityMutationObserved", "s.runRuntimeMutationOutcome"},
-		{"pipelinepersistence/owner.go", "PipelineSQLiteOwner.runRuntimeMutationOutcome", "s.backend.RunTransactionOutcome"},
-	}
-}
+const revisionProtocolPath = "internal/store/internal/backend/mutationprotocol/protocol.go"
 
 func TestRunForkRevisionAttemptResetOwnersAreClosed(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
-	want := map[string]int{}
-	for _, contract := range revisionResetOwners() {
-		path := "internal/store/internal/backend/" + contract.path
-		want[path+"|"+contract.symbol] = 1
-		body, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
+	body, err := os.ReadFile(filepath.Join(root, revisionProtocolPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRevisionProtocolReset(string(body)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := revisionCallCensus(root, "AttemptReset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{revisionProtocolPath + "|run": 1}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("only mutationprotocol may reset the shared baseline at native retry entry: got=%v want=%v", got, want)
+	}
+}
+
+func validateRevisionProtocolReset(source string) error {
+	functions, err := revisionGuardFunctions(source)
+	if err != nil {
+		return err
+	}
+	fn := functions["run"]
+	if fn == nil {
+		return fmt.Errorf("mutationprotocol.run is missing")
+	}
+	var capture *ast.AssignStmt
+	var native *ast.CallExpr
+	var callback *ast.FuncLit
+	for _, statement := range fn.Body.List {
+		if assign, ok := statement.(*ast.AssignStmt); ok && assign.Tok == token.DEFINE && len(assign.Rhs) == 1 && revisionGuardNode(assign.Rhs[0]) == "baseline.effects.AttemptReset()" {
+			if len(assign.Lhs) != 1 || revisionGuardNode(assign.Lhs[0]) != "resetEffects" || capture != nil {
+				return fmt.Errorf("shared baseline reset capture is not unique")
+			}
+			capture = assign
 		}
-		if err := validateRevisionAttemptReset(string(body), contract); err != nil {
-			t.Fatalf("%s: %v", path, err)
+		ast.Inspect(statement, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if ok && revisionGuardNode(call.Fun) == "native" && len(call.Args) == 2 {
+				native = call
+				callback, _ = call.Args[1].(*ast.FuncLit)
+			}
+			return true
+		})
+	}
+	if capture == nil || native == nil || callback == nil || capture.End() >= native.Pos() {
+		return fmt.Errorf("reset must be captured from the baseline before the native retry callback")
+	}
+	if len(callback.Body.List) < 3 {
+		return fmt.Errorf("native retry callback is incomplete")
+	}
+	if revisionGuardNode(callback.Body.List[0]) != "if previous != nil {\n\tprevious.active = false\n}" || revisionGuardNode(callback.Body.List[1]) != "resetEffects()" {
+		return fmt.Errorf("native retry must deactivate the old attempt then reset effects before mutation")
+	}
+	resetCalls, writes := 0, 0
+	ast.Inspect(callback.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch revisionGuardNode(call.Fun) {
+		case "resetEffects":
+			resetCalls++
+		case "write":
+			writes++
+			if call.Pos() < callback.Body.List[1].End() {
+				writes = -100
+			}
+		}
+		return true
+	})
+	if resetCalls != 1 || writes != 1 {
+		return fmt.Errorf("native retry requires one reset before one domain write: resets=%d writes=%d", resetCalls, writes)
+	}
+	uses := 0
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if ident, ok := node.(*ast.Ident); ok && ident.Name == "resetEffects" {
+			uses++
+		}
+		return true
+	})
+	if uses != 2 {
+		return fmt.Errorf("reset handle escaped the native retry entry: uses=%d", uses)
+	}
+	return nil
+}
+
+func TestRunForkRevisionFreshEffectsStayInsideRetryOwners(t *testing.T) {
+	root := repoRootForRuntimeWriterGuard(t)
+	body, err := os.ReadFile(filepath.Join(root, revisionProtocolPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRevisionProtocolFreshBaseline(string(body)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := revisionCallCensus(root, "NewEffects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{
+		revisionProtocolPath + "|NewBaseline":                                           1,
+		"internal/store/internal/backend/runforkrevision/effects.go|ForRun":             1,
+		"internal/store/internal/backend/runforkrevision/finalizer.go|validateComplete": 1,
+		"internal/store/testutil/runforkrevisionfixture/revision.go|Capture":            1,
+		"internal/store/testutil/runforkrevisionfixture/revision.go|CaptureSQLite":      1,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("new effects allocator escaped protocol, projection verifier, or test fixture: got=%v want=%v", got, want)
+	}
+}
+
+func validateRevisionProtocolFreshBaseline(source string) error {
+	functions, err := revisionGuardFunctions(source)
+	if err != nil {
+		return err
+	}
+	baseline, run := functions["NewBaseline"], functions["run"]
+	if baseline == nil || run == nil {
+		return fmt.Errorf("mutationprotocol baseline or run owner is missing")
+	}
+	if err := validateRevisionWriterCalls(source, revisionExactWriterContract{symbol: "NewBaseline", calls: []string{"privatefork.NewEffects()"}}, false); err != nil {
+		return err
+	}
+	found := false
+	for _, statement := range run.Body.List {
+		branch, ok := statement.(*ast.IfStmt)
+		if !ok || revisionGuardNode(branch.Cond) != "baseline == nil" || len(branch.Body.List) != 1 {
+			continue
+		}
+		if revisionGuardNode(branch.Body.List[0]) == "baseline = NewBaseline()" {
+			found = true
 		}
 	}
-	got := map[string]int{}
+	if !found {
+		return fmt.Errorf("nil baseline must allocate through NewBaseline before native retry")
+	}
+	return nil
+}
+
+func revisionCallCensus(root, name string) (map[string]int, error) {
+	result := map[string]int{}
 	err := filepath.WalkDir(filepath.Join(root, "internal/store"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
@@ -58,179 +175,48 @@ func TestRunForkRevisionAttemptResetOwnersAreClosed(t *testing.T) {
 		}
 		for symbol, fn := range functions {
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				if selector, ok := node.(*ast.SelectorExpr); ok && selector.Sel.Name == "AttemptReset" {
-					got[filepath.ToSlash(rel)+"|"+symbol]++
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if ok && selector.Sel.Name == name {
+					result[filepath.ToSlash(rel)+"|"+symbol]++
+				} else if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == name {
+					result[filepath.ToSlash(rel)+"|"+symbol]++
 				}
 				return true
 			})
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("retry reset must stay at exact outer owners, never subordinate writers: got=%v want=%v", got, want)
-	}
-}
-
-func revisionRetryCallback(fn *ast.FuncDecl, callee string) (*ast.CallExpr, *ast.FuncLit, error) {
-	var transaction *ast.CallExpr
-	var callback *ast.FuncLit
-	count := 0
-	ast.Inspect(fn.Body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || revisionGuardNode(call.Fun) != callee {
-			return true
-		}
-		count++
-		transaction = call
-		if len(call.Args) > 0 {
-			callback, _ = call.Args[len(call.Args)-1].(*ast.FuncLit)
-		}
-		return true
-	})
-	if count != 1 || callback == nil {
-		return nil, nil, fmt.Errorf("expected one literal callback at %s, got %d", callee, count)
-	}
-	return transaction, callback, nil
-}
-
-func validateRevisionAttemptReset(source string, contract revisionRetryOwnerContract) error {
-	functions, err := revisionGuardFunctions(source)
-	if err != nil {
-		return err
-	}
-	fn := functions[contract.symbol]
-	if fn == nil {
-		return fmt.Errorf("missing outer retry owner %s", contract.symbol)
-	}
-	transaction, callback, err := revisionRetryCallback(fn, contract.transaction)
-	if err != nil {
-		return err
-	}
-	var capture *ast.AssignStmt
-	var resetName string
-	for _, statement := range fn.Body.List {
-		assignment, ok := statement.(*ast.AssignStmt)
-		if !ok || assignment.Tok != token.DEFINE || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
-			continue
-		}
-		if revisionGuardNode(assignment.Rhs[0]) == "effects.AttemptReset()" {
-			if capture != nil {
-				return fmt.Errorf("multiple retry baseline captures")
-			}
-			capture = assignment
-			resetName = revisionGuardNode(assignment.Lhs[0])
-		}
-	}
-	if capture == nil || capture.End() >= transaction.Pos() || resetName == "_" {
-		return fmt.Errorf("%s must capture seeded baseline outside transaction callback", contract.symbol)
-	}
-	if len(callback.Body.List) == 0 {
-		return fmt.Errorf("empty retry callback")
-	}
-	first, ok := callback.Body.List[0].(*ast.ExprStmt)
-	if !ok || revisionGuardNode(first.X) != resetName+"()" {
-		return fmt.Errorf("%s must invoke baseline reset first at callback entry", contract.symbol)
-	}
-	uses := 0
-	ast.Inspect(fn.Body, func(node ast.Node) bool {
-		if identifier, ok := node.(*ast.Ident); ok && identifier.Name == resetName {
-			uses++
-		}
-		return true
-	})
-	if uses != 2 {
-		return fmt.Errorf("reset handle escaped or was invoked outside sole callback entry: uses=%d", uses)
-	}
-	return nil
-}
-
-// These owners have no predeclared baseline: fresh effects belong inside the
-// retry callback. They must not acquire a second subordinate reset instead.
-func TestRunForkRevisionFreshEffectsStayInsideRetryOwners(t *testing.T) {
-	root := repoRootForRuntimeWriterGuard(t)
-	for _, contract := range []revisionRetryOwnerContract{
-		{"effectpersistence/owner.go", "EffectSQLiteOwner.runRuntimeMutationOutcome", "s.backend.RunTransactionOutcome"},
-		{"eventpersistence/owner.go", "EventSQLiteOwner.runRuntimeMutationOutcome", "s.backend.RunTransactionOutcome"},
-		{"runforkpersistence/run_fork_selected_contract_activation_owner.go", "sqliteRunForkSelectedContractActivationPort", "s.backend.RunTransactionOutcome"},
-		{"runforkpersistence/run_fork_selected_contract_materialization_owner.go", "sqliteRunForkSelectedContractMaterializationPort", "s.backend.RunTransactionOutcome"},
-		{"runforkpersistence/run_fork_selected_contract_discard_owner.go", "sqliteRunForkSelectedContractDiscardPort", "s.runRuntimeMutation"},
-	} {
-		body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", contract.path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := validateRevisionFreshAttempt(string(body), contract); err != nil {
-			t.Fatalf("%s/%s: %v", contract.path, contract.symbol, err)
-		}
-	}
-}
-
-func validateRevisionFreshAttempt(source string, contract revisionRetryOwnerContract) error {
-	functions, err := revisionGuardFunctions(source)
-	if err != nil {
-		return err
-	}
-	fn := functions[contract.symbol]
-	if fn == nil {
-		return fmt.Errorf("missing fresh-attempt owner %s", contract.symbol)
-	}
-	_, callback, err := revisionRetryCallback(fn, contract.transaction)
-	if err != nil {
-		return err
-	}
-	count, inside := 0, 0
-	ast.Inspect(fn.Body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if ok && selector.Sel.Name == "NewEffects" {
-			count++
-			if call.Pos() > callback.Body.Pos() && call.End() < callback.Body.End() {
-				inside++
-			}
-		}
-		return true
-	})
-	if count != 1 || inside != 1 {
-		return fmt.Errorf("fresh effects must be allocated once per attempt, got total=%d inside=%d", count, inside)
-	}
-	return nil
+	return result, err
 }
 
 func TestRunForkRevisionRetryOwnerGuardHostileControls(t *testing.T) {
-	contract := revisionRetryOwnerContract{symbol: "write", transaction: "backend.RunTransaction"}
-	valid := `package p; func write() error { reset := effects.AttemptReset(); return backend.RunTransaction(func() error { reset(); return mutate(effects) }) }`
-	for _, tc := range []struct {
-		name, source string
-	}{
-		{"capture_inside", strings.Replace(valid, "reset := effects.AttemptReset(); return backend.RunTransaction(func() error {", "return backend.RunTransaction(func() error { reset := effects.AttemptReset();", 1)},
-		{"missing_reset", strings.Replace(valid, "reset();", "", 1)},
-		{"reset_after_mutation", strings.Replace(valid, "reset(); return mutate(effects)", "err := mutate(effects); reset(); return err", 1)},
-		{"deferred_reset", strings.Replace(valid, "reset();", "defer reset();", 1)},
-		{"reset_outside", strings.Replace(valid, "return backend.RunTransaction", "reset(); return backend.RunTransaction", 1)},
-		{"subordinate_reset", strings.Replace(valid, "return mutate(effects)", "return mutateWithReset(effects, reset)", 1)},
-		{"wrong_baseline", strings.Replace(valid, "effects.AttemptReset()", "otherEffects.AttemptReset()", 1)},
+	valid := `package p; func run() { resetEffects := baseline.effects.AttemptReset(); native(ctx, func() { if previous != nil { previous.active = false }; resetEffects(); attempt := NewAttempt(); write(ctx, attempt) }) }`
+	for _, tc := range []struct{ name, source string }{
+		{"capture_inside", strings.Replace(valid, "resetEffects := baseline.effects.AttemptReset(); native(ctx, func() {", "native(ctx, func() { resetEffects := baseline.effects.AttemptReset();", 1)},
+		{"missing_reset", strings.Replace(valid, "resetEffects();", "", 1)},
+		{"reset_after_mutation", strings.Replace(valid, "resetEffects(); attempt := NewAttempt(); write(ctx, attempt)", "attempt := NewAttempt(); write(ctx, attempt); resetEffects()", 1)},
+		{"deferred_reset", strings.Replace(valid, "resetEffects();", "defer resetEffects();", 1)},
+		{"extra_reset", strings.Replace(valid, "resetEffects();", "resetEffects(); resetEffects();", 1)},
+		{"wrong_baseline", strings.Replace(valid, "baseline.effects.AttemptReset()", "other.effects.AttemptReset()", 1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := validateRevisionAttemptReset(tc.source, contract); err == nil {
-				t.Fatal("invalid retry reset placement passed")
+			if err := validateRevisionProtocolReset(tc.source); err == nil {
+				t.Fatal("invalid protocol reset placement passed")
 			}
 		})
 	}
-	if err := validateRevisionAttemptReset(valid, contract); err != nil {
+	if err := validateRevisionProtocolReset(valid); err != nil {
 		t.Fatal(err)
 	}
-	fresh := `package p; func write() error { return backend.RunTransaction(func() error { effects := revision.NewEffects(); return mutate(effects) }) }`
-	if err := validateRevisionFreshAttempt(fresh, contract); err != nil {
+	fresh := `package p; func NewBaseline() *Baseline { return &Baseline{effects: privatefork.NewEffects()} }; func run() { if baseline == nil { baseline = NewBaseline() } }`
+	if err := validateRevisionProtocolFreshBaseline(fresh); err != nil {
 		t.Fatal(err)
 	}
-	outside := `package p; func write() error { effects := revision.NewEffects(); return backend.RunTransaction(func() error { return mutate(effects) }) }`
-	if err := validateRevisionFreshAttempt(outside, contract); err == nil {
-		t.Fatal("stale generated IDs can survive retry through outer effects allocation")
+	if err := validateRevisionProtocolFreshBaseline(strings.Replace(fresh, "baseline = NewBaseline()", "baseline = otherBaseline", 1)); err == nil {
+		t.Fatal("missing fresh baseline was accepted")
 	}
 }

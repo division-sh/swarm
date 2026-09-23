@@ -150,7 +150,8 @@ func TestRunForkRevisionProductionWriterCensusIsClosed(t *testing.T) {
 		"if !preserveCompletionEvidence",
 		"FamilyCommittedReplayScopes",
 		"FamilyAgentSessions",
-		"FinalizePostgres(ctx, tx, effects)",
+		"attempt.SelectForkDiscardRetention(txctx, forkRunID)",
+		"attempt.BeginDestructiveCleanup(txctx)",
 		"DeleteMaterializedForkRunTx",
 	} {
 		if !strings.Contains(selectedText, required) {
@@ -233,8 +234,8 @@ func assertPublicationSettlementKernelOwners(t *testing.T, root string) {
 		}
 	}
 	group := read("internal/store/internal/backend/pipelinepersistence/publication_group.go", "Settle")
-	if strings.Count(group, "FinalizePostgres(") != 1 || strings.Count(group, "g.sqlite.runRuntimeMutationOutcome(") != 1 || strings.Count(group, "newRevisionEffects()") != 1 {
-		t.Fatal("group settlement must aggregate once and finalize through one owner per backend")
+	if strings.Count(group, "mutationprotocol.RunRetainedPostgres(") != 1 || strings.Count(group, "mutationprotocol.RunSQLite(") != 1 || strings.Count(group, "settlePipelineMemberTx(") != 1 {
+		t.Fatal("group settlement must use one shared member kernel and one mutation-protocol owner per backend")
 	}
 	prepare := read("internal/runtime/bus/eventbus_publish.go", "prepareClosedPublication")
 	flush, claim := strings.Index(prepare, "flushEnclosingPublicationSettlement(ctx)"), strings.Index(prepare, "claim := publication.publicationClaim")
@@ -257,55 +258,55 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 	paths := []runForkRevisionContributionPath{
 		{
 			Path: "internal/store/internal/backend/delivery/lifecycle.go", Writer: "TerminalizeRunDeliveriesTx",
-			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "TerminalizeRun(ctx, tx, effects", "RecordDeadLetterTx(ctx, tx, story, effects"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "TerminalizeRun(ctx, attempt, runID, reason)", "RecordDeadLetterTx(ctx, attempt, diagnostic, false)"},
 			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_revision_operation_proof_test.go", Proof: "TestRunForkRevisionDirectDeliveryTerminalizationIsCompleteOnBothStores",
 			ProofTokens: []string{"fixture.store.TerminalizeRun", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/delivery/lifecycle.go", Writer: "renewClaimTx",
-			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "RenewClaim(ctx, tx, effects, claim, lease)"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "RenewClaim(ctx, attempt, claim, lease)"},
 			ProofPath:    "internal/store/internal/runtimepersistence/completion_settlement_test.go", Proof: "proveDeliveryClaimRenewalPublishesCompleteRunForkRevision",
 			ProofTokens: []string{"fixture.store.RenewClaim", "providerOriginLease", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/effectpersistence/runtime_external_effects.go", Writer: "HeartbeatCompletionAttempt",
-			WriterTokens: []string{"runRuntimeMutation", "effects *revisionEffects", "renewProviderOriginTx"},
+			WriterTokens: []string{"mutationprotocol.RunPostgres", "mutation *mutationprotocol.Attempt", "renewProviderOriginTx(txctx, mutation"},
 			ProofPath:    "internal/store/internal/runtimepersistence/completion_settlement_test.go", Proof: "proveCompletionAttemptHeartbeatFencesRecovery",
 			ProofTokens: []string{"HeartbeatCompletionAttempt", "providerOriginLease", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/pipelinepersistence/owner_operations.go", Writer: "TerminalizePipelineObligationTx",
-			WriterTokens: []string{"effects *revisionEffects", "terminalizeUnclaimedPipelineObligationTx(ctx, tx, effects"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "terminalizeUnclaimedPipelineObligationTx(ctx, tx, attempt"},
 			ProofPath:    "internal/store/internal/runtimepersistence/active_run_quiescence_delivery_readback_test.go", Proof: "TestActiveRunDeliveryQuiescenceReadbackParity",
 			ProofTokens: []string{"ApplyActiveRunQuiescence", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/pipelinepersistence/owner_operations.go", Writer: "MarkDecisionProcessed",
-			WriterTokens: []string{"effects := newRevisionEffects()", "markDecisionRouteProcessedTx(txctx, tx, effects", "CommitPipelineHandoff(txctx, tx, effects", "FinalizePostgres"},
+			WriterTokens: []string{"mutationprotocol.RunRetainedPostgres", "markDecisionRouteProcessedTx(txctx, tx, attempt", "CommitPipelineHandoff(txctx, attempt", "outcome.Acknowledged()"},
 			ProofPath:    "internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go", Proof: "provePipelineDecisionRouteDispositions",
 			ProofTokens: []string{"MarkDecisionProcessed", "Settle", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/pipelinepersistence/owner_operations.go", Writer: "Settle",
-			WriterTokens: []string{"effects := newRevisionEffects()", "validateGroupedSingletonSettlementTx", "settlePipelineMemberTx", "RunAuthorityTransactionOutcome", "FinalizePostgres"},
+			WriterTokens: []string{"mutationprotocol.RunRetainedPostgres", "validateGroupedSingletonSettlementTx", "settlePipelineMemberTx", "mutation.Acknowledged()"},
 			ProofPath:    "internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go", Proof: "provePipelineExactPayloadRecovery",
 			ProofTokens: []string{"PipelineObligations().Settle", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/pipelinepersistence/publication_group.go", Writer: "Settle",
-			WriterTokens: []string{"effects := newRevisionEffects()", "validateCommittedMembersTx", "settlePipelineMemberTx", "RunAuthorityTransactionOutcome", "FinalizePostgres", "g.sqlite.runRuntimeMutationOutcome"},
+			WriterTokens: []string{"validateCommittedMembersTx", "settlePipelineMemberTx", "mutationprotocol.RunRetainedPostgres", "mutationprotocol.RunSQLite", "outcome.Acknowledged()"},
 			ProofPath:    "internal/store/internal/runtimepersistence/fan_out_publication_group_history_test.go", Proof: "TestFanOutPublicationGroupHistoryAtomicCutsBothStores",
 			ProofTokens: []string{"DispatchFanOutPublications", "receipt.Total.WriteCommits != 1", "receipt.Total.Revision.Finalizations != 1", "requireReceipts", "requireForkPoint"},
 		},
 		{
 			Path: "internal/store/internal/backend/pipelinepersistence/publication_settlement_kernel.go", Writer: "settlePipelineMemberTx",
-			WriterTokens: []string{"effects *revisionEffects", "disposition.ValidateFor", "writePipelineDispositionTx(ctx, tx, effects", "RequestCompletionCandidateTx", "CommitPipelineHandoff(ctx, tx, effects"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "disposition.ValidateFor", "writePipelineDispositionTx(ctx, tx, attempt", "attempt.RequestCompletion", "CommitPipelineHandoff(ctx, attempt"},
 			ProofPath:    "internal/store/internal/runtimepersistence/fan_out_publication_group_history_test.go", Proof: "TestFanOutPublicationGroupHistoryRollbackBothStores",
 			ProofTokens: []string{"group.Settle", "installRollbackFault", "reflect.DeepEqual(before, after)", "ReadPublicationSettlement", "requireReceipts"},
 		},
 		{
-			Path: "internal/store/internal/backend/pipelinepersistence/owner.go", Writer: "runRuntimeMutationOutcome",
-			WriterTokens: []string{"effects *revisionEffects", "RunTransactionOutcome", "operation(txctx, tx)", "FinalizeSQLite(txctx, tx, effects)"},
+			Path: "internal/store/internal/backend/pipelinepersistence/publication_group.go", Writer: "Settle",
+			WriterTokens: []string{"mutationprotocol.RunRetainedPostgres", "mutationprotocol.RunSQLite", "settlePipelineMemberTx", "outcome.Acknowledged()"},
 			ProofPath:    "internal/store/internal/runtimepersistence/fan_out_publication_group_history_test.go", Proof: "TestFanOutPublicationGroupHistoryAtomicCutsBothStores",
 			ProofTokens: []string{"\"sqlite\"", "DispatchFanOutPublications", "readFanOutGroupHistory", "reflect.DeepEqual(held, before)"},
 		},
@@ -317,49 +318,49 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 		},
 		{
 			Path: "internal/store/internal/backend/eventpersistence/event_commit.go", Writer: "commitInitialSideEffectEvidence",
-			WriterTokens: []string{"effects", "CommitInitialPipelineDispositionTx", "RecordDeadLetterTx"},
+			WriterTokens: []string{"c.attempt", "CommitInitialPipelineDispositionTx", "RecordDeadLetterTx"},
 			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_revision_operation_proof_test.go", Proof: "TestRunForkRevisionTargetFailurePublicationIsCompleteOnBothStores",
 			ProofTokens: []string{"store.CommitPublication", "requireCompleteRunForkRevision"},
 		},
 		{
-			Path: "internal/store/internal/backend/runlifecycle/run_lifecycle_state_adapter.go", Writer: "markRunTerminalStateTx",
-			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "TerminalizeRunDeliveriesTx", "SupersedeRunTx"},
+			Path: "internal/store/internal/backend/runlifecycle/run_lifecycle_state.go", Writer: "markRunTerminalStateTx",
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "TerminalizeRunDeliveriesTx(ctx, attempt", "SupersedeRunTx("},
 			ProofPath:    "internal/store/internal/runtimepersistence/decision_cards_test.go", Proof: "TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity",
 			ProofTokens: []string{"markDecisionCardRunTerminalStatus", "stopDecisionCardRun", "quiesceDecisionCardRun", "assertTerminalDecisionCardStateChangeOnly"},
 		},
 		{
 			Path: "internal/store/internal/backend/runlifecycle/run_control.go", Writer: "quiesceStoppedRunWorkTx",
-			WriterTokens: []string{"effects *runforkrevision.Effects", "TerminalizeRunTx", "terminateActiveRunSessionsTx", "cancelActiveRunTimerFamiliesTx"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "TerminalizeRunDeliveriesTx(ctx, attempt", "terminateActiveRunSessionsTx", "cancelActiveRunTimerFamiliesTx"},
 			ProofPath:    "internal/store/internal/runtimepersistence/decision_cards_test.go", Proof: "TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity",
 			ProofTokens: []string{"run_stop", "stopDecisionCardRun", "assertTerminalDecisionCardStateChangeOnly"},
 		},
 		{
 			Path: "internal/store/internal/backend/runlifecycle/active_run_quiescence.go", Writer: "applyActiveRunQuiescenceTx",
-			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "FinalizePostgres"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "TerminalizeRunDeliveriesTx(ctx, attempt", "TerminalizeRunTx(ctx, attempt", "terminateActiveRunSessionsTx"},
 			ProofPath:    "internal/store/internal/runtimepersistence/active_run_quiescence_delivery_readback_test.go", Proof: "TestActiveRunDeliveryQuiescenceReadbackParity",
 			ProofTokens: []string{"ApplyActiveRunQuiescence", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go", Writer: "executeCompletionCandidateTx",
-			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "completeRunTx"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "completeRunTx(ctx, tx, attempt"},
 			ProofPath:    "internal/store/internal/runtimepersistence/decision_cards_test.go", Proof: "TestStandaloneCompletionCandidatePublishesChangedGateRevisionParity",
 			ProofTokens: []string{"executeStandaloneCompletionCandidateWithCatalog", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/pipelinepersistence/standing_service.go", Writer: "quiesceStandingRunTx",
-			WriterTokens: []string{"s.revisionEffects", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "FamilyAgentSessions"},
+			WriterTokens: []string{"s.attempt", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "AddWholeFamily(runID, privaterunforkrevision.FamilyAgentSessions)"},
 			ProofPath:    "internal/store/internal/runtimepersistence/standing_service_store_test.go", Proof: "TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState",
 			ProofTokens: []string{"ResetStandingService", "requireCompleteRunForkRevision"},
 		},
 		{
 			Path: "internal/store/internal/backend/runforkpersistence/run_fork_source_freeze.go", Writer: "applyRunForkSourceFreeze",
-			WriterTokens: []string{"effects *runforkrevision.Effects", "ForkSourceTx"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "ForkSourceTx(ctx, attempt"},
 			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_source_freeze_test.go", Proof: "TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome",
 			ProofTokens: []string{"commitRunForkSourceFreezeForTest", "ValidateCompletePostgres"},
 		},
 		{
 			Path: "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_activation_owner.go", Writer: "postgresRunForkSelectedContractActivationPort",
-			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "applyRunForkSourceFreeze", "finalizeRunForkAuthorActivityTransaction", "RunTransactionWithOptionsOutcome"},
+			WriterTokens: []string{"mutationprotocol.RunPostgresWithOptions", "operation(txctx, tx, attempt)", "freeze:  s.applyRunForkSourceFreeze", "result.Acknowledged()"},
 			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_selected_contract_execution_mutation_test.go", Proof: "TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation",
 			ProofTokens: []string{"ActivateRunForkForSelectedContractExecution", "ValidateCompletePostgres"},
 		},
@@ -372,7 +373,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 		writerBody := productionFunctionBody(t, string(productionSource), path.Writer)
 		for _, token := range path.WriterTokens {
 			if !strings.Contains(writerBody, token) {
-				t.Fatalf("revision contribution path %s/%s cannot prove writer token %q", path.Path, path.Writer, token)
+				t.Errorf("revision contribution path %s/%s cannot prove writer token %q", path.Path, path.Writer, token)
 			}
 		}
 		proofSource, err := os.ReadFile(filepath.Join(root, path.ProofPath))
@@ -382,7 +383,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 		proofBody := productionFunctionBody(t, string(proofSource), path.Proof)
 		for _, token := range path.ProofTokens {
 			if !strings.Contains(proofBody, token) {
-				t.Fatalf("revision contribution proof %s/%s does not execute %q", path.ProofPath, path.Proof, token)
+				t.Errorf("revision contribution proof %s/%s does not execute %q", path.ProofPath, path.Proof, token)
 			}
 		}
 	}
@@ -548,11 +549,11 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 		row("internal/store/internal/backend/agentpersistence/lifecycle.go", []string{"applyPostgresLifecycleSessionMutation", "applySQLiteLifecycleSubordinate"}, []string{"agent_sessions"}, "agent_sessions", "CommitAgentLifecycleTransitionTx", "projected lifecycle transition", "transition result session run IDs", "lifecycle owner FinalizePostgres/FinalizeSQLite", "TestPostgresLifecycleSessionMutationPublishesRunForkRevision"),
 		row("internal/store/internal/backend/decisionpersistence/decision_cards.go", []string{"supersedeRunGateActivations"}, []string{"entity_state"}, "entity_metadata excluded-column no-change", "decision-card named mutation", "accumulator-only update", "validated card run ID", "outer mutation compares declared entity mutation effects; metadata projection is unchanged", matrixProof),
 
-		row("internal/store/internal/backend/delivery/adapter.go", []string{"ActivateNormalAuthority", "prepareProviderOriginRecovery", "RenewClaim"}, []string{"event_deliveries", "event_delivery_attempts"}, "event_deliveries", "delivery lifecycle/effect named mutation", "claim lifecycle", "locked delivery snapshot run ID", "outer delivery/effect owner finalizer", matrixProof),
-		row("internal/store/internal/backend/delivery/adapter.go", []string{"BindAgentSession", "closeAttemptForTerminalization", "completeAttempt", "expireAttempt", "insertAttempt", "insertTerminalizedAttempt"}, []string{"event_delivery_attempts"}, "event_deliveries", "delivery lifecycle/effect named mutation", "attempt lifecycle", "locked delivery snapshot run ID", "outer delivery/effect owner finalizer", matrixProof),
-		row("internal/store/internal/backend/delivery/adapter.go", []string{"CommitPipelineHandoff", "terminalizeDeliveries", "claimLocked", "insertExactObligation", "settle"}, []string{"event_deliveries"}, "event_deliveries", "event/pipeline/delivery/run-lifecycle named mutation", "delivery row lifecycle", "event or delivery snapshot run ID", "outer named owner finalizer", matrixProof),
+		row("internal/store/internal/backend/delivery/adapter.go", []string{"activateNormalAuthorityTx", "prepareProviderOriginRecovery", "renewClaimTx"}, []string{"event_deliveries", "event_delivery_attempts"}, "event_deliveries", "delivery lifecycle/effect named mutation", "claim lifecycle", "locked delivery snapshot run ID", "outer delivery/effect owner finalizer", matrixProof),
+		row("internal/store/internal/backend/delivery/adapter.go", []string{"bindAgentSessionTx", "closeAttemptForTerminalization", "completeAttempt", "expireAttempt", "insertAttempt", "insertTerminalizedAttempt"}, []string{"event_delivery_attempts"}, "event_deliveries", "delivery lifecycle/effect named mutation", "attempt lifecycle", "locked delivery snapshot run ID", "outer delivery/effect owner finalizer", matrixProof),
+		row("internal/store/internal/backend/delivery/adapter.go", []string{"commitPipelineHandoffTx", "terminalizeDeliveries", "claimLocked", "insertExactObligation", "settle"}, []string{"event_deliveries"}, "event_deliveries", "event/pipeline/delivery/run-lifecycle named mutation", "delivery row lifecycle", "event or delivery snapshot run ID", "outer named owner finalizer", matrixProof),
 		row("internal/store/internal/backend/delivery/adapter.go", []string{"insertOutcome"}, []string{"event_delivery_outcomes"}, "dead_letters joined outcome; delivery lifecycle composition", "delivery/effect named settlement", "outcome append plus all existing matching dead letters", "delivery ID + claim version join to actual dead_letter_id and original event owning run", "outer delivery/effect owner finalizer", matrixProof+"; TestRunForkExactFactsTransitiveBothStores"),
-		row("internal/store/internal/backend/delivery/adapter.go", []string{"persistHandlerRuleSelection"}, []string{"event_delivery_handler_rule_selections"}, "event_deliveries joined selection", "delivery settlement/terminalization", "exact immutable selection insert", "owning delivery ID and run, not selection text", "same outer delivery/effect finalizer", matrixProof+"; TestRunForkExactFactsTransitiveBothStores"),
+		row("internal/store/internal/backend/delivery/adapter.go", []string{"persistHandlerRuleSelectionSQL"}, []string{"event_delivery_handler_rule_selections"}, "event_deliveries joined selection", "delivery settlement/terminalization", "exact immutable selection insert", "owning delivery ID and run, not selection text", "same outer delivery/effect finalizer", matrixProof+"; TestRunForkExactFactsTransitiveBothStores"),
 		row("internal/store/internal/adminpersistence/destructive_reset_cleanup.go", []string{"destructiveResetCleanupStatementsForTable"}, []string{"event_delivery_handler_rule_selections"}, "event_deliveries joined selection", "ApplyDestructiveResetCleanup", "whole-parent destructive cleanup", "validated cleanup plan delivery membership", "parent deletion cascades complete revision ledger", "TestResetCleanupSourceTopologyAndReceiptAtomicityBothStores"),
 		row("internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go", []string{"deleteSelectedContractForkState"}, []string{"event_delivery_handler_rule_selections"}, "event_deliveries joined selection", "DiscardMaterializedSelectedContractExecutionFork", "retained tombstone or whole-parent deletion", "locked selected fork run and delivery membership", "retained branch finalizes; parent branch cascades", discardProof+"; "+discardParity),
 		row("internal/store/internal/backend/delivery/dead_letters.go", []string{"insertPostgresDeadLetterRecord", "insertSQLiteDeadLetterRecord"}, []string{"dead_letters"}, "dead_letters", "PersistDeadLetter", "exact insert or duplicate", "immutable original event run lookup", "dead-letter owner finalizer", matrixProof),
@@ -562,28 +563,29 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 
 		row("internal/store/internal/backend/entityruntime/persistence.go", []string{"CreateEntity"}, []string{"entity_state"}, "entity_metadata", "CreateEntity", "new entity", "validated record run ID", "entity owner finalizer", matrixProof),
 		row("internal/store/internal/backend/entityruntime/persistence.go", []string{"SaveEntityField"}, []string{"entity_state"}, "entity_metadata excluded-column no-change", "SaveEntityField", "fields-only update", "validated command run ID", "entity owner finalizer publishes entity_mutations", matrixProof),
-		row("internal/store/internal/backend/entityruntime/persistence.go", []string{"InsertSQLiteEntityStateDiff"}, []string{"entity_mutations"}, "entity_mutations", "SQLite entity mutation", "mutation append", "active-run source owner", "entity/pipeline outer finalizer", matrixProof),
-		row("internal/store/internal/backend/mutationlog/adapter.go", []string{"InsertWithStory", "InsertSQLiteWithStory"}, []string{"entity_mutations"}, "entity_mutations", "entity/decision/pipeline/fork named mutation", "mutation append", "active-run source owner", "outer named owner finalizer", matrixProof),
+		row("internal/store/internal/backend/entityruntime/persistence.go", []string{"insertPostgresEntityStateDiff", "insertSQLiteEntityStateDiff"}, []string{"entity_mutations"}, "entity_mutations", "entity mutation", "mutation append", "active-run source owner", "entity/pipeline outer finalizer", matrixProof),
+		row("internal/store/internal/backend/mutationlog/adapter.go", []string{"Insert", "insertSQLiteAt"}, []string{"entity_mutations"}, "entity_mutations", "entity/decision/pipeline/fork named mutation", "mutation append", "active-run source owner", "outer named owner finalizer", matrixProof),
 
 		row("internal/store/internal/backend/eventrecord/postgres/adapter.go", []string{"Insert"}, []string{"events"}, "events", "event/pipeline/fork named commit", "exact append", "admitted record run ID", "outer event/pipeline/fork finalizer", matrixProof),
 		row("internal/store/internal/backend/eventrecord/sqlite/adapter.go", []string{"Insert"}, []string{"events"}, "events", "event/pipeline named commit", "exact append", "admitted record run ID", "outer event/pipeline finalizer", matrixProof),
 		row("internal/store/internal/backend/eventrecord/postgres/adapter.go", []string{"DeleteSelectedForkRunEvents"}, []string{"events"}, "events", "DiscardMaterializedSelectedContractExecutionFork", "retained tombstone or whole-parent deletion", "locked selected fork run ID", "retained branch finalizes; parent branch cascades", discardProof),
 		row("internal/store/internal/backend/eventrecord/sqlite/adapter.go", []string{"DeleteSelectedForkRunEvents"}, []string{"events"}, "events", "DiscardMaterializedSelectedContractExecutionFork", "retained tombstone or whole-parent deletion", "locked selected fork run ID", "retained branch finalizes; parent branch cascades", discardParity),
 
-		row("internal/store/internal/backend/genericschedule/occurrence.go", []string{"AdvanceOccurrenceTx"}, []string{"timers"}, "timers", "CommitGenericScheduleOccurrence", "occurrence advance", "loaded activation run ID", "schedule/pipeline outer finalizer", matrixProof),
+		row("internal/store/internal/backend/genericschedule/occurrence.go", []string{"advanceOccurrenceTx"}, []string{"timers"}, "timers", "CommitGenericScheduleOccurrence", "occurrence advance", "loaded activation run ID", "schedule/pipeline outer finalizer", matrixProof),
 		row("internal/store/internal/backend/genericschedule/owner.go", []string{"cancelLoadedTx", "failLoadedTx", "failMalformedByIDTx", "insertActivationTx", "stampOccurrenceTx"}, []string{"timers"}, "timers", "generic schedule named mutation", "schedule lifecycle", "loaded/validated activation run ID", "generic schedule owner finalizer", "TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision"),
-		row("internal/store/internal/backend/workflowtimer/cancellation.go", []string{"CancelRunsTx"}, []string{"timers"}, "timers", "standing/run-lifecycle/preservation named mutation", "workflow timer cancellation", "locked timer run ID", "outer pipeline/run-lifecycle/preservation finalizer", matrixProof),
+		row("internal/store/internal/backend/workflowtimer/cancellation.go", []string{"cancelRunsSQL"}, []string{"timers"}, "timers", "standing/run-lifecycle/preservation named mutation", "workflow timer cancellation", "locked timer run ID", "outer pipeline/run-lifecycle/preservation finalizer", matrixProof),
+		row("internal/store/internal/backend/runlifecycle/active_run_quiescence.go", []string{"cancelActiveRunWorkflowTimersTx"}, []string{"timers"}, "timers", "active run quiescence", "workflow timer cancellation", "locked run IDs", "run-lifecycle owner finalizer", matrixProof),
 
 		row("internal/store/internal/backend/llmpersistence/postgres.go", []string{"ensurePostgresStatelessAuditTx"}, []string{"agent_conversation_audits"}, "agent_conversation_audits", "completion settlement", "stateless audit ensure", "validated turn run ID", "effect owner finalizer", matrixProof),
 		row("internal/store/internal/backend/llmpersistence/sqlite.go", []string{"ensureSQLiteStatelessAuditTx"}, []string{"agent_conversation_audits"}, "agent_conversation_audits", "completion settlement", "stateless audit ensure", "validated turn run ID", "effect owner finalizer", matrixProof),
 		row("internal/store/internal/backend/llmpersistence/postgres.go", []string{"EnsureCompletionTurnMemoryTx", "ProjectCompletionConversationTx", "UpdateLiveSessionWatchdog", "UpsertConversation"}, []string{"agent_sessions"}, "agent_sessions excluded-column no-change", "LLM/effect named mutation", "conversation/runtime-state churn", "validated memory identity run ID", "LLM/effect owner finalizer compares canonical projection", sessionProof),
 		row("internal/store/internal/backend/llmpersistence/sqlite.go", []string{"EnsureCompletionTurnMemoryTx", "ProjectCompletionConversationTx", "UpdateLiveSessionWatchdog", "UpsertConversation"}, []string{"agent_sessions"}, "agent_sessions excluded-column no-change", "LLM/effect named mutation", "conversation/runtime-state churn", "validated memory identity run ID", "LLM/effect owner finalizer compares canonical projection", sessionProof),
-		row("internal/store/internal/backend/llmpersistence/postgres_sessions.go", []string{"acquirePostgresLiveSession", "Release", "Rotate", "IncrementTurn", "AdoptSessionID", "ResetAll"}, []string{"agent_sessions"}, "agent_sessions", "live-session named operation", "presence/status or excluded lease/runtime churn", "validated memory identity or locked session run ID", "LLM owner finalizer", sessionProof),
-		row("internal/store/internal/backend/llmpersistence/sqlite_sessions.go", []string{"acquireSQLiteLiveSession", "Release", "Rotate", "IncrementTurn", "AdoptSessionID", "ResetAll"}, []string{"agent_sessions"}, "agent_sessions", "live-session named operation", "presence/status or excluded lease/runtime churn", "validated memory identity or locked session run ID", "LLM owner finalizer", sessionProof),
+		row("internal/store/internal/backend/llmpersistence/postgres_sessions.go", []string{"acquirePostgresLiveSession", "ReleaseOutcome", "Rotate", "IncrementTurnOutcome", "AdoptSessionID", "ResetAll"}, []string{"agent_sessions"}, "agent_sessions", "live-session named operation", "presence/status or excluded lease/runtime churn", "validated memory identity or locked session run ID", "LLM owner finalizer", sessionProof),
+		row("internal/store/internal/backend/llmpersistence/sqlite_sessions.go", []string{"acquireSQLiteLiveSession", "ReleaseOutcome", "Rotate", "IncrementTurnOutcome", "AdoptSessionID", "ResetAll"}, []string{"agent_sessions"}, "agent_sessions", "live-session named operation", "presence/status or excluded lease/runtime churn", "validated memory identity or locked session run ID", "LLM owner finalizer", sessionProof),
 
 		row("internal/store/internal/backend/pipelinepersistence/owner_operations.go", []string{"insertCommittedPipelineScopeTx"}, []string{"committed_replay_scopes"}, "committed_replay_scopes", "event/pipeline named commit", "scope insert", "admitted event run ID", "outer pipeline finalizer", matrixProof),
 		row("internal/store/internal/backend/pipelinepersistence/owner_operations.go", []string{"writeExactPlatformPipelineReceipt"}, []string{"event_receipts"}, "event_receipts", "singleton and bounded publication-group settlement through settlePipelineMemberTx; initial/parent/decision named mutations preserved", "exact per-event receipt insert", "immutable event run lookup after exact current claim admission", "one outer pipeline finalizer per physical transaction; grouped effects union before finalization", matrixProof+"; TestFanOutPublicationGroupHistoryAtomicCutsBothStores; TestFanOutPublicationGroupHistoryRollbackBothStores; TestFanOutPublicationGroupHistoryNestedCutBothStores; TestFanOutPublicationGroupHistoryIndependentWriterBothStores; TestFanOutPublicationGroupHistoryMaterializedForkBothStores"),
-		row("internal/store/internal/backend/pipelinepersistence/fan_out_obligation.go", []string{"commitFanOutIntentTx"}, []string{"fan_out_intents"}, "fan_out_obligations", "CommitWorkflowEngineMutation", "constant-size intent insert", "validated engine mutation run ID", "pipeline owner finalizer", matrixProof),
+		row("internal/store/internal/backend/pipelinepersistence/fan_out_obligation.go", []string{"insertFanOutIntentSQL"}, []string{"fan_out_intents"}, "fan_out_obligations", "CommitWorkflowEngineMutation", "constant-size intent insert", "validated engine mutation run ID", "pipeline owner finalizer", matrixProof),
 		row("internal/store/internal/backend/pipelinepersistence/fan_out_obligation.go", []string{"insertFanOutEntitySourceRevisionTx"}, []string{"entity_mutations"}, "entity_mutations", "CommitWorkflowEngineMutation", "immutable source revision append", "validated intent run and entity IDs", "pipeline owner finalizer", matrixProof),
 		row("internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go", []string{"advanceFanOutDeliveryBarriersTx", "commitFanOutBarrierCompletionTx", "commitFanOutBarrierRegistrationTx", "materializeRunForkFanOutBarrierTx", "suppressRunTerminalFanOutBarriersTx", "suppressSupersededArmedFanOutBarrierTx", "suppressSupersededPendingFanOutBarriersTx", "terminalizeDeadLetteredFanOutBarrierOutcomesTx"}, []string{"fan_out_obligation_barriers"}, "fan_out_obligations", "workflow mutation, lifecycle candidate, outcome settlement, run terminalization, or fork materialization", "exact barrier registration and typed lifecycle transition", "validated or locked exact fan-out intent run ID", "pipeline, run-lifecycle, delivery-settlement, or run-fork owner finalizer", "TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores; TestFanOutDeliveryBarrierCancellationSuppressesOutcomeOnBothStores; TestFanOutDeliveryBarrierGenerationSupersessionOnBothStores; TestFanOutDeliveryBarrierCompletionFiresIdempotentlyOnBothStores; TestFanOutDeliveryBarrierOutcomeFailureTerminalizesOnBothStores"),
 		row("internal/store/internal/backend/pipelinepersistence/fan_out_owner.go", []string{"claimFanOutIntentRow", "releaseFanOutClaim", "releaseFanOutRetryable", "blockFanOutClaim", "commitFanOutChunk", "cancelRunFanOut"}, []string{"fan_out_intents"}, "fan_out_obligations", "fan-out claim/retry/block/atomic chunk-and-release/cancel named mutations", "intent operational state, typed blocking, and semantic progress", "validated or locked intent run ID", "pipeline owner finalizer for semantic changes; operational claim and tuning changes are excluded", matrixProof),
@@ -604,7 +606,9 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 
 		row("internal/store/internal/backend/runlifecycle/active_run_quiescence.go", []string{"terminateActiveRunSessionsTx", "sqliteTerminateActiveRunSessionsTx"}, []string{"agent_sessions"}, "agent_sessions", "ApplyActiveRunQuiescence/run control", "run quiescence", "locked target run IDs", "run-lifecycle owner finalizer", matrixProof),
 		row("internal/store/storetest/event.go", []string{"insertPipelineScopeFixture"}, []string{"committed_replay_scopes"}, "test fixture only", "storetest semantic event fixture", "test-only insertion", "fixture event run ID", "fixture explicitly invokes selected-store finalizer", matrixProof),
-		row("internal/store/storetest/event.go", []string{"insertPipelineDispositionFixture"}, []string{"event_receipts"}, "test fixture only", "storetest semantic event fixture", "test-only insertion", "fixture event run ID", "fixture explicitly invokes selected-store finalizer", matrixProof),
+		row("internal/store/storetest/event.go", []string{"insertPipelineDispositionFixtureTx"}, []string{"event_receipts"}, "test fixture only", "storetest semantic event fixture", "test-only insertion", "fixture event run ID", "fixture explicitly invokes selected-store finalizer", matrixProof),
+		row("internal/store/storetest/event.go", []string{"commitUnrevisionedSemanticEventFixture", "insertUnrevisionedDeliveryFixture"}, []string{"event_deliveries"}, "test fixture only", "storetest unrevisioned event fixture", "test-only insertion", "fixture event run ID", "fixture mutation protocol", matrixProof),
+		row("internal/store/eventfixture/unrevisioned.go", []string{"InsertUnrevisioned"}, []string{"events"}, "test fixture only", "unrevisioned event fixture", "test-only insertion", "fixture event run ID", "fixture mutation protocol", matrixProof),
 		row("internal/store/internal/runtimepersistence/test_conversation_fork_source.go", []string{"SeedConversationForkSourceForTest"}, []string{"agent_sessions", "entity_state", "entity_mutations"}, "test fixture only", "selected backend RunTransaction", "served conversation history fixture", "exact admitted agent/run and source checked in transaction", "historical conversation fixture, not production run-fork revision evidence", "TestConversationForkRawSeedOverlapsRuntimeDiagnostic / TestConversationForkSourceFixtureAtomicBothStores / TestServedConversationForkFixtureUsesSelectedWriteOwner"),
 		row("internal/store/internal/runtimepersistence/test_decision_card_refusal.go", []string{"SupersedeDecisionCardAnchorForTest"}, []string{"entity_state"}, "test fixture only", "selected backend RunTransaction", "hostile pending-card/superseded-anchor cut", "exact card/source and anchor identity", "intentional corruption fixture, not production run-fork revision evidence", "TestMailboxRefusalAtPreparationAndCommitBothStores"),
 	}
