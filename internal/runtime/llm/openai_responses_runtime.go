@@ -378,7 +378,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 		return nil, errors.Join(settlementErr, err)
 	}
 	projected, err := projectCompletionContinuation(handoffCtx, dispatch, s, &resp)
-	if err != nil {
+	if err != nil && !committedCompletionCleanup(&resp, err) {
 		return nil, errors.Join(settlementErr, err)
 	}
 	if !projected {
@@ -393,7 +393,7 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 		r.persistConversation(handoffCtx, s)
 	}
 
-	return &resp, settlementErr
+	return &resp, errors.Join(settlementErr, err)
 }
 
 func (r *OpenAIResponsesRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte, managed *managedProviderCall) ([]byte, openAIResponsesResponse, *completionDispatch, error) {

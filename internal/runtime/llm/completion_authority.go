@@ -212,12 +212,16 @@ func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffec
 		return nil, true, fmt.Errorf("marshal completion continuation projection: %w", err)
 	}
 	snapshot, _ := handle.CompletionContinuation()
-	if err := handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+	projectionErr := handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
 		Payload: snapshot.Payload, SessionID: projection.SessionID, Identity: projection.Identity,
 		Memory: projection.Memory, ExpectedTurnCount: projection.ExpectedTurnCount,
 		TurnCount: projection.TurnCount, Messages: messages,
-	}); err != nil {
-		return nil, true, err
+	})
+	response := continuation.Response
+	attempt := handle.Attempt()
+	response.completionAttempt = &attempt
+	if projectionErr != nil && (!runtimeeffects.CommittedMutationPhase(projectionErr, runtimeeffects.MutationProjection, attempt) || !committedCompletionCleanup(&response, projectionErr)) {
+		return nil, true, projectionErr
 	}
 	session.Messages = append([]Message(nil), projection.Messages...)
 	session.TurnCount = projection.TurnCount
@@ -225,7 +229,6 @@ func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffec
 	if providerSessionID := strings.TrimSpace(continuation.Response.SessionID); providerSessionID != "" {
 		session.ProviderSessionID = providerSessionID
 	}
-	response := continuation.Response
 	response.CapabilitySurface = &snapshot.Surface
 	response.completionHandle = handle
 	response.completionFrameID = projection.FrameID
@@ -233,7 +236,7 @@ func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffec
 	if successor, ok := snapshot.ToolContinuation(); ok {
 		response.completionSuccessor = &successor
 	}
-	return &response, true, nil
+	return &response, true, projectionErr
 }
 
 func projectCompletionContinuation(ctx context.Context, dispatch *completionDispatch, session *Session, response *Response) (bool, error) {
@@ -256,26 +259,38 @@ func projectCompletionContinuation(ctx context.Context, dispatch *completionDisp
 	if err != nil {
 		return true, fmt.Errorf("marshal completion conversation projection: %w", err)
 	}
-	if err := dispatch.handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+	projectionErr := dispatch.handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
 		Payload: dispatch.continuation, SessionID: projection.SessionID, Identity: projection.Identity,
 		Memory: projection.Memory, ExpectedTurnCount: projection.ExpectedTurnCount,
 		TurnCount: projection.TurnCount, Messages: messages,
-	}); err != nil {
-		return true, err
+	})
+	attempt = dispatch.handle.Attempt()
+	response.completionAttempt = &attempt
+	if projectionErr != nil && (!runtimeeffects.CommittedMutationPhase(projectionErr, runtimeeffects.MutationProjection, attempt) || !committedCompletionCleanup(response, projectionErr)) {
+		return true, projectionErr
 	}
 	session.Messages = append([]Message(nil), projection.Messages...)
 	session.TurnCount = projection.TurnCount
 	session.ParseFailures = 0
 	response.completionHandle = dispatch.handle
 	response.completionFrameID = projection.FrameID
-	return true, nil
+	return true, projectionErr
 }
 
 func consumeCompletionContinuation(ctx context.Context, response *Response, successor *agentframe.ToolContinuation) error {
 	if response == nil || response.completionHandle == nil {
 		return nil
 	}
-	return response.completionHandle.ConsumeCompletionResponse(ctx, successor)
+	err := response.completionHandle.ConsumeCompletionResponse(ctx, successor)
+	if err != nil {
+		attempt := response.completionHandle.Attempt()
+		if response.completionAttempt == nil || response.completionAttempt.OperationID != attempt.OperationID || response.completionAttempt.AttemptID != attempt.AttemptID ||
+			!runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationProjection, attempt) || !committedCompletionCleanup(response, err) {
+			return err
+		}
+		recordCompletionCleanup(response, err)
+	}
+	return nil
 }
 
 const (
@@ -674,6 +689,10 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		settlement.AgentTurn = completionAgentTurn(targetID, turn)
 	}
 	result, err := dispatch.handle.SettleCompletion(ctx, settlement)
+	if response != nil && state == runtimeeffects.StateSettled && result.Committed && result.Disposition == runtimeeffects.CompletionSettlementCurrent {
+		attempt := dispatch.handle.Attempt()
+		response.completionAttempt = &attempt
+	}
 	if result.Committed && result.Disposition == runtimeeffects.CompletionSettlementCurrent && state == runtimeeffects.StateSettled && response != nil &&
 		dispatch.handle.Attempt().Authority.Kind == runtimeeffects.AuthorityNormalAgent &&
 		dispatch.handle.Attempt().Origin.Kind == runtimeeffects.CompletionOriginDelivery {

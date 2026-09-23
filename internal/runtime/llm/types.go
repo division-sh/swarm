@@ -173,6 +173,8 @@ type Response struct {
 	CapabilitySurface              *managedcapabilities.Surface `json:"capability_surface,omitempty"`
 	ToolOutputAuthority            *ToolOutputAuthority         `json:"tool_output_authority,omitempty"`
 	completionHandle               *runtimeeffects.Handle
+	completionAttempt              *runtimeeffects.Attempt
+	completionCleanupDiagnostics   error
 	completionFrameID              string
 	completionSuccessor            *agentframe.ToolContinuation
 	completionConsumed             bool
