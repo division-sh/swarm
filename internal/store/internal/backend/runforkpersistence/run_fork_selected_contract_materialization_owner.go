@@ -62,9 +62,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
+	var refusal *runfork.RunForkMaterialization
 
 	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		materialization = runfork.RunForkMaterialization{}
+		refusal = nil
 		if err := proveSelectedPreparationForMutationTx(txctx, tx, req.Preparation, !port.postgres); err != nil {
 			return err
 		}
@@ -106,10 +108,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			replayAdmission = runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
 		}
 		if blockers := runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil); len(blockers) > 0 {
-			materialization = runfork.RunForkMaterialization{
+			blocked := runfork.RunForkMaterialization{
 				SourceRunID: plan.SourceRunID, ForkPoint: plan.ForkPoint, ExecutionReady: false,
 				ReplayResumeAdmission: replayAdmission, UnsupportedBlockers: blockers, DeliveryResumeBlocked: true,
 			}
+			refusal = &blocked
 			return fmt.Errorf("selected-contract fork execution materialization blocked: %s", runForkBlockerCodes(blockers))
 		}
 		if err := ensureRunForkActivationNoForkReplayState(txctx, tx, port.deliveries, forkRunID); err != nil {
@@ -261,6 +264,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		return nil
 	})
 	if !committed {
+		if refusal != nil {
+			return *refusal, err
+		}
 		return runfork.RunForkMaterialization{}, err
 	}
 	if err != nil {
