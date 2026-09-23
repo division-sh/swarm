@@ -185,6 +185,7 @@ func (s *processIngressProofStore) CommitInboundPublication(ctx context.Context,
 		}
 	}
 	return runtimeinbound.CommitResult{
+		Acknowledged: true,
 		Record:       runtimeinbound.Record{Request: command.Request, State: "committed", OutputCount: len(children), Events: children, Created: true},
 		Publications: committed,
 	}, nil
@@ -214,10 +215,10 @@ func (s *processIngressEventStore) CommitPublication(_ context.Context, command 
 		if !reflect.DeepEqual(existing, event) {
 			return runtimebus.CommittedPublication{}, fmt.Errorf("event %s conflicts with its committed fixture", event.ID())
 		}
-		return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendExactDuplicate}, nil
+		return runtimebus.CommittedPublication{Acknowledged: true, AppendOutcome: runtimebus.EventAppendExactDuplicate}, nil
 	}
 	s.events = append(s.events, event)
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+	return runtimebus.CommittedPublication{Acknowledged: true, AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (s *processIngressEventStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
