@@ -27,38 +27,39 @@ func InsertUnrevisionedChild(
 	envelope events.EventEnvelope,
 	createdAt time.Time,
 ) (events.Event, error) {
+	var empty events.Event
 	facts, err := eventFacts(eventID, eventType, producer, payload, envelope, createdAt)
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	event, err := events.NewChildEvent(events.ChildEventInput{
 		Facts:   facts,
 		Lineage: events.EventLineage{RunID: runID, ParentEventID: parentEventID, ExecutionMode: executionmode.Live},
 	})
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	bound, err := BindPayload(event)
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	admitted, err := events.AdmitForPersistence(bound, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
-		return events.Event{}, fmt.Errorf("selected-fork replay fixture requires exact lineage persistence")
+		return empty, fmt.Errorf("selected-fork replay fixture requires exact lineage persistence")
 	}
 	settlement, err := fixtureSettlement(admitted.Event())
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	record, err := eventrecord.FromAdmitted(admitted, settlement)
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	if _, err := InsertUnrevisioned(ctx, tx, dialect, record); err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	return event, nil
 }
