@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -17,13 +16,6 @@ type WorkflowRuntime interface {
 	GuardRegistry() GuardRegistry
 }
 
-type WorkflowNodeExecutor interface {
-	ExecutableNode() identity.ExecutableNode
-	Subscriptions() []events.EventType
-	InterceptPolicy(eventType string, evt events.Event) (consume bool, handled bool)
-	Handle(ctx context.Context, evt events.Event) bool
-}
-
 type BackgroundNode interface {
 	Run(context.Context)
 }
@@ -35,10 +27,6 @@ type systemNodeRuntimeLogger interface {
 type SubscriptionReadyBackgroundNode interface {
 	BackgroundNode
 	AddSubscriptionReadyHook(func())
-}
-
-type BackgroundWorkflowExecutorProvider interface {
-	BackgroundWorkflowExecutor() WorkflowNodeExecutor
 }
 
 type GuardRegistry interface {

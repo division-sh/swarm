@@ -39,6 +39,7 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 					t.Fatalf("commit state-only companion transition: %v", err)
 				}
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 2, 1)
+				assertWorkflowEngineHistoryStep(t, backend, db, runID, entityID, "mutate")
 			})
 
 			t.Run("absent target creates exact state and companion", func(t *testing.T) {
@@ -53,6 +54,7 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 					t.Fatalf("commit absent target transition: %v", err)
 				}
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "done", 1, 1)
+				assertWorkflowEngineHistoryStep(t, backend, db, runID, entityID, "create")
 			})
 
 			t.Run("stale state rolls back companion", func(t *testing.T) {
@@ -69,6 +71,23 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 					t.Fatalf("stale state-only transition error = %v", err)
 				}
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+				assertNoWorkflowEngineHistory(t, backend, db, runID, entityID)
+			})
+
+			t.Run("invalid transition cannot mutate state or companion", func(t *testing.T) {
+				flowID := "invalid-transition-" + uuid.NewString()
+				instancePath := flowID + "/receiver"
+				entityID := uuid.NewString()
+				createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+				seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, instancePath, "active", 1, createdAt)
+				record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
+				record.Transition = runtimepipeline.WorkflowEngineStateTransition(255)
+
+				if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err == nil || !strings.Contains(err.Error(), "closed persistence transition") {
+					t.Fatalf("invalid transition error = %v", err)
+				}
+				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+				assertNoWorkflowEngineHistory(t, backend, db, runID, entityID)
 			})
 
 			t.Run("preexisting companion contradiction rolls back state", func(t *testing.T) {
@@ -84,6 +103,7 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 					t.Fatal("concurrent companion winner was accepted")
 				}
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "review", "active", 1, 1)
+				assertNoWorkflowEngineHistory(t, backend, db, runID, entityID)
 			})
 
 			t.Run("two simultaneous first mutations commit exactly one companion", func(t *testing.T) {
@@ -166,6 +186,7 @@ func TestWorkflowEngineStateOnlyCompanionTransitionAtomicOnBothStores(t *testing
 					t.Fatalf("commit mutation after complete reload: %v", err)
 				}
 				assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, flowID, "settled", 3, 1)
+				assertWorkflowEngineHistoryStep(t, backend, db, runID, entityID, "mutate")
 			})
 		})
 	}
@@ -376,5 +397,45 @@ func assertWorkflowTargetTransitionRows(t *testing.T, backend string, db *sql.DB
 	}
 	if companions != wantCompanions || workflow != wantWorkflow {
 		t.Fatalf("workflow target companion = %d/%q, want %d/%q", companions, workflow, wantCompanions, wantWorkflow)
+	}
+}
+
+func assertWorkflowEngineHistoryStep(t *testing.T, backend string, db *sql.DB, runID, entityID, step string) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND writer_id = 'workflow_engine' AND handler_step = ?`
+	if backend == "postgres" {
+		query = `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND writer_id = 'workflow_engine' AND handler_step = $3`
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, runID, entityID, step).Scan(&count); err != nil {
+		t.Fatalf("load workflow engine %s history: %v", step, err)
+	}
+	if count == 0 {
+		t.Fatalf("workflow engine %s history is missing", step)
+	}
+	other := "create"
+	if step == "create" {
+		other = "mutate"
+	}
+	if err := db.QueryRowContext(context.Background(), query, runID, entityID, other).Scan(&count); err != nil {
+		t.Fatalf("load unexpected workflow engine %s history: %v", other, err)
+	}
+	if count != 0 {
+		t.Fatalf("workflow engine wrote %d unexpected %s history rows", count, other)
+	}
+}
+
+func assertNoWorkflowEngineHistory(t *testing.T, backend string, db *sql.DB, runID, entityID string) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ? AND writer_id = 'workflow_engine'`
+	if backend == "postgres" {
+		query = `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid AND writer_id = 'workflow_engine'`
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, runID, entityID).Scan(&count); err != nil {
+		t.Fatalf("load workflow engine history: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("failed workflow engine mutation wrote %d history rows", count)
 	}
 }

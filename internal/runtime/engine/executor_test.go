@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3178,6 +3179,191 @@ type orderedLocker struct{ order *[]string }
 func (l orderedLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
 	*l.order = append(*l.order, "lock")
 	return fn(ctx)
+}
+
+type executionBoundaryLocker struct{ held bool }
+
+type lockCheckingMutationOwner struct {
+	locker   *executionBoundaryLocker
+	delegate composedMutationOwner
+	calls    int
+}
+
+func (o *lockCheckingMutationOwner) CommitEngineMutation(ctx context.Context, mutation EngineMutation) (CommittedEngineMutation, error) {
+	if !o.locker.held {
+		return CommittedEngineMutation{}, errors.New("engine commit ran outside entity lock")
+	}
+	o.calls++
+	return o.delegate.CommitEngineMutation(ctx, mutation)
+}
+
+func (l *executionBoundaryLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
+	if l.held {
+		return errors.New("recursive entity lock")
+	}
+	l.held = true
+	defer func() { l.held = false }()
+	return fn(ctx)
+}
+
+type unlockedDispatchProbe struct {
+	locker   *executionBoundaryLocker
+	executor *Executor
+	reentry  ExecutionRequest
+	calls    int
+}
+
+type entityScopedProbeLocker struct {
+	mu    sync.Mutex
+	locks map[identity.EntityID]*sync.Mutex
+}
+
+func (l *entityScopedProbeLocker) WithEntityLock(ctx context.Context, entityID identity.EntityID, fn func(context.Context) error) error {
+	l.mu.Lock()
+	lock := l.locks[entityID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		l.locks[entityID] = lock
+	}
+	l.mu.Unlock()
+	lock.Lock()
+	defer lock.Unlock()
+	return fn(ctx)
+}
+
+type blockingFirstEntityCommit struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (o *blockingFirstEntityCommit) CommitEngineMutation(_ context.Context, mutation EngineMutation) (CommittedEngineMutation, error) {
+	if mutation.Address.EntityID == "entity-1" {
+		close(o.entered)
+		<-o.release
+	}
+	return CommittedEngineMutation{Committed: true}, nil
+}
+
+func TestExecutorDoesNotSerializeIndependentEntitiesBehindCommit(t *testing.T) {
+	owner := &blockingFirstEntityCommit{entered: make(chan struct{}), release: make(chan struct{})}
+	locker := &entityScopedProbeLocker{locks: make(map[identity.EntityID]*sync.Mutex)}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:    sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending", "done"),
+		StateRepo: &orderedStateRepo{order: &[]string{}}, MutationOwner: owner, Locker: locker, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(entityID identity.EntityID, eventID string) ExecutionRequest {
+		return ExecutionRequest{
+			EntityID: entityID, Node: testFlowExecutableNode(t, "flow-1", "node-1"),
+			Route:   runtimeflowidentity.RouteForInstancePath("flow-1"),
+			Event:   eventtest.RunCreatingRootIngress(eventID, "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
+			Handler: runtimecontracts.SystemNodeEventHandler{}, State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		}
+	}
+	firstRequest := request("entity-1", "evt-1")
+	secondRequest := request("entity-2", "evt-2")
+	defer func() {
+		select {
+		case <-owner.release:
+		default:
+			close(owner.release)
+		}
+	}()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := exec.ExecuteSemanticFixture(context.Background(), firstRequest)
+		firstDone <- err
+	}()
+	select {
+	case <-owner.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first entity did not reach commit")
+	}
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := exec.ExecuteSemanticFixture(context.Background(), secondRequest)
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			t.Fatalf("independent entity execution: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("independent entity blocked behind first commit")
+	}
+	close(owner.release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first entity execution: %v", err)
+	}
+}
+
+func TestExecutorKeepsEntityLockThroughCommitButNotDispatch(t *testing.T) {
+	for _, deferred := range []bool{false, true} {
+		name := "immediate"
+		if deferred {
+			name = "deferred"
+		}
+		t.Run(name, func(t *testing.T) {
+			locker := &executionBoundaryLocker{}
+			dispatcher := &unlockedDispatchProbe{locker: locker}
+			repo := &orderedStateRepo{order: &[]string{}}
+			owner := &lockCheckingMutationOwner{locker: locker, delegate: composedMutationOwner{state: repo}}
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source:    sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending", "done"),
+				StateRepo: repo, MutationOwner: owner,
+				Locker: locker, Dispatcher: dispatcher,
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := ExecutionRequest{
+				EntityID: "entity-1", Node: testFlowExecutableNode(t, "flow-1", "node-1"),
+				Route:                  runtimeflowidentity.RouteForInstancePath("flow-1"),
+				Event:                  eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
+				Handler:                runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "task.recorded"}},
+				State:                  testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				DeferCommittedDispatch: deferred,
+			}
+			dispatcher.executor = exec
+			dispatcher.reentry = request
+			dispatcher.reentry.Handler = runtimecontracts.SystemNodeEventHandler{}
+			dispatcher.reentry.Event = eventtest.RunCreatingRootIngress("evt-2", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 1, 0, time.UTC))
+			result, err := exec.ExecuteSemanticFixture(context.Background(), request)
+			if err != nil || locker.held || len(result.EmitIntents) != 1 {
+				t.Fatalf("result=%+v error=%v lock held=%v commits=%d", result, err, locker.held, owner.calls)
+			}
+			wantDispatch := 1
+			if deferred {
+				wantDispatch = 0
+			}
+			if dispatcher.calls != wantDispatch {
+				t.Fatalf("dispatch calls = %d, want %d", dispatcher.calls, wantDispatch)
+			}
+			if wantCommits := 1 + wantDispatch; owner.calls != wantCommits {
+				t.Fatalf("handler commits = %d, want %d", owner.calls, wantCommits)
+			}
+		})
+	}
+}
+
+func (d *unlockedDispatchProbe) DispatchPostCommit(_ context.Context, intents []EmitIntent) error {
+	if d.locker.held {
+		return errors.New("recursive dispatch holds entity lock")
+	}
+	if len(intents) != 1 {
+		return fmt.Errorf("dispatch intents = %d, want one", len(intents))
+	}
+	d.calls++
+	if d.executor != nil {
+		result, err := d.executor.ExecuteSemanticFixture(context.Background(), d.reentry)
+		if err != nil || result.Status != OutcomeCompleted {
+			return fmt.Errorf("same-entity reentry after dispatch: result=%+v error=%v", result, err)
+		}
+	}
+	return nil
 }
 
 type orderedPublicationCommitter struct{ order *[]string }

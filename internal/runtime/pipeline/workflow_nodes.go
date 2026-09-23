@@ -27,8 +27,6 @@ const (
 	ConsumerTypeSystemComponent ConsumerType = "system_component"
 )
 
-type workflowNodeExecutor = WorkflowNodeExecutor
-
 type WorkflowNode struct {
 	Node             runtimeidentity.ExecutableNode
 	Subscriptions    []events.EventType
@@ -425,30 +423,6 @@ func deriveWorkflowEventPolicy(source semanticview.Source, node runtimeidentity.
 
 func (pc *PipelineCoordinator) BackgroundNodes() []BackgroundNode {
 	return nil
-}
-
-func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
-	if pc == nil {
-		return nil
-	}
-	source := pc.SemanticSource()
-	if source == nil {
-		return nil
-	}
-	nodes := pc.WorkflowNodes()
-	out := make([]workflowNodeExecutor, 0, len(nodes))
-	for _, node := range nodes {
-		record, ok := source.ExecutableNode(node.Node)
-		if !ok {
-			continue
-		}
-		executor := NewNode(node.Node, record.Entry, pc.SemanticSource(), newCoordinatorHandlerExecutionEngine(pc, node.Node))
-		if executor == nil {
-			continue
-		}
-		out = append(out, executor)
-	}
-	return out
 }
 
 func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, eventType string, evt events.Event) (bool, bool, error) {

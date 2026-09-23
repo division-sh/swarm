@@ -176,7 +176,7 @@ func (h *exactWorkflowJoinHarness) scheduleEvent(schedule runtimegenericschedule
 
 func (h *exactWorkflowJoinHarness) fire(event events.Event) (contractHandlerExecutionResult, error) {
 	h.t.Helper()
-	return h.pc.executeAuthoritativeNodeHandler(h.ctx, event, workflowTriggerContext{
+	return executeResolvedJoinForTest(h.pc, h.ctx, event, workflowTriggerContext{
 		Event: event, State: mustCurrentWorkflowState(h.t, h.pc, h.ctx, h.route, h.entityID),
 	})
 }
@@ -1190,7 +1190,7 @@ func TestConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestart(t *testin
 				}
 				fireEvent := workflowJoinScheduleEventForTest(t, uuid.NewString(), firedSchedule, runID, fireEnvelope, time.Now().UTC())
 				persistExactJoinEvent(t, store, ctx, fireEvent)
-				result, err := pc.executeAuthoritativeNodeHandler(ctx, fireEvent, workflowTriggerContext{
+				result, err := executeResolvedJoinForTest(pc, ctx, fireEvent, workflowTriggerContext{
 					Event: fireEvent, State: mustCurrentWorkflowState(t, pc, ctx, firedScope.route, firedScope.entityID),
 				})
 				if err != nil || !result.Handled {

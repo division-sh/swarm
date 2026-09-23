@@ -183,14 +183,6 @@ func TestWorkflowNodeProjectionRejectsQualifiedExactHandlerBeforeExecution(t *te
 			if resolved := workflowNodeEventHandlerResolutionForEventType(source, nodeRef, "child/task.done"); resolved.Matched {
 				t.Fatalf("invalid authored handler reached execution projection: %#v", resolved)
 			}
-			record, ok := source.ExecutableNode(nodeRef)
-			if !ok {
-				t.Fatal("listener executable node missing")
-			}
-			node := NewNode(nodeRef, record.Entry, source, nil)
-			if subscriptions := node.Subscriptions(); len(subscriptions) != 0 {
-				t.Fatalf("invalid authored subscription reached node executor: %#v", subscriptions)
-			}
 			if _, err := LoadWorkflowNodes(source); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
 				t.Fatalf("LoadWorkflowNodes error = %v, want typed exact rejection", err)
 			}

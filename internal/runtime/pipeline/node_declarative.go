@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -9,317 +8,13 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Event = events.Event
-type NodeExecutor = WorkflowNodeExecutor
-type SystemNodeContract = runtimecontracts.SystemNodeContract
 type SystemNodeEventHandler = runtimecontracts.SystemNodeEventHandler
-
-type HandlerOutcome struct {
-	Handled         bool
-	ActionsExecuted []string
-}
-
-type HandlerExecutionEngine interface {
-	ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event, handlerEventKey string) (*HandlerOutcome, error)
-}
-
-type DeclarativeNode struct {
-	node     identity.ExecutableNode
-	contract SystemNodeContract
-	source   semanticview.Source
-	policies map[string]WorkflowEventPolicy
-	engine   HandlerExecutionEngine
-}
-
-func NewNode(node identity.ExecutableNode, contract SystemNodeContract, source semanticview.Source, engine HandlerExecutionEngine) NodeExecutor {
-	if !node.Valid() {
-		return nil
-	}
-	effectiveSubscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(contract)
-	subscriptions := make([]events.EventType, 0, len(effectiveSubscriptions))
-	for _, evt := range effectiveSubscriptions {
-		evt = strings.TrimSpace(evt)
-		if evt == "" {
-			continue
-		}
-		subscriptions = append(subscriptions, events.EventType(evt))
-	}
-	return &DeclarativeNode{
-		node:     node,
-		contract: contract,
-		source:   source,
-		policies: buildWorkflowNodePolicies(source, node, subscriptions),
-		engine:   engine,
-	}
-}
-
-func (n *DeclarativeNode) ExecutableNode() identity.ExecutableNode {
-	if n == nil {
-		return identity.ExecutableNode{}
-	}
-	return n.node
-}
-
-func (n *DeclarativeNode) Subscriptions() []events.EventType {
-	if n == nil {
-		return nil
-	}
-	effectiveSubscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(n.contract)
-	out := make([]events.EventType, 0, len(effectiveSubscriptions))
-	for _, evt := range effectiveSubscriptions {
-		aliases, err := workflowNodeSubscriptionAliases(n.source, n.node, evt)
-		if err != nil {
-			continue
-		}
-		for _, alias := range aliases {
-			if alias = strings.TrimSpace(alias); alias != "" {
-				out = append(out, events.EventType(alias))
-			}
-		}
-	}
-	return out
-}
-
-func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (bool, bool) {
-	if n == nil {
-		return false, false
-	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		eventType = strings.TrimSpace(string(evt.Type()))
-	}
-	policy, ok := n.policies[eventType]
-	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.source, evt); err == nil && refOK && resolution.Ref.Node().Equal(n.node) {
-			policy, ok = n.policies[resolution.Ref.HandlerEvent()]
-		}
-	}
-	if !ok {
-		return false, false
-	}
-	return policy.Consume, true
-}
-
-func (n *DeclarativeNode) Handle(ctx context.Context, evt events.Event) bool {
-	outcome, err := n.HandleEvent(ctx, evt)
-	return err == nil && outcome != nil && outcome.Handled
-}
-
-func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerOutcome, error) {
-	if n == nil {
-		return nil, nil
-	}
-	eventType := strings.TrimSpace(string(evt.Type()))
-	handlerEventKey := eventType
-	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, n.source, n.node, evt)
-	if resolved.Failure != "" {
-		return nil, fmt.Errorf("resolve workflow handler for node %s: %s", n.node.Key(), resolved.Failure)
-	}
-	handler, ok := resolved.Handler, resolved.Matched
-	if ok {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, n.source, n.node, evt)
-	}
-	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		resolution, refOK, err := resolveWorkflowJoinOccurrence(n.source, evt)
-		if err != nil {
-			return nil, err
-		}
-		if refOK && resolution.Ref.Node().Equal(n.node) {
-			handler = resolution.Handler
-			handlerEventKey = resolution.Ref.HandlerEvent()
-			ok = true
-		}
-	}
-	if !ok {
-		return nil, nil
-	}
-	if n.engine == nil {
-		return nil, fmt.Errorf("declarative node %s has no handler execution engine", n.node.Key())
-	}
-	outcome, err := n.engine.ExecuteHandlerSteps(ctx, handler, evt, handlerEventKey)
-	if err != nil {
-		return nil, err
-	}
-	return outcome, nil
-}
-
-type coordinatorHandlerExecutionEngine struct {
-	nodeRef     identity.ExecutableNode
-	coordinator *PipelineCoordinator
-	executor    *runtimeengine.Executor
-	node        *runtimeengine.DeclarativeNode
-	err         error
-}
-
-func newCoordinatorHandlerExecutionEngine(pc *PipelineCoordinator, node identity.ExecutableNode) HandlerExecutionEngine {
-	if pc == nil || !node.Valid() {
-		return nil
-	}
-	engine := &coordinatorHandlerExecutionEngine{
-		nodeRef:     node,
-		coordinator: pc,
-	}
-	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
-	if err != nil {
-		engine.err = err
-		return engine
-	}
-	engine.executor = exec
-	engine.node = runtimeengine.NewDeclarativeNode(node, exec)
-	return engine
-}
-
-func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event, handlerEventKey string) (*HandlerOutcome, error) {
-	if e == nil || e.coordinator == nil {
-		return nil, fmt.Errorf("handler execution engine is not configured")
-	}
-	if e.err != nil {
-		return nil, e.err
-	}
-	if e.executor == nil || e.node == nil {
-		return nil, fmt.Errorf("handler execution engine is not configured")
-	}
-	if !e.nodeRef.Valid() || strings.TrimSpace(string(evt.Type())) == "" {
-		return &HandlerOutcome{Handled: false}, nil
-	}
-	source := e.coordinator.SemanticSource()
-	handlerEventKey = strings.TrimSpace(handlerEventKey)
-	if handlerEventKey == "" {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, e.nodeRef, evt)
-	}
-	entityID := workflowEventEntityID(evt)
-	handlerFact := MustDeliveryTargetHandler(e.nodeRef)
-	flowID := handlerFact.ExecutionFlowID(source)
-	if handler.Join != nil {
-		if executionFlowID := strings.TrimSpace(pipelineFlowScope(ctx)); executionFlowID != "" {
-			flowID = executionFlowID
-		}
-	}
-	selectedState := WorkflowState{}
-	hasSelectedState := false
-	stampedOwner, exactDelivery := stampedDeliveryTargetOwnership(ctx)
-	application := DeliveryTargetApplication{}
-	if exactDelivery {
-		admittedApplication, ok := deliveryTargetApplicationFromContext(ctx)
-		if !ok {
-			exactHandler := handlerFact.ForEvent(events.EventType(firstNonEmptyString(handlerEventKey, string(evt.Type()))))
-			var err error
-			admittedApplication, err = e.coordinator.prepareDeliveryTargetApplication(ctx, e.nodeRef.Key(), exactHandler, handler, evt, stampedOwner)
-			if err != nil {
-				return nil, err
-			}
-			ctx = withDeliveryTargetApplication(ctx, admittedApplication)
-		}
-		if admittedApplication.Owner() != stampedOwner {
-			return nil, fmt.Errorf("durable handler execution requires its exact delivery target application")
-		}
-		application = admittedApplication
-		if err := application.Validate(); err != nil {
-			return nil, err
-		}
-		flowID = application.FlowID()
-		entityID = application.EntityID()
-		evt = application.Event()
-		selectedState = application.State()
-		hasSelectedState = strings.TrimSpace(selectedState.EntityID) != ""
-	}
-	if !exactDelivery {
-		resolvedEntityID, resolvedEvent, err := ensureHandlerEntityIDAtNode(source, e.nodeRef, events.EventType(handlerEventKey), flowID, handler, entityID, evt)
-		if err != nil {
-			return nil, err
-		}
-		entityID, evt = resolvedEntityID, resolvedEvent
-	}
-	ctx = withPipelineFlowScope(ctx, flowID)
-	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	statePath := firstNonEmptyString(selectedState.Control.FlowPath, evt.FlowInstance())
-	if exactDelivery {
-		statePath = application.Route().InstancePath
-	}
-	var stateRoute runtimeflowidentity.Route
-	var err error
-	if exactDelivery {
-		stateRoute, err = workflowInstanceRouteForExecution(source, flowID, statePath)
-	} else {
-		stateRoute, err = canonicalHandlerRoute(
-			source,
-			flowID,
-			statePath,
-			evt,
-		)
-	}
-	if err != nil {
-		return nil, err
-	}
-	currentState := WorkflowState{Metadata: map[string]any{}}
-	if exactDelivery {
-		currentState = application.State()
-	} else {
-		flowOwner, ownerErr := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), stateRoute)
-		if ownerErr != nil {
-			return nil, ownerErr
-		}
-		currentState, err = e.coordinator.currentWorkflowState(ctx, flowOwner, identity.NormalizeEntityID(entityID))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
-		currentState = selectedState
-	}
-	if !exactDelivery {
-		if err := prepareHandlerMaterializationStateAtNode(source, e.nodeRef, events.EventType(handlerEventKey), flowID, handler, stateRoute, entityID, &currentState); err != nil {
-			return nil, err
-		}
-	}
-	node := e.node
-	workflowVersion := ""
-	if source != nil {
-		workflowVersion = source.WorkflowVersion()
-	}
-	stateSnapshot, err := handlerExecutionStateSnapshot(handler, entityID, currentState, flowID, workflowVersion)
-	if err != nil {
-		return nil, err
-	}
-	producerSource, err := workflowNodeProducerSource(ctx, source, e.nodeRef, flowID, entityID, evt.RoutingSource())
-	if err != nil {
-		return nil, fmt.Errorf("admit workflow node producer source: %w", err)
-	}
-	joinDeclaration, err := workflowJoinDeclarationForExecution(source, evt, e.nodeRef, handlerEventKey, handler)
-	if err != nil {
-		return nil, err
-	}
-	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
-		EntityID:        identity.NormalizeEntityID(entityID),
-		Node:            e.nodeRef,
-		ExecutionFlowID: identity.NormalizeFlowID(flowID),
-		Route:           stateRoute,
-		Event:           evt,
-		ProducerSource:  producerSource,
-		HandlerEventKey: handlerEventKey,
-		JoinDeclaration: joinDeclaration,
-		ChainDepth:      evt.ChainDepth(),
-		Handler:         handler,
-		State:           stateSnapshot,
-	})
-	logComputeModuleReplayEvidence(ctx, e.coordinator.bus, e.nodeRef.Key(), evt, result.ComputeModuleTraces)
-	if err != nil {
-		return nil, err
-	}
-	e.coordinator.recordInterceptedEmitDeadLetters(ctx, evt, e.nodeRef.Key(), &handlerExecutionOutcome{
-		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
-	}, nil)
-	return &HandlerOutcome{
-		Handled:         runtimeengine.IsHandledOutcome(result.Status),
-		ActionsExecuted: append([]string{}, result.ActionsExecuted...),
-	}, nil
-}
 
 func canonicalHandlerMaterializationTarget(source semanticview.Source, flowID string, handler SystemNodeEventHandler, evt Event, blueprint events.RouteIdentity) (events.RouteIdentity, error) {
 	blueprint = blueprint.Normalized()
@@ -333,10 +28,6 @@ func canonicalHandlerMaterializationTarget(source semanticview.Source, flowID st
 		return events.RouteIdentity{}, fmt.Errorf("materializing target entity %q disagrees with canonical future entity %q", blueprint.EntityID, want.EntityID)
 	}
 	return want.Normalized(), nil
-}
-
-func ensureHandlerEntityID(source semanticview.Source, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event, error) {
-	return ensureHandlerEntityIDAtNode(source, identity.ExecutableNode{}, evt.Type(), flowID, handler, entityID, evt)
 }
 
 func ensureHandlerEntityIDAtNode(source semanticview.Source, node identity.ExecutableNode, handlerEvent events.EventType, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event, error) {
@@ -392,10 +83,6 @@ func canonicalHandlerRoute(source semanticview.Source, flowID, statePath string,
 		return workflowInstanceRouteForPath(runID)
 	}
 	return runtimeflowidentity.Route{}, fmt.Errorf("materializing handler requires an exact workflow instance route")
-}
-
-func prepareHandlerMaterializationState(source semanticview.Source, flowID string, handler SystemNodeEventHandler, route runtimeflowidentity.Route, entityID string, state *WorkflowState) error {
-	return prepareHandlerMaterializationStateAtNode(source, identity.ExecutableNode{}, "", flowID, handler, route, entityID, state)
 }
 
 func prepareHandlerMaterializationStateAtNode(source semanticview.Source, node identity.ExecutableNode, handlerEvent events.EventType, flowID string, handler SystemNodeEventHandler, route runtimeflowidentity.Route, entityID string, state *WorkflowState) error {

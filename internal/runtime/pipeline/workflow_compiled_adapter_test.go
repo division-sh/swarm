@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -494,6 +495,159 @@ func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStores(t *testing.T) {
+	bundle := compiledAdapterSource(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newCompiledAdapterFixture(t, backend, bundle, ".", "Ready", true)
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"direct"}, Policies: map[string]WorkflowEventPolicy{"direct": {Consume: true}}}}
+			evt := f.event("direct")
+			route := events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(f.node),
+				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
+			}
+			owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
+			if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, _ := f.load()
+			attempt := withWorkflowNodeDeliveryRoute(f.ctx, route)
+			handled, err := f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
+			if err == nil || !handled {
+				t.Fatalf("terminal receiver must fail admission: handled=%v err=%v", handled, err)
+			}
+			after, _ := f.load()
+			if !reflect.DeepEqual(before, after) || len(after.TransitionHistory) != 0 || f.bus.publishedCount() != 0 {
+				t.Fatalf("terminal reject changed business state or emitted work: before=%#v after=%#v", before, after)
+			}
+			snapshot, err := owner.Snapshot(f.ctx, id)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+				t.Fatalf("terminal receiver failure did not settle exact delivery: snapshot=%#v err=%v", snapshot, err)
+			}
+			outcomes, err := owner.Outcomes(f.ctx, id)
+			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != string(runtimedelivery.StatusDeadLetter) {
+				t.Fatalf("terminal receiver failure outcomes=%#v err=%v", outcomes, err)
+			}
+			handled, err = f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
+			if err != nil || !handled {
+				t.Fatalf("terminal receiver duplicate: handled=%v err=%v", handled, err)
+			}
+			outcomes, err = owner.Outcomes(f.ctx, id)
+			if err != nil || len(outcomes) != 1 {
+				t.Fatalf("duplicate terminal receiver failure added outcome: outcomes=%#v err=%v", outcomes, err)
+			}
+		})
+	}
+}
+
+func TestNoMatchClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
+	bundle := compiledAdapterSource(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"unmatched"}, Policies: map[string]WorkflowEventPolicy{"unmatched": {Consume: true}}}}
+			evt := f.event("unmatched")
+			route := events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(f.node),
+				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
+			}
+			owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
+			if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, _ := f.load()
+			attempt := withWorkflowNodeDeliveryRoute(f.ctx, route)
+			handled, err := f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
+			if err != nil || !handled {
+				t.Fatalf("no-match delivery: handled=%v err=%v", handled, err)
+			}
+			after, _ := f.load()
+			if before.CurrentState != after.CurrentState || !reflect.DeepEqual(before.Fields, after.Fields) || len(after.TransitionHistory) != 0 || f.bus.publishedCount() != 0 {
+				t.Fatalf("no-match changed business stage/fields or emitted work: before=%#v after=%#v", before, after)
+			}
+			snapshot, err := owner.Snapshot(f.ctx, id)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("no-match did not settle exact delivery: snapshot=%#v err=%v", snapshot, err)
+			}
+			selection, err := snapshot.FinalSelection.Fact()
+			if err != nil || selection.Disposition() != handlerselection.DispositionNoMatch {
+				t.Fatalf("no-match selection=%#v err=%v", selection, err)
+			}
+			outcomes, err := owner.Outcomes(f.ctx, id)
+			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != string(runtimedelivery.StatusDelivered) {
+				t.Fatalf("no-match outcomes=%#v err=%v", outcomes, err)
+			}
+			handled, err = f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
+			if err != nil || !handled {
+				t.Fatalf("no-match duplicate: handled=%v err=%v", handled, err)
+			}
+			outcomes, err = owner.Outcomes(f.ctx, id)
+			if err != nil || len(outcomes) != 1 {
+				t.Fatalf("duplicate no-match added outcome: outcomes=%#v err=%v", outcomes, err)
+			}
+		})
+	}
+}
+
+func TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
+	bundle := compiledAdapterSource(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, event := range []string{"reject", "discard"} {
+			t.Run(backend+"/"+event, func(t *testing.T) {
+				f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
+				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{events.EventType(event)}, Policies: map[string]WorkflowEventPolicy{event: {Consume: true}}}}
+				evt := f.event(event)
+				route := events.DeliveryRoute{
+					Recipient: events.MustNodeDeliveryRecipient(f.node),
+					Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
+				}
+				owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
+				if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+					t.Fatal(err)
+				}
+				id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				before, _ := f.load()
+				attempt := withWorkflowNodeDeliveryRoute(f.ctx, route)
+				handled, err := f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
+				if err != nil || handled {
+					t.Fatalf("guard refusal must not claim handler admission: handled=%v err=%v", handled, err)
+				}
+				after, _ := f.load()
+				if before.CurrentState != after.CurrentState || !reflect.DeepEqual(before.Fields, after.Fields) || len(after.TransitionHistory) != 0 || f.bus.publishedCount() != 0 {
+					t.Fatalf("guard refusal changed business stage/fields or emitted work: before=%#v after=%#v", before, after)
+				}
+				snapshot, err := owner.Snapshot(f.ctx, id)
+				if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+					t.Fatalf("guard refusal did not settle exact delivery: snapshot=%#v err=%v", snapshot, err)
+				}
+				outcomes, err := owner.Outcomes(f.ctx, id)
+				if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != string(runtimedelivery.StatusDelivered) {
+					t.Fatalf("guard refusal outcomes=%#v err=%v", outcomes, err)
+				}
+				handled, err = f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
+				if err != nil || !handled {
+					t.Fatalf("guard refusal duplicate: handled=%v err=%v", handled, err)
+				}
+				outcomes, err = owner.Outcomes(f.ctx, id)
+				if err != nil || len(outcomes) != 1 {
+					t.Fatalf("duplicate guard refusal added outcome: outcomes=%#v err=%v", outcomes, err)
+				}
+			})
+		}
 	}
 }
 

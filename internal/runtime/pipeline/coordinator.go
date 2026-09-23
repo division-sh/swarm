@@ -747,11 +747,8 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				State:           application.State(),
 			}, false, emissions != nil && !emissions.dispatchInline)
 		}()
-		if emissions != nil {
-			emissions.committed = result.Committed
-		}
-		if result.SettledDeliveryClaim != nil && !result.SettledDeliveryClaim.Same(claim) {
-			return false, fmt.Errorf("workflow node engine settled a different delivery claim")
+		if evidenceErr := consumeHandlerSettlementEvidence(result, claim, emissions); evidenceErr != nil {
+			return false, errors.Join(err, evidenceErr)
 		}
 		if err == nil || result.Committed || result.SettledDeliveryClaim != nil {
 			postCommitErr := err
@@ -866,6 +863,23 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	}
 }
 
+func consumeHandlerSettlementEvidence(result contractHandlerExecutionResult, claim runtimedelivery.Claim, emissions *pipelineEmissionPlan) error {
+	// A malformed post-commit result is still committed; never reclassify it as a retryable write.
+	if emissions != nil {
+		emissions.committed = result.Committed
+	}
+	if result.SettledDeliveryClaim != nil && !result.SettledDeliveryClaim.Same(claim) {
+		return fmt.Errorf("workflow node engine settled a different delivery claim")
+	}
+	if result.SettledDeliveryClaim != nil && !result.Committed {
+		return fmt.Errorf("workflow node engine reported settlement without an acknowledged commit")
+	}
+	if result.Committed && result.SettledDeliveryClaim == nil {
+		return fmt.Errorf("workflow node engine committed without exact delivery settlement evidence")
+	}
+	return nil
+}
+
 type workflowNodeDeliveryAuthority interface {
 	DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
 	AcquireDeliveryContinuation(string) (worklifetime.DeliveryAcquisition, error)
@@ -934,10 +948,10 @@ func admitWorkflowNodeDelivery(
 		}
 		return workflowNodeDeliveryAdmission{handled: true, postCommitErr: postCommitErr}, nil
 	case runtimedelivery.ClaimTerminal:
-		if err := authorityProvider.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID); err != nil {
-			return workflowNodeDeliveryAdmission{}, returnCarrier(errors.Join(postCommitErr, err))
-		}
 		if err := returnCarrier(nil); err != nil {
+			return workflowNodeDeliveryAdmission{}, errors.Join(postCommitErr, err)
+		}
+		if err := authorityProvider.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID); err != nil {
 			return workflowNodeDeliveryAdmission{}, errors.Join(postCommitErr, err)
 		}
 		return workflowNodeDeliveryAdmission{handled: true, postCommitErr: postCommitErr}, nil

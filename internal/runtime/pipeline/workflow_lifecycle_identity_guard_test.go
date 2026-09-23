@@ -68,7 +68,6 @@ func TestWorkflowLifecycleIdentityConsumersDoNotReintroduceFallbacks(t *testing.
 		{file: filepath.Join(pipelineDir, "workflow_join_resolution.go"), function: "workflowJoinDeclarationRef", forbidden: []string{"WorkflowName", "NodeContractSource", "candidates"}, required: []string{"WorkflowJoinPlanForExecutionHandler", "WorkflowJoinPlanForRef"}},
 		{file: filepath.Join(pipelineDir, "workflow_join_resolution.go"), function: "workflowJoinDeclarationForExecution", forbidden: []string{"WorkflowName", "WorkflowJoinPlanForHandler"}, required: []string{"resolveWorkflowJoinOccurrence", "workflowJoinDeclarationRef"}},
 		{file: filepath.Join(pipelineDir, "engine_bridge.go"), function: "executeNodeContractHandler", forbidden: []string{"WorkflowJoinPlanForHandler", "ParseJoinHandle"}, required: []string{"workflowJoinDeclarationForExecution", "JoinDeclaration:"}},
-		{file: filepath.Join(pipelineDir, "node_declarative.go"), function: "ExecuteHandlerSteps", forbidden: []string{"WorkflowJoinPlanForHandler", "ParseJoinHandle"}, required: []string{"workflowJoinDeclarationForExecution", "JoinDeclaration:"}},
 		{file: filepath.Join(pipelineDir, "..", "engine", "executor.go"), function: "joinPlan", forbidden: []string{"WorkflowName", "WorkflowJoinPlanForHandler", "NewJoinRef"}, required: []string{"WorkflowJoinPlanForRef", "JoinDeclaration.Valid"}},
 	}
 	for _, check := range checks {

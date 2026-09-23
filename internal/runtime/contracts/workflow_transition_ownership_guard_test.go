@@ -320,8 +320,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                        1,
 		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                  1,
 		// T19: accepted execution binding and the existing exact delivery owners.
-		"internal/runtime/pipeline.DeclarativeNode.HandleEvent::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                                      1,
-		"internal/runtime/pipeline.PipelineCoordinator.executeAuthoritativeNodeHandler::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":              1,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/correlation.WithInboundEvent":                                                    1,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                                        1,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                     1,
@@ -337,11 +335,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeConnectedInputFailureApplies::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                1,
 		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeDeliveryRouteMatches::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                        1,
 		"internal/runtime/pipeline.PipelineCoordinator.workflowNodeInterceptPolicy::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                             1,
-		"internal/runtime/pipeline.coordinatorHandlerExecutionEngine.ExecuteHandlerSteps::call internal/runtime/correlation.WithInboundEvent":                                             1,
-		"internal/runtime/pipeline.coordinatorHandlerExecutionEngine.ExecuteHandlerSteps::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                                 1,
-		"internal/runtime/pipeline.coordinatorHandlerExecutionEngine.ExecuteHandlerSteps::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                              1,
-		"internal/runtime/pipeline.coordinatorHandlerExecutionEngine.ExecuteHandlerSteps::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                            1,
-		"internal/runtime/pipeline.coordinatorHandlerExecutionEngine.ExecuteHandlerSteps::call internal/runtime/pipeline.withDeliveryTargetApplication":                                   1,
 		"internal/runtime/pipeline.pipelineEngineMutationOwner.CommitEngineMutation::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                   1,
 		"internal/runtime/pipeline.pipelineEngineMutationOwner.CommitEngineMutation::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                                 1,
 		"internal/runtime/pipeline.pipelineEngineStateRepo.LoadState::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                                  1,
@@ -384,8 +377,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.pipelineEngineStateRepo.validateMutationTransition::accepted trigger TriggeredAt":      1,
 		// T20/#2424: exact observation transport, including explicit NotReached at
 		// preparation exits; none of these sites reconstructs a final fact.
-		"internal/runtime/pipeline.PipelineCoordinator.executeAuthoritativeNodeHandler::construct internal/runtime/pipeline.contractHandlerExecutionResult":              7,
-		"internal/runtime/pipeline.PipelineCoordinator.executeAuthoritativeNodeHandler::execution projection RuleSelection":                                              7,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::construct internal/runtime/pipeline.contractHandlerExecutionResult":                   17,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection RuleSelection":                                                   17,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection Transition":                                                      3,

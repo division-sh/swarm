@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
@@ -34,21 +35,25 @@ func TestWorkflowRuntime_NodesOwnRegisteredPolicies(t *testing.T) {
 	if len(nodes) == 0 {
 		t.Fatal("expected workflow nodes")
 	}
-	executors := pc.workflowNodeExecutors()
-	executorByID := make(map[string]WorkflowNodeExecutor, len(executors))
-	for _, executor := range executors {
-		executorByID[executor.ExecutableNode().Key()] = executor
-	}
+	source := pc.SemanticSource()
 	for _, node := range nodes {
-		executor, ok := executorByID[node.Node.Key()]
+		record, ok := source.ExecutableNode(node.Node)
 		if !ok {
 			if node.Node.NodeID() == "build-orchestrator" {
 				continue
 			}
-			t.Fatalf("missing executor for node %s", node.Node.Key())
+			t.Fatalf("missing compiled executable node %s", node.Node.Key())
 		}
-		if len(executor.Subscriptions()) == 0 {
-			t.Fatalf("executor %s missing subscriptions", node.Node.Key())
+		admittedSubscriptions := 0
+		for _, eventType := range runtimecontracts.EffectiveSystemNodeSubscriptions(record.Entry) {
+			aliases, err := workflowNodeSubscriptionAliases(source, node.Node, eventType)
+			if err != nil {
+				t.Fatalf("node %s subscription %s: %v", node.Node.Key(), eventType, err)
+			}
+			admittedSubscriptions += len(aliases)
+		}
+		if admittedSubscriptions == 0 {
+			t.Fatalf("compiled node %s missing subscriptions", node.Node.Key())
 		}
 		subscriptions := make(map[string]struct{}, len(node.Subscriptions))
 		for _, sub := range node.Subscriptions {

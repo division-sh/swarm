@@ -134,6 +134,7 @@ type recordingPipelineBus struct {
 	directContexts        []events.DeliveryContext
 	directInMutation      []bool
 	outboxErr             error
+	finalizeErr           error
 	runtimeLogErr         error
 	deliveryOwner         *pipelineTestDeliveryOwner
 	deliveryContinuations *pipelineTestContinuationOwner

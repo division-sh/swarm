@@ -61,7 +61,7 @@ func testWholeJobEvidence(t *testing.T, event string) {
 	if err := WriteBudgetMarkdown(&report, result); err != nil || !strings.Contains(report.String(), "60s | 5s | 50s") {
 		t.Fatalf("whole-job markdown=%s err=%v", report.String(), err)
 	}
-	for _, kind := range []string{"missing", "duplicate", "wrong_head", "wrong_attempt", "wrong_run", "unfinished", "missing_upload", "invalid_time", "unknown_unit", "missing_workflow_head", "wrong_workflow_head", "wrong_command_head"} {
+	for _, kind := range []string{"missing", "duplicate", "wrong_head", "wrong_attempt", "wrong_run", "unfinished", "failed", "cancelled", "missing_upload", "invalid_time", "unknown_unit", "missing_workflow_head", "wrong_workflow_head", "wrong_command_head"} {
 		t.Run(kind, func(t *testing.T) {
 			values := append([]ActionJob(nil), decoded...)
 			expectedHead := workflowHeadSHA
@@ -82,6 +82,10 @@ func testWholeJobEvidence(t *testing.T, event string) {
 				values[0].RunID++
 			case "unfinished":
 				values[0].Status = "in_progress"
+			case "failed":
+				values[0].Conclusion = "failure"
+			case "cancelled":
+				values[0].Conclusion = "cancelled"
 			case "missing_upload":
 				values[0].Steps = values[0].Steps[:1]
 			case "invalid_time":

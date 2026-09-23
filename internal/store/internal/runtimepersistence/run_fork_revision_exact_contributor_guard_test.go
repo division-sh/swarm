@@ -259,12 +259,10 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 			"attempt.AddFact(next.Command.RunID, privaterunforkrevision.FamilyTimers, next.ID)",
 		}},
 		{"pipelinepersistence/workflow_engine_mutation_commit.go", "commitWorkflowEngineState", []string{
-			"commitPostgresWorkflowEngineState(ctx, tx, attempt, record)", "commitSQLiteWorkflowEngineState(ctx, tx, record)",
-			"attempt.AddFact(record.Identity.RunID, privaterunforkrevision.FamilyEntityMetadata, record.EntityID)",
-		}},
-		{"pipelinepersistence/workflow_engine_mutation_commit.go", "commitPostgresWorkflowEngineState", []string{
-			"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)",
-			"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)",
+			"decideWorkflowEngineState(record.Transition)",
+			"commitPostgresWorkflowEngineState(ctx, tx, record, decision)",
+			"commitSQLiteWorkflowEngineState(ctx, tx, record, decision)",
+			"attempt.AddFact(written.runID, privaterunforkrevision.FamilyEntityMetadata, written.entityID)",
 		}},
 		{"eventrecord/postgres/adapter.go", "Insert", []string{"attempt.AddFact(storedRunID, runforkrevision.FamilyEvents, storedEventID)"}},
 		{"eventrecord/sqlite/adapter.go", "Insert", []string{"attempt.AddFact(record.RunID, runforkrevision.FamilyEvents, record.EventID)"}},
