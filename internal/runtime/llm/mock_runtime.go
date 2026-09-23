@@ -238,7 +238,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		return nil, errors.Join(settlementErr, err)
 	}
 	projected, err := projectCompletionContinuation(handoffCtx, dispatch, session, response)
-	if err != nil {
+	if err != nil && !committedCompletionCleanup(response, err) {
 		return nil, errors.Join(settlementErr, err)
 	}
 	if !projected {
@@ -252,7 +252,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		session.ParseFailures = 0
 		r.persistConversation(handoffCtx, session)
 	}
-	return response, settlementErr
+	return response, errors.Join(settlementErr, err)
 }
 
 func (r *MockRuntime) persistConversation(ctx context.Context, session *Session) {

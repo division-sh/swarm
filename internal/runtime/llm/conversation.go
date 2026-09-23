@@ -200,7 +200,11 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 	}
 	resp, found, err := c.recoverManagedCompletionContinuation(ctx)
 	if err != nil {
-		return nil, err
+		if !found || !committedCompletionCleanup(resp, err) {
+			return nil, err
+		}
+		recordCompletionCleanup(resp, err)
+		err = nil
 	}
 	if found {
 		c.adoptRecoveredCompletion(resp)
@@ -208,7 +212,11 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 			if c.causalEvent == nil {
 				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "resume_tool_continuation", nil)
 			}
+			prior := resp.completionCleanupDiagnostics
 			resp, err = c.continueManagedOnce(ctx, resp.completionSuccessor.Draft(*c.causalEvent))
+			if resp != nil {
+				resp.completionCleanupDiagnostics = errors.Join(prior, resp.completionCleanupDiagnostics)
+			}
 		} else if resp.completionConsumed {
 			terminal := *resp
 			terminal.ToolCalls = nil
@@ -344,8 +352,11 @@ func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe
 	}
 	resp, err := runtime.ContinueManagedSession(turnCtx, c.Session, call)
 	if err != nil {
-		// Retain settled evidence without consuming tools or admitting another turn.
-		return resp, err
+		if !committedCompletionCleanup(resp, err) {
+			// Retain settled evidence without consuming tools or admitting another turn.
+			return resp, err
+		}
+		recordCompletionCleanup(resp, err)
 	}
 	if resp == nil {
 		return nil, nil
@@ -402,6 +413,7 @@ func (c *Conversation) continueForkChatOnce(ctx context.Context, msg Message) (*
 func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) (result *Response, retErr error) {
 	resp := initial
 	var cleanupErr error
+	var committedDiagnostics error
 	defer func() { retErr = errors.Join(cleanupErr, retErr) }()
 	rounds := c.maxToolRounds
 	if rounds <= 0 {
@@ -409,7 +421,14 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 	}
 	for round := 0; round < rounds; round++ {
 		if len(resp.ToolCalls) == 0 {
+			if err := consumeCompletionContinuation(ctx, resp, nil); err != nil {
+				return nil, err
+			}
+			resp.completionCleanupDiagnostics = errors.Join(committedDiagnostics, resp.completionCleanupDiagnostics)
 			return resp, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		if surface, ok := capabilitySurfaceForResponse(resp); ok {
 			ctx = managedcapabilities.WithContext(ctx, surface)
@@ -460,9 +479,11 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		if err := consumeCompletionContinuation(ctx, resp, successor); err != nil {
 			return nil, err
 		}
+		committedDiagnostics = errors.Join(committedDiagnostics, resp.completionCleanupDiagnostics)
 		if terminal {
 			terminal := *resp
 			terminal.ToolCalls = nil
+			terminal.completionCleanupDiagnostics = committedDiagnostics
 			return &terminal, nil
 		}
 		toolMsg := Message{Role: "tool", Content: toolPayload}

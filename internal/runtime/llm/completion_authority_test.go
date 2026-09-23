@@ -42,6 +42,17 @@ type committedCleanupCompletionProbe struct {
 	cancel     context.CancelFunc
 }
 
+type freshProjectionCleanupProbe struct {
+	*committedCleanupCompletionProbe
+	fault       error
+	projections int
+}
+
+func (p *freshProjectionCleanupProbe) ProjectCompletionConversation(_ context.Context, attempt runtimeeffects.Attempt, _ runtimeeffects.CompletionConversationProjection) error {
+	p.projections++
+	return runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationProjection, attempt, p.fault)
+}
+
 func (p *committedCleanupCompletionProbe) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	result, err := p.Harness.SettleCompletion(ctx, attempt, settlement)
 	if result.Committed {
@@ -57,6 +68,8 @@ func TestCommittedCompletionProjectsContinuationDespiteCleanupError(t *testing.T
 	harness := effecttest.New()
 	cleanup := errors.New("completion cleanup failed after commit")
 	probe := &committedCleanupCompletionProbe{Harness: harness, cleanupErr: cleanup}
+	projectionCleanup := errors.New("conversation projection cleanup failed after commit")
+	projectionProbe := &freshProjectionCleanupProbe{committedCleanupCompletionProbe: probe, fault: projectionCleanup}
 	ctx := managedEffectHarnessContext(t, harness, t.Name())
 	authority, ok := runtimeeffects.CompletionAuthorityFromContext(ctx)
 	if !ok {
@@ -67,7 +80,7 @@ func TestCommittedCompletionProjectsContinuationDespiteCleanupError(t *testing.T
 	ctx = llmTestWorkContext(t, runtimeeffects.WithUsageTarget(ctx, ownedTarget))
 	ctx, cancel := context.WithCancel(ctx)
 	probe.cancel = cancel
-	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(harness, probe, harness, harness))
+	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(harness, projectionProbe, harness, harness))
 	handle, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("exact-request"))
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +135,8 @@ func TestCommittedCompletionProjectsContinuationDespiteCleanupError(t *testing.T
 		t.Fatal("acknowledged completion lost its continuation")
 	}
 	projected, err := projectCompletionContinuation(context.WithoutCancel(ctx), dispatch, session, response)
-	if err != nil || !projected || session.TurnCount != 1 || len(session.Messages) != 2 {
+	if !errors.Is(err, projectionCleanup) || !projected || session.TurnCount != 1 || len(session.Messages) != 2 ||
+		response.completionHandle == nil || projectionProbe.projections != 1 || harness.CompletionCount() != 1 {
 		t.Fatalf("continuation projection = %t, session=%+v, err=%v", projected, session, err)
 	}
 }

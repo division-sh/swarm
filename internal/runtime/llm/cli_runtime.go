@@ -540,7 +540,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		return nil, settlementErr
 	}
 	projected, err := projectCompletionContinuation(handoffCtx, dispatch, s, resp)
-	if err != nil {
+	if err != nil && !committedCompletionCleanup(resp, err) {
 		return nil, errors.Join(settlementErr, err)
 	}
 	s.ProviderSessionID = childSessionID
@@ -559,7 +559,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		r.persistConversation(handoffCtx, s)
 	}
 
-	return resp, settlementErr
+	return resp, errors.Join(settlementErr, err)
 }
 
 func (r *ClaudeCLIRuntime) admitProviderDispatch(ctx context.Context, profile llmselection.Profile, resolvedModel llmselection.ResolvedModel) (func(), error) {

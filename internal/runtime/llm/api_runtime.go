@@ -346,7 +346,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		return nil, errors.Join(settlementErr, err)
 	}
 	projected, err := projectCompletionContinuation(handoffCtx, dispatch, s, &resp)
-	if err != nil {
+	if err != nil && !committedCompletionCleanup(&resp, err) {
 		return nil, errors.Join(settlementErr, err)
 	}
 	if !projected {
@@ -361,7 +361,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 		r.persistConversation(handoffCtx, s)
 	}
 
-	return &resp, settlementErr
+	return &resp, errors.Join(settlementErr, err)
 }
 
 func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte, managed *managedProviderCall) ([]byte, anthropicResponse, *completionDispatch, error) {
