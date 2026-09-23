@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -26,7 +27,28 @@ type committedPhaseEffectStore struct {
 	*effecttest.Harness
 	launchFault      error
 	observationFault error
+	heartbeatFault   error
+	heartbeatMode    string
+	heartbeats       atomic.Int32
 	afterLaunch      func()
+}
+
+func (s *committedPhaseEffectStore) HeartbeatCompletionAttempt(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time, lease time.Duration) error {
+	if s.heartbeatMode == "unacknowledged" {
+		return s.heartbeatFault
+	}
+	if err := s.Harness.HeartbeatCompletionAttempt(ctx, attempt, at, lease); err != nil {
+		return err
+	}
+	s.heartbeats.Add(1)
+	if s.heartbeatMode == "foreign" {
+		attempt.AttemptID = "foreign-attempt"
+	}
+	err := runtimeeffects.NewPostCommitMutationError(runtimeeffects.MutationHeartbeat, attempt, s.heartbeatFault)
+	if s.heartbeatMode == "joined" {
+		return errors.Join(err, context.Canceled)
+	}
+	return err
 }
 
 func (s *committedPhaseEffectStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, at time.Time) error {
@@ -109,6 +131,115 @@ func TestHTTPCompletionCommittedPhasesPreserveDispatchAndResponse(t *testing.T) 
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestHTTPCompletionAcknowledgedHeartbeatPreservesProviderResponseAndSettlement(t *testing.T) {
+	base := effecttest.New()
+	fault := errors.New("heartbeat cleanup failed after renewal commit")
+	store := &committedPhaseEffectStore{Harness: base, heartbeatFault: fault}
+	ctx := managedEffectHarnessContext(t, base, t.Name())
+	authority, ok := runtimeeffects.CompletionAuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("completion authority missing")
+	}
+	ownedTarget := authority.Target
+	ownedTarget.EntityID = "77777777-7777-4777-8777-777777777777"
+	ctx = llmTestWorkContext(t, runtimeeffects.WithUsageTarget(ctx, ownedTarget))
+	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(store, base, store, base))
+	var calls atomic.Int32
+	runtime := &OpenAICompatibleRuntime{
+		httpClient: &http.Client{Transport: committedPhaseResponseTransport{calls: &calls, body: `{"model":"test","choices":[{"message":{"role":"assistant","content":"done"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`}},
+		baseURL:    "http://effect.test", apiKey: "test",
+	}
+	raw, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
+	if err != nil || calls.Load() != 1 || len(raw) == 0 || dispatch == nil || dispatch.state != runtimeeffects.StateSettled || dispatch.invocation != completionProviderInvocationStarted {
+		t.Fatalf("provider dispatch = calls:%d raw:%q dispatch:%+v err:%v", calls.Load(), raw, dispatch, err)
+	}
+	if store.heartbeats.Load() < 2 || !errors.Is(dispatch.mutationErr, fault) {
+		t.Fatalf("heartbeat commits=%d diagnostics=%v", store.heartbeats.Load(), dispatch.mutationErr)
+	}
+	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	dispatch.providerModel = model
+	dispatch.request = []byte(`{"model":"test"}`)
+	target := dispatch.handle.Attempt().Authority.Target
+	session := &Session{ID: target.SessionID, AgentID: target.AgentID, Memory: target.Memory, MemoryIdentity: target.AgentIdentity.Normalize()}
+	if err := bindCompletionProjection(dispatch, session, Message{Role: "user", Content: "hello"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	response := &Response{Message: Message{Role: "assistant", Content: "done"}, Raw: raw}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed capability surface missing")
+	}
+	turn := AgentTurnRecord{
+		AgentID: target.AgentID, Identity: target.AgentIdentity, Memory: target.Memory,
+		SessionID: target.SessionID, RunID: target.RunID, EntityID: target.EntityID,
+		FlowInstance: target.FlowInstance, CapabilitySurface: &surface,
+	}
+	result, settleErr := settleCompletionTurn(ctx, dispatch, target.ID, turn, response, profile,
+		unavailableCompletionUsage(model.ConcreteModel), runtimeeffects.StateSettled, nil, nil)
+	if !result.Committed || !errors.Is(settleErr, fault) || calls.Load() != 1 {
+		t.Fatalf("completion settlement = result:%+v calls:%d err:%v", result, calls.Load(), settleErr)
+	}
+	if err := base.RequireState("openai_compatible", runtimeeffects.StateSettled); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHTTPCompletionUnacknowledgedOrForeignHeartbeatFailsClosed(t *testing.T) {
+	for _, mode := range []string{"unacknowledged", "foreign", "joined"} {
+		t.Run(mode, func(t *testing.T) {
+			base := effecttest.New()
+			fault := errors.New("heartbeat authority unavailable")
+			store := &committedPhaseEffectStore{Harness: base, heartbeatFault: fault, heartbeatMode: mode}
+			ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, base, t.Name()))
+			ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(store, base, store, base))
+			var calls atomic.Int32
+			runtime := &OpenAICompatibleRuntime{
+				httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: &calls}},
+				baseURL:    "http://effect.test", apiKey: "test",
+			}
+			_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
+			if !errors.Is(err, fault) || calls.Load() != 0 || dispatch == nil || dispatch.invocation != completionProviderInvocationNotStarted || dispatch.mutationErr != nil {
+				t.Fatalf("heartbeat refusal = calls:%d dispatch:%+v err:%v", calls.Load(), dispatch, err)
+			}
+			if err := base.RequireState("openai_compatible", runtimeeffects.StateAuthorized); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestCompletionAcknowledgedPeriodicHeartbeatKeepsExecutionAuthority(t *testing.T) {
+	base := effecttest.New()
+	fault := errors.New("periodic heartbeat cleanup failed after renewal commit")
+	store := &committedPhaseEffectStore{Harness: base, heartbeatFault: fault}
+	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, base, t.Name()))
+	ctx = runtimeeffects.WithController(ctx, liveTestCompletionController(store, base, store, base))
+	handle, err := beginManagedTestCompletion(t, ctx, "openai_compatible", []byte(`{"model":"test"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeatWithTiming(ctx, handle, time.Millisecond, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(time.Second)
+	for store.heartbeats.Load() < 3 {
+		select {
+		case <-heartbeatCtx.Done():
+			t.Fatalf("acknowledged renewal canceled execution: %v", context.Cause(heartbeatCtx))
+		case <-deadline:
+			t.Fatal("periodic heartbeat did not renew")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	dispatch := newCompletionDispatch(handle, runtimeeffects.StateSettled)
+	dispatch.markProviderInvocationStarted()
+	if err := finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil); err != nil || dispatch.state != runtimeeffects.StateSettled || !errors.Is(dispatch.mutationErr, fault) {
+		t.Fatalf("periodic heartbeat finish = state:%s diagnostic:%v err:%v", dispatch.state, dispatch.mutationErr, err)
 	}
 }
 

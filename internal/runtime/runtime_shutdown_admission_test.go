@@ -30,6 +30,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -139,7 +141,6 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	for _, ddl := range []string{
-		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT)`,
 		`CREATE TABLE events (
 			event_class TEXT NOT NULL, event_id TEXT PRIMARY KEY, run_id TEXT, event_name TEXT NOT NULL,
 			task_id TEXT, entity_id TEXT, flow_instance TEXT, scope TEXT NOT NULL, payload BLOB NOT NULL,
@@ -218,19 +219,21 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			t.Fatalf("create runtime shutdown delivery schema: %v", err)
 		}
 	}
+	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
+		t.Fatalf("create runtime shutdown lifecycle schema: %v", err)
+	}
 	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery adapter: %v", err)
 	}
-	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if err != nil {
-		t.Fatalf("create runtime shutdown delivery source: %v", err)
-	}
+	source := sourceartifactfixture.Fact()
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "runtime-shutdown-test", 1)
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery authority: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO runs (run_id, bundle_hash) VALUES (?, ?)`, agentidentitytest.DefaultRunID, source.BundleHash()); err != nil {
+	if err := runlifecyclefixture.Materialize(context.Background(), db, runlifecyclefixture.DialectSQLite, runlifecyclefixture.Fixture{
+		RunID: agentidentitytest.DefaultRunID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
+	}); err != nil {
 		t.Fatalf("seed runtime shutdown delivery run: %v", err)
 	}
 	return &runtimeShutdownDeliveryStore{

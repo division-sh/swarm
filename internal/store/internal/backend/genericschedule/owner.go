@@ -217,15 +217,6 @@ func (o *SQLiteOwner) AdmitGenericScheduleOutcome(ctx context.Context, command r
 	return runtimegenericschedule.AdmissionCommit{Result: value, Acknowledged: acknowledged}, result.Err()
 }
 
-func acknowledgedValue[T any](result mutationprotocol.Result[T]) (T, error) {
-	value, ok := result.Value()
-	if !ok {
-		var zero T
-		return zero, result.Err()
-	}
-	return value, result.Err()
-}
-
 func (o *PostgresOwner) AdmitTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
 	return AdmitTx(ctx, attempt, true, command, o.now)
 }
@@ -433,9 +424,9 @@ func failMalformedAttempt(ctx context.Context, attempt *mutationprotocol.Attempt
 	})
 }
 
-func (o *PostgresOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparedOccurrence, error) {
+func (o *PostgresOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
 	if err := o.requireSchema(); err != nil {
-		return runtimegenericschedule.PreparedOccurrence{}, err
+		return runtimegenericschedule.PreparationCommit{}, err
 	}
 	result := mutationprotocol.RunPostgres(ctx, o.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.PreparedOccurrence, error) {
 		var admittedAt time.Time
@@ -449,12 +440,13 @@ func (o *PostgresOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wa
 		}
 		return PrepareOccurrenceTx(ctx, attempt, true, wakeup, admittedAt)
 	})
-	return acknowledgedValue(result)
+	value, acknowledged := result.Value()
+	return runtimegenericschedule.PreparationCommit{Result: value, Acknowledged: acknowledged}, result.Err()
 }
 
-func (o *SQLiteOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparedOccurrence, error) {
+func (o *SQLiteOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wakeup runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparationCommit, error) {
 	if err := o.requireSchema(); err != nil {
-		return runtimegenericschedule.PreparedOccurrence{}, err
+		return runtimegenericschedule.PreparationCommit{}, err
 	}
 	result := mutationprotocol.RunSQLite(ctx, o.backend, "sqlite generic schedule occurrence preparation", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (runtimegenericschedule.PreparedOccurrence, error) {
 		var admittedAt time.Time
@@ -468,7 +460,8 @@ func (o *SQLiteOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wake
 		}
 		return PrepareOccurrenceTx(ctx, attempt, false, wakeup, admittedAt)
 	})
-	return acknowledgedValue(result)
+	value, acknowledged := result.Value()
+	return runtimegenericschedule.PreparationCommit{Result: value, Acknowledged: acknowledged}, result.Err()
 }
 
 func PrepareOccurrenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, wakeup runtimegenericschedule.Wakeup, admittedAt time.Time) (runtimegenericschedule.PreparedOccurrence, error) {

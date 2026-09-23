@@ -427,8 +427,10 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
-	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+	if bound, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind delivery session: %v", err)
+	} else if !bound.Acknowledged {
+		t.Fatal("bind delivery session was not acknowledged")
 	}
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
@@ -532,10 +534,14 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	if err != nil {
 		t.Fatalf("claim late delivery: %v", err)
 	}
-	lateDelivery, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID)
+	lateDeliveryCommit, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID)
 	if err != nil {
 		t.Fatalf("bind late delivery session: %v", err)
 	}
+	if !lateDeliveryCommit.Acknowledged {
+		t.Fatal("bind late delivery session was not acknowledged")
+	}
+	lateDelivery := lateDeliveryCommit.Snapshot
 	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
 		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,

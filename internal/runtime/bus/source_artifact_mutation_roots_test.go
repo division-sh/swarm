@@ -294,10 +294,18 @@ func (s *sourceBoundaryProbeStore) ListFlowInstanceRoutes(context.Context) ([]ru
 	return out, nil
 }
 
-func (s *sourceBoundaryProbeStore) BindAgentSession(ctx context.Context, _ runtimedelivery.Claim, _ string) (runtimedelivery.Snapshot, error) {
+func (s *sourceBoundaryProbeStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.ClaimCommit, error) {
 	s.bindCalls++
 	s.bindFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	return runtimedelivery.Snapshot{}, nil
+	routeIdentity, err := events.ParseDeliveryRouteIdentity(claim.RouteIdentity())
+	if err != nil {
+		return runtimedelivery.ClaimCommit{}, err
+	}
+	return runtimedelivery.ClaimCommit{Acknowledged: true, Snapshot: runtimedelivery.Snapshot{
+		DeliveryID: claim.DeliveryID(), RunID: claim.RunID(), RouteIdentity: routeIdentity,
+		ClaimVersion: claim.Version(), SubscriberClass: claim.SubscriberClass(), SubscriberID: claim.SubscriberID(),
+		Status: runtimedelivery.StatusInProgress, ActiveSessionID: sessionID,
+	}}, nil
 }
 
 func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.SourceArtifactFact {
@@ -565,6 +573,7 @@ func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMuta
 	foreign := sourceMutationFact(t, "8")
 	store := newExactHandoffProofStore(t, false)
 	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
+	bus.durable.DeliveryLifecycle = store
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	sessionID := uuid.NewString()
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: testAgentRouteIdentityForRun(t, runID, "agent-a", "")}

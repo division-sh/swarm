@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -286,7 +287,22 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 		}
 	}
 	if err := attempt.Succeed(ctx, map[string]any{"status": resp.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(rawBody)}); err != nil {
-		return nil, err
+		committed := attempt.Attempt()
+		if !committed.AuthorizationAcknowledged || !runtimeeffects.CommittedMutationPhase(err, runtimeeffects.MutationSettlement, committed) {
+			return nil, err
+		}
+		if logger, ok := e.bus.(runtimeToolLogSink); ok && logger != nil {
+			var postCommit *runtimeeffects.PostCommitMutationError
+			_ = errors.As(err, &postCommit)
+			detail := map[string]any{"tool": toolName, "operation_id": committed.OperationID, "attempt_id": committed.AttemptID}
+			if postCommit != nil && postCommit.Cause != nil {
+				detail["post_commit_error"] = postCommit.Cause.Error()
+			}
+			_ = logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
+				Level: "warn", Message: "HTTP tool effect settlement committed with a post-commit failure",
+				Component: "tool-executor", Action: "http_tool_settlement_post_commit_failure", Detail: detail,
+			})
+		}
 	}
 	return result, nil
 }

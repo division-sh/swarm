@@ -21,6 +21,8 @@ import (
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -51,21 +53,22 @@ func (s *exactHandoffProofStore) ProveHandoff(ctx context.Context, eventID strin
 	return s.adapter.ProveHandoff(ctx, s.db, eventID, route)
 }
 
-func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.Snapshot, error) {
+func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.ClaimCommit, error) {
 	s.mu.Lock()
 	s.binds++
 	s.bindFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	s.mu.Unlock()
 	var snapshot runtimedelivery.Snapshot
-	err := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+	result := eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, func(ctx context.Context, attempt *eventfixture.Attempt) error {
 		var err error
 		snapshot, err = s.adapter.BindAgentSession(ctx, attempt, claim, sessionID)
 		return err
-	}).Err()
-	if err != nil {
-		return runtimedelivery.Snapshot{}, err
+	})
+	_, acknowledged := result.Value()
+	if !acknowledged {
+		return runtimedelivery.ClaimCommit{}, result.Err()
 	}
-	return snapshot, nil
+	return runtimedelivery.ClaimCommit{Snapshot: snapshot, Acknowledged: true}, result.Err()
 }
 
 func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofStore {
@@ -77,10 +80,6 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	for _, ddl := range []string{
-		`CREATE TABLE runs (
-			run_id TEXT PRIMARY KEY,
-			bundle_hash TEXT
-		)`,
 		`CREATE TABLE run_fork_revision_heads (
 			run_id TEXT PRIMARY KEY,
 			last_revision INTEGER NOT NULL DEFAULT 0,
@@ -248,14 +247,14 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			t.Fatalf("create exact handoff proof schema: %v", err)
 		}
 	}
+	if err := runlifecyclefixture.CreateSQLiteScenarioSchema(context.Background(), db); err != nil {
+		t.Fatalf("create exact handoff lifecycle schema: %v", err)
+	}
 	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create exact handoff adapter: %v", err)
 	}
-	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	if err != nil {
-		t.Fatalf("create exact handoff source: %v", err)
-	}
+	source := sourceartifactfixture.Fact()
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "exact-handoff-test", 1)
 	if err != nil {
 		t.Fatalf("create exact handoff authority: %v", err)
@@ -266,7 +265,9 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route events.DeliveryRoute) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash) VALUES (?, ?) ON CONFLICT (run_id) DO NOTHING`, runID, s.authority.SourceArtifact().BundleHash()); err != nil {
+	if err := runlifecyclefixture.Materialize(ctx, s.db, runlifecyclefixture.DialectSQLite, runlifecyclefixture.Fixture{
+		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
+	}); err != nil {
 		t.Fatalf("seed exact handoff run: %v", err)
 	}
 	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())

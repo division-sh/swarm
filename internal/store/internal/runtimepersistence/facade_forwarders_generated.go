@@ -150,7 +150,7 @@ func (s *PostgresStore) BeginChannelBinding(ctx context.Context, req operatorcha
 	return s.operatorChannelPostgresOwner.BeginChannelBinding(ctx, req)
 }
 
-func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.Snapshot, error) {
+func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliveryPostgresOwner.BindAgentSession(ctx, claim, sessionID)
 }
 
@@ -1010,7 +1010,7 @@ func (s *PostgresStore) RegisterCompletionCandidateSink(ctx context.Context, sco
 	return s.runLifecyclePostgresOwner.RegisterCompletionCandidateSink(ctx, scope, sink)
 }
 
-func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {
+func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliveryPostgresOwner.RenewClaim(ctx, claim)
 }
 
@@ -1350,7 +1350,7 @@ func (s *SQLiteRuntimeStore) BeginChannelBinding(ctx context.Context, req operat
 	return s.operatorChannelSQLiteOwner.BeginChannelBinding(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.Snapshot, error) {
+func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliverySQLiteOwner.BindAgentSession(ctx, claim, sessionID)
 }
 
@@ -2186,7 +2186,7 @@ func (s *SQLiteRuntimeStore) ReleaseConstructionPossession() error {
 	return s.startupSQLiteOwner.ReleaseConstructionPossession()
 }
 
-func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {
+func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliverySQLiteOwner.RenewClaim(ctx, claim)
 }
 

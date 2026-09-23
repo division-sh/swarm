@@ -314,9 +314,10 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.publishDirect::call internal/runtime/correlation.InboundEventFromContext":                       1,
 		"internal/runtime/pipeline.PipelineCoordinator.claimAndServeFanOutTurn::call internal/runtime/correlation.WithInboundEvent":                    1,
 		"internal/runtime/pipeline.pipelineActivityDispatcher.logActivityRuntime::call internal/runtime/correlation.InboundEventFromContext":           1,
-		"internal/store/internal/backend/entityruntime.InsertSQLiteEntityStateDiff::call internal/runtime/correlation.InboundEventFromContext":         1,
-		"internal/store/internal/backend/mutationlog.InsertSQLiteWithStory::call internal/runtime/correlation.InboundEventFromContext":                 1,
-		"internal/store/internal/backend/mutationlog.InsertWithStory::call internal/runtime/correlation.InboundEventFromContext":                       1,
+		"internal/store/internal/backend/entityruntime.insertPostgresEntityStateDiff::call internal/runtime/correlation.InboundEventFromContext":       1,
+		"internal/store/internal/backend/entityruntime.insertSQLiteEntityStateDiff::call internal/runtime/correlation.InboundEventFromContext":         1,
+		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                                1,
+		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                        1,
 		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                  1,
 		// T19: accepted execution binding and the existing exact delivery owners.
 		"internal/runtime/pipeline.DeclarativeNode.HandleEvent::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                                      1,

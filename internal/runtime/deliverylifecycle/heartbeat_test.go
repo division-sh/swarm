@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/google/uuid"
 )
@@ -15,13 +16,17 @@ import (
 type heartbeatTestStore struct {
 	Store
 
-	mu       sync.Mutex
-	renewals int
-	failAt   int
-	renewed  chan int
+	mu              sync.Mutex
+	renewals        int
+	failAt          int
+	cleanupAt       int
+	cleanupErr      error
+	missingAckAt    int
+	wrongSnapshotAt int
+	renewed         chan int
 }
 
-func (s *heartbeatTestStore) RenewClaim(context.Context, Claim) (Snapshot, error) {
+func (s *heartbeatTestStore) RenewClaim(_ context.Context, claim Claim) (ClaimCommit, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.renewals++
@@ -32,10 +37,83 @@ func (s *heartbeatTestStore) RenewClaim(context.Context, Claim) (Snapshot, error
 		}
 	}
 	if s.failAt > 0 && s.renewals >= s.failAt {
-		return Snapshot{}, errors.New("renewal rejected")
+		return ClaimCommit{}, errors.New("renewal rejected")
+	}
+	if s.missingAckAt > 0 && s.renewals >= s.missingAckAt {
+		return ClaimCommit{}, nil
 	}
 	now := time.Now().UTC()
-	return Snapshot{UpdatedAt: now, ClaimExpiresAt: now.Add(DefaultLeaseTTL)}, nil
+	routeIdentity, err := events.ParseDeliveryRouteIdentity(claim.RouteIdentity())
+	if err != nil {
+		return ClaimCommit{}, err
+	}
+	commit := ClaimCommit{Snapshot: Snapshot{
+		DeliveryID: claim.DeliveryID(), RunID: claim.RunID(), RouteIdentity: routeIdentity,
+		ClaimVersion: claim.Version(), SubscriberClass: claim.SubscriberClass(), SubscriberID: claim.SubscriberID(),
+		Status: StatusInProgress, UpdatedAt: now, ClaimExpiresAt: now.Add(DefaultLeaseTTL),
+	}, Acknowledged: true}
+	if s.wrongSnapshotAt > 0 && s.renewals >= s.wrongSnapshotAt {
+		commit.Snapshot.RunID = uuid.NewString()
+	}
+	if s.cleanupAt > 0 && s.renewals >= s.cleanupAt {
+		return commit, s.cleanupErr
+	}
+	return commit, nil
+}
+
+func TestClaimHeartbeatAcknowledgedCleanupKeepsExactClaimLive(t *testing.T) {
+	owner := newHeartbeatTestOwner(t)
+	cleanup := errors.New("renewal cleanup failed after commit")
+	store := &heartbeatTestStore{cleanupAt: 1, cleanupErr: cleanup, renewed: make(chan int, 8)}
+	claim := heartbeatTestClaim()
+	heartbeat, err := startClaimHeartbeat(context.Background(), owner, store, claim, 5*time.Millisecond)
+	if err != nil {
+		t.Fatalf("start acknowledged heartbeat: %v", err)
+	}
+	for store.renewalCount() < 2 {
+		select {
+		case <-store.renewed:
+		case <-time.After(time.Second):
+			t.Fatal("acknowledged periodic renewal did not continue")
+		}
+	}
+	if err := heartbeat.Context().Err(); err != nil {
+		t.Fatalf("acknowledged cleanup retired handler: %v", err)
+	}
+	guard, err := heartbeat.BeginSettlement()
+	if err != nil {
+		t.Fatalf("acknowledged pre-settlement renewal refused claim: %v", err)
+	}
+	guard.Abort()
+	if err := heartbeat.Stop(); err != nil {
+		t.Fatalf("acknowledged cleanup classified as authority failure: %v", err)
+	}
+	if err := heartbeat.CleanupDiagnostic(); !errors.Is(err, cleanup) {
+		t.Fatalf("heartbeat diagnostic = %v, want cleanup error", err)
+	}
+	if err := owner.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaimHeartbeatUnacknowledgedRenewalFailsClosedWithoutStoreError(t *testing.T) {
+	owner := newHeartbeatTestOwner(t)
+	store := &heartbeatTestStore{missingAckAt: 1}
+	if heartbeat, err := startClaimHeartbeat(context.Background(), owner, store, heartbeatTestClaim(), 5*time.Millisecond); heartbeat != nil || err == nil || !strings.Contains(err.Error(), "did not acknowledge") {
+		t.Fatalf("unacknowledged start = heartbeat:%v err:%v", heartbeat, err)
+	}
+	if err := owner.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaimHeartbeatAcknowledgedWrongClaimFailsClosedDespiteCleanupError(t *testing.T) {
+	owner := newHeartbeatTestOwner(t)
+	cleanup := errors.New("postcommit cleanup")
+	store := &heartbeatTestStore{wrongSnapshotAt: 1, cleanupAt: 1, cleanupErr: cleanup}
+	if heartbeat, err := startClaimHeartbeat(context.Background(), owner, store, heartbeatTestClaim(), 5*time.Millisecond); heartbeat != nil || err == nil || !strings.Contains(err.Error(), "does not match exact claim") || !errors.Is(err, cleanup) {
+		t.Fatalf("wrong acknowledged claim started handler: heartbeat=%v err=%v", heartbeat, err)
+	}
 }
 
 func (s *heartbeatTestStore) renewalCount() int {
@@ -222,7 +300,7 @@ func heartbeatTestClaim() Claim {
 	return Claim{
 		deliveryID:    uuid.NewString(),
 		runID:         uuid.NewString(),
-		routeIdentity: "agent\x00agent-a",
+		routeIdentity: "delivery-route-v2:sha256:" + strings.Repeat("a", 64),
 		token:         uuid.NewString(),
 		version:       1,
 		class:         SubscriberAgent,

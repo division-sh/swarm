@@ -667,10 +667,22 @@ func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, session
 	if owner == nil {
 		return false, fmt.Errorf("selected event store does not expose delivery lifecycle ownership")
 	}
-	if _, err := owner.BindAgentSession(ctx, claim, sessionID); err != nil {
+	commit, err := owner.BindAgentSession(ctx, claim, sessionID)
+	if !commit.Acknowledged {
+		if err == nil {
+			err = fmt.Errorf("%w: agent session binding was not acknowledged", runtimedelivery.ErrConflict)
+		}
 		return false, err
 	}
-	return true, nil
+	snapshot := commit.Snapshot
+	if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.DeliveryID != claim.DeliveryID() ||
+		snapshot.RunID != claim.RunID() || snapshot.ClaimVersion != claim.Version() ||
+		snapshot.SubscriberClass != claim.SubscriberClass() || snapshot.SubscriberID != claim.SubscriberID() ||
+		events.EncodeDeliveryRouteIdentity(snapshot.RouteIdentity) != claim.RouteIdentity() ||
+		snapshot.ActiveSessionID != strings.TrimSpace(sessionID) {
+		return false, errors.Join(err, fmt.Errorf("%w: acknowledged agent session binding returned a different claim or session", runtimedelivery.ErrConflict))
+	}
+	return true, err
 }
 
 func (eb *EventBus) RouteTable() *RouteTable {

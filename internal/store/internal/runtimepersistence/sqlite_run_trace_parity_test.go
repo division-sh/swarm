@@ -345,8 +345,10 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		if err != nil {
 			t.Fatalf("claim trace delivery %s/%s: %v", eventID, agentID, err)
 		}
-		if _, err := sqliteStore.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+		if bound, err := sqliteStore.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 			t.Fatalf("bind trace delivery %s/%s: %v", eventID, agentID, err)
+		} else if !bound.Acknowledged {
+			t.Fatalf("bind trace delivery %s/%s was not acknowledged", eventID, agentID)
 		}
 		for _, turn := range turnsByDelivery[eventID+"\x00"+agentID] {
 			insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, claimed.Claim, event, turn.id, fixture.runID, agentID, sessionID, true, turn.at)

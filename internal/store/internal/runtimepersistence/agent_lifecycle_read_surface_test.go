@@ -85,8 +85,10 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 			switch tc.state {
 			case runtimedelivery.StateLaunching:
 			case runtimedelivery.StateActive:
-				if _, err := pg.BindAgentSession(ctx, claimed.Claim, tc.activeSession); err != nil {
+				if bound, err := pg.BindAgentSession(ctx, claimed.Claim, tc.activeSession); err != nil {
 					t.Fatalf("bind delivery for %s: %v", tc.agentID, err)
+				} else if !bound.Acknowledged {
+					t.Fatalf("bind delivery for %s was not acknowledged", tc.agentID)
 				}
 			case runtimedelivery.StateRetrying:
 				if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
@@ -158,8 +160,10 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
 	}
-	if _, err := pg.BindAgentSession(ctx, activeClaim.Claim, activeSessionID); err != nil {
+	if bound, err := pg.BindAgentSession(ctx, activeClaim.Claim, activeSessionID); err != nil {
 		t.Fatalf("bind active delivery: %v", err)
+	} else if !bound.Acknowledged {
+		t.Fatal("bind active delivery was not acknowledged")
 	}
 
 	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{identity})

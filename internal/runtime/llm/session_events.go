@@ -139,10 +139,20 @@ func requireInboundDeliveryActiveForSession(ctx context.Context, publisher Event
 	if publisher == nil || session == nil {
 		return nil
 	}
-	_, err := markInboundDeliveryActiveForSession(ctx, publisher, session)
+	acknowledged, err := markInboundDeliveryActiveForSession(ctx, publisher, session)
 	if err == nil {
 		return nil
 	}
-	logPublisherRuntime(ctx, publisher, level, "mark_delivery_in_progress_failed", message, session.AgentID, session.ID, entityID, detail, err)
+	action := "mark_delivery_in_progress_failed"
+	if acknowledged {
+		action = "mark_delivery_in_progress_postcommit_cleanup_failed"
+	}
+	logPublisherRuntime(ctx, publisher, level, action, message, session.AgentID, session.ID, entityID, detail, err)
+	if acknowledged {
+		if _, ok := publisher.(RuntimeLogSink); !ok {
+			diaglog.ProcessLog(level, "llm", message, "action", action, "agent_id", session.AgentID, "session_id", session.ID, "error", err.Error())
+		}
+		return nil
+	}
 	return err
 }

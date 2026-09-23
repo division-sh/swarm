@@ -18,15 +18,15 @@ import (
 func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	allowedWrites := map[string]bool{
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go":       true,
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go": true,
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_state_adapter.go":    true,
-		"internal/testutil/runlifecyclefixture/fixture.go":                               true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go": true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go":   true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":      true,
+		"internal/testutil/runlifecyclefixture/fixture.go":                         true,
 	}
 	allowedCandidateColumns := map[string]bool{
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go":    true,
-		"internal/store/internal/backend/runlifecycle/run_lifecycle_state_adapter.go": true,
-		"internal/testutil/runlifecyclefixture/fixture.go":                            true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go": true,
+		"internal/store/internal/backend/runlifecycle/run_lifecycle_state.go":      true,
+		"internal/testutil/runlifecyclefixture/fixture.go":                         true,
 	}
 	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
 	var violations []string
@@ -56,9 +56,12 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 		if runWrite.MatchString(source) && !allowedWrites[relative] {
 			violations = append(violations, relative+": writes runs outside the private lifecycle adapters")
 		}
-		if (strings.Contains(source, "completion_due_at") || strings.Contains(source, "completion_revision")) &&
-			!allowedCandidateColumns[relative] {
-			violations = append(violations, relative+": accesses private completion candidate columns")
+		if (strings.Contains(source, "completion_due_at") || strings.Contains(source, "completion_revision")) && !allowedCandidateColumns[relative] {
+			if relative != reconciledFanOutCandidateReadPath {
+				violations = append(violations, relative+": accesses private completion candidate columns")
+			} else if err := classifyReconciledFanOutCandidateRead(relative, source); err != nil {
+				violations = append(violations, relative+": "+err.Error())
+			}
 		}
 		for _, legacy := range []string{
 			"ConvergeNormalRunCompletion",
@@ -80,6 +83,69 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	sort.Strings(violations)
 	if len(violations) > 0 {
 		t.Fatalf("run lifecycle ownership violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+const reconciledFanOutCandidateReadPath = "internal/store/internal/backend/pipelinepersistence/fan_out_owner.go"
+const reconciledFanOutCandidateReadScope = "representReconciledFanOutCandidate"
+const reconciledFanOutCandidateReadSQL = "SELECT completion_due_at FROM runs WHERE run_id=$1"
+
+func classifyReconciledFanOutCandidateRead(path, source string) error {
+	if path != reconciledFanOutCandidateReadPath {
+		return fmt.Errorf("candidate read is outside its exact fan-out reconciliation owner")
+	}
+	if strings.Count(source, "completion_due_at") != 1 || strings.Contains(source, "completion_revision") {
+		return fmt.Errorf("fan-out reconciliation must read only one completion_due_at candidate fact")
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), path, source, 0)
+	if err != nil {
+		return err
+	}
+	approved := 0
+	var violation error
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		query, err := strconv.Unquote(literal.Value)
+		if err != nil || !strings.Contains(query, "completion_due_at") {
+			return true
+		}
+		if eventBoundaryEnclosingScope(file, literal.Pos()) != reconciledFanOutCandidateReadScope || compactSQLForLifecycleGuard(query) != reconciledFanOutCandidateReadSQL {
+			violation = fmt.Errorf("fan-out reconciliation candidate SQL escaped its exact read scope or shape")
+			return false
+		}
+		approved++
+		return true
+	})
+	if violation != nil {
+		return violation
+	}
+	if approved != 1 {
+		return fmt.Errorf("fan-out reconciliation has %d exact candidate reads, want 1", approved)
+	}
+	return nil
+}
+
+func TestReconciledFanOutCandidateReadClassificationIsExact(t *testing.T) {
+	exact := "package fixture\nfunc " + reconciledFanOutCandidateReadScope + "() { use(" + strconv.Quote(reconciledFanOutCandidateReadSQL) + ") }\n"
+	for _, tc := range []struct {
+		name, path, source string
+		want               bool
+	}{
+		{"exact", reconciledFanOutCandidateReadPath, exact, true},
+		{"sibling-path", "internal/store/internal/backend/pipelinepersistence/sibling.go", exact, false},
+		{"sibling-function", reconciledFanOutCandidateReadPath, strings.ReplaceAll(exact, reconciledFanOutCandidateReadScope, "siblingRead"), false},
+		{"altered-query", reconciledFanOutCandidateReadPath, strings.Replace(exact, "WHERE run_id=$1", "WHERE run_id=$1 FOR UPDATE", 1), false},
+		{"duplicate-query", reconciledFanOutCandidateReadPath, strings.Replace(exact, " }", "; use("+strconv.Quote(reconciledFanOutCandidateReadSQL)+") }", 1), false},
+		{"other-candidate-column", reconciledFanOutCandidateReadPath, strings.Replace(exact, "completion_due_at", "completion_revision", 1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyReconciledFanOutCandidateRead(tc.path, tc.source) == nil; got != tc.want {
+				t.Fatalf("classified=%v want=%v", got, tc.want)
+			}
+		})
 	}
 }
 

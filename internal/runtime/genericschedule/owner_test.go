@@ -363,8 +363,8 @@ func (s *restoreStore) LoadGenericScheduleActivation(context.Context, string) (A
 func (s *restoreStore) ListActiveGenericScheduleActivations(context.Context) ([]Activation, error) {
 	return []Activation{s.activation}, nil
 }
-func (*restoreStore) PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparedOccurrence, error) {
-	return PreparedOccurrence{}, nil
+func (*restoreStore) PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparationCommit, error) {
+	return PreparationCommit{Acknowledged: true}, nil
 }
 func (*restoreStore) CommitGenericScheduleOccurrence(context.Context, CommitCommand) (CommitResult, error) {
 	return CommitResult{}, nil
@@ -470,16 +470,18 @@ func (p lifecycleProofCommit) ValidateCommittedDurablePublication() error {
 }
 
 type lifecycleProofStore struct {
-	activation  Activation
-	missing     bool
-	prepared    PreparedOccurrence
-	commit      func(CommitCommand) (CommitResult, error)
-	commitCalls int
-	released    []Wakeup
-	releaseErrs []error
-	releaseSeen chan error
-	releaseMu   sync.Mutex
-	order       *[]string
+	activation    Activation
+	missing       bool
+	prepared      PreparedOccurrence
+	prepareErr    error
+	prepareReject bool
+	commit        func(CommitCommand) (CommitResult, error)
+	commitCalls   int
+	released      []Wakeup
+	releaseErrs   []error
+	releaseSeen   chan error
+	releaseMu     sync.Mutex
+	order         *[]string
 }
 
 func (s *lifecycleProofStore) AdmitGenericScheduleOutcome(context.Context, AdmissionCommand) (AdmissionCommit, error) {
@@ -497,8 +499,8 @@ func (s *lifecycleProofStore) LoadGenericScheduleActivation(context.Context, str
 func (s *lifecycleProofStore) ListActiveGenericScheduleActivations(context.Context) ([]Activation, error) {
 	return []Activation{s.activation}, nil
 }
-func (s *lifecycleProofStore) PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparedOccurrence, error) {
-	return s.prepared, nil
+func (s *lifecycleProofStore) PrepareGenericScheduleOccurrence(context.Context, Wakeup) (PreparationCommit, error) {
+	return PreparationCommit{Result: s.prepared, Acknowledged: !s.prepareReject}, s.prepareErr
 }
 func (s *lifecycleProofStore) CommitGenericScheduleOccurrence(_ context.Context, command CommitCommand) (CommitResult, error) {
 	s.commitCalls++
@@ -877,6 +879,50 @@ func TestLifecyclePlannerFailureCannotReachOccurrenceSettlement(t *testing.T) {
 	}
 	if store.commitCalls != 0 {
 		t.Fatalf("planner failure reached occurrence settlement %d time(s)", store.commitCalls)
+	}
+}
+
+func TestLifecyclePreparationAcknowledgementControlsOccurrenceSettlement(t *testing.T) {
+	activation, occurrence, wakeup := lifecyclePreparedOccurrence(t)
+	cleanupErr := errors.New("preparation postcommit cleanup failed")
+	for _, test := range []struct {
+		name          string
+		prepareReject bool
+		wantCommits   int
+		wantOutcome   CommitOutcome
+	}{
+		{name: "acknowledged_cleanup_failure", wantCommits: 1, wantOutcome: CommitCommitted},
+		{name: "unacknowledged_failure", prepareReject: true, wantCommits: 0, wantOutcome: CommitRetry},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			next := activation
+			next.Status = StatusFired
+			next.AcceptedAt = occurrence.AdmittedAt.Add(time.Millisecond)
+			next.FiredAt = next.AcceptedAt
+			store := &lifecycleProofStore{
+				activation: activation,
+				prepared:   PreparedOccurrence{Outcome: PrepareReady, Activation: activation, Occurrence: occurrence},
+				prepareErr: cleanupErr, prepareReject: test.prepareReject,
+				commit: func(command CommitCommand) (CommitResult, error) {
+					plan := command.Publication.(lifecycleProofPlan)
+					return CommitResult{Outcome: CommitCommitted, Next: next, Publication: lifecycleProofCommit{plan: plan}}, nil
+				},
+			}
+			planner := &lifecycleProofPlanner{}
+			dispatcher := &lifecycleProofDispatcher{}
+			lifecycle, err := NewLifecycle(store, &lifecycleProofScheduler{}, planner, dispatcher, nil, executionposture.Live)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stopLifecycleProof(t, lifecycle)
+			result, err := lifecycle.fire(context.Background(), wakeup)
+			if result.Outcome != test.wantOutcome || !errors.Is(err, cleanupErr) {
+				t.Fatalf("preparation result = %#v, %v", result, err)
+			}
+			if store.commitCalls != test.wantCommits || planner.finalizes != test.wantCommits || dispatcher.calls != test.wantCommits {
+				t.Fatalf("preparation consequences = commits:%d finalizes:%d dispatches:%d", store.commitCalls, planner.finalizes, dispatcher.calls)
+			}
+		})
 	}
 }
 

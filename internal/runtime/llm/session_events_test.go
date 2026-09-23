@@ -44,11 +44,23 @@ func (s *eventPublisherStub) Publish(_ context.Context, evt events.Event) error 
 }
 
 func (s *eventPublisherStub) MarkDeliveryInProgress(_ context.Context, agentID, sessionID string) (bool, error) {
-	if s.markErr != nil {
-		return false, s.markErr
-	}
 	s.marks = append(s.marks, strings.TrimSpace(agentID)+"|"+strings.TrimSpace(sessionID))
-	return s.markChanged, nil
+	return s.markChanged, s.markErr
+}
+
+func TestInboundDeliveryBindingAcknowledgedCleanupDoesNotRetry(t *testing.T) {
+	cleanup := errors.New("binding cleanup failed after commit")
+	publisher := &eventPublisherStub{markChanged: true, markErr: cleanup}
+	session := &Session{ID: "session-1", AgentID: "agent-1", Memory: agentmemory.Authored(true)}
+	if err := requireInboundDeliveryActiveForSession(context.Background(), publisher, session, diaglog.LevelWarn, "bind reused session", nil, ""); err != nil {
+		t.Fatalf("acknowledged binding was retried: %v", err)
+	}
+	if len(publisher.marks) != 1 || publisher.marks[0] != "agent-1|session-1" {
+		t.Fatalf("binding calls = %#v, want one exact session binding", publisher.marks)
+	}
+	if len(publisher.runtimeLogs) != 1 || publisher.runtimeLogs[0].Action != "mark_delivery_in_progress_postcommit_cleanup_failed" || publisher.runtimeLogs[0].Failure == nil {
+		t.Fatalf("acknowledged cleanup diagnostic = %#v", publisher.runtimeLogs)
+	}
 }
 
 func (s *eventPublisherStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {

@@ -286,6 +286,7 @@ func captureSelectedReadSideEffects(t *testing.T, db *sql.DB, postgres bool, run
 
 func TestStandaloneSelectedReadAccessModeGuard(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
+	const lifecyclePath = "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go"
 	tests := []selectedReadGuard{
 		{path: "internal/store/internal/backend/delivery/lifecycle.go", receiver: "DeliverySQLiteOwner", method: "ScanDeliveryContinuations", required: "RunReadTransaction"},
 		{path: "internal/store/internal/backend/delivery/lifecycle.go", receiver: "DeliverySQLiteOwner", method: "ObserveDeliveryContinuation", required: "RunReadTransaction"},
@@ -298,9 +299,9 @@ func TestStandaloneSelectedReadAccessModeGuard(t *testing.T) {
 	for _, backend := range []string{"SQLite", "Postgres"} {
 		wrapper := "run" + backend + "LifecycleRead"
 		for _, method := range []string{"RequirePresentRun", "RequireActiveRun", "RequirePresentRunSource", "RequireActiveRunSource"} {
-			tests = append(tests, selectedReadGuard{path: "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go", receiver: "RunLifecycle" + backend + "Owner", method: method, required: wrapper})
+			tests = append(tests, selectedReadGuard{path: lifecyclePath, receiver: "RunLifecycle" + backend + "Owner", method: method, required: wrapper})
 		}
-		tests = append(tests, selectedReadGuard{path: "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go", receiver: "RunLifecycle" + backend + "Owner", method: "RequirePublicationRunActive", required: "runRead"})
+		tests = append(tests, selectedReadGuard{path: lifecyclePath, receiver: "RunLifecycle" + backend + "Owner", method: "RequirePublicationRunActive", required: "runRead"})
 	}
 	for _, method := range []string{"ListAgentDeliveryLifecycleFacts", "readOperatorAgentSummarySnapshot", "LoadOperatorAgentDiagnosis"} {
 		tests = append(tests, selectedReadGuard{path: "internal/store/internal/operatorsurface/sqlite_operator_agent_conversation_read_surface.go", receiver: "AgentSQLite", method: method, required: "RunReadTransaction"})
@@ -321,7 +322,7 @@ func TestStandaloneSelectedReadAccessModeGuard(t *testing.T) {
 		}
 	}
 
-	path := filepath.Join(root, "internal/store/internal/backend/runlifecycle/run_lifecycle_mutation_adapter.go")
+	path := filepath.Join(root, lifecyclePath)
 	for _, function := range []string{"runSQLiteLifecycleRead", "runPostgresLifecycleRead"} {
 		calls := selectedReadMethodCalls(t, path, "", function)
 		if !calls["runRead"] {
