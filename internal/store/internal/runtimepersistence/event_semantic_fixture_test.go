@@ -537,6 +537,18 @@ func insertPostgresCanonicalEventRecordFixture(ctx context.Context, db *sql.DB, 
 	return insertCanonicalEventRecordFixture(ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), event)
 }
 
+func insertPostgresStagedCanonicalEventRecordFixture(ctx context.Context, db *sql.DB, event events.Event) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func insertPostgresCanonicalEventRecordFixtureTx(ctx context.Context, tx *sql.Tx, event events.Event) error {
 	if tx == nil {
 		return fmt.Errorf("postgres canonical event record fixture requires a transaction")
@@ -604,15 +616,7 @@ func insertPostgresSemanticEventRecordFixture(
 	event := semanticEventRecordFixture(eventID, runID, eventType, producer, payload, envelope, createdAt)
 	// Historical fixtures stage event and mutation rows before explicitly
 	// capturing one revision for their shared fork point.
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return event, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
-		return event, err
-	}
-	return event, tx.Commit()
+	return event, insertPostgresStagedCanonicalEventRecordFixture(ctx, db, event)
 }
 
 func seedPostgresSemanticEventRecordFixture(

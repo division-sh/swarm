@@ -1065,7 +1065,7 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 	sourceRoute := events.DeliveryRoute{
 		Recipient: events.MustAgentDeliveryRecipient(agentIdentity.AgentID()), AgentIdentity: agentIdentity,
 	}
-	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, sourceEvent); err != nil {
+	if err := insertPostgresStagedCanonicalEventRecordFixture(ctx, db, sourceEvent); err != nil {
 		t.Fatalf("seed historical replay source event: %v", err)
 	}
 	sourceRow, found, err := loadPostgresEventIdentity(ctx, db, sourceID)
@@ -1225,7 +1225,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		sourceEnvelope,
 		at,
 	)
-	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, sourceEvent); err != nil {
+	if err := insertPostgresStagedCanonicalEventRecordFixture(ctx, db, sourceEvent); err != nil {
 		t.Fatalf("seed complete historical replay source event: %v", err)
 	}
 	sourceRow, found, err := loadPostgresEventIdentity(ctx, db, eventID)
