@@ -153,169 +153,183 @@ func TestRunForkRevisionExactWriterContributions(t *testing.T) {
 
 func revisionExactWriterContracts() []revisionExactWriterContract {
 	return []revisionExactWriterContract{
-		{"mutationlog/adapter.go", "InsertWithStory", []string{"uuid.NewString()", "effects.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"mutationlog/adapter.go", "InsertSQLiteWithStory", []string{"uuid.NewString()", "effects.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"entityruntime/persistence.go", "InsertSQLiteEntityStateDiff", []string{"uuid.NewString()", "effects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"entityruntime/persistence.go", "EntityPostgresOwner.CreateEntity", []string{"effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
-		{"entityruntime/persistence.go", "EntitySQLiteOwner.CreateEntity", []string{"effects.AddFact(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, rec.EntityID)"}},
-		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.SetupScenarioEntities", []string{"effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
-		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.SetupScenarioEntities", []string{"effects.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID)"}},
-		{"runforkpersistence/run_fork_materializer.go", "materializeRunForkEntityState", []string{"effects.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID)"}},
+		{"mutationlog/adapter.go", "Insert", []string{"uuid.NewString()", "attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
+		{"mutationlog/adapter.go", "insertSQLiteAt", []string{"uuid.NewString()", "attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
+		{"entityruntime/persistence.go", "insertPostgresEntityStateDiff", []string{"uuid.NewString()", "mutation.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
+		{"entityruntime/persistence.go", "insertSQLiteEntityStateDiff", []string{"uuid.NewString()", "addFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
+		{"entityruntime/persistence.go", "insertSQLiteEntityStateDiffAttempt", []string{"insertSQLiteEntityStateDiff(ctx, tx, runID, entityID, before, after, writer, createdAt, mutation.AddFact, mutation.Record)"}},
+		{"entityruntime/persistence.go", "EntityPostgresOwner.CreateEntity", []string{"mutation.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
+		{"entityruntime/persistence.go", "EntitySQLiteOwner.CreateEntity", []string{"mutation.AddFact(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, rec.EntityID)"}},
+		{"pipelinepersistence/scenario_setup.go", "PipelinePostgresOwner.SetupScenarioEntities", []string{"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)"}},
+		{"pipelinepersistence/scenario_setup.go", "PipelineSQLiteOwner.SetupScenarioEntities", []string{"attempt.AddFact(req.RunID, privaterunforkrevision.FamilyEntityMetadata, entity.EntityID)"}},
+		{"runforkpersistence/run_fork_materializer.go", "materializeRunForkEntityState", []string{"attempt.AddFact(forkRunID, privaterunforkrevision.FamilyEntityMetadata, entityID)"}},
 		{"replycontext/owner.go", "createPostgresReplyContext", []string{
 			"record.Normalized()", "record.Validate()", "resolveReplyContextCreateConflict(record, existing, loadErr)",
-			"effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)",
-			"effects.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)",
+			"attempt.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)",
+			"attempt.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)",
 		}},
 		{"replycontext/owner.go", "createSQLiteReplyContextTx", []string{
 			"record.Normalized()", "record.Validate()", "resolveReplyContextCreateConflict(record, existing, loadErr)",
-			"effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)",
-			"effects.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)",
+			"attempt.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)",
+			"attempt.AddFact(existing.RunID, runforkrevision.FamilyReplyContexts, existing.ID)",
 		}},
-		{"replycontext/owner.go", "ReplyPostgresOwner.ClaimReplyContext", []string{"effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)"}},
-		{"replycontext/owner.go", "ReplySQLiteOwner.ClaimReplyContext", []string{"effects.AddFact(record.RunID, runforkrevision.FamilyReplyContexts, record.ID)"}},
-		{"replycontext/owner.go", "ReplyPostgresOwner.ClaimWithinTransaction", []string{"effects.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)"}},
-		{"replycontext/owner.go", "ReplySQLiteOwner.ClaimWithinTransaction", []string{"effects.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)"}},
+		{"replycontext/owner.go", "ReplyPostgresOwner.ClaimReplyContext", []string{"attempt.AddFact(value.record.RunID, runforkrevision.FamilyReplyContexts, value.record.ID)"}},
+		{"replycontext/owner.go", "ReplySQLiteOwner.ClaimReplyContext", []string{"attempt.AddFact(value.record.RunID, runforkrevision.FamilyReplyContexts, value.record.ID)"}},
+		{"replycontext/owner.go", "ReplyPostgresOwner.ClaimWithinTransaction", []string{"attempt.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)"}},
+		{"replycontext/owner.go", "ReplySQLiteOwner.ClaimWithinTransaction", []string{"attempt.AddFact(loaded.RunID, runforkrevision.FamilyReplyContexts, loaded.ID)"}},
 		{"effectpersistence/completion_settlement.go", "insertCompletionTargetPostgres", []string{"effects.AddFact(storedRunID, privaterunforkrevision.FamilyAgentTurns, storedTurnID)"}},
 		{"effectpersistence/completion_settlement.go", "insertCompletionTargetSQLite", []string{"effects.AddFact(t.RunID, privaterunforkrevision.FamilyAgentTurns, t.TurnID)"}},
 		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", []string{
-			"effects.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.PreviousSessionID)",
-			"effects.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.SuccessorSessionID)",
+			"attempt.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.PreviousSessionID)",
+			"attempt.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.SuccessorSessionID)",
 		}},
-		{"agentpersistence/lifecycle.go", "commitPostgresAgentLifecycleTransitionTx", []string{"applyPostgresLifecycleSubordinate(ctx, tx, req)", "addLifecycleRevisionEffects(effects, result)"}},
-		{"agentpersistence/lifecycle.go", "commitSQLiteAgentLifecycleTransitionTx", []string{"applySQLiteLifecycleSubordinate(ctx, tx, req)", "addLifecycleRevisionEffects(effects, result)"}},
-		{"llmpersistence/owner.go", "agentSessionEffects", []string{"addAgentSessionFacts(effects, runID, sessionID, otherSessionIDs...)"}},
+		{"agentpersistence/lifecycle.go", "commitPostgresAgentLifecycleTransitionTx", []string{"applyPostgresLifecycleSubordinate(ctx, tx, req)", "addLifecycleRevisionEffects(attempt, result)"}},
+		{"agentpersistence/lifecycle.go", "commitSQLiteAgentLifecycleTransitionTx", []string{"applySQLiteLifecycleSubordinate(ctx, tx, req)", "addLifecycleRevisionEffects(attempt, result)"}},
 		{"llmpersistence/owner.go", "addAgentSessionFacts", []string{
-			"effects.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)",
-			"effects.AddFact(runID, runforkrevision.FamilyAgentSessions, id)",
+			"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)",
+			"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, id)",
 		}},
 		{"llmpersistence/postgres.go", "ensurePostgresStatelessAuditTx", []string{
-			"effects.AddFact(previousRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID)",
-			"effects.AddFact(storedRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID)",
+			"attempt.AddFact(previousRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID)",
+			"attempt.AddFact(storedRunID, runforkrevision.FamilyAgentConversationAudits, storedSessionID)",
 		}},
 		{"llmpersistence/sqlite.go", "ensureSQLiteStatelessAuditTx", []string{
-			"effects.AddFact(previousRunID, runforkrevision.FamilyAgentConversationAudits, sessionID)",
-			"effects.AddFact(identity.RunID, runforkrevision.FamilyAgentConversationAudits, sessionID)",
+			"attempt.AddFact(previousRunID, runforkrevision.FamilyAgentConversationAudits, sessionID)",
+			"attempt.AddFact(identity.RunID, runforkrevision.FamilyAgentConversationAudits, sessionID)",
 		}},
 		{"llmpersistence/postgres.go", "LLMPostgresOwner.EnsureCompletionTurnMemoryTx", []string{
-			"ensurePostgresStatelessAuditTx(ctx, tx, effects, rec, plan, identity)", "addAgentSessionFacts(effects, storedRunID, storedSessionID)",
+			"ensurePostgresStatelessAuditTx(ctx, tx, attempt, rec, plan, identity)", "addAgentSessionFacts(attempt, storedRunID, storedSessionID)",
 		}},
 		{"llmpersistence/sqlite.go", "LLMSQLiteOwner.EnsureCompletionTurnMemoryTx", []string{
-			"ensureSQLiteStatelessAuditTx(ctx, tx, effects, rec, plan, identity, now)", "addAgentSessionFacts(effects, identity.RunID, rec.SessionID)",
+			"ensureSQLiteStatelessAuditTx(ctx, tx, attempt, rec, plan, identity, now)", "addAgentSessionFacts(attempt, identity.RunID, rec.SessionID)",
 		}},
-		{"llmpersistence/postgres.go", "LLMPostgresOwner.UpsertConversation", []string{"addAgentSessionFacts(effects, storedRunID, storedSessionID)"}},
-		{"llmpersistence/sqlite.go", "LLMSQLiteOwner.UpsertConversation", []string{"addAgentSessionFacts(effects, identity.RunID, rec.SessionID)"}},
-		{"llmpersistence/postgres.go", "LLMPostgresOwner.ProjectCompletionConversationTx", []string{"addAgentSessionFacts(effects, storedRunID, storedSessionID)"}},
-		{"llmpersistence/sqlite.go", "LLMSQLiteOwner.ProjectCompletionConversationTx", []string{"addAgentSessionFacts(effects, identity.RunID, rec.SessionID)"}},
-		{"llmpersistence/postgres.go", "LLMPostgresOwner.UpdateLiveSessionWatchdog", []string{"agentSessionEffects(storedRunID, storedSessionID)"}},
-		{"llmpersistence/sqlite.go", "LLMSQLiteOwner.UpdateLiveSessionWatchdog", []string{"addAgentSessionFacts(effects, identity.RunID, update.SessionID)"}},
-		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.acquirePostgresLiveSession", []string{"agentSessionEffects(current.runID, current.sessionID)"}},
-		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.Release", []string{"agentSessionEffects(storedRunID, storedSessionID)"}},
-		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.Rotate", []string{"agentSessionEffects(currentRunID, currentID)", "addAgentSessionFacts(effects, newRunID, newID)"}},
-		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.IncrementTurn", []string{"agentSessionEffects(storedRunID, storedSessionID)"}},
-		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.AdoptSessionID", []string{"agentSessionEffects(storedRunID, sessionID)"}},
+		{"llmpersistence/postgres.go", "LLMPostgresOwner.UpsertConversation", []string{"addAgentSessionFacts(attempt, storedRunID, storedSessionID)"}},
+		{"llmpersistence/sqlite.go", "LLMSQLiteOwner.UpsertConversation", []string{"addAgentSessionFacts(attempt, identity.RunID, rec.SessionID)"}},
+		{"llmpersistence/postgres.go", "LLMPostgresOwner.ProjectCompletionConversationTx", []string{"addAgentSessionFacts(attempt, storedRunID, storedSessionID)"}},
+		{"llmpersistence/sqlite.go", "LLMSQLiteOwner.ProjectCompletionConversationTx", []string{"addAgentSessionFacts(attempt, identity.RunID, rec.SessionID)"}},
+		{"llmpersistence/postgres.go", "LLMPostgresOwner.UpdateLiveSessionWatchdog", []string{"addAgentSessionFacts(attempt, storedRunID, storedSessionID)"}},
+		{"llmpersistence/sqlite.go", "LLMSQLiteOwner.UpdateLiveSessionWatchdog", []string{"addAgentSessionFacts(attempt, identity.RunID, update.SessionID)"}},
+		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.acquirePostgresLiveSession", []string{"addAgentSessionFacts(attempt, current.runID, current.sessionID)"}},
+		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.ReleaseOutcome", []string{"addAgentSessionFacts(attempt, storedRunID, storedSessionID)"}},
+		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.Rotate", []string{"addAgentSessionFacts(attempt, currentRunID, currentID)", "addAgentSessionFacts(attempt, newRunID, newID)"}},
+		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.IncrementTurnOutcome", []string{"addAgentSessionFacts(attempt, storedRunID, storedSessionID)"}},
+		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.AdoptSessionID", []string{"addAgentSessionFacts(attempt, storedRunID, sessionID)"}},
 		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.acquireSQLiteLiveSession", []string{
-			"addAgentSessionFacts(effects, identity.RunID, sessionID)", "addAgentSessionFacts(effects, identity.RunID, rec.sessionID)",
+			"addAgentSessionFacts(attempt, identity.RunID, sessionID)", "addAgentSessionFacts(attempt, identity.RunID, rec.sessionID)",
 		}},
-		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.Release", []string{"addAgentSessionFacts(effects, identity.RunID, lease.SessionID)"}},
-		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.Rotate", []string{"addAgentSessionFacts(effects, identity.RunID, rec.sessionID, newID)"}},
-		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.IncrementTurn", []string{"addAgentSessionFacts(effects, identity.RunID, sessionID)"}},
-		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.AdoptSessionID", []string{"addAgentSessionFacts(effects, identity.RunID, rec.sessionID)"}},
-		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.ResetAll", []string{"addAgentSessionFacts(effects, disposition.RunID, disposition.SessionID)"}},
-		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.ResetAll", []string{"addAgentSessionFacts(effects, disposition.RunID, disposition.SessionID)"}},
-		{"genericschedule/owner.go", "AdmitTx", []string{"insertActivationTx(ctx, tx, dialectFor(postgres), scope, activation)", "effects.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
-		{"genericschedule/owner.go", "addTimerEffect", []string{"effects.AddFact(runID, privaterunforkrevision.FamilyTimers, activationID)"}},
-		{"genericschedule/owner.go", "PostgresOwner.failMalformed", []string{"addTimerEffect(effects, runID, storedTimerID)"}},
-		{"genericschedule/owner.go", "SQLiteOwner.failMalformed", []string{"addTimerEffect(effects, runID, storedTimerID)"}},
-		{"genericschedule/owner.go", "PrepareOccurrenceTx", []string{
-			"addTimerEffect(effects, runID, storedTimerID)",
-			"addTimerEffect(effects, activation.Command.RunID, activation.ID)",
-			"addTimerEffect(effects, activation.Command.RunID, activation.ID)",
-			"addTimerEffect(effects, activation.Command.RunID, activation.ID)",
+		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.ReleaseOutcome", []string{"addAgentSessionFacts(attempt, identity.RunID, lease.SessionID)"}},
+		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.Rotate", []string{"addAgentSessionFacts(attempt, identity.RunID, rec.sessionID, newID)"}},
+		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.IncrementTurnOutcome", []string{"addAgentSessionFacts(attempt, identity.RunID, sessionID)"}},
+		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.AdoptSessionID", []string{"addAgentSessionFacts(attempt, identity.RunID, rec.sessionID)"}},
+		{"llmpersistence/postgres_sessions.go", "LLMPostgresOwner.ResetAll", []string{"addAgentSessionFacts(attempt, disposition.RunID, disposition.SessionID)"}},
+		{"llmpersistence/sqlite_sessions.go", "LLMSQLiteOwner.ResetAll", []string{"addAgentSessionFacts(attempt, disposition.RunID, disposition.SessionID)"}},
+		{"runlifecycle/active_run_quiescence.go", "terminateActiveRunSessionsTx", []string{"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)"}},
+		{"runlifecycle/active_run_quiescence.go", "sqliteTerminateActiveRunSessionsTx", []string{"attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, sessionID)"}},
+		{"genericschedule/owner.go", "AdmitTx", []string{"admitTx(ctx, tx, attempt, postgres, command, now)"}},
+		{"genericschedule/owner.go", "admitTx", []string{"insertActivationTx(ctx, tx, dialectFor(postgres), scope, activation)", "attempt.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
+		{"genericschedule/owner.go", "addTimerEffect", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyTimers, activationID)"}},
+		{"genericschedule/owner.go", "PostgresOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, true, activationID, malformed, o.now())"}},
+		{"genericschedule/owner.go", "SQLiteOwner.failMalformed", []string{"failMalformedAttempt(ctx, attempt, false, activationID, malformed, o.now())"}},
+		{"genericschedule/owner.go", "failMalformedAttempt", []string{"addTimerEffect(attempt, runID, storedTimerID)"}},
+		{"genericschedule/owner.go", "PrepareOccurrenceTx", []string{"prepareOccurrenceTx(ctx, tx, attempt, postgres, wakeup, admittedAt)"}},
+		{"genericschedule/owner.go", "prepareOccurrenceTx", []string{
+			"addTimerEffect(attempt, runID, storedTimerID)",
+			"addTimerEffect(attempt, activation.Command.RunID, activation.ID)",
+			"addTimerEffect(attempt, activation.Command.RunID, activation.ID)",
+			"addTimerEffect(attempt, activation.Command.RunID, activation.ID)",
 		}},
-		{"genericschedule/owner.go", "CancelTx", []string{"effects.AddFact(activation.Command.RunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
-		{"genericschedule/owner.go", "CancelAdmissionTx", []string{"effects.AddFact(activation.Command.RunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
-		{"genericschedule/owner.go", "CancelRunsTx", []string{"CancelTx(ctx, tx, postgres, effects, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"}},
-		{"workflowtimer/cancellation.go", "CancelRunsTx", []string{"effects.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"}},
-		{"pipelinepersistence/owner.go", "addTimerRevisionEffects", []string{"effects.AddFact(runID, privaterunforkrevision.FamilyTimers, timerID)"}},
+		{"genericschedule/owner.go", "CancelTx", []string{"cancelTx(ctx, tx, attempt, postgres, command)"}},
+		{"genericschedule/owner.go", "cancelTx", []string{"attempt.AddFact(activation.Command.RunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
+		{"genericschedule/owner.go", "CancelAdmissionTx", []string{"cancelAdmissionTx(ctx, tx, attempt, postgres, command, cause, cancelledAt)"}},
+		{"genericschedule/owner.go", "cancelAdmissionTx", []string{"attempt.AddFact(activation.Command.RunID, privaterunforkrevision.FamilyTimers, activation.ID)"}},
+		{"genericschedule/owner.go", "CancelRunsTx", []string{"cancelRunsTx(ctx, tx, attempt, postgres, runIDs, cause, cancelledAt)"}},
+		{"genericschedule/owner.go", "cancelRunsTx", []string{"CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"}},
+		{"workflowtimer/cancellation.go", "CancelRunsTx", []string{"cancelRunsSQL(ctx, tx, postgres, attempt, runIDs)"}},
+		{"workflowtimer/cancellation.go", "cancelRunsSQL", []string{"facts.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"}},
 		{"pipelinepersistence/workflow_engine_timer_commit.go", "commitWorkflowEngineTimerMutation", []string{
-			"insertWorkflowEngineTimerActivation(ctx, tx, postgres, effects, activation)",
-			"cancelWorkflowEngineTimerActivation(ctx, tx, postgres, effects, activation)",
+			"insertWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)",
+			"cancelWorkflowEngineTimerActivation(ctx, tx, postgres, attempt, activation)",
 		}},
-		{"pipelinepersistence/workflow_engine_timer_commit.go", "insertWorkflowEngineTimerActivation", []string{"effects.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
-		{"pipelinepersistence/workflow_engine_timer_commit.go", "cancelWorkflowEngineTimerActivation", []string{"effects.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
-		{"pipelinepersistence/workflow_timer_occurrence_commit.go", "advanceWorkflowEngineTimerOccurrence", []string{"addTimerRevisionEffects(effects, storedRunID, storedTimerID)"}},
+		{"pipelinepersistence/workflow_engine_timer_commit.go", "insertWorkflowEngineTimerActivation", []string{"facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
+		{"pipelinepersistence/workflow_engine_timer_commit.go", "cancelWorkflowEngineTimerActivation", []string{"facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
+		{"pipelinepersistence/workflow_timer_occurrence_commit.go", "advanceWorkflowEngineTimerOccurrence", []string{"facts.AddFact(storedRunID, privaterunforkrevision.FamilyTimers, storedTimerID)"}},
 		{"pipelinepersistence/generic_schedule_occurrence_commit.go", "commitGenericScheduleOccurrence", []string{
-			"addTimerRevisionEffects(effects, persisted.Command.RunID, persisted.ID)",
-			"privategenericschedule.AdvanceOccurrenceTx(txctx, tx, postgres, command)",
-			"addTimerRevisionEffects(effects, next.Command.RunID, next.ID)",
+			"attempt.AddFact(persisted.Command.RunID, privaterunforkrevision.FamilyTimers, persisted.ID)",
+			"privategenericschedule.AdvanceOccurrenceTx(txctx, attempt, postgres, command)",
+			"attempt.AddFact(next.Command.RunID, privaterunforkrevision.FamilyTimers, next.ID)",
 		}},
 		{"pipelinepersistence/workflow_engine_mutation_commit.go", "commitWorkflowEngineState", []string{
-			"commitPostgresWorkflowEngineState(ctx, tx, effects, record)", "commitSQLiteWorkflowEngineState(ctx, tx, record)",
-			"effects.AddFact(record.Identity.RunID, privaterunforkrevision.FamilyEntityMetadata, record.EntityID)",
+			"commitPostgresWorkflowEngineState(ctx, tx, attempt, record)", "commitSQLiteWorkflowEngineState(ctx, tx, record)",
+			"attempt.AddFact(record.Identity.RunID, privaterunforkrevision.FamilyEntityMetadata, record.EntityID)",
 		}},
 		{"pipelinepersistence/workflow_engine_mutation_commit.go", "commitPostgresWorkflowEngineState", []string{
-			"effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)",
-			"effects.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)",
+			"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)",
+			"attempt.AddFact(storedRunID, privaterunforkrevision.FamilyEntityMetadata, storedEntityID)",
 		}},
-		{"eventrecord/postgres/adapter.go", "Insert", []string{"runforkrevision.NewFactRef(runforkrevision.FamilyEvents, storedEventID)", "effects.AddFacts(storedRunID, ref)"}},
-		{"eventrecord/sqlite/adapter.go", "Insert", []string{"runforkrevision.NewFactRef(runforkrevision.FamilyEvents, record.EventID)", "effects.AddFacts(record.RunID, ref)"}},
+		{"eventrecord/postgres/adapter.go", "Insert", []string{"attempt.AddFact(storedRunID, runforkrevision.FamilyEvents, storedEventID)"}},
+		{"eventrecord/sqlite/adapter.go", "Insert", []string{"attempt.AddFact(record.RunID, runforkrevision.FamilyEvents, record.EventID)"}},
 		{"pipelinepersistence/owner_operations.go", "insertCommittedPipelineScopeTx", []string{
-			"declareEventRevisionFact(ctx, tx, effects, eventID, privaterunforkrevision.FamilyCommittedReplayScopes, eventID)",
-			"declareEventRevisionFact(ctx, tx, effects, eventID, privaterunforkrevision.FamilyCommittedReplayScopes, eventID)",
+			"declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyCommittedReplayScopes, eventID)",
+			"declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyCommittedReplayScopes, eventID)",
 		}},
-		{"pipelinepersistence/owner_operations.go", "writeExactPlatformPipelineReceipt", []string{"uuid.NewString()", "declareEventRevisionFact(ctx, tx, effects, eventID, privaterunforkrevision.FamilyEventReceipts, receiptID)"}},
-		{"pipelinepersistence/owner_operations.go", "declareEventRevisionFact", []string{"privaterunforkrevision.NewFactRef(family, key)", "effects.AddFacts(runID.String, ref)"}},
-		{"delivery/adapter.go", "Adapter.insertExactObligation", []string{"effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.claimLocked", []string{"effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.BindAgentSession", []string{"effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.RenewClaim", []string{"effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
-		{"delivery/adapter.go", "Adapter.prepareProviderOriginRecovery", []string{"effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
-		{"delivery/adapter.go", "Adapter.settle", []string{"effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.CommitPipelineHandoff", []string{"effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
-		{"delivery/adapter.go", "Adapter.terminalizeDeliveries", []string{"effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, id)"}},
-		{"delivery/adapter.go", "Adapter.persistHandlerRuleSelection", []string{"effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
-		{"delivery/adapter.go", "Adapter.insertAttempt", []string{"effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
-		{"delivery/adapter.go", "Adapter.expireAttempt", []string{"effects.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.completeAttempt", []string{"effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
-		{"delivery/adapter.go", "Adapter.closeAttemptForTerminalization", []string{"effects.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
-		{"delivery/adapter.go", "Adapter.insertTerminalizedAttempt", []string{"effects.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
-		{"delivery/adapter.go", "Adapter.insertOutcome", []string{"declareOutcomeDeadLetterEffects(ctx, tx, effects, deliveryID, version)"}},
-		{"delivery/dead_letters.go", "declareDeadLetterEffect", []string{"privaterunforkrevision.RunIDForEvent(ctx, tx, eventID)", "effects.AddFact(runID, privaterunforkrevision.FamilyDeadLetters, deadLetterID)"}},
-		{"delivery/dead_letters.go", "declareOutcomeDeadLetterEffects", []string{"effects.AddFact(runID.String, privaterunforkrevision.FamilyDeadLetters, deadLetterID)"}},
-		{"delivery/dead_letters.go", "insertPostgresDeadLetterRecord", []string{"uuid.NewString()", "declareDeadLetterEffect(ctx, tx, effects, rec.OriginalEventID, deadLetterID)"}},
-		{"delivery/dead_letters.go", "insertSQLiteDeadLetterRecord", []string{"uuid.NewString()", "declareDeadLetterEffect(ctx, tx, effects, rec.OriginalEventID, deadLetterID)"}},
-		{"delivery/lifecycle.go", "DeliveryPostgresOwner.renewClaimTx", []string{"postgresDeliveryAdapter.RenewClaim(ctx, tx, effects, claim, lease)"}},
-		{"delivery/lifecycle.go", "DeliverySQLiteOwner.renewClaimTx", []string{"sqliteDeliveryAdapter.RenewClaim(ctx, tx, effects, claim, lease)"}},
-		{"delivery/lifecycle.go", "DeliveryPostgresOwner.TerminalizeRunDeliveriesTx", []string{"postgresDeliveryAdapter.TerminalizeRun(ctx, tx, effects, story, runID, reason)", "s.RecordDeadLetterTx(ctx, tx, story, effects, diagnostic, false)"}},
-		{"delivery/lifecycle.go", "DeliverySQLiteOwner.TerminalizeRunDeliveriesTx", []string{"sqliteDeliveryAdapter.TerminalizeRun(ctx, tx, effects, story, runID, reason)", "s.RecordDeadLetterTx(ctx, tx, story, effects, diagnostic, false)"}},
-		{"delivery/receiver_materialization.go", "Adapter.TerminalizeMaterializationDependents", []string{"a.publicationRecords(ctx, tx, materializer.EventID)", "validateMaterializerAuthority(materializer, record.Snapshot)", "a.terminalizeDeliveries(ctx, tx, effects, story, ids, reason, failure)"}},
+		{"pipelinepersistence/owner_operations.go", "writeExactPlatformPipelineReceipt", []string{"uuid.NewString()", "declareEventRevisionFact(ctx, tx, attempt, eventID, privaterunforkrevision.FamilyEventReceipts, receiptID)"}},
+		{"pipelinepersistence/owner_operations.go", "declareEventRevisionFact", []string{"attempt.AddFact(runID.String, family, key)"}},
+		{"delivery/adapter.go", "Adapter.insertExactObligation", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.claimLocked", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.BindAgentSession", []string{"a.bindAgentSessionTx(ctx, tx, attempt, claim, sessionID)"}},
+		{"delivery/adapter.go", "Adapter.bindAgentSessionTx", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.RenewClaim", []string{"a.renewClaimTx(ctx, tx, attempt, claim, leaseTTL)"}},
+		{"delivery/adapter.go", "Adapter.renewClaimTx", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
+		{"delivery/adapter.go", "Adapter.prepareProviderOriginRecovery", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
+		{"delivery/adapter.go", "Adapter.settle", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.CommitPipelineHandoff", []string{"a.commitPipelineHandoffTx(ctx, tx, attempt, eventID)"}},
+		{"delivery/adapter.go", "Adapter.commitPipelineHandoffTx", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
+		{"delivery/adapter.go", "Adapter.terminalizeDeliveries", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, id)"}},
+		{"delivery/adapter.go", "Adapter.persistHandlerRuleSelection", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
+		{"delivery/adapter.go", "Adapter.insertAttempt", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
+		{"delivery/adapter.go", "Adapter.expireAttempt", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.completeAttempt", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
+		{"delivery/adapter.go", "Adapter.closeAttemptForTerminalization", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
+		{"delivery/adapter.go", "Adapter.insertTerminalizedAttempt", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
+		{"delivery/adapter.go", "Adapter.insertOutcome", []string{"declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)"}},
+		{"delivery/dead_letters.go", "declareDeadLetterEffect", []string{"privaterunforkrevision.RunIDForEvent(ctx, tx, eventID)", "attempt.AddFact(runID, privaterunforkrevision.FamilyDeadLetters, deadLetterID)"}},
+		{"delivery/dead_letters.go", "declareOutcomeDeadLetterEffects", []string{"attempt.AddFact(runID.String, privaterunforkrevision.FamilyDeadLetters, deadLetterID)"}},
+		{"delivery/dead_letters.go", "insertPostgresDeadLetterRecord", []string{"uuid.NewString()", "declareDeadLetterEffect(ctx, tx, attempt, rec.OriginalEventID, deadLetterID)"}},
+		{"delivery/dead_letters.go", "insertSQLiteDeadLetterRecord", []string{"uuid.NewString()", "declareDeadLetterEffect(ctx, tx, attempt, rec.OriginalEventID, deadLetterID)"}},
+		{"delivery/lifecycle.go", "DeliveryPostgresOwner.renewClaimTx", []string{"postgresDeliveryAdapter.RenewClaim(ctx, attempt, claim, lease)"}},
+		{"delivery/lifecycle.go", "DeliverySQLiteOwner.renewClaimTx", []string{"sqliteDeliveryAdapter.RenewClaim(ctx, attempt, claim, lease)"}},
+		{"delivery/lifecycle.go", "DeliveryPostgresOwner.TerminalizeRunDeliveriesTx", []string{"postgresDeliveryAdapter.TerminalizeRun(ctx, attempt, runID, reason)", "s.RecordDeadLetterTx(ctx, attempt, diagnostic, false)"}},
+		{"delivery/lifecycle.go", "DeliverySQLiteOwner.TerminalizeRunDeliveriesTx", []string{"sqliteDeliveryAdapter.TerminalizeRun(ctx, attempt, runID, reason)", "s.RecordDeadLetterTx(ctx, attempt, diagnostic, false)"}},
+		{"delivery/receiver_materialization.go", "Adapter.TerminalizeMaterializationDependents", []string{"a.terminalizeMaterializationDependentsTx(ctx, tx, attempt, materializer)"}},
+		{"delivery/receiver_materialization.go", "Adapter.terminalizeMaterializationDependentsTx", []string{"a.publicationRecords(ctx, tx, materializer.EventID)", "validateMaterializerAuthority(materializer, record.Snapshot)", "a.terminalizeDeliveries(ctx, tx, attempt, ids, reason, failure)"}},
 		{"pipelinepersistence/publication_settlement_kernel.go", "settlePipelineMemberTx", []string{
-			"writePipelineDispositionTx(ctx, tx, effects, claim.EventID(), claim.Purpose(), disposition, postgres, now)",
-			"postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, effects, claim.EventID())",
-			"sqliteDeliveryAdapter.CommitPipelineHandoff(ctx, tx, effects, claim.EventID())",
+			"writePipelineDispositionTx(ctx, tx, attempt, claim.EventID(), claim.Purpose(), disposition, postgres, now)",
+			"postgresDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())",
+			"sqliteDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())",
 		}},
-		{"pipelinepersistence/fan_out_obligation.go", "insertFanOutEntitySourceRevisionTx", []string{"effects.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"pipelinepersistence/fan_out_obligation.go", "commitFanOutIntentTx", []string{"privaterunforkrevision.FanOutIntentFact(request.Key)", "effects.AddFacts(request.Key.RunID, ref)"}},
-		{"pipelinepersistence/fan_out_owner.go", "blockFanOutClaim", []string{"privaterunforkrevision.FanOutIntentFact(request.Claim.Key)", "effects.AddFacts(request.Claim.Key.RunID, ref)"}},
+		{"pipelinepersistence/fan_out_obligation.go", "insertFanOutEntitySourceRevisionTx", []string{"facts.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
+		{"pipelinepersistence/fan_out_obligation.go", "commitFanOutIntentTx", []string{"insertFanOutIntentSQL(ctx, tx, postgres, attempt, request, stateFields, triggerEventID, createdAt)"}},
+		{"pipelinepersistence/fan_out_obligation.go", "insertFanOutIntentSQL", []string{"privaterunforkrevision.FanOutIntentFact(request.Key)", "facts.AddFacts(request.Key.RunID, ref)"}},
+		{"pipelinepersistence/fan_out_owner.go", "blockFanOutClaim", []string{"privaterunforkrevision.FanOutIntentFact(request.Claim.Key)", "attempt.AddFacts(request.Claim.Key.RunID, ref)"}},
 		{"pipelinepersistence/fan_out_owner.go", "commitFanOutChunk", []string{
-			"privaterunforkrevision.FanOutOutcomeFact(command.Claim.Key, outcome.Ordinal)", "effects.AddFacts(command.Claim.Key.RunID, ref)",
-			"privaterunforkrevision.FanOutIntentFact(command.Claim.Key)", "effects.AddFacts(command.Claim.Key.RunID, ref)",
+			"privaterunforkrevision.FanOutOutcomeFact(command.Claim.Key, outcome.Ordinal)", "attempt.AddFacts(command.Claim.Key.RunID, ref)",
+			"privaterunforkrevision.FanOutIntentFact(command.Claim.Key)", "attempt.AddFacts(command.Claim.Key.RunID, ref)",
 		}},
 		{"pipelinepersistence/fan_out_owner.go", "cancelRunFanOut", []string{"privaterunforkrevision.FanOutIntentFact(intent.Request.Key)", "effects.AddFacts(runID, ref)"}},
 		{"pipelinepersistence/fan_out_barrier_owner.go", "addFanOutBarrierRevisionEffect", []string{"privaterunforkrevision.FanOutBarrierFact(key)", "effects.AddFacts(key.RunID, ref)"}},
-		{"pipelinepersistence/fan_out_barrier_owner.go", "advanceFanOutDeliveryBarriersTx", []string{"addFanOutBarrierRevisionEffect(effects, registration.IntentKey)"}},
+		{"pipelinepersistence/fan_out_barrier_owner.go", "advanceFanOutDeliveryBarriersTx", []string{"addFanOutBarrierRevisionEffect(attempt, registration.IntentKey)"}},
 		{"pipelinepersistence/fan_out_barrier_owner.go", "suppressSupersededArmedFanOutBarrierTx", []string{"addFanOutBarrierRevisionEffect(effects, registration.IntentKey)"}},
-		{"pipelinepersistence/fan_out_barrier_owner.go", "suppressSupersededPendingFanOutBarriersTx", []string{"addFanOutBarrierRevisionEffect(effects, registration.IntentKey)"}},
+		{"pipelinepersistence/fan_out_barrier_owner.go", "suppressSupersededPendingFanOutBarriersTx", []string{"addFanOutBarrierRevisionEffect(attempt, registration.IntentKey)"}},
 		{"pipelinepersistence/fan_out_barrier_owner.go", "terminalizeDeadLetteredFanOutBarrierOutcomesTx", []string{"addFanOutBarrierRevisionEffect(effects, key)"}},
 		{"pipelinepersistence/fan_out_barrier_owner.go", "suppressRunTerminalFanOutBarriersTx", []string{"addFanOutBarrierRevisionEffect(effects, candidate.key)"}},
-		{"pipelinepersistence/fan_out_barrier_owner.go", "materializeRunForkFanOutBarrierTx", []string{"addFanOutBarrierRevisionEffect(effects, registration.IntentKey)"}},
-		{"pipelinepersistence/fan_out_barrier_owner.go", "commitFanOutBarrierRegistrationTx", []string{"addFanOutBarrierRevisionEffect(effects, registration.IntentKey)"}},
-		{"pipelinepersistence/fan_out_barrier_owner.go", "commitFanOutBarrierCompletionTx", []string{"addFanOutBarrierRevisionEffect(effects, key)"}},
+		{"pipelinepersistence/fan_out_barrier_owner.go", "materializeRunForkFanOutBarrierTx", []string{"addFanOutBarrierRevisionEffect(attempt, registration.IntentKey)"}},
+		{"pipelinepersistence/fan_out_barrier_owner.go", "commitFanOutBarrierRegistrationTx", []string{"attempt.AddFacts(registration.IntentKey.RunID, fact)"}},
+		{"pipelinepersistence/fan_out_barrier_owner.go", "commitFanOutBarrierCompletionTx", []string{"attempt.AddFacts(key.RunID, ref)"}},
 		{"runforkpersistence/run_fork_fan_out_materializer.go", "materializeRunForkFanOutObligations", []string{
-			"runforkrevision.FanOutIntentFact(intent.Request.Key)", "effects.AddFacts(forkRunID, intentRef)",
-			"runforkrevision.FanOutOutcomeFact(intent.Request.Key, outcome.Ordinal)", "effects.AddFacts(forkRunID, outcomeRef)",
+			"runforkrevision.FanOutIntentFact(intent.Request.Key)", "attempt.AddFacts(forkRunID, intentRef)",
+			"runforkrevision.FanOutOutcomeFact(intent.Request.Key, outcome.Ordinal)", "attempt.AddFacts(forkRunID, outcomeRef)",
 		}},
-		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkFanOutPendingReplays", []string{"runforkrevision.FanOutOutcomeFact(key, replay.Ordinal)", "effects.AddFacts(forkRunID, ref)"}},
+		{"runforkpersistence/run_fork_fan_out_materializer.go", "bindRunForkFanOutPendingReplays", []string{"runforkrevision.FanOutOutcomeFact(key, replay.Ordinal)", "attempt.AddFacts(forkRunID, ref)"}},
 	}
 }
 
@@ -375,8 +389,10 @@ func validateRevisionWriterCalls(source string, contract revisionExactWriterCont
 			return true
 		}
 		calls[revisionGuardNode(call)]++
-		if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "Add" && revisionGuardNode(selector.X) == "effects" {
-			whole = true
+		if selector, ok := call.Fun.(*ast.SelectorExpr); ok {
+			if selector.Sel.Name == "AddWholeFamily" || selector.Sel.Name == "Add" && revisionGuardNode(selector.X) == "effects" {
+				whole = true
+			}
 		}
 		return true
 	})
@@ -402,14 +418,13 @@ func validateRevisionWriterCalls(source string, contract revisionExactWriterCont
 func TestRunForkRevisionExplicitBroadWriterContributions(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	for _, contract := range []revisionExactWriterContract{
-		{"runlifecycle/active_run_quiescence.go", "terminateActiveRunSessionsTx", []string{"effects.Add(runID, runforkrevision.FamilyAgentSessions)"}},
-		{"runlifecycle/active_run_quiescence.go", "sqliteTerminateActiveRunSessionsTx", []string{"effects.Add(runID, runforkrevision.FamilyAgentSessions)"}},
 		{"pipelinepersistence/standing_service.go", "standingServiceAdapter.quiesceStandingRunTx", []string{
-			"s.revisionEffects.Add(runID, privaterunforkrevision.FamilyAgentSessions)",
-			"s.revisionEffects.Add(runID, privaterunforkrevision.FamilyAgentSessions)",
+			"s.attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyAgentSessions)",
+			"s.attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyAgentSessions)",
 		}},
-		{"delivery/adapter.go", "Adapter.ActivateNormalAuthority", []string{"declareAuthorityDeliveryRuns(ctx, tx, authority, effects)"}},
-		{"delivery/lifecycle.go", "declareAuthorityDeliveryRuns", []string{"effects.Add(runID, privaterunforkrevision.FamilyEventDeliveries)"}},
+		{"delivery/adapter.go", "Adapter.ActivateNormalAuthority", []string{"a.activateNormalAuthorityTx(ctx, tx, attempt, authority)"}},
+		{"delivery/adapter.go", "Adapter.activateNormalAuthorityTx", []string{"declareAuthorityDeliveryRuns(ctx, tx, authority, attempt)"}},
+		{"delivery/lifecycle.go", "declareAuthorityDeliveryRuns", []string{"attempt.AddWholeFamily(runID, privaterunforkrevision.FamilyEventDeliveries)"}},
 	} {
 		body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", contract.path))
 		if err != nil {
@@ -426,11 +441,11 @@ func TestRunForkRevisionEnumeratedWriterContributions(t *testing.T) {
 	for _, row := range []struct {
 		path, symbol, rangeOver, call string
 	}{
-		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", "result.Subordinate.Sessions", "effects.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.PreviousSessionID)"},
-		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", "result.Subordinate.Sessions", "effects.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.SuccessorSessionID)"},
-		{"llmpersistence/owner.go", "addAgentSessionFacts", "otherSessionIDs", "effects.AddFact(runID, runforkrevision.FamilyAgentSessions, id)"},
-		{"workflowtimer/cancellation.go", "CancelRunsTx", "refs", "effects.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"},
-		{"genericschedule/owner.go", "CancelRunsTx", "refs", "CancelTx(ctx, tx, postgres, effects, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"},
+		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", "result.Subordinate.Sessions", "attempt.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.PreviousSessionID)"},
+		{"agentpersistence/lifecycle.go", "addLifecycleRevisionEffects", "result.Subordinate.Sessions", "attempt.AddFact(session.RunID, privaterunforkrevision.FamilyAgentSessions, session.SuccessorSessionID)"},
+		{"llmpersistence/owner.go", "addAgentSessionFacts", "otherSessionIDs", "attempt.AddFact(runID, runforkrevision.FamilyAgentSessions, id)"},
+		{"workflowtimer/cancellation.go", "cancelRunsSQL", "refs", "facts.AddFact(ref.RunID, privaterunforkrevision.FamilyTimers, ref.ActivationID)"},
+		{"genericschedule/owner.go", "cancelRunsTx", "refs", "CancelTx(ctx, attempt, postgres, runtimegenericschedule.CancelCommand{ActivationID: ref.ActivationID, Cause: cause, CancelledAt: cancelledAt})"},
 	} {
 		body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", row.path))
 		if err != nil {
@@ -458,7 +473,7 @@ func TestRunForkRevisionEnumeratedWriterContributions(t *testing.T) {
 }
 
 func validateRevisionResetAllContribution(source, symbol string, sqlite bool) error {
-	const required = "addAgentSessionFacts(effects, disposition.RunID, disposition.SessionID)"
+	const required = "addAgentSessionFacts(attempt, disposition.RunID, disposition.SessionID)"
 	if err := validateRevisionExactWriter(source, revisionExactWriterContract{symbol: symbol, calls: []string{required}}); err != nil {
 		return err
 	}
@@ -467,14 +482,13 @@ func validateRevisionResetAllContribution(source, symbol string, sqlite bool) er
 		return err
 	}
 	fn := functions[symbol]
-	guardSource := `package p; func f() { if err := ` + required + `; err != nil { return err } }; func reset() { if err := handoff.ResetAttempt(); err != nil { return err } }`
+	guardSource := `package p; func f() { if err := ` + required + `; err != nil { return err } }`
 	guards, err := revisionGuardFunctions(guardSource)
 	if err != nil {
 		return err
 	}
 	wantFirst := revisionGuardNode(guards["f"].Body.List[0])
-	wantReset := revisionGuardNode(guards["reset"].Body.List[0])
-	loops, resets := 0, 0
+	loops := 0
 	var whole, invalid bool
 	ast.Inspect(fn.Body, func(node ast.Node) bool {
 		if loop, ok := node.(*ast.RangeStmt); ok && revisionGuardNode(loop.X) == "summary.OrphanedSessions" {
@@ -491,22 +505,10 @@ func validateRevisionResetAllContribution(source, symbol string, sqlite bool) er
 		if revisionGuardNode(call.Fun) == "addAgentSessionEffect" {
 			whole = true
 		}
-		if sqlite && revisionGuardNode(call.Fun) == "s.runRuntimeMutationOutcome" {
-			for _, arg := range call.Args {
-				if callback, ok := arg.(*ast.FuncLit); ok {
-					resets++
-					// Both attempt-local owners reset before any reads/mutations;
-					// cancellation failure must abort, not permit stale submission.
-					if len(callback.Body.List) < 2 || revisionGuardNode(callback.Body.List[0]) != wantReset || revisionGuardNode(callback.Body.List[1]) != "summary = runtimesessions.ResetSummary{}" {
-						invalid = true
-					}
-				}
-			}
-		}
 		return true
 	})
-	if loops != 1 || whole || invalid || (sqlite && resets != 1) {
-		return fmt.Errorf("%s must contribute every physical session before dedup and reset SQLite handoff then summary before mutation: loops=%d whole=%v invalid=%v callbacks=%d", symbol, loops, whole, invalid, resets)
+	if loops != 1 || whole || invalid {
+		return fmt.Errorf("%s must contribute every physical session before run dedup: loops=%d whole=%v invalid=%v", symbol, loops, whole, invalid)
 	}
 	return nil
 }
@@ -559,6 +561,7 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 		{"wrong_run", strings.Replace(valid, "(runID,", "(foreignRunID,", 1), true},
 		{"wrong_family", strings.Replace(valid, "FamilyEntityMutations", "FamilyEntityMetadata", 1), true},
 		{"whole_fallback", strings.Replace(valid, "return effects", "_ = effects.Add(runID, revision.FamilyEntityMutations); return effects", 1), true},
+		{"attempt_whole_fallback", strings.Replace(valid, "return effects", "_ = attempt.AddWholeFamily(runID, revision.FamilyEntityMutations); return effects", 1), true},
 		{"other_function", strings.Replace(valid, "func write", "func unrelated", 1) + `; func write() error { return nil }`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -608,11 +611,9 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 		}
 	})
 	t.Run("reset_all_physical_sessions_before_run_dedup", func(t *testing.T) {
-		contribution := `if err := addAgentSessionFacts(effects, disposition.RunID, disposition.SessionID); err != nil { return err };`
+		contribution := `if err := addAgentSessionFacts(attempt, disposition.RunID, disposition.SessionID); err != nil { return err };`
 		dedup := `if _, exists := seenRuns[disposition.RunID]; exists { continue };`
-		handoffReset := `if err := handoff.ResetAttempt(); err != nil { return err };`
-		summaryReset := `summary = runtimesessions.ResetSummary{};`
-		valid := `package p; func (s *SQLite) ResetAll() { s.runRuntimeMutationOutcome(ctx, label, effects, func() error { ` + handoffReset + summaryReset + ` for _, disposition := range summary.OrphanedSessions { ` + contribution + dedup + ` seenRuns[disposition.RunID] = struct{}{} }; return nil }) }`
+		valid := `package p; func (s *SQLite) ResetAll() { for _, disposition := range summary.OrphanedSessions { ` + contribution + dedup + ` seenRuns[disposition.RunID] = struct{}{} } }`
 		for _, tc := range []struct {
 			name, source string
 			wantError    bool
@@ -621,15 +622,7 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 			{"after_dedup", strings.Replace(valid, contribution+dedup, dedup+contribution, 1), true},
 			{"first_session_only", strings.Replace(valid, "range summary.OrphanedSessions", "range summary.OrphanedSessions[:1]", 1), true},
 			{"wrong_physical_key", strings.Replace(valid, "disposition.SessionID", "disposition.RunID", 1), true},
-			{"whole_helper", strings.Replace(valid, contribution, contribution+`_ = addAgentSessionEffect(effects, disposition.RunID);`, 1), true},
-			{"missing_handoff_reset", strings.Replace(valid, handoffReset, "", 1), true},
-			{"late_handoff_reset", strings.Replace(valid, handoffReset+summaryReset, summaryReset+handoffReset, 1), true},
-			{"ignored_handoff_error", strings.Replace(valid, handoffReset, `_ = handoff.ResetAttempt();`, 1), true},
-			{"swallowed_handoff_error", strings.Replace(valid, handoffReset, `if err := handoff.ResetAttempt(); err != nil { return nil };`, 1), true},
-			{"wrong_handoff_owner", strings.Replace(valid, "handoff.ResetAttempt()", "other.ResetAttempt()", 1), true},
-			{"mutation_before_handoff_reset", strings.Replace(valid, handoffReset, "mutate();"+handoffReset, 1), true},
-			{"missing_summary_reset", strings.Replace(valid, "summary = runtimesessions.ResetSummary{};", "", 1), true},
-			{"late_summary_reset", strings.Replace(valid, "summary = runtimesessions.ResetSummary{};", "scan(); summary = runtimesessions.ResetSummary{};", 1), true},
+			{"whole_helper", strings.Replace(valid, contribution, contribution+`_ = addAgentSessionEffect(attempt, disposition.RunID);`, 1), true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				if err := validateRevisionResetAllContribution(tc.source, "SQLite.ResetAll", true); (err != nil) != tc.wantError {
