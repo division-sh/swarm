@@ -195,7 +195,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 			DataPinOverrides:  params.DataPinOverrides,
 			ContractSelection: contractSelection,
 		})
-		if err != nil && !result.activationAcknowledged {
+		if err != nil && (!result.activationAcknowledged || params.IdempotencyKey == "") {
 			return apiidempotency.Completion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
 		}
 		if result.BundleHash == "" {
