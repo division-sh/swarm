@@ -106,7 +106,6 @@ var directEventSQLTestFixtures = map[string]int{
 	"internal/store/internal/runtimepersistence/event_schema_contract_test.go": 2,
 	// These low-level revision/rollback probes insert inside a caller-owned
 	// transaction to test exact history and lock boundaries, not publication.
-	"internal/store/internal/runtimepersistence/event_semantic_fixture_test.go":                  1,
 	"internal/store/internal/runtimepersistence/run_fork_revision_selected_store_parity_test.go": 2,
 	// This pre-existing native batch-query differential seeds an admitted record
 	// into an isolated read-only probe schema; it never publishes or dispatches.
