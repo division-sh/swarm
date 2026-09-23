@@ -17,16 +17,23 @@ func committedCompletionCleanup(response *Response, err error) bool {
 	if response == nil || response.completionAttempt == nil {
 		return false
 	}
-	return completionCleanupOnly(err, *response.completionAttempt)
+	return completionCleanupOnly(err, *response.completionAttempt, 0)
 }
 
-func completionCleanupOnly(err error, attempt runtimeeffects.Attempt) bool {
+func committedCompletionCleanupPhase(err error, attempt runtimeeffects.Attempt, phase runtimeeffects.MutationPhase) bool {
+	return completionCleanupOnly(err, attempt, phase)
+}
+
+func completionCleanupOnly(err error, attempt runtimeeffects.Attempt, requiredPhase runtimeeffects.MutationPhase) bool {
 	if err == nil {
 		return false
 	}
 	if committed, ok := err.(*runtimeeffects.PostCommitMutationError); ok {
 		if committed.OperationID != attempt.OperationID || committed.AttemptID != attempt.AttemptID || committed.Cause == nil ||
 			attempt.OperationID == "" || attempt.AttemptID == "" {
+			return false
+		}
+		if requiredPhase != 0 && committed.Phase != requiredPhase {
 			return false
 		}
 		switch committed.Phase {
@@ -43,14 +50,14 @@ func completionCleanupOnly(err error, attempt runtimeeffects.Attempt) bool {
 			return false
 		}
 		for _, cause := range causes {
-			if !completionCleanupOnly(cause, attempt) {
+			if !completionCleanupOnly(cause, attempt, requiredPhase) {
 				return false
 			}
 		}
 		return true
 	}
 	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		return completionCleanupOnly(wrapped.Unwrap(), attempt)
+		return completionCleanupOnly(wrapped.Unwrap(), attempt, requiredPhase)
 	}
 	return false
 }
