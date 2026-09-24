@@ -11,7 +11,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type InboundDeliveryBatch struct {
@@ -184,25 +183,14 @@ func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan Inbound
 		return nil, fmt.Errorf("committed inbound publication evidence count differs from prepared batch")
 	}
 	prepared := append([]PreparedPublish(nil), plan.prepared...)
+	var finalizationErr error
 	for index := range prepared {
-		if err := committed[index].Validate(); err != nil {
-			return nil, fmt.Errorf("validate inbound publication evidence %d: %w", index, err)
-		}
-		var err error
-		prepared[index], err = prepared[index].WithCommitOutcome(committed[index].AppendOutcome)
-		if err != nil {
-			return nil, err
-		}
-		prepared[index].committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed[index].DeliveryHandoffs...)
-		if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed[index].Activations); err != nil {
-			return nil, err
-		}
-		if err := eb.finalizeCommittedAgentReadiness(ctx, prepared[index].Event, prepared[index].plan.DeliveryRoutes()); err != nil {
-			return nil, err
-		}
-		if eb.testLifecycleProbe != nil && !prepared[index].exactDuplicate {
-			eb.notifyTestPublishPersisted(ctx, prepared[index].Event, prepared[index].plan)
-		}
+		consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared[index], committed[index])
+		prepared[index] = consequences.prepared
+		finalizationErr = errors.Join(finalizationErr, err)
+	}
+	if finalizationErr != nil {
+		return nil, errors.Join(finalizationErr, eb.AbandonInboundDeliveryPlan(context.WithoutCancel(ctx), plan))
 	}
 	return prepared, nil
 }

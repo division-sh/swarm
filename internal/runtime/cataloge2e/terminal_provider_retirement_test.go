@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -177,6 +178,21 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 				defer probe.once.Do(func() { close(probe.release) })
 				path := "worker-flow/worker-001"
 				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				if activity && launched && os.Getenv("SWARM_2412_COST_DIAGNOSTICS") == "1" {
+					var selected any = h.sqlite
+					if h.pg != nil {
+						selected = h.pg
+					}
+					collector := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+					before, started := collector.Snapshot(), time.Now()
+					defer func() {
+						after := collector.Snapshot()
+						t.Logf("2412 activity cost backend=%s elapsed=%s begin=%d reads=%d writes=%d commit_attempts=%d rollbacks=%d revision_exec=%d revision_query=%d revision_queryrow=%d", backend, time.Since(started),
+							after.Total.BeginAttempts-before.Total.BeginAttempts, after.Total.ReadCommits-before.Total.ReadCommits, after.Total.WriteCommits-before.Total.WriteCommits,
+							after.Total.CommitAttempts-before.Total.CommitAttempts, after.Total.RollbackAttempts-before.Total.RollbackAttempts,
+							after.Total.Revision.ExecCalls-before.Total.Revision.ExecCalls, after.Total.Revision.QueryCalls-before.Total.Revision.QueryCalls, after.Total.Revision.QueryRowCalls-before.Total.Revision.QueryRowCalls)
+					}()
+				}
 				ctx := catalogRunContext(h, catalogRuntimeRunID)
 				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/worker.ready"), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entity), path), eventtest.ConcreteTemplateRoutingSource("worker-flow", path, entity), time.Now().UTC())

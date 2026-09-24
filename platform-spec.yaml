@@ -3311,6 +3311,12 @@ handler_specification:
       prerequisites retains an exact recovery disposition and cannot be dispatched directly. A diagnostic-only
       notification failure cannot erase or reclassify an already committed publication. The exact delivery
       continuation is released or retained from its typed outcome even when later notification or cleanup fails.
+      Immediate, intercepted, deferred and inbound-batch publication paths consume the same committed-consequence
+      decision while retaining their distinct admission and exact claim authority. A failure in one committed batch
+      item does not skip sibling finalization; an item with failed prerequisites releases its exact local claim for
+      durable recovery, whereas an acknowledged item with only a diagnostic remains dispatchable. Handler execution
+      finishes its exact claim once from the typed committed, retry or terminal outcome, not from a caller-local
+      reconstruction of whether cleanup succeeded.
       An activity-request event admitted in the selected-store mutation is carried unchanged through immediate or
       deferred post-commit dispatch. Consumers use the committed publication's exact event, including its timestamp
       and route projection; they MUST NOT reconstruct a second event with the same ID after COMMIT or retry a failed

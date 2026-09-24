@@ -305,13 +305,17 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	if committed.Replay {
 		return committed.Completion, true, errors.Join(commitErr, prepared.publicationClaim.Release(handoffCtx))
 	}
-	prepared, err = eb.applyCommittedPublication(handoffCtx, prepared, committed.Publication)
-	if err != nil {
+	prepared, ready, finalizationErr := eb.applyCommittedPublication(handoffCtx, prepared, committed.Publication)
+	if !ready {
+		err = finalizationErr
 		eb.reportLocalDispatchFailure("api_event_publication_finalize_failed", evt, err)
 		if commitErr != nil {
 			return committed.Completion, false, errors.Join(commitErr, err)
 		}
 		return committed.Completion, false, nil
+	}
+	if finalizationErr != nil {
+		eb.reportLocalDispatchFailure("api_event_publication_finalize_diagnostic", evt, finalizationErr)
 	}
 	if prepared.exactDuplicate {
 		err = eb.DispatchPreparedPublish(handoffCtx, prepared)
@@ -372,11 +376,8 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 	if err := committed.Validate(); err != nil {
 		return PreparedPublish{}, false, errors.Join(commitErr, err, prepared.publicationClaim.Release(publicationHandoffContext(preparedCtx, commitErr)))
 	}
-	prepared, err = eb.applyCommittedPublication(publicationHandoffContext(preparedCtx, commitErr), prepared, committed)
-	if err != nil {
-		return PreparedPublish{}, false, errors.Join(commitErr, err)
-	}
-	return prepared, true, commitErr
+	prepared, ready, err := eb.applyCommittedPublication(publicationHandoffContext(preparedCtx, commitErr), prepared, committed)
+	return prepared, ready, errors.Join(commitErr, err)
 }
 
 func publicationHandoffContext(ctx context.Context, commitErr error) context.Context {
@@ -404,35 +405,16 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 	return preparedCtx, prepared, command, err
 }
 
-func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared PreparedPublish, committed CommittedPublication) (result PreparedPublish, err error) {
+func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared PreparedPublish, committed CommittedPublication) (result PreparedPublish, ready bool, err error) {
 	claim := prepared.publicationClaim
 	if claim == nil {
-		return PreparedPublish{}, errors.New("committed publication requires its exact claim")
+		return PreparedPublish{}, false, errors.New("committed publication requires its exact claim")
 	}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = errors.Join(err, fmt.Errorf("committed publication finalization panic: %v", recovered))
-		}
-		if err != nil {
-			err = errors.Join(err, claim.Release(ctx))
-			result = PreparedPublish{}
-		}
-	}()
-	prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
-	if err != nil {
-		return PreparedPublish{}, err
+	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared, committed)
+	if !consequences.ready {
+		return PreparedPublish{}, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 	}
-	prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
-	if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations); err != nil {
-		return PreparedPublish{}, err
-	}
-	if err := eb.finalizeCommittedAgentReadiness(ctx, prepared.Event, prepared.plan.DeliveryRoutes()); err != nil {
-		return PreparedPublish{}, err
-	}
-	if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
-		eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
-	}
-	return prepared, nil
+	return consequences.prepared, true, err
 }
 
 func (eb *EventBus) requireExistingRunActive(ctx context.Context, event events.Event) error {
@@ -1958,7 +1940,7 @@ func admittedEventContext(ctx context.Context, admitted events.AdmittedEvent) co
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
-	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
+	if err := (engineDispatcher{bus: eb}).flushCommittedPublicationPredecessor(ctx, []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
 		return err
 	}
 	if evt.Type() == "" {

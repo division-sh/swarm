@@ -747,120 +747,156 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				State:           application.State(),
 			}, false, emissions != nil && !emissions.dispatchInline)
 		}()
-		if evidenceErr := consumeHandlerSettlementEvidence(result, claim, emissions); evidenceErr != nil {
-			return false, errors.Join(err, evidenceErr)
+		handled, finishErr, finishProbeErr := pc.finishClaimedNodeAttempt(claimedNodeAttempt{
+			ctx: executionCtx, statusCtx: attemptCtx, node: node, event: evt,
+			claim: claim, heartbeat: heartbeat, started: started,
+			result: result, executionErr: err, emissions: emissions,
+			retryBase: semanticview.HandlerRetryBase(source), recoveryClaim: recoveryClaim,
+		})
+		probeErr = errors.Join(probeErr, finishProbeErr)
+		return handled, finishErr
+	}
+}
+
+type claimedNodeAttempt struct {
+	ctx, statusCtx context.Context
+	node           identity.ExecutableNode
+	event          events.Event
+	claim          runtimedelivery.Claim
+	heartbeat      *runtimedelivery.ClaimHeartbeat
+	started        time.Time
+	result         contractHandlerExecutionResult
+	executionErr   error
+	emissions      *pipelineEmissionPlan
+	retryBase      time.Duration
+	recoveryClaim  bool
+}
+
+// finishClaimedNodeAttempt is the single outcome handoff after execution. A
+// committed result is never converted into a retry because cleanup failed.
+func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (handled bool, resultErr, probeErr error) {
+	defer func() { resultErr = errors.Join(resultErr, a.heartbeat.Stop()) }()
+	if err := consumeHandlerSettlementEvidence(a.result, a.claim, a.emissions); err != nil {
+		return false, errors.Join(a.executionErr, err), nil
+	}
+	committed := a.executionErr == nil || a.result.Committed || a.result.SettledDeliveryClaim != nil
+	if committed {
+		for _, emitted := range a.result.Emissions {
+			a.emissions.appendEvent(emitted)
 		}
-		if err == nil || result.Committed || result.SettledDeliveryClaim != nil {
-			postCommitErr := err
-			for _, emitted := range result.Emissions {
-				emissions.appendEvent(emitted)
-			}
-			probeErr = errors.Join(probeErr, pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "completed"))
-			if result.SettledDeliveryClaim != nil {
-				stopErr := heartbeat.Stop()
-				releaser := pc.deliveryRuntime
-				if releaser == nil {
-					return result.Handled, errors.Join(postCommitErr, stopErr, errors.New("terminal workflow node delivery continuation owner is required"))
-				}
-				if err := errors.Join(stopErr, releaser.ReleaseDeliveryContinuation(claim.DeliveryID())); err != nil {
-					return result.Handled, errors.Join(postCommitErr, fmt.Errorf("finish settled workflow node delivery continuation: %w", err))
-				}
-				probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered"))
-				return result.Handled, postCommitErr
-			}
-			sideEffects := []string{"handler_completed"}
-			selection, selectionErr := result.RuleSelection.ResolvedFact()
-			if selectionErr != nil {
-				return result.Handled, errors.Join(postCommitErr, selectionErr)
-			}
-			settlementGuard, settleErr := heartbeat.BeginSettlement()
-			if settleErr != nil {
-				_ = heartbeat.Stop()
-				return result.Handled, errors.Join(postCommitErr, fmt.Errorf("prepare workflow node delivery settlement: %w", settleErr))
-			}
-			snapshot, settleErr := deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started), selection)
-			settled := snapshot.Status == runtimedelivery.StatusDelivered && snapshot.MatchesSettlementClaim(claim)
-			if !settled && settleErr == nil {
-				settleErr = errors.New("workflow node success settlement returned no exact acknowledged snapshot")
-			}
-			finishErr := settlementGuard.Finish(settled)
-			var releaseErr error
-			if settled {
-				releaser := pc.deliveryRuntime
-				if releaser == nil {
-					releaseErr = errors.New("terminal workflow node delivery continuation owner is required")
-				} else {
-					releaseErr = releaser.ReleaseDeliveryContinuation(claim.DeliveryID())
-				}
-			}
-			if err := errors.Join(settleErr, finishErr, releaseErr); err != nil {
-				return result.Handled, errors.Join(postCommitErr, fmt.Errorf("settle workflow node delivery: %w", err))
-			}
-			probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered"))
-			return result.Handled, postCommitErr
+		probeErr = pc.notifyTestLifecycleHandlerCompleted(a.ctx, a.node.Key(), a.event, "completed")
+	} else {
+		probeErr = pc.notifyTestLifecycleHandlerCompleted(a.ctx, a.node.Key(), a.event, "failed")
+	}
+
+	// The engine may already have settled the exact claim in its commit. All
+	// other attempts settle through one guarded store handoff below.
+	if a.result.SettledDeliveryClaim != nil {
+		stopErr := a.heartbeat.Stop()
+		if pc.deliveryRuntime == nil {
+			return a.result.Handled, errors.Join(a.executionErr, stopErr, errors.New("terminal workflow node delivery continuation owner is required")), probeErr
 		}
-		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "failed"))
-		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
+		if err := errors.Join(stopErr, pc.deliveryRuntime.ReleaseDeliveryContinuation(a.claim.DeliveryID())); err != nil {
+			return a.result.Handled, errors.Join(a.executionErr, fmt.Errorf("finish settled workflow node delivery continuation: %w", err)), probeErr
+		}
+		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(a.statusCtx, a.node.Key(), a.event, "delivered"))
+		return a.result.Handled, a.executionErr, probeErr
+	}
+
+	var selection handlerselection.HandlerRuleSelectionFact
+	if committed {
+		var err error
+		selection, err = a.result.RuleSelection.ResolvedFact()
+		if err != nil {
+			return a.result.Handled, errors.Join(a.executionErr, err), probeErr
+		}
+	}
+	guard, err := a.heartbeat.BeginSettlement()
+	if err != nil {
+		if committed {
+			return a.result.Handled, errors.Join(a.executionErr, fmt.Errorf("prepare workflow node delivery settlement: %w", err)), probeErr
+		}
+		return false, errors.Join(a.executionErr, fmt.Errorf("prepare failed workflow node delivery settlement: %w", err)), probeErr
+	}
+
+	var snapshot runtimedelivery.Snapshot
+	var settleErr error
+	if committed {
+		snapshot, settleErr = pc.deliveryStore.SettleSuccess(a.ctx, a.claim, []string{"handler_completed"}, time.Since(a.started), selection)
+	} else {
+		failure := runtimefailures.FromError(a.executionErr, runtimeWorkflowID, "execute_handler")
 		disposition := runtimedelivery.FailureRetry
 		reason := "handler_failure"
-		if admission, ok := managedexecution.FromContext(executionCtx); ok && admission.Kind == managedexecution.KindSelectedContractFork {
+		if admission, ok := managedexecution.FromContext(a.ctx); ok && admission.Kind == managedexecution.KindSelectedContractFork {
 			disposition = runtimedelivery.FailureDeadLetter
 			reason = "terminal_failure"
 		}
-		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) || runtimeengine.FailureDispositionFor(failure) != runtimeengine.FailureDispositionRetry {
+		if errors.Is(a.executionErr, runtimeengine.ErrChainDepthExceeded) || runtimeengine.FailureDispositionFor(failure) != runtimeengine.FailureDispositionRetry {
 			disposition = runtimedelivery.FailureDeadLetter
 			reason = "handler_terminal_failure"
-			if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
+			if errors.Is(a.executionErr, runtimeengine.ErrChainDepthExceeded) {
 				reason = "chain_depth_exceeded"
 			}
 		}
-		settlementGuard, settleErr := heartbeat.BeginSettlement()
-		if settleErr != nil {
-			_ = heartbeat.Stop()
-			return false, errors.Join(err, fmt.Errorf("prepare failed workflow node delivery settlement: %w", settleErr))
-		}
-		snapshot, settleErr := deliveryStore.SettleFailure(executionCtx, claim, runtimedelivery.Settlement{
+		snapshot, settleErr = pc.deliveryStore.SettleFailure(a.ctx, a.claim, runtimedelivery.Settlement{
 			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,
-			Duration: time.Since(started), RetryBase: semanticview.HandlerRetryBase(source),
-			RuleSelection: result.RuleSelection,
+			Duration: time.Since(a.started), RetryBase: a.retryBase,
+			RuleSelection: a.result.RuleSelection,
 		})
-		settled := (snapshot.Status == runtimedelivery.StatusFailed || snapshot.Status == runtimedelivery.StatusDeadLetter) && snapshot.MatchesSettlementClaim(claim)
-		if !settled && settleErr == nil {
+	}
+	settled := snapshot.MatchesSettlementClaim(a.claim) &&
+		((committed && snapshot.Status == runtimedelivery.StatusDelivered) ||
+			(!committed && (snapshot.Status == runtimedelivery.StatusFailed || snapshot.Status == runtimedelivery.StatusDeadLetter)))
+	if !settled && settleErr == nil {
+		if committed {
+			settleErr = errors.New("workflow node success settlement returned no exact acknowledged snapshot")
+		} else {
 			settleErr = errors.New("workflow node failure settlement returned no exact acknowledged snapshot")
 		}
-		finishErr := settlementGuard.Finish(settled)
-		var releaseErr error
-		if settled && snapshot.Status == runtimedelivery.StatusDeadLetter {
-			releaser := pc.deliveryRuntime
-			if releaser == nil {
-				releaseErr = errors.New("terminal workflow node delivery continuation owner is required")
-			} else {
-				releaseErr = releaser.ReleaseDeliveryContinuation(snapshot.DeliveryID)
-			}
-		}
-		settlementErr := errors.Join(settleErr, finishErr, releaseErr)
-		if !settled {
-			return false, errors.Join(err, fmt.Errorf("settle failed workflow node delivery: %w", settlementErr))
-		}
-		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(snapshot.Status)))
-		if snapshot.Status == runtimedelivery.StatusDeadLetter {
-			pc.recordWorkflowHandlerFailure(attemptCtx, evt, node.Key(), err)
-			if recoveryClaim {
-				// The recovered handler failure is now durable terminal evidence.
-				// Only claim or settlement failures make readiness unsafe.
-				return true, settlementErr
-			}
-			return true, errors.Join(err, settlementErr)
-		}
-		retainer := pc.deliveryRuntime
-		if retainer == nil {
-			return false, errors.Join(settlementErr, fmt.Errorf("workflow node retry continuation owner is required"))
-		}
-		if err := retainer.RetainDeliveryContinuation(snapshot); err != nil {
-			return false, errors.Join(settlementErr, fmt.Errorf("transfer workflow node retry continuation: %w", err))
-		}
-		return true, settlementErr
 	}
+	finishErr := guard.Finish(settled)
+	var continuationErr error
+	if settled {
+		switch snapshot.Status {
+		case runtimedelivery.StatusDelivered, runtimedelivery.StatusDeadLetter:
+			if pc.deliveryRuntime == nil {
+				continuationErr = errors.New("terminal workflow node delivery continuation owner is required")
+			} else {
+				continuationErr = pc.deliveryRuntime.ReleaseDeliveryContinuation(snapshot.DeliveryID)
+			}
+		case runtimedelivery.StatusFailed:
+			if pc.deliveryRuntime == nil {
+				continuationErr = errors.New("workflow node retry continuation owner is required")
+			} else {
+				continuationErr = pc.deliveryRuntime.RetainDeliveryContinuation(snapshot)
+			}
+		}
+	}
+	settlementErr := errors.Join(settleErr, finishErr, continuationErr)
+	if !settled {
+		if committed {
+			return a.result.Handled, errors.Join(a.executionErr, fmt.Errorf("settle workflow node delivery: %w", settlementErr)), probeErr
+		}
+		return false, errors.Join(a.executionErr, fmt.Errorf("settle failed workflow node delivery: %w", settlementErr)), probeErr
+	}
+	if continuationErr != nil && snapshot.Status == runtimedelivery.StatusFailed {
+		return false, errors.Join(settleErr, finishErr, fmt.Errorf("transfer workflow node retry continuation: %w", continuationErr)), probeErr
+	}
+	if committed && settlementErr != nil {
+		return a.result.Handled, errors.Join(a.executionErr, fmt.Errorf("settle workflow node delivery: %w", settlementErr)), probeErr
+	}
+	probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(a.statusCtx, a.node.Key(), a.event, string(snapshot.Status)))
+	if committed {
+		return a.result.Handled, a.executionErr, probeErr
+	}
+	if snapshot.Status == runtimedelivery.StatusDeadLetter {
+		pc.recordWorkflowHandlerFailure(a.statusCtx, a.event, a.node.Key(), a.executionErr)
+		if a.recoveryClaim {
+			return true, settlementErr, probeErr
+		}
+		return true, errors.Join(a.executionErr, settlementErr), probeErr
+	}
+	return true, settlementErr, probeErr
 }
 
 func consumeHandlerSettlementEvidence(result contractHandlerExecutionResult, claim runtimedelivery.Claim, emissions *pipelineEmissionPlan) error {

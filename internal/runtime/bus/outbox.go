@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -267,32 +266,70 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 			err = errors.Join(err, fmt.Errorf("finalize committed publication %s panic: %v", committed.CommittedDurablePublicationEventID(), recovered))
 		}
 		if err != nil && !staged && claim != nil {
-			err = errors.Join(err, claim.Release(ctx))
+			err = errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 		}
 	}()
 	if err := committed.ValidateCommittedDurablePublication(); err != nil {
 		return err
 	}
-	prepared, err := committed.plan.prepared.WithCommitOutcome(committed.committed.AppendOutcome)
-	if err != nil {
+	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, committed.plan.prepared, committed.committed)
+	if consequences.prerequisiteErr != nil {
+		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, consequences.prerequisiteErr)
+		staged = true
+		return errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
+	}
+	if !consequences.bound {
 		return err
 	}
-	prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.committed.DeliveryHandoffs...)
-	activationErr := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.committed.Activations)
-	readinessErr := eb.finalizeEngineAgentReadiness(ctx, prepared.Event, prepared.plan.DeliveryRoutes())
-	internalErr := eb.finalizeEngineInternalDelivery(prepared.Event.ID(), prepared.plan.InternalRecipientIDs())
-	prerequisiteErr := errors.Join(activationErr, readinessErr, internalErr)
-	if prerequisiteErr != nil {
-		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs, prerequisiteErr)
+	if !consequences.ready {
+		blockErr := errors.Join(err, errors.New("committed publication prerequisites did not finish"))
+		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, blockErr)
 		staged = true
-		return errors.Join(prerequisiteErr, prepared.publicationClaim.Release(ctx))
+		return errors.Join(blockErr, claim.Release(context.WithoutCancel(ctx)))
 	}
-	eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs, nil)
+	eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, nil)
 	staged = true
-	if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
-		eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
+	return err
+}
+
+type committedPublicationConsequences struct {
+	prepared        PreparedPublish
+	prerequisiteErr error
+	bound           bool
+	ready           bool
+}
+
+func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context, prepared PreparedPublish, committed CommittedPublication) (result committedPublicationConsequences, err error) {
+	result.prepared = prepared
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("finalize committed publication %s panic: %v", prepared.Event.ID(), recovered))
+			if result.bound && !result.ready {
+				result.prerequisiteErr = errors.Join(result.prerequisiteErr, err)
+			}
+		}
+	}()
+	if err := committed.Validate(); err != nil {
+		return result, err
 	}
-	return nil
+	result.prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
+	if err != nil {
+		return result, err
+	}
+	result.bound = true
+	result.prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
+	activationErr := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations)
+	readinessErr := eb.finalizeEngineAgentReadiness(ctx, result.prepared.Event, result.prepared.plan.DeliveryRoutes())
+	internalErr := eb.finalizeEngineInternalDelivery(result.prepared.Event.ID(), result.prepared.plan.InternalRecipientIDs())
+	result.prerequisiteErr = errors.Join(activationErr, readinessErr, internalErr)
+	if result.prerequisiteErr != nil {
+		return result, result.prerequisiteErr
+	}
+	result.ready = true
+	if eb.testLifecycleProbe != nil && !result.prepared.exactDuplicate {
+		eb.notifyTestPublishPersisted(ctx, result.prepared.Event, result.prepared.plan)
+	}
+	return result, nil
 }
 
 func (eb *EventBus) finalizeEngineInternalDelivery(eventID string, recipients []string) (err error) {
@@ -330,15 +367,12 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 			err = errors.Join(err, fmt.Errorf("dispatch committed publication batch panic: %v", recovered), d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
 		}
 	}()
-	if err := flushEnclosingPublicationSettlement(ctx); err != nil {
-		return errors.Join(err, d.releaseUndispatchedPostCommit(ctx, intents))
+	if err := d.flushCommittedPublicationPredecessor(ctx, intents); err != nil {
+		return err
 	}
 	ctx, lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
-		if errors.Is(err, worklifetime.ErrAdmissionFenced) {
-			return errors.Join(err, d.releaseUndispatchedPostCommit(ctx, intents))
-		}
-		return err
+		return errors.Join(err, d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
@@ -360,13 +394,25 @@ func (d engineDispatcher) releaseUndispatchedPostCommit(ctx context.Context, int
 	return result
 }
 
+func (d engineDispatcher) flushCommittedPublicationPredecessor(ctx context.Context, intents []runtimeengine.EmitIntent) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("committed publication predecessor panic: %v", recovered))
+		}
+		if err != nil {
+			err = errors.Join(err, d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
+		}
+	}()
+	return flushEnclosingPublicationSettlement(ctx)
+}
+
 func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runtimeengine.EmitIntent) (err error) {
 	if strings.TrimSpace(string(intent.Event.Type())) == "" {
 		return nil
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = errors.Join(err, fmt.Errorf("dispatch committed publication %s panic: %v", intent.Event.ID(), recovered))
+			err = errors.Join(err, fmt.Errorf("dispatch committed publication %s panic: %v", intent.Event.ID(), recovered), d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), intent.Event))
 		}
 	}()
 	var admitted events.AdmittedEvent
@@ -377,6 +423,9 @@ func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runt
 		_, admitted, err = admitEventForPublish(ctx, intent.Event, time.Now().UTC())
 	}
 	if err != nil {
+		if ctx.Err() != nil {
+			err = errors.Join(err, d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), intent.Event))
+		}
 		return err
 	}
 	intent.Event = admitted.Event()
@@ -474,17 +523,18 @@ func (eb *EventBus) requireCommittedInheritedFanOut(ctx context.Context, event e
 // A continuation must never reinterpret a missing operation as permission to
 // append or dispatch a fresh event.
 func (d engineDispatcher) dispatchCommittedInterceptorPublications(ctx context.Context, events []events.Event) error {
-	if len(events) > 0 {
-		if err := flushEnclosingPublicationSettlement(ctx); err != nil {
+	intents := make([]runtimeengine.EmitIntent, 0, len(events))
+	for _, event := range events {
+		intents = append(intents, runtimeengine.EmitIntent{Event: event, Context: event.DeliveryContext()})
+	}
+	if len(intents) > 0 {
+		if err := d.flushCommittedPublicationPredecessor(ctx, intents); err != nil {
 			return err
 		}
 	}
 	var dispatchErr error
-	for _, event := range events {
-		result, err := d.dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{
-			Event:   event,
-			Context: event.DeliveryContext(),
-		})
+	for _, intent := range intents {
+		result, err := d.dispatchPendingOutboxOperation(ctx, intent)
 		if err != nil {
 			if result.deliveryHandoffsTransferred && onlyAuthoritativeDeliveryIncomplete(err) {
 				continue
@@ -493,7 +543,7 @@ func (d engineDispatcher) dispatchCommittedInterceptorPublications(ctx context.C
 			continue
 		}
 		if !result.handled {
-			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("deferred interceptor publication %s has no committed post-commit operation", strings.TrimSpace(event.ID())))
+			dispatchErr = errors.Join(dispatchErr, fmt.Errorf("deferred interceptor publication %s has no committed post-commit operation", strings.TrimSpace(intent.Event.ID())))
 		}
 	}
 	return dispatchErr
@@ -524,6 +574,17 @@ func onlyAuthoritativeDeliveryIncomplete(err error) bool {
 }
 
 func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (result pendingOutboxDispatch, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = errors.Join(err, fmt.Errorf("dispatch committed publication %s panic: %v", fallback.Event.ID(), recovered))
+			if !result.handled {
+				err = errors.Join(err, d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), fallback.Event))
+			}
+		}
+	}()
+	if ctx.Err() != nil {
+		return result, errors.Join(ctx.Err(), d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), fallback.Event))
+	}
 	ctx, err = d.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return result, err
@@ -537,7 +598,7 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	}
 	result.handled = true
 	defer func() {
-		err = errors.Join(err, operation.publicationClaim.Release(ctx))
+		err = errors.Join(err, operation.publicationClaim.Release(context.WithoutCancel(ctx)))
 	}()
 	if operation.finalizationErr != nil {
 		return result, fmt.Errorf("committed publication %s has incomplete prerequisites: %w", fallback.Event.ID(), operation.finalizationErr)

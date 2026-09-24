@@ -18,13 +18,40 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
+
+type inboundCommittedFinalizerProbe struct{ persisted int }
+
+func (p *inboundCommittedFinalizerProbe) NotifyLifecycle(_ context.Context, signal lifecycleprobe.Signal) {
+	if signal.Kind == lifecycleprobe.EventPersisted {
+		p.persisted++
+		if p.persisted == 1 {
+			panic("first committed inbound notification failed")
+		}
+	}
+}
+
+type inboundExactStandingRecoveryOwner struct {
+	occurrence *worklifetime.StandingOccurrence
+}
+
+func (o inboundExactStandingRecoveryOwner) BeginStandingRunRecovery(ctx context.Context, runID string, origin runtimerunlifecycle.RunOrigin) (*worklifetime.Lease, error) {
+	identity := o.occurrence.Identity()
+	if identity.RunID != runID || identity.ServiceID != origin.ServiceID() || identity.Generation != uint64(origin.Generation()) {
+		return nil, errors.New("standing recovery requested a different generation")
+	}
+	return o.occurrence.Begin(ctx)
+}
 
 // The selected store performs the real commit; this boundary injects only the
 // cleanup error returned after its acknowledged result.
@@ -99,6 +126,82 @@ func serveAcknowledgedTelegram(t *testing.T, gateway *runtimepkg.InboundGateway,
 	recorder := httptest.NewRecorder()
 	handleBoundedProviderDelivery(t, gateway, bus, target, recorder, inboundAcknowledgedTelegramRequest(target.Alias, updateID, text).WithContext(ctx), "telegram", "telegram-secret")
 	return recorder
+}
+
+func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			const runID = "75100000-0000-0000-0000-000000000001"
+			const entityID = "75100000-0000-0000-0000-000000000002"
+			const agentID = "committed-inbound-observer"
+			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound-instance", "committed-inbound", agentID)
+			probe := &inboundCommittedFinalizerProbe{}
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{TestLifecycleProbe: probe}, "inbound.telegram", "inbound.telegram.text_message")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = subscribeInboundGatewayAgent(t, bus, runID, agentID, target.FlowInstance, events.EventType("inbound.telegram"))
+			gateway := newTestInboundGateway(t, bus, nil, nil, selected)
+			first := serveAcknowledgedTelegram(t, gateway, bus, target, ctx, 8291, "hello")
+			if first.Code != http.StatusServiceUnavailable || probe.persisted != 2 {
+				t.Fatalf("commit status=%d notifications=%d body=%s", first.Code, probe.persisted, first.Body.String())
+			}
+			record, found, err := selected.LoadInboundPublicationByIdentity(ctx, "telegram", entityID, "8291")
+			if err != nil || !found || len(record.Events) != 2 {
+				t.Fatalf("committed batch=%+v found=%t err=%v", record, found, err)
+			}
+			originReader, ok := selected.(interface {
+				LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error)
+			})
+			if !ok {
+				t.Fatalf("selected store %T lacks run origin", selected)
+			}
+			origin, err := originReader.LoadRunOrigin(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			process := worklifetime.NewProcess()
+			runtimeOwner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			standing, err := runtimeOwner.NewStanding(ctx, worklifetime.StandingIdentity{ServiceID: origin.ServiceID(), RunID: runID, Generation: uint64(origin.Generation())})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := standing.RetireAndWait(context.Background()); err != nil {
+					t.Errorf("retire standing recovery owner: %v", err)
+				}
+				if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+					t.Errorf("retire runtime recovery owner: %v", err)
+				}
+				process.Retire()
+				if _, err := process.Join(context.Background()); err != nil {
+					t.Errorf("join recovery process: %v", err)
+				}
+			})
+			bus.SetStandingRunWorkOwner(inboundExactStandingRecoveryOwner{occurrence: standing})
+			if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
+				t.Fatalf("recover committed batch: %v", err)
+			}
+			for _, item := range record.Events {
+				query := `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
+				if backend == "postgres" {
+					query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
+				}
+				var receipts int
+				if err := db.QueryRowContext(ctx, query, item.EventID).Scan(&receipts); err != nil || receipts != 1 {
+					t.Fatalf("recovered pipeline receipt for %s=%d err=%v, want 1", item.EventID, receipts, err)
+				}
+			}
+			duplicate := serveAcknowledgedTelegram(t, gateway, bus, target, ctx, 8291, "hello")
+			if duplicate.Code != http.StatusOK {
+				t.Fatalf("duplicate status=%d body=%s", duplicate.Code, duplicate.Body.String())
+			}
+			unsubscribeAndWaitForInboundBusQuiescence(t, bus, runID, agentID, target.FlowInstance)
+		})
+	}
 }
 
 func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothStores(t *testing.T) {
