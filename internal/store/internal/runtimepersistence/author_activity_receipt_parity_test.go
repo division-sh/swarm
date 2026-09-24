@@ -192,7 +192,7 @@ func openSQLiteAuthorActivityReceiptFixture(t *testing.T) authorActivityReceiptF
 			return readAuthorActivityReceiptStamps(t, ctx, store.backend.ConstructionHandle(), `
 				SELECT CAST(d.settled_at AS TEXT), CAST(o.settled_at AS TEXT)
 				FROM event_deliveries d
-				JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
+				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id = d.delivery_id
 				WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?
 			`, eventID, agentID)
 		},
@@ -212,7 +212,7 @@ func openPostgresAuthorActivityReceiptFixture(t *testing.T) authorActivityReceip
 			return readAuthorActivityReceiptStamps(t, ctx, db, `
 				SELECT d.settled_at::text, o.settled_at::text
 				FROM event_deliveries d
-				JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
+				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id = d.delivery_id
 				WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2
 			`, eventID, agentID)
 		},

@@ -120,8 +120,7 @@ func TestDeclarativeEmitPreservesScopedProducerSourceRoute(t *testing.T) {
 			executor, err := NewExecutor(RuntimeDependencies{
 				Source:    sourceWithFixtureStages(stubSource(), "worker", "ready", "ready"),
 				StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{},
-				Locker: stubLocker{}, Dispatcher: stubDispatcher{},
-			}, nil)
+				Locker: stubLocker{}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

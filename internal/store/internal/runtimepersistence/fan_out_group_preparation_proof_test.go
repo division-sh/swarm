@@ -185,7 +185,7 @@ func TestFanOutPublicationGroupExactDuplicateAppendBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			after := f.snapshot(t)
-			for _, table := range []string{"events", "event_deliveries", "event_receipts", "event_delivery_outcomes"} {
+			for _, table := range []string{"events", "event_deliveries", "event_receipts", "event_delivery_attempts"} {
 				if !reflect.DeepEqual(before[table], after[table]) {
 					t.Fatalf("duplicate changed %s", table)
 				}

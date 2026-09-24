@@ -768,7 +768,7 @@ func loadSelectedForkDiscardProof(t *testing.T, ctx context.Context, db *sql.DB,
 		{&proof.EventRows, "SELECT COUNT(*) FROM events WHERE run_id = " + placeholder, []any{runID}},
 		{&proof.DeliveryRows, "SELECT COUNT(*) FROM event_deliveries WHERE run_id = " + placeholder, []any{runID}},
 		{&proof.AttemptRows, "SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = " + placeholder + ")", []any{runID}},
-		{&proof.OutcomeRows, "SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = " + placeholder + ")", []any{runID}},
+		{&proof.OutcomeRows, "SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = " + placeholder + ")", []any{runID}},
 		{&proof.ExecutionRows, "SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = " + placeholder + " AND execution_id = " + executionPlaceholder, []any{runID, executionID}},
 		{&proof.BindingRows, "SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE fork_run_id = " + placeholder, []any{runID}},
 	}
@@ -1018,7 +1018,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 		"deliveries":      `SELECT COUNT(*) FROM event_deliveries WHERE delivery_id IN ($1::uuid, $2::uuid)`,
 		"rule selections": `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id IN ($1::uuid, $2::uuid)`,
 		"attempts":        `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN ($1::uuid, $2::uuid)`,
-		"outcomes":        `SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+		"outcomes":        `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id IN ($1::uuid, $2::uuid)`,
 	} {
 		var count int
 		if err := db.QueryRowContext(ctx, query, claimed.Snapshot.DeliveryID, settled.Snapshot.DeliveryID).Scan(&count); err != nil {

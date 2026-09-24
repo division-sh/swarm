@@ -3299,7 +3299,10 @@ handler_specification:
       evaluate the handler, and prepare its mutation under the entity lock. Commit business state, publication,
       historical effects and exact delivery success through the named selected-store mutation operation. Consume
       its typed COMMIT acknowledgement and exact settled-claim evidence before dispatching committed event or activity
-      follow-up. Release the entity lock before recursive dispatch and release or retain the exact delivery
+      follow-up. The executor returns exact acknowledged emit and activity-request intents without choosing an inline
+      or deferred dispatcher; the coordinator alone validates and transfers those intents through the existing
+      EventBus postcommit dispatcher or deferred publication transport. A failed independent handoff cannot skip its
+      committed siblings. Release the entity lock before recursive dispatch and release or retain the exact delivery
       continuation after its durable outcome. Entityless and stateful handlers have different preparation rules but
       share acknowledgement, publication finalization and continuation handling. Guard reject/discard, guard-kill,
       terminal-state rejection and preparation failure keep their distinct settlement and retry semantics. A
@@ -13462,7 +13465,6 @@ platform_tables:
         - agent_directive_operations
       delete_mixed_row_policy:
         - event_delivery_handler_rule_selections
-        - event_delivery_outcomes
         - event_delivery_attempts
         - event_deliveries
         - committed_replay_scopes
@@ -15178,7 +15180,10 @@ platform_tables:
         class, and agent through composite foreign keys; the named binding operation additionally requires that exact session
         to be active. Only memory-enabled agents bind this persisted session fact; stateless provider sessions are process-local
         and must leave the complete session projection null. Attempt rows are evidence and never independently select or mutate
-        delivery work.
+        delivery work. closure_kind is the selected-store lifecycle owner's exact classification of an open, lease-expired,
+        parent-interrupted or settled attempt. An ended attempt is not necessarily a delivery settlement: parent
+        terminalization closes interrupted version N and atomically creates a separate settled version N+1. Only
+        closure_kind=settled is public delivery-outcome evidence; older settled retry versions remain visible.
       rule_selection: Exact selections observed by unsuccessful attempts are deliberately not persisted in this ledger.
       ddl: |
         CREATE TABLE event_delivery_attempts (
@@ -15200,6 +15205,7 @@ platform_tables:
             session_agent_flow_instance_id TEXT,
             session_agent_flow_instance_path TEXT,
             open_marker       BOOLEAN NOT NULL,
+            closure_kind      TEXT NOT NULL CHECK (closure_kind IN ('open', 'lease_expired', 'parent_interrupted', 'settled')),
             outcome          TEXT CHECK (outcome IS NULL OR outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'lease_expired', 'terminalized')),
             reason_code      TEXT,
             failure          JSONB,
@@ -15208,6 +15214,7 @@ platform_tables:
             completed_at     TIMESTAMPTZ,
             PRIMARY KEY (delivery_id, claim_version),
             UNIQUE (delivery_id, claim_version, open_marker),
+            UNIQUE (delivery_id, claim_version, closure_kind),
             UNIQUE (delivery_id, claim_version, claim_token),
             FOREIGN KEY (active_session_id, session_run_id, session_agent_id, session_agent_name_owner, session_agent_name_source, session_agent_route_presence, session_agent_flow_scope_key, session_agent_flow_instance_id, session_agent_flow_instance_path) REFERENCES agent_sessions(session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             FOREIGN KEY (session_delivery_id, session_run_id, session_subscriber_type, session_agent_id, session_agent_name_owner, session_agent_name_source, session_agent_route_presence, session_agent_flow_scope_key, session_agent_flow_instance_id, session_agent_flow_instance_path) REFERENCES event_deliveries(delivery_id, run_id, subscriber_type, subscriber_id, agent_name_owner, agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path),
@@ -15216,27 +15223,9 @@ platform_tables:
             CHECK ((open_marker = TRUE AND current_delivery_id = delivery_id) OR (open_marker = FALSE AND current_delivery_id IS NULL)),
             CHECK ((active_session_id IS NULL AND session_delivery_id IS NULL AND session_run_id IS NULL AND session_subscriber_type IS NULL AND session_agent_id IS NULL AND session_agent_name_owner IS NULL AND session_agent_name_source IS NULL AND session_agent_route_presence IS NULL AND session_agent_flow_scope_key IS NULL AND session_agent_flow_instance_id IS NULL AND session_agent_flow_instance_path IS NULL) OR (active_session_id IS NOT NULL AND session_delivery_id = delivery_id AND session_run_id IS NOT NULL AND session_subscriber_type = 'agent' AND NULLIF(TRIM(COALESCE(session_agent_id, '')), '') IS NOT NULL AND NULLIF(TRIM(COALESCE(session_agent_name_owner, '')), '') IS NOT NULL AND session_agent_name_source IN ('declared', 'runtime_created') AND session_agent_route_presence IN ('present', 'root') AND session_agent_flow_scope_key IS NOT NULL AND session_agent_flow_instance_id IS NOT NULL AND session_agent_flow_instance_path IS NOT NULL)),
             CHECK ((open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL) OR (open_marker = FALSE AND outcome IS NOT NULL AND completed_at IS NOT NULL)),
+            CHECK ((closure_kind = 'open' AND open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL AND duration_ms IS NULL) OR (closure_kind = 'lease_expired' AND open_marker = FALSE AND outcome = 'lease_expired' AND completed_at IS NOT NULL AND duration_ms IS NULL) OR (closure_kind = 'parent_interrupted' AND open_marker = FALSE AND outcome = 'terminalized' AND completed_at IS NOT NULL AND duration_ms IS NOT NULL) OR (closure_kind = 'settled' AND open_marker = FALSE AND outcome IS NOT NULL AND outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized') AND completed_at IS NOT NULL AND duration_ms IS NOT NULL)),
             CHECK (completed_at IS NULL OR completed_at >= started_at),
             INDEX idx_delivery_attempts_open (lease_expires_at) WHERE outcome IS NULL
-        );
-    event_delivery_outcomes:
-      description: >-
-        Exact delivery-linked settlement evidence. Unlike platform pipeline receipts, these rows are keyed by delivery_id
-        and claim_version, so route siblings for one event/subscriber retain independent outcomes. The lifecycle owner writes
-        the delivery transition, attempt completion, outcome, author activity, and required diagnostics atomically.
-      ddl: |
-        CREATE TABLE event_delivery_outcomes (
-            delivery_id   UUID NOT NULL,
-            claim_version BIGINT NOT NULL,
-            outcome       TEXT NOT NULL CHECK (outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized')),
-            reason_code   TEXT,
-            failure       JSONB,
-            side_effects  JSONB NOT NULL DEFAULT '[]',
-            duration_ms   BIGINT NOT NULL CHECK (duration_ms >= 0),
-            settled_at    TIMESTAMPTZ NOT NULL,
-            PRIMARY KEY (delivery_id, claim_version),
-            FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_attempts(delivery_id, claim_version),
-            INDEX idx_delivery_outcomes_delivery (delivery_id, settled_at)
         );
     committed_replay_scopes:
       description: >-
@@ -15277,7 +15266,7 @@ platform_tables:
         );
     event_receipts:
       description: Event-level platform pipeline acknowledgement only. Executable agent/node settlement belongs exclusively
-        to event_delivery_outcomes and cannot be represented here. This table is not a delivery eligibility, claim, retry,
+        to settled event_delivery_attempts and cannot be represented here. This table is not a delivery eligibility, claim, retry,
         terminality, or idempotency owner.
       ddl: "CREATE TABLE event_receipts (\n    receipt_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_id\
         \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
@@ -16360,14 +16349,30 @@ platform_tables:
           `{flow_scope_key, flow_instance_id, flow_instance}`, activation serialization,
           owner_agent, event, due coordinate, recurrence facts, status facts, and complete-or-absent fork lineage.
     dead_letters:
-      description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; parent terminalization supplies its typed delivery_parent_terminalized lifecycle-conflict envelope. Lifecycle and retry counters remain dead-letter-owned facts. Every terminal executable delivery, including parent terminalization, carries the exact delivery_id and claim_version pair and is structurally coupled to the committed delivery outcome. Pre-delivery diagnostics leave both fields null.
+      description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; parent terminalization supplies its typed delivery_parent_terminalized lifecycle-conflict envelope. Lifecycle and retry counters remain dead-letter-owned facts. Every terminal executable delivery, including parent terminalization, references the exact settled attempt; an interrupted parent attempt is not a settlement. Pre-delivery diagnostics leave all settlement reference fields null.
       timestamp_admission: The typed dead-letter owner canonicalizes created_at to UTC microsecond precision before validation, persistence, author-activity projection, or exact duplicate comparison on either selected store.
-      ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
-        \ UUID REFERENCES events(event_id),\n    delivery_id       UUID,\n    claim_version     BIGINT,\n    original_event    TEXT NOT NULL,\n    original_payload  JSONB NOT NULL DEFAULT\
-        \ '{}',\n    entity_id         UUID,\n    flow_instance     TEXT NOT NULL,\n    failure           JSONB NOT NULL,\n   \
-        \ retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
-        \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (delivery_id, claim_version),\n    FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version),\n    CHECK ((delivery_id IS NULL AND claim_version IS NULL) OR (delivery_id IS NOT NULL AND claim_version > 0)),\n    INDEX idx_dead_letters_flow (flow_instance,\
-        \ created_at),\n    INDEX idx_dead_letters_class ((failure->>'class'))\n);"
+      ddl: |
+        CREATE TABLE dead_letters (
+            dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            original_event_id UUID REFERENCES events(event_id),
+            delivery_id       UUID,
+            claim_version     BIGINT,
+            settlement_ref_kind TEXT,
+            original_event    TEXT NOT NULL,
+            original_payload JSONB NOT NULL DEFAULT '{}',
+            entity_id         UUID,
+            flow_instance     TEXT NOT NULL,
+            failure           JSONB NOT NULL,
+            retry_count       INTEGER NOT NULL DEFAULT 0,
+            chain_depth       INTEGER NOT NULL DEFAULT 0,
+            handler_node      TEXT,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (delivery_id, claim_version),
+            FOREIGN KEY (delivery_id, claim_version, settlement_ref_kind) REFERENCES event_delivery_attempts(delivery_id, claim_version, closure_kind),
+            CHECK ((delivery_id IS NULL AND claim_version IS NULL AND settlement_ref_kind IS NULL) OR (delivery_id IS NOT NULL AND claim_version IS NOT NULL AND claim_version > 0 AND settlement_ref_kind IS NOT NULL AND settlement_ref_kind = 'settled')),
+            INDEX idx_dead_letters_flow (flow_instance, created_at),
+            INDEX idx_dead_letters_class ((failure->>'class'))
+        );
     run_scenario_execution_profiles:
       description: >-
         Immutable source-bound scenario execution profile selected for one run. profile_bytes is the sole artifact

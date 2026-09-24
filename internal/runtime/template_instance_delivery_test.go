@@ -1104,7 +1104,7 @@ func waitRuntimeNodeDeliveryOutcome(t *testing.T, ctx context.Context, db *sql.D
 	waitRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*)
 		FROM event_deliveries d
-		JOIN event_delivery_outcomes o
+		JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 		  ON o.delivery_id = d.delivery_id
 		 AND o.claim_version = d.claim_version
 		WHERE d.event_id = $1::uuid

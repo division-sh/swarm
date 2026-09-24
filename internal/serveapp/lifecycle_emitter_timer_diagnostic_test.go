@@ -132,7 +132,7 @@ func (d *lifecycleTimerContenderDiagnostic) dump(t *testing.T, rt servedControlP
 		{"timers", `SELECT * FROM timers WHERE run_id=$1`},
 		{"publications_and_runtime_logs", `SELECT * FROM events WHERE run_id=$1`},
 		{"deliveries", `SELECT * FROM event_deliveries WHERE run_id=$1`},
-		{"delivery_outcomes", `SELECT * FROM event_delivery_outcomes WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)`},
+		{"delivery_outcomes", `SELECT * FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)`},
 		{"receipts", `SELECT * FROM event_receipts WHERE event_id IN (SELECT event_id FROM events WHERE run_id=$1)`},
 		{"api_completions", `SELECT * FROM api_idempotency WHERE resource_id=$1::text OR resource_id IN (SELECT card_id::text FROM decision_cards WHERE run_id=$1::uuid)`},
 	}

@@ -208,7 +208,7 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1`, runID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.subscriber_type='agent' AND d.status='delivered' AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, runID).Scan(&deliveries); err != nil {
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.subscriber_type='agent' AND d.status='delivered' AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, runID).Scan(&deliveries); err != nil {
 		t.Fatal(err)
 	}
 	if count != turns || deliveries != turns {

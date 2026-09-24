@@ -133,10 +133,6 @@ type ActivityIntentWriter interface {
 	WriteActivityIntents(ctx context.Context, intents []ActivityIntent) error
 }
 
-type ActivityDispatcher interface {
-	DispatchActivities(ctx context.Context, intents []ActivityIntent, committedRequests []EmitIntent) error
-}
-
 type GuardRegistry interface {
 	HasGuard(id identity.GuardKey) bool
 	IsExecutable(id identity.GuardKey) bool
@@ -152,17 +148,15 @@ type PayloadShaper interface {
 }
 
 type RuntimeDependencies struct {
-	Source             semanticview.Source
-	StateRepo          StateRepository
-	EntityCollections  EntityCollectionReader
-	MutationOwner      EngineMutationOwner
-	Locker             EntityLocker
-	WorkflowLifecycle  WorkflowLifecycleEffectOwner
-	Dispatcher         PostCommitDispatcher
-	ActivityDispatcher ActivityDispatcher
-	GuardRegistry      GuardRegistry
-	GuardRunner        GuardRunner
-	PayloadShaper      PayloadShaper
-	EmitNow            func() time.Time
-	MaxChainDepth      int
+	Source            semanticview.Source
+	StateRepo         StateRepository
+	EntityCollections EntityCollectionReader
+	MutationOwner     EngineMutationOwner
+	Locker            EntityLocker
+	WorkflowLifecycle WorkflowLifecycleEffectOwner
+	GuardRegistry     GuardRegistry
+	GuardRunner       GuardRunner
+	PayloadShaper     PayloadShaper
+	EmitNow           func() time.Time
+	MaxChainDepth     int
 }

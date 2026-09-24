@@ -193,7 +193,7 @@ func TestFutureSelectedForkReceiverPostRevisionFailureSettlementBothStores(t *te
 					if status != wantStatus || version != claim.Version() || afterTarget != rawTarget {
 						t.Fatalf("settlement changed ownership/version: status=%s version=%d target=%s", status, version, afterTarget)
 					}
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1 AND claim_version=$2 AND outcome=$3`, claim.DeliveryID(), claim.Version(), wantStatus).Scan(&outcomes); err != nil || outcomes != 1 {
+					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts WHERE closure_kind='settled' AND delivery_id=$1 AND claim_version=$2 AND outcome=$3`, claim.DeliveryID(), claim.Version(), wantStatus).Scan(&outcomes); err != nil || outcomes != 1 {
 						t.Fatalf("exact claim outcomes=%d err=%v", outcomes, err)
 					}
 					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND open_marker=TRUE`, claim.DeliveryID()).Scan(&openAttempts); err != nil || openAttempts != 0 {

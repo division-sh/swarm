@@ -492,28 +492,31 @@ func (pc *PipelineCoordinator) workflowNodeConnectedInputFailureApplies(ctx cont
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Context, evt events.Event) (bool, error) {
-	return pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, nil)
+	handled, _, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, nil)
+	return handled, err
 }
 
-func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
+func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, bool, error) {
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
-		return false, nil
+		return false, false, nil
 	}
 	handledAny := false
+	committedAny := false
 	for _, node := range pc.WorkflowNodes() {
 		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.RunID(), evt.TargetRoute()) {
 			continue
 		}
-		handled, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node.Node, evt, emissions)
+		handled, committed, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node.Node, evt, emissions)
+		committedAny = committedAny || committed
 		if err != nil {
-			return handledAny || handled, err
+			return handledAny || handled, committedAny, err
 		}
 		if handled {
 			handledAny = true
 		}
 	}
-	return handledAny, nil
+	return handledAny, committedAny, nil
 }
 
 func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, node runtimeidentity.ExecutableNode, runID string, eventTarget events.RouteIdentity) bool {

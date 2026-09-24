@@ -160,7 +160,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				}
 				var status string
 				var outcomes int
-				if err := selected.db.QueryRow(`SELECT d.status, (SELECT count(*) FROM event_delivery_outcomes o WHERE o.delivery_id=d.delivery_id) FROM event_deliveries d WHERE d.event_id=$1`, evt.ID()).Scan(&status, &outcomes); err != nil {
+				if err := selected.db.QueryRow(`SELECT d.status, (SELECT count(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id=d.delivery_id) FROM event_deliveries d WHERE d.event_id=$1`, evt.ID()).Scan(&status, &outcomes); err != nil {
 					t.Fatal(err)
 				}
 				wantStatus := "delivered"

@@ -563,7 +563,7 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 		predicate = "target.resolved_run_id IN %[1]s"
 	case "event_receipts":
 		predicate = "EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.event_id AND e.run_id IN %[1]s)"
-	case "event_delivery_handler_rule_selections", "event_delivery_attempts", "event_delivery_outcomes":
+	case "event_delivery_handler_rule_selections", "event_delivery_attempts":
 		predicate = "EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = target.delivery_id AND (d.run_id IN %[1]s OR e.run_id IN %[1]s))"
 	case "dead_letters":
 		predicate = "EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.original_event_id AND e.run_id IN %[1]s)"

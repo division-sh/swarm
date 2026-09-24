@@ -56,7 +56,7 @@ func TestForkTerminalBarrierHistoryCorruptionBothStores(t *testing.T) {
 					case "handler":
 						query = `UPDATE dead_letters SET handler_node='wrong-handler' WHERE original_event_id=$1`
 					case "outcome_reason":
-						query = `UPDATE event_delivery_outcomes SET reason_code='wrong-reason' WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE event_id=$1)`
+						query = `UPDATE event_delivery_attempts SET reason_code='wrong-reason' WHERE closure_kind='settled' AND delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE event_id=$1)`
 					case "missing_dead_letter":
 						query = `DELETE FROM dead_letters WHERE original_event_id=$1`
 					case "occurrence_payload":

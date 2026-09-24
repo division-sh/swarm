@@ -91,7 +91,7 @@ func TestExecutorJoinCapturedContextFromRetainedEvidence(t *testing.T) {
 						}
 					}
 					source := semanticview.Wrap(bundle)
-					exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{}}, nil)
+					exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
 					if err != nil {
 						t.Fatal(err)
 					}

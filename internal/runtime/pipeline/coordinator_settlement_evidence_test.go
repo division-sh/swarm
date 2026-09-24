@@ -28,11 +28,10 @@ func TestHandlerSettlementEvidenceRetainsAcknowledgedCommitOnContradiction(t *te
 		{"uncommitted attempt", contractHandlerExecutionResult{}, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			emissions := &pipelineEmissionPlan{}
-			err := consumeHandlerSettlementEvidence(test.result, claim, emissions)
-			if emissions.committed != test.result.Committed || (err == nil) != (test.wantError == "") ||
+			err := consumeHandlerSettlementEvidence(test.result, claim)
+			if (err == nil) != (test.wantError == "") ||
 				(err != nil && !strings.Contains(err.Error(), test.wantError)) {
-				t.Fatalf("committed=%t error=%v, want committed=%t error containing %q", emissions.committed, err, test.result.Committed, test.wantError)
+				t.Fatalf("error=%v, want error containing %q", err, test.wantError)
 			}
 		})
 	}

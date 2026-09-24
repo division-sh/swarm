@@ -35,7 +35,6 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 	}})
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
-		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -187,8 +186,7 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 	}
 	bundle.Semantics.Loops = []runtimecontracts.WorkflowLoopPlan{plan}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: sourceWithFixtureStages(source, "validation", "drafting", "drafting", "review", "escalated"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
-	}, nil)
+		Source: sourceWithFixtureStages(source, "validation", "drafting", "drafting", "review", "escalated"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

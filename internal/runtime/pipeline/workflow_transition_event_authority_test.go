@@ -139,7 +139,7 @@ func TestPipelineTransitionRejectsCoherentEventSubstitutionOnBothStores(t *testi
 					for _, table := range []string{
 						"entity_state", "flow_instances", "entity_mutations", "workflow_instance_initial_materializations",
 						"events", "event_deliveries", "event_receipts", "timers", "activity_attempts",
-						"event_delivery_handler_rule_selections", "event_delivery_attempts", "event_delivery_outcomes",
+						"event_delivery_handler_rule_selections", "event_delivery_attempts",
 						"author_activity_occurrences", "fan_out_intents", "fan_out_outcomes",
 					} {
 						out[table] = func() []string {

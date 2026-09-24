@@ -19,7 +19,7 @@ func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T)
 		t.Run(map[bool]string{false: "node", true: "flow"}[flowOwned], func(t *testing.T) {
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source: sourceWithFixtureStages(fanOutPayloadSource(t, "flow-1", "task.completed"), "flow-1", "pending", "pending"), StateRepo: stubStateRepo{},
-				MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{}, PayloadShaper: stubPayloadShaper{},
+				MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, PayloadShaper: stubPayloadShaper{},
 			}, nil)
 			if err != nil {
 				t.Fatal(err)

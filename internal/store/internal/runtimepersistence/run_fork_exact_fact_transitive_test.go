@@ -29,9 +29,8 @@ func TestRunForkExactFactsTransitiveBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_delivery_attempts (delivery_id,claim_version,claim_token,started_at,lease_expires_at,open_marker,outcome,completed_at,reason_code,failure) VALUES ($1,1,$2,$3,$4,FALSE,'dead_letter',$3,'joined_failure',$5)`, f.deliveryID, uuid.NewString(), f.at, f.at.Add(time.Minute), string(encoded))
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_delivery_outcomes (delivery_id,claim_version,outcome,reason_code,duration_ms,settled_at,failure) VALUES ($1,1,'dead_letter','joined_failure',0,$2,$3)`, f.deliveryID, f.at, string(encoded))
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE dead_letters SET delivery_id=$1,claim_version=1,failure=$3 WHERE dead_letter_id=$2`, f.deliveryID, f.deadLetterID, string(encoded))
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_delivery_attempts (delivery_id,claim_version,claim_token,started_at,lease_expires_at,open_marker,closure_kind,outcome,completed_at,duration_ms,reason_code,failure) VALUES ($1,1,$2,$3,$4,FALSE,'settled','dead_letter',$3,0,'joined_failure',$5)`, f.deliveryID, uuid.NewString(), f.at, f.at.Add(time.Minute), string(encoded))
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE dead_letters SET delivery_id=$1,claim_version=1,settlement_ref_kind='settled',failure=$3 WHERE dead_letter_id=$2`, f.deliveryID, f.deadLetterID, string(encoded))
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_delivery_handler_rule_selections (delivery_id,selection_context,disposition) VALUES ($1,'none','not_applicable')`, f.deliveryID)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE event_deliveries SET status='dead_letter',claim_version=1,next_eligible_at=NULL,started_at=$1,settled_at=$1,reason_code='joined_failure',failure=$3 WHERE delivery_id=$2`, f.at, f.deliveryID, string(encoded))
 				// Omitting the joined dead-letter contributor is not detected by an

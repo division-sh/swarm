@@ -485,7 +485,7 @@ func waitArtifactActionResultDBCount(t *testing.T, ctx context.Context, db *sql.
 						'status', d.status,
 						'target', d.delivery_target_route,
 						'claim_version', d.claim_version,
-						'outcomes', (SELECT COALESCE(jsonb_agg(to_jsonb(o)), '[]'::jsonb) FROM event_delivery_outcomes o WHERE o.delivery_id = d.delivery_id)
+						'outcomes', (SELECT COALESCE(jsonb_agg(to_jsonb(o)), '[]'::jsonb) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id = d.delivery_id)
 						)), '[]'::jsonb),
 						'receipts', (SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM event_receipts r WHERE r.event_id = $1::uuid)
 					)::text

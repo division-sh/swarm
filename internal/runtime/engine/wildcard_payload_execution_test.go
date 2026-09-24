@@ -43,8 +43,7 @@ func TestExecutorLocalWildcardPayloadReaderUsesConcreteProducerSchema(t *testing
 	}
 	source := semanticview.Wrap(bundle)
 	executor, err := NewExecutor(RuntimeDependencies{
-		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
-	}, schemaBoundWildcardEvaluator{})
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, schemaBoundWildcardEvaluator{})
 	if err != nil {
 		t.Fatal(err)
 	}

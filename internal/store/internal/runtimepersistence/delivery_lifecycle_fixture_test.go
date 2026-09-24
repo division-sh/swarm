@@ -288,7 +288,6 @@ func deletePostgresDeliveryFixturesForRun(t testing.TB, ctx context.Context, db 
 	for _, query := range []string{
 		`UPDATE event_deliveries SET status = 'dead_letter', reason_code = 'fixture_cleanup', failure = $2::jsonb, next_eligible_at = NULL, current_attempt_version = NULL, current_attempt_open = NULL, settled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress', 'failed')`,
 		`DELETE FROM dead_letters WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
-		`DELETE FROM event_delivery_outcomes WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1::uuid)`,
 		`DELETE FROM event_deliveries WHERE run_id = $1::uuid`,
 	} {

@@ -33,8 +33,7 @@ func TestExecutor_GenericAppendReferenceControls(t *testing.T) {
 			}), ".", "active", "active")
 			executor, err := NewExecutor(RuntimeDependencies{
 				Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{},
-				Locker: stubLocker{}, Dispatcher: stubDispatcher{},
-			}, nil)
+				Locker: stubLocker{}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

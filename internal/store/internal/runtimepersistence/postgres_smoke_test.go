@@ -190,7 +190,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(reason_code, '')
-		FROM event_delivery_outcomes
+		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled')
 		WHERE delivery_id = $1::uuid
 	`, claimed.Snapshot.DeliveryID).Scan(&receiptReason); err != nil {
 		t.Fatalf("load delivery outcome reason: %v", err)

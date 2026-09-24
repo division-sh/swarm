@@ -151,7 +151,7 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 	}{
 		{
 			name: "authorized_terminalization", boundary: providerDrainFailureBoundary{
-				name: "origin_outcome", table: "event_delivery_outcomes", operation: "INSERT",
+				name: "origin_outcome", table: "event_delivery_attempts", operation: "UPDATE", predicate: "NEW.closure_kind='settled'",
 			}, wantState: runtimeeffects.StateAuthorized,
 		},
 		{
@@ -493,7 +493,7 @@ func TestProviderAttemptDrainSettlementRollbackParity(t *testing.T) {
 	boundaries := []providerDrainFailureBoundary{
 		{name: "agent_turn", table: "agent_turns", operation: "INSERT"},
 		{name: "spend", table: "spend_ledger", operation: "INSERT"},
-		{name: "origin_outcome", table: "event_delivery_outcomes", operation: "INSERT"},
+		{name: "origin_outcome", table: "event_delivery_attempts", operation: "UPDATE", predicate: "NEW.closure_kind='settled'"},
 		{name: "drain_settlement", table: "runtime_provider_attempt_drains", operation: "UPDATE", predicate: "NEW.state='settled'"},
 		{name: "lifecycle_finalization", table: "agents", operation: "UPDATE", predicate: "OLD.lifecycle_phase='draining' AND NEW.lifecycle_phase='terminated'"},
 	}
@@ -1000,23 +1000,23 @@ func requireTerminalizedOriginDelivery(t *testing.T, fixture completionSettlemen
 	t.Helper()
 	query := `
 		SELECT d.status,d.claim_version,COALESCE(o.reason_code,''),
-		       (SELECT COUNT(*) FROM event_delivery_outcomes all_o WHERE all_o.delivery_id=d.delivery_id),
+		       (SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') all_o WHERE all_o.delivery_id=d.delivery_id),
 		       (SELECT COUNT(*) FROM event_delivery_attempts a
 		        WHERE a.delivery_id=d.delivery_id AND a.claim_version=? AND a.claim_token=?
 		          AND a.open_marker=FALSE AND a.completed_at IS NOT NULL AND a.outcome='terminalized')
 		FROM event_deliveries d
-		JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version
+		JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version
 		WHERE d.delivery_id=?`
 	args := []any{fixture.origin.Version(), fixture.origin.PersistenceToken(), fixture.origin.DeliveryID()}
 	if !fixture.sqlite {
 		query = `
 			SELECT d.status,d.claim_version,COALESCE(o.reason_code,''),
-			       (SELECT COUNT(*) FROM event_delivery_outcomes all_o WHERE all_o.delivery_id=d.delivery_id),
+			       (SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') all_o WHERE all_o.delivery_id=d.delivery_id),
 			       (SELECT COUNT(*) FROM event_delivery_attempts a
 			        WHERE a.delivery_id=d.delivery_id AND a.claim_version=$1 AND a.claim_token=$2::uuid
 			          AND a.open_marker=FALSE AND a.completed_at IS NOT NULL AND a.outcome='terminalized')
 			FROM event_deliveries d
-			JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version
+			JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version
 			WHERE d.delivery_id=$3::uuid`
 	}
 	var state, reason string
@@ -1030,10 +1030,10 @@ func requireTerminalizedOriginDelivery(t *testing.T, fixture completionSettlemen
 
 func requireDeliveryClaimOutcome(t *testing.T, fixture completionSettlementFixture, claim runtimedelivery.Claim, wantState, wantReason string) {
 	t.Helper()
-	query := `SELECT d.status,COALESCE(o.reason_code,'') FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id AND o.claim_version=? WHERE d.delivery_id=?`
+	query := `SELECT d.status,COALESCE(o.reason_code,'') FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id AND o.claim_version=? WHERE d.delivery_id=?`
 	args := []any{claim.Version(), claim.DeliveryID()}
 	if !fixture.sqlite {
-		query = `SELECT d.status,COALESCE(o.reason_code,'') FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id AND o.claim_version=$1 WHERE d.delivery_id=$2::uuid`
+		query = `SELECT d.status,COALESCE(o.reason_code,'') FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id AND o.claim_version=$1 WHERE d.delivery_id=$2::uuid`
 	}
 	var state, reason string
 	if err := fixture.db.QueryRow(query, args...).Scan(&state, &reason); err != nil || state != wantState || reason != wantReason {
@@ -1167,12 +1167,12 @@ func requireProviderDrainImmutableSnapshots(t *testing.T, fixture completionSett
 func requireDeliveryClaimPending(t *testing.T, fixture completionSettlementFixture, claim runtimedelivery.Claim) {
 	t.Helper()
 	statusQuery := `SELECT status FROM event_deliveries WHERE delivery_id=?`
-	outcomeQuery := `SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=? AND claim_version=?`
+	outcomeQuery := `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=? AND claim_version=?`
 	statusArgs := []any{claim.DeliveryID()}
 	outcomeArgs := []any{claim.DeliveryID(), claim.Version()}
 	if !fixture.sqlite {
 		statusQuery = `SELECT status FROM event_deliveries WHERE delivery_id=$1::uuid`
-		outcomeQuery = `SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1::uuid AND claim_version=$2`
+		outcomeQuery = `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1::uuid AND claim_version=$2`
 	}
 	var status string
 	var outcomes int

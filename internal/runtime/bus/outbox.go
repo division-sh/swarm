@@ -676,25 +676,11 @@ func (d engineDispatcher) dispatchIntentDisposition(ctx context.Context, intent 
 
 func (d engineDispatcher) dispatchIntentDispositionWithBoundary(ctx context.Context, intent runtimeengine.EmitIntent, boundary publicationSettlementBoundary) (runtimepipelineobligation.Disposition, bool, error) {
 	queued, outcome, err := d.dispatchIntentWithBoundary(ctx, intent, boundary)
-	if outcome.Committed && outcome.ContinueDispatch() {
-		return runtimepipelineobligation.Acknowledged("pipeline_persisted"), true, err
-	}
-	if _, retry := outcome.RetryRelease(); retry {
+	decision := classifyPipelineDispatch(outcome, err, queued, runtimepipelineobligation.PurposePublication, false)
+	if decision.action != pipelineDispatchSettle {
 		return runtimepipelineobligation.Disposition{}, false, err
 	}
-	if disposition, ok := outcome.Disposition(); ok {
-		return disposition, true, err
-	}
-	if err != nil {
-		if errors.Is(err, ErrRuntimeIngressPaused) || errors.Is(err, ErrRunDispatchBlocked) || errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-			return runtimepipelineobligation.Disposition{}, false, err
-		}
-		return runtimepipelineobligation.Terminal("pipeline_outbox_dispatch_failed", eventBusFailure(err, "dispatch_outbox")), true, err
-	}
-	if queued {
-		return runtimepipelineobligation.Disposition{}, false, nil
-	}
-	return runtimepipelineobligation.Acknowledged("pipeline_persisted"), true, nil
+	return decision.disposition, true, err
 }
 
 func clonePostCommitPublish(evt events.Event) events.Event {

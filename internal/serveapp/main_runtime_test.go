@@ -5703,7 +5703,7 @@ func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID str
 		servedEventPublishDebugQuery(t, db, backend, "flow_instances", runID),
 		servedEventPublishDebugQuery(t, db, backend, "events", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
-		servedEventPublishDebugQuery(t, db, backend, "event_delivery_outcomes", runID),
+		servedEventPublishDebugQuery(t, db, backend, "settled_delivery_attempts", runID),
 		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
 		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
 		servedEventPublishDebugQuery(t, db, backend, "delivery_agents", runID),
@@ -5729,8 +5729,8 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
 			sqlText = `SELECT delivery_id::text, event_id::text, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 8`
-		case "event_delivery_outcomes":
-			sqlText = `SELECT o.delivery_id::text, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = $1::uuid ORDER BY o.settled_at, o.delivery_id LIMIT 8`
+		case "settled_delivery_attempts":
+			sqlText = `SELECT o.delivery_id::text, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = $1::uuid ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
@@ -5752,8 +5752,8 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_deliveries":
 			sqlText = `SELECT delivery_id, event_id, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? ORDER BY created_at, event_id LIMIT 8`
-		case "event_delivery_outcomes":
-			sqlText = `SELECT o.delivery_id, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = ? ORDER BY o.settled_at, o.delivery_id LIMIT 8`
+		case "settled_delivery_attempts":
+			sqlText = `SELECT o.delivery_id, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = ? ORDER BY o.settled_at, o.delivery_id LIMIT 8`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
@@ -6043,7 +6043,7 @@ func waitServedDeliveryOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, 
 			query = `
 				SELECT COUNT(*)
 				FROM event_deliveries d
-				JOIN event_delivery_outcomes o
+				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 				  ON o.delivery_id = d.delivery_id
 				 AND o.claim_version = d.claim_version
 				WHERE d.event_id = $1::uuid
@@ -6055,7 +6055,7 @@ func waitServedDeliveryOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, 
 			query = `
 				SELECT COUNT(*)
 				FROM event_deliveries d
-				JOIN event_delivery_outcomes o
+				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 				  ON o.delivery_id = d.delivery_id
 				 AND o.claim_version = d.claim_version
 				WHERE d.event_id = ?
@@ -7061,7 +7061,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	var deliveryOutcome, deliveryOutcomeReason string
 	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT o.outcome, COALESCE(o.reason_code, '')
-		FROM event_delivery_outcomes o
+		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 		WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-a'
 		ORDER BY o.claim_version DESC
@@ -8624,7 +8624,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	var deliveryOutcome, deliveryOutcomeReason string
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT o.outcome, COALESCE(o.reason_code, '')
-		FROM event_delivery_outcomes o
+		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 		WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-a'
 		ORDER BY o.claim_version DESC

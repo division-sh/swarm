@@ -312,6 +312,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		return runtimeengine.CommittedEngineMutation{}, err
 	}
 	return runtimeengine.CommittedEngineMutation{
+		Committed:       true,
 		ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
 		EmitIntents:     append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...),
 	}, nil
@@ -1076,10 +1077,6 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	if source == nil {
 		source = semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	}
-	var dispatcher runtimeengine.PostCommitDispatcher
-	if pc.bus != nil {
-		dispatcher = pc.bus.EngineDispatcher()
-	}
 	var lifecycleOwner runtimeengine.WorkflowLifecycleEffectOwner
 	if (pc.workflowStore != nil && pc.workflowStore.enabled()) || pc.previewState != nil {
 		lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
@@ -1088,19 +1085,17 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	activityWriter := pipelineActivityIntentWriter{coordinator: pc}
 	publicationPlanner, _ := pc.bus.(EnginePublicationPlanner)
 	return runtimeengine.RuntimeDependencies{
-		Source:             source,
-		StateRepo:          stateRepo,
-		EntityCollections:  pipelineEngineEntityCollectionReader{coordinator: pc},
-		MutationOwner:      pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
-		Locker:             pipelineEngineLocker{coordinator: pc},
-		WorkflowLifecycle:  lifecycleOwner,
-		Dispatcher:         dispatcher,
-		ActivityDispatcher: pipelineActivityDispatcher{coordinator: pc},
-		GuardRegistry:      pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
-		GuardRunner:        pipelineEngineGuardRunner{coordinator: pc},
-		PayloadShaper:      pipelineEnginePayloadShaper{coordinator: pc},
-		EmitNow:            pc.testEngineEmitNow,
-		MaxChainDepth:      workflowMaxChainDepthPolicy(source),
+		Source:            source,
+		StateRepo:         stateRepo,
+		EntityCollections: pipelineEngineEntityCollectionReader{coordinator: pc},
+		MutationOwner:     pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
+		Locker:            pipelineEngineLocker{coordinator: pc},
+		WorkflowLifecycle: lifecycleOwner,
+		GuardRegistry:     pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
+		GuardRunner:       pipelineEngineGuardRunner{coordinator: pc},
+		PayloadShaper:     pipelineEnginePayloadShaper{coordinator: pc},
+		EmitNow:           pc.testEngineEmitNow,
+		MaxChainDepth:     workflowMaxChainDepthPolicy(source),
 	}
 }
 

@@ -449,10 +449,10 @@ func (f completeEventDispatchFixture) updateChainDepth(depth int) error {
 func (f completeEventDispatchFixture) assertNoAgentDispatchMutation(t *testing.T) {
 	t.Helper()
 	var outcomes int
-	query := `SELECT COUNT(*) FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
+	query := `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = ? AND d.subscriber_type = 'agent' AND d.subscriber_id = ?`
 	args := []any{f.event.ID(), f.agentID}
 	if f.dialect == "postgres" {
-		query = `SELECT COUNT(*) FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
+		query = `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = $2`
 	}
 	if err := f.db.QueryRowContext(f.ctx, query, args...).Scan(&outcomes); err != nil {
 		t.Fatalf("count agent delivery outcomes: %v", err)

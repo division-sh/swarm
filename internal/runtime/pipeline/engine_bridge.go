@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -54,11 +53,33 @@ type contractHandlerExecutionResult struct {
 	GuardsEvaluated           []string
 	PreviewMetadata           map[string]any
 	InitialValuesMaterialized map[string]any
-	Emissions                 []events.Event
+	FollowUp                  handlerCommittedFollowUp
+	DiagnosticEmissions       []events.Event
 	SettledDeliveryClaim      *runtimedelivery.Claim
 	Handled                   bool
 	RuleSelection             handlerselection.Observation
 	Transition                *workflowlifecycle.Transition
+}
+
+// The selected mutation has already committed these exact events. The
+// coordinator transfers them only after Executor releases the entity lock.
+type handlerCommittedFollowUp struct {
+	Emissions        []runtimeengine.EmitIntent
+	ActivityIntents  []runtimeengine.ActivityIntent
+	ActivityRequests []runtimeengine.EmitIntent
+}
+
+func copyCommittedIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
+	if len(intents) == 0 {
+		return nil
+	}
+	copyOf := make([]runtimeengine.EmitIntent, len(intents))
+	for index, intent := range intents {
+		copyOf[index] = intent
+		copyOf[index].Event = intent.Event.Clone()
+		copyOf[index].Recipients = append([]string(nil), intent.Recipients...)
+	}
+	return copyOf
 }
 
 func isJoinLifecycleEvent(eventType events.EventType) bool {
@@ -72,9 +93,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	handler runtimecontracts.SystemNodeEventHandler,
 	triggerCtx workflowTriggerContext,
 	preview bool,
-	deferCommittedDispatchOption ...bool,
+	collectDiagnosticEmissionsOption ...bool,
 ) (contractHandlerExecutionResult, error) {
-	deferCommittedDispatch := len(deferCommittedDispatchOption) > 0 && deferCommittedDispatchOption[0]
+	collectDiagnosticEmissions := len(collectDiagnosticEmissionsOption) > 0 && collectDiagnosticEmissionsOption[0]
 	if !node.Valid() {
 		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, nil
 	}
@@ -217,21 +238,20 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID:               identity.NormalizeEntityID(entityID),
-		Node:                   node,
-		ExecutionFlowID:        identity.NormalizeFlowID(flowID),
-		Route:                  stateRoute,
-		Event:                  triggerCtx.Event,
-		ProducerSource:         producerSource,
-		HandlerEventKey:        handlerEventKey,
-		JoinDeclaration:        joinDeclaration,
-		ChainDepth:             triggerCtx.Event.ChainDepth(),
-		Handler:                handler,
-		FanOutPlans:            source.FanOutPlansForHandler(node, handlerEventKey),
-		Preview:                preview,
-		State:                  stateSnapshot,
-		InitialFieldValues:     initialFieldValues,
-		DeferCommittedDispatch: deferCommittedDispatch,
+		EntityID:           identity.NormalizeEntityID(entityID),
+		Node:               node,
+		ExecutionFlowID:    identity.NormalizeFlowID(flowID),
+		Route:              stateRoute,
+		Event:              triggerCtx.Event,
+		ProducerSource:     producerSource,
+		HandlerEventKey:    handlerEventKey,
+		JoinDeclaration:    joinDeclaration,
+		ChainDepth:         triggerCtx.Event.ChainDepth(),
+		Handler:            handler,
+		FanOutPlans:        source.FanOutPlansForHandler(node, handlerEventKey),
+		Preview:            preview,
+		State:              stateSnapshot,
+		InitialFieldValues: initialFieldValues,
 	})
 	if !preview {
 		logComputeModuleReplayEvidence(ctx, pc.bus, node.Key(), triggerCtx.Event, result.ComputeModuleTraces)
@@ -253,30 +273,25 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if handler.CreateEntity {
 		initialValuesMaterialized = workflowEntitySchemaInitialValues(source, flowID)
 	}
-	emissions := &pipelineEmissionPlan{}
-	if deferCommittedDispatch {
-		emissions.appendIntents(result.EmitIntents)
-		immediateCount := 0
-		for _, intent := range result.ActivityIntents {
-			if intent.Normalized().ApprovalDecision == "" {
-				immediateCount++
-			}
-		}
-		if len(result.ActivityRequestIntents) != immediateCount {
-			err = errors.Join(err, fmt.Errorf("committed activity requests = %d, want %d immediate activities", len(result.ActivityRequestIntents), immediateCount))
-		} else {
-			emissions.appendIntents(result.ActivityRequestIntents)
+	followUp := handlerCommittedFollowUp{}
+	if result.Committed {
+		followUp = handlerCommittedFollowUp{
+			Emissions:        copyCommittedIntents(result.EmitIntents),
+			ActivityIntents:  append([]runtimeengine.ActivityIntent(nil), result.ActivityIntents...),
+			ActivityRequests: copyCommittedIntents(result.ActivityRequestIntents),
 		}
 	}
+	diagnostics := &pipelineEmissionPlan{}
 	if !preview {
-		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, node.Key(), handlerOutcomeFromExecutionResult(result), emissionPlanWhen(deferCommittedDispatch, emissions))
+		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, node.Key(), handlerOutcomeFromExecutionResult(result), emissionPlanWhen(collectDiagnosticEmissions, diagnostics))
 	}
 	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return contractHandlerExecutionResult{
 			Committed:            result.Committed,
 			Handled:              handled,
-			Emissions:            emissions.immutableEvents(),
+			FollowUp:             followUp,
+			DiagnosticEmissions:  diagnostics.immutableEvents(),
 			SettledDeliveryClaim: result.SettledDeliveryClaim,
 			RuleSelection:        result.HandlerRuleSelection,
 			Transition:           result.StateMutation.Transition,
@@ -302,7 +317,8 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
 		PreviewMetadata:           previewMetadata,
 		InitialValuesMaterialized: initialValuesMaterialized,
-		Emissions:                 emissions.immutableEvents(),
+		FollowUp:                  followUp,
+		DiagnosticEmissions:       diagnostics.immutableEvents(),
 		SettledDeliveryClaim:      result.SettledDeliveryClaim,
 		Handled:                   handled,
 		RuleSelection:             result.HandlerRuleSelection,

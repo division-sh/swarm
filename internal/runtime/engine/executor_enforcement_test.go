@@ -207,8 +207,7 @@ func TestExecutorPersistCommitsCompleteAuthoritativeStateCarrier(t *testing.T) {
 
 func TestExecutorRejectsAccumulateWithHandlerOnCompleteWithoutBootverify(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: stubSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
-	}, nil)
+		Source: stubSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +242,6 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -283,7 +281,6 @@ func TestExecutor_GuardBlocksTransitionForTerminalState(t *testing.T) {
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 		GuardRegistry: stubGuardRegistry{entries: map[identity.GuardKey]runtimeregistry.GuardInstruction{
 			identity.NormalizeGuardKey("not_in_terminal_state"): {
 				Key:     identity.NormalizeGuardKey("not_in_terminal_state"),
@@ -322,7 +319,6 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 			StateRepo:     &persistentStateRepo{found: true, snapshot: StateSnapshot{CurrentState: "pending", StateCarrier: NewStateCarrier(map[string]any{"score": score}, nil, map[string]map[string]any{})}},
 			MutationOwner: stubMutationOwner{},
 			Locker:        stubLocker{},
-			Dispatcher:    stubDispatcher{},
 		}, stubEvaluator{bools: map[string]bool{
 			"entity.score >= 75": allowed,
 		}})
@@ -396,7 +392,6 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
 		"payload.score >= 70": true,
 	}})
@@ -463,7 +458,6 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -547,7 +541,6 @@ func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)

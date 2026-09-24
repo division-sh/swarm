@@ -162,23 +162,13 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			session_agent_flow_instance_id TEXT,
 			session_agent_flow_instance_path TEXT,
 			open_marker BOOLEAN NOT NULL,
+			closure_kind TEXT NOT NULL,
 			outcome TEXT,
 			reason_code TEXT,
 			failure TEXT,
 			side_effects TEXT NOT NULL DEFAULT '[]',
 			duration_ms INTEGER,
 			completed_at TIMESTAMP,
-			PRIMARY KEY(delivery_id, claim_version)
-		)`,
-		`CREATE TABLE event_delivery_outcomes (
-			delivery_id TEXT NOT NULL,
-			claim_version INTEGER NOT NULL,
-			outcome TEXT NOT NULL,
-			reason_code TEXT,
-			failure TEXT,
-			side_effects TEXT NOT NULL DEFAULT '[]',
-			duration_ms INTEGER NOT NULL,
-			settled_at TIMESTAMP NOT NULL,
 			PRIMARY KEY(delivery_id, claim_version)
 		)`,
 		`CREATE TABLE author_activity_order (

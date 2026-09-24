@@ -90,7 +90,7 @@ func TestSupportedHandlerAppendEmitReadbackAndRollbackBothStores(t *testing.T) {
 					if outcome == "outbox_failure" && i == 1 {
 						bus.outboxErr = errors.New("outbox unavailable")
 					}
-					result, err := newCoordinator().executeNodeContractHandler(ctx, node, handler, workflowTriggerContext{Event: event}, false)
+					result, err := executeNodeContractHandlerWithHandoff(t, newCoordinator(), ctx, node, handler, workflowTriggerContext{Event: event}, false)
 					failed := outcome == "outbox_failure" && i == 1
 					if failed {
 						if err == nil || !strings.Contains(err.Error(), "outbox unavailable") {

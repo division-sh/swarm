@@ -58,7 +58,6 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 		StateRepo:     fanOutPinRouteStateRepo{},
 		MutationOwner: fanOutPinRouteMutationOwner{},
 		Locker:        fanOutPinRouteLocker{},
-		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -230,7 +229,6 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		StateRepo:     fanOutPinRouteStateRepo{},
 		MutationOwner: fanOutPinRouteMutationOwner{},
 		Locker:        fanOutPinRouteLocker{},
-		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)

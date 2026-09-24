@@ -1041,7 +1041,7 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 	if err := db.QueryRowContext(ctx, `
 		SELECT d.status, COALESCE(d.failure, ''), COALESCE(o.outcome, '')
 		FROM event_deliveries d
-		LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id
+		LEFT JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id = d.delivery_id
 		WHERE d.event_id = ? AND d.subscriber_type = 'node' AND d.subscriber_id = ?
 	`, evt.ID(), joinNode.Key()).Scan(&status, &failureRaw, &deliveryOutcome); err != nil {
 		t.Fatal(err)

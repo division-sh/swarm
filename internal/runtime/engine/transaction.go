@@ -83,7 +83,6 @@ func NormalizeFailure(err error, component, operation string) *failures.Error {
 	case errors.Is(err, ErrMissingStateRepo),
 		errors.Is(err, ErrMissingMutationOwner),
 		errors.Is(err, ErrMissingEntityLocker),
-		errors.Is(err, ErrMissingDispatcher),
 		errors.Is(err, ErrEmitPersistencePrerequisite):
 		return failures.Wrap(
 			failures.ClassDependencyUnavailable,

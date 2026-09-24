@@ -46,7 +46,7 @@ func revisionProjectionContributorCensus() map[string][]string {
 		"FamilyEventDeliveries":         {"event_deliveries", "event_delivery_attempts", "event_delivery_handler_rule_selections"},
 		"FamilyCommittedReplayScopes":   {"committed_replay_scopes"},
 		"FamilyEventReceipts":           {"event_receipts", "events"},
-		"FamilyDeadLetters":             {"dead_letters", "event_delivery_outcomes", "events"},
+		"FamilyDeadLetters":             {"dead_letters", "event_delivery_attempts", "events"},
 		"FamilyTimers":                  {"timers"},
 		"FamilyAgentSessions":           {"agent_sessions"},
 		"FamilyAgentTurns":              {"agent_turns"},
@@ -286,10 +286,9 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"delivery/adapter.go", "Adapter.persistHandlerRuleSelection", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
 		{"delivery/adapter.go", "Adapter.insertAttempt", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
 		{"delivery/adapter.go", "Adapter.expireAttempt", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.completeAttempt", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
+		{"delivery/adapter.go", "Adapter.completeAttempt", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())", "declareOutcomeDeadLetterEffects(ctx, tx, attempt, claim.DeliveryID(), claim.Version())"}},
 		{"delivery/adapter.go", "Adapter.closeAttemptForTerminalization", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
-		{"delivery/adapter.go", "Adapter.insertTerminalizedAttempt", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
-		{"delivery/adapter.go", "Adapter.insertOutcome", []string{"declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)"}},
+		{"delivery/adapter.go", "Adapter.insertTerminalizedAttempt", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)", "declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)"}},
 		{"delivery/dead_letters.go", "declareDeadLetterEffect", []string{"privaterunforkrevision.RunIDForEvent(ctx, tx, eventID)", "attempt.AddFact(runID, privaterunforkrevision.FamilyDeadLetters, deadLetterID)"}},
 		{"delivery/dead_letters.go", "declareOutcomeDeadLetterEffects", []string{"attempt.AddFact(runID.String, privaterunforkrevision.FamilyDeadLetters, deadLetterID)"}},
 		{"delivery/dead_letters.go", "insertPostgresDeadLetterRecord", []string{"uuid.NewString()", "declareDeadLetterEffect(ctx, tx, attempt, rec.OriginalEventID, deadLetterID)"}},
@@ -666,13 +665,13 @@ func TestRunForkRevisionJoinedPhysicalWriterGuardHostileControls(t *testing.T) {
 	source := "package store\nfunc unclassifiedContributor() {\n" +
 		"_ = `INSERT INTO event_delivery_handler_rule_selections (delivery_id) VALUES (?)`\n" +
 		"_ = `UPDATE \"event_delivery_attempts\" SET open_marker = false`\n" +
-		"_ = `DELETE FROM \"public\".\"event_delivery_outcomes\" WHERE delivery_id = $1`\n}"
+		"_ = `DELETE FROM \"public\".\"dead_letters\" WHERE delivery_id = $1`\n}"
 	if err := os.WriteFile(filepath.Join(dir, "future.go"), []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
 	got := scanRunForkRevisionPhysicalWriters(t, root)
 	want := map[string]struct{}{}
-	for _, table := range []string{"event_delivery_handler_rule_selections", "event_delivery_attempts", "event_delivery_outcomes"} {
+	for _, table := range []string{"event_delivery_handler_rule_selections", "event_delivery_attempts", "dead_letters"} {
 		want["internal/store/future.go|unclassifiedContributor|"+table] = struct{}{}
 	}
 	if !reflect.DeepEqual(got, want) {

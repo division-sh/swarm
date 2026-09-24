@@ -261,7 +261,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					if status != wantStatus || version != claim.Version() || afterTarget != rawTarget {
 						t.Fatalf("settlement changed ownership/version: status=%s version=%d target=%s", status, version, afterTarget)
 					}
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1 AND claim_version=$2 AND outcome=$3`, claim.DeliveryID(), claim.Version(), wantStatus).Scan(&outcomes); err != nil || outcomes != 1 {
+					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1 AND claim_version=$2 AND outcome=$3`, claim.DeliveryID(), claim.Version(), wantStatus).Scan(&outcomes); err != nil || outcomes != 1 {
 						t.Fatalf("exact claim outcomes=%d err=%v", outcomes, err)
 					}
 					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND open_marker=TRUE`, claim.DeliveryID()).Scan(&openAttempts); err != nil || openAttempts != 0 {
@@ -498,7 +498,7 @@ func requireSelectedForkMixedBusinessMutation(t *testing.T, rt servedControlProo
 			t.Fatalf("mixed frontier borrowed another entity: %+v", delivery)
 		}
 		var outcomes int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1 AND claim_version=1 AND outcome='delivered'`, delivery.DeliveryID).Scan(&outcomes); err != nil || outcomes != 1 {
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1 AND claim_version=1 AND outcome='delivered'`, delivery.DeliveryID).Scan(&outcomes); err != nil || outcomes != 1 {
 			t.Fatalf("mixed frontier missing exact settlement: count=%d err=%v", outcomes, err)
 		}
 	}

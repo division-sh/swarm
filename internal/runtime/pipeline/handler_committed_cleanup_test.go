@@ -75,6 +75,72 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 	}
 }
 
+type releaseFailureWorkflowRuntime struct {
+	WorkflowDeliveryRuntime
+	failure error
+}
+
+func (r releaseFailureWorkflowRuntime) ReleaseDeliveryContinuation(deliveryID string) error {
+	return errors.Join(r.WorkflowDeliveryRuntime.ReleaseDeliveryContinuation(deliveryID), r.failure)
+}
+
+func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *testing.T) {
+	for _, backend := range workflowJoinStoreCases() {
+		t.Run(backend.name, func(t *testing.T) {
+			store, ctx := backend.open(t)
+			bundle := loadWorkflowTempBundle(t, map[string]string{
+				"schema.yaml":   "name: terminal-no-engine\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
+				"entities.yaml": "test_entity: {}\n",
+				"events.yaml":   "source.evt: {}\n",
+				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      guard: {id: reject-check, check: 'false', on_fail: reject}\n      advances_to: done\n",
+			})
+			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
+			node := pipelineNode(t, ".", "node-a")
+			module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}, Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}}}}
+			bus := &recordingPipelineBus{}
+			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
+				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()),
+			})
+			pc.workflowStore = store
+			owner := configurePipelineTestDeliveryOwner(t, pc)
+			runID, entityID := correlation.RunIDFromContext(ctx), uuid.NewString()
+			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+			dialect := authoractivityfixture.DialectPostgres
+			if store.isSQLite() {
+				dialect = authoractivityfixture.DialectSQLite
+			}
+			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "v-test",
+				CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
+			})); err != nil {
+				t.Fatal(err)
+			}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID})}
+			if err := owner.commitInitial(ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			deliveryID, err := deliverylifecycle.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			injected := errors.New("injected continuation cleanup failure")
+			pc.deliveryRuntime = releaseFailureWorkflowRuntime{WorkflowDeliveryRuntime: pc.deliveryRuntime, failure: injected}
+			handled, outcome, err := pc.handleEventResultWithEmissionPlan(withWorkflowNodeDeliveryRoute(ctx, route), evt, nil)
+			if handled || !outcome.Committed || !errors.Is(err, injected) {
+				t.Fatalf("handled=%t outcome=%+v error=%v, want guard rejection with acknowledged delivery and cleanup diagnostic", handled, outcome, err)
+			}
+			outcomes, err := owner.Outcomes(ctx, deliveryID)
+			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "delivered" {
+				t.Fatalf("settled outcomes=%+v error=%v, want one delivered", outcomes, err)
+			}
+			if got := bus.outboxCount(); got != 0 {
+				t.Fatalf("guard rejection published %d events", got)
+			}
+		})
+	}
+}
+
 func assertCommittedHandlerCleanupRows(t *testing.T, ctx context.Context, store *workflowInstanceStore, owner *pipelineTestDeliveryOwner, bus *recordingPipelineBus, runID, entityID, deliveryID string) {
 	t.Helper()
 	snapshot, err := owner.Snapshot(ctx, deliveryID)

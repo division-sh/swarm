@@ -22,7 +22,7 @@ func TestRetainedNodeContractHandlerUsesRuntimeEnginePath(t *testing.T) {
 		"00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}), time.Unix(1, 0).UTC(),
 	)
-	outcome, err := pc.executeNodeContractHandler(testAuthorActivityContext(t, context.Background()), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	outcome, err := executeNodeContractHandlerWithHandoff(t, pc, testAuthorActivityContext(t, context.Background()), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{Event: evt, HandlerEventKey: "custom.trigger"}, false)
 	if err != nil {

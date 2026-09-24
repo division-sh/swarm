@@ -152,10 +152,10 @@ func requireForkLoopStateEffect(t *testing.T, rt servedControlProofRuntime, runI
 	if delivery.Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "review", FlowInstance: "review", EntityID: entityID}) {
 		t.Fatalf("loop delivery lost exact target: %+v", delivery)
 	}
-	if err := rt.DB.QueryRow(`SELECT d.claim_version,o.claim_version,o.outcome,s.selection_context,s.disposition FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id JOIN event_delivery_handler_rule_selections s ON s.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, delivery.DeliveryID).Scan(&claim, &outcomeClaim, &outcome, &selectionContext, &disposition); err != nil {
+	if err := rt.DB.QueryRow(`SELECT d.claim_version,o.claim_version,o.outcome,s.selection_context,s.disposition FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id JOIN event_delivery_handler_rule_selections s ON s.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, delivery.DeliveryID).Scan(&claim, &outcomeClaim, &outcome, &selectionContext, &disposition); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1`, delivery.DeliveryID).Scan(&outcomes); err != nil {
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1`, delivery.DeliveryID).Scan(&outcomes); err != nil {
 		t.Fatal(err)
 	}
 	if claim != 1 || outcomeClaim != 1 || outcomes != 1 || outcome != "delivered" || selectionContext != "none" || disposition != "not_applicable" {
