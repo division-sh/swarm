@@ -185,7 +185,7 @@ func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan Inbound
 	prepared := append([]PreparedPublish(nil), plan.prepared...)
 	var finalizationErr error
 	for index := range prepared {
-		consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared[index], committed[index])
+		consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared[index], committed[index], false)
 		prepared[index] = consequences.prepared
 		finalizationErr = errors.Join(finalizationErr, err)
 	}
