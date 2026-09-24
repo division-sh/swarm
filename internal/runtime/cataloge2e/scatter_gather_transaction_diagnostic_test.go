@@ -1,6 +1,7 @@
 package cataloge2e
 
 import (
+	"context"
 	"os"
 	"sort"
 	"testing"
@@ -21,8 +22,11 @@ func scatterGatherTransactionDiagnostics(t *testing.T, h *runtimeHarness) func(s
 	collector := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	return func(event string) func() {
 		before, started := collector.Snapshot(), time.Now()
+		beforeDeliveries, beforeAttempts := catalogDeliveryAttemptCounts(t, h, catalogRuntimeRunID)
 		return func() {
 			after := collector.Snapshot()
+			afterDeliveries, afterAttempts := catalogDeliveryAttemptCounts(t, h, catalogRuntimeRunID)
+			t.Logf("S03 handoff phase=%s deliveries=%d claim_attempts=%d", event, afterDeliveries-beforeDeliveries, afterAttempts-beforeAttempts)
 			t.Logf("S03 transaction phase=%s start=%s end=%s elapsed=%s active=%d active_classes=%+v", event, started.UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), time.Since(started), after.Active, after.ActiveByClass)
 			logCounts := func(label string, a, b storetest.TransactionCounts) {
 				t.Logf("S03 transaction phase=%s operation=%s begin=%d reads=%d writes=%d failed=%d commit_attempts=%d commit_failures=%d rollbacks=%d revision_finalizations=%d revision_elapsed=%s revision_lock_phases=%d revision_lock_elapsed=%s revision_exec=%d revision_query=%d revision_queryrow=%d first_commit=%s last_commit=%s", event, label,
@@ -47,4 +51,15 @@ func scatterGatherTransactionDiagnostics(t *testing.T, h *runtimeHarness) func(s
 			}
 		}
 	}
+}
+
+func catalogDeliveryAttemptCounts(t *testing.T, h *runtimeHarness, runID string) (deliveries, attempts int64) {
+	t.Helper()
+	const query = `SELECT COUNT(*), COALESCE(SUM(d.claim_version),0)
+		FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
+		WHERE e.run_id=$1 AND e.event_name<>'platform.runtime_log'`
+	if err := h.db.QueryRowContext(context.Background(), query, runID).Scan(&deliveries, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	return deliveries, attempts
 }
