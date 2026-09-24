@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -287,7 +288,10 @@ func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context, st
 
 func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
 	return runtimebustest.CommitPublish(ctx, command, func(_ context.Context, admitted events.AdmittedEvent) (bus.EventAppendOutcome, error) {
-		if _, exists := s.events[admitted.ID()]; exists {
+		if original, exists := s.events[admitted.ID()]; exists {
+			if !reflect.DeepEqual(admitted.Event(), original) {
+				return bus.EventAppendOutcomeUnknown, events.ErrEventIdentityConflict
+			}
 			return bus.EventAppendExactDuplicate, nil
 		}
 		return bus.EventAppendInserted, nil
@@ -328,6 +332,16 @@ func (s *fanInStreamMemoryStore) LoadPreparedPublishEvent(_ context.Context, eve
 		return bus.PreparedPublishEvent{}, false, err
 	}
 	return bus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, true, nil
+}
+
+func (s *fanInStreamMemoryStore) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable bus.PreparedPublishEvent) error {
+	if err := durable.Validate(); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(candidate.Event(), durable.Event.Event()) {
+		return events.ErrEventIdentityConflict
+	}
+	return nil
 }
 
 func (s *fanInStreamMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
