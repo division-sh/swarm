@@ -143,6 +143,7 @@ func TestOrdinaryCommittedPublicationDiagnosticRetainsDispatchAuthority(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	internal := subscribeInternalDeliveriesForTest(t, bus, "committed-diagnostic-internal", events.EventType("custom.emitted"))
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	prepared, ready, diagnostic := bus.commitPublish(ctx, eventBusCommitPublishPlan{bus: bus, event: event})
 	if !ready || diagnostic == nil || probe.seen != 1 {
@@ -151,8 +152,18 @@ func TestOrdinaryCommittedPublicationDiagnosticRetainsDispatchAuthority(t *testi
 	if prepared.Event.ID() != event.ID() {
 		t.Fatalf("committed event=%s, want %s", prepared.Event.ID(), event.ID())
 	}
+	if len(prepared.plan.InternalRecipientIDs()) != 1 {
+		t.Fatalf("internal recipients=%v, want exact internal subscriber", prepared.plan.InternalRecipientIDs())
+	}
+	if pending := bus.pendingInternalDeliveryForEvent(event.ID()); len(pending.recipients) != 0 {
+		t.Fatalf("ordinary publication staged engine-only internal cache: %v", pending.recipients)
+	}
 	if err := bus.dispatchPreparedPublish(context.WithoutCancel(ctx), prepared); err != nil {
 		t.Fatalf("dispatch exact committed event: %v", err)
+	}
+	delivery := requireBusEvent(t, internal, "ordinary committed internal recipient")
+	if delivery.ID() != event.ID() {
+		t.Fatalf("internal delivery=%s, want %s", delivery.ID(), event.ID())
 	}
 	if !prepared.publicationClaim.released.Load() {
 		t.Fatal("acknowledged publication retained its local claim after dispatch")

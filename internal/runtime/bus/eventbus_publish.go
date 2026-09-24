@@ -410,7 +410,7 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 	if claim == nil {
 		return PreparedPublish{}, false, errors.New("committed publication requires its exact claim")
 	}
-	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared, committed)
+	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, prepared, committed, false)
 	if !consequences.ready {
 		return PreparedPublish{}, false, errors.Join(err, claim.Release(context.WithoutCancel(ctx)))
 	}

@@ -272,7 +272,7 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 	if err := committed.ValidateCommittedDurablePublication(); err != nil {
 		return err
 	}
-	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, committed.plan.prepared, committed.committed)
+	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, committed.plan.prepared, committed.committed, true)
 	if consequences.prerequisiteErr != nil {
 		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), committed.committed.AppendOutcome, claim, committed.committed.DeliveryHandoffs, consequences.prerequisiteErr)
 		staged = true
@@ -299,7 +299,7 @@ type committedPublicationConsequences struct {
 	ready           bool
 }
 
-func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context, prepared PreparedPublish, committed CommittedPublication) (result committedPublicationConsequences, err error) {
+func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context, prepared PreparedPublish, committed CommittedPublication, stageEngineInternalDelivery bool) (result committedPublicationConsequences, err error) {
 	result.prepared = prepared
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -320,7 +320,10 @@ func (eb *EventBus) finalizeCommittedPublicationConsequences(ctx context.Context
 	result.prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
 	activationErr := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.Activations)
 	readinessErr := eb.finalizeEngineAgentReadiness(ctx, result.prepared.Event, result.prepared.plan.DeliveryRoutes())
-	internalErr := eb.finalizeEngineInternalDelivery(result.prepared.Event.ID(), result.prepared.plan.InternalRecipientIDs())
+	var internalErr error
+	if stageEngineInternalDelivery {
+		internalErr = eb.finalizeEngineInternalDelivery(result.prepared.Event.ID(), result.prepared.plan.InternalRecipientIDs())
+	}
 	result.prerequisiteErr = errors.Join(activationErr, readinessErr, internalErr)
 	if result.prerequisiteErr != nil {
 		return result, result.prerequisiteErr
