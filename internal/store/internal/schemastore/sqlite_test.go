@@ -20,8 +20,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 96 {
-		t.Fatalf("platform table plan count = %d, want 96", len(platformPlans))
+	if len(platformPlans) != 95 {
+		t.Fatalf("platform table plan count = %d, want 95 after retiring duplicate delivery outcomes", len(platformPlans))
 	}
 	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
 		LogicalID: "planner",
@@ -68,6 +68,9 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 		if !sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), tableName) {
 			t.Fatalf("sqlite table %s missing after bootstrap", tableName)
 		}
+	}
+	if sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), "event_delivery_outcomes") {
+		t.Fatal("retired event_delivery_outcomes table remains authoritative")
 	}
 	for _, column := range []string{
 		"payload_schema_bundle_hash",

@@ -610,12 +610,12 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-ok")}, runtimedelivery.StateDelivered, nil)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
-			original_event_id, delivery_id, claim_version, original_event, original_payload, flow_instance,
+			original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance,
 			failure, retry_count, handler_node, created_at
 		)
 		VALUES
-			($1::uuid, $5::uuid, $6, 'fork.work', '{}'::jsonb, 'runtime', $2::jsonb, 1, $7, $4),
-			($1::uuid, NULL, NULL, 'fork.work', '{}'::jsonb, 'runtime', $3::jsonb, 3, 'node-other', $4)
+			($1::uuid, $5::uuid, $6, 'settled', 'fork.work', '{}'::jsonb, 'runtime', $2::jsonb, 1, $7, $4),
+			($1::uuid, NULL, NULL, NULL, 'fork.work', '{}'::jsonb, 'runtime', $3::jsonb, 3, 'node-other', $4)
 	`, eventID,
 		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)),
 		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "different_node_failed", nil)), at,

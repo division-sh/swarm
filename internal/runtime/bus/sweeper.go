@@ -386,12 +386,13 @@ func (eb *EventBus) processClaimedPipelineWork(
 		if !settlement.Committed() {
 			return false, false, nil, errors.Join(dispatchErr, settleErr)
 		}
-		if decision.disposition.Terminal() {
-			eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, decision.disposition.Failure(), recipients)
-		} else if decision.disposition.Successful() && work.Scope == runtimepipelineobligation.ScopeDirect && len(recipients) == 0 {
+		// Acknowledged is terminal for claim ownership, but not a dropped replay.
+		if decision.disposition.Successful() && work.Scope == runtimepipelineobligation.ScopeDirect && len(recipients) == 0 {
 			eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, nil, nil)
 		} else if decision.disposition.Successful() {
 			eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, recipients)
+		} else if decision.disposition.Terminal() {
+			eb.logStartupRecoveryPipelineAftermath(ctx, work.Event, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, decision.disposition.Failure(), recipients)
 		}
 		if decision.failedBeforeSettle {
 			return true, false, nil, settleErr
