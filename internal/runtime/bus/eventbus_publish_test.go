@@ -362,6 +362,20 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 	}
 	assertPhase := func(t *testing.T) {
 		t.Helper()
+		beforePreflight, err := loadState()
+		if err != nil {
+			t.Fatalf("load state before duplicate preflight: %v", err)
+		}
+		if _, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt); err != nil {
+			t.Fatalf("preflight exact duplicate: %v", err)
+		}
+		afterPreflight, err := loadState()
+		if err != nil {
+			t.Fatalf("load state after duplicate preflight: %v", err)
+		}
+		if afterPreflight != beforePreflight {
+			t.Fatalf("exact duplicate preflight mutated operation state: before=%+v after=%+v", beforePreflight, afterPreflight)
+		}
 		for name, publish := range writers {
 			name, publish := name, publish
 			t.Run(name, func(t *testing.T) {

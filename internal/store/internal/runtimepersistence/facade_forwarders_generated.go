@@ -1258,6 +1258,10 @@ func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context)
 	return s.eventPostgresOwner.ValidateInboundPublicationIntegrity(ctx)
 }
 
+func (s *PostgresStore) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable bus.PreparedPublishEvent) error {
+	return s.eventPostgresOwner.VerifyPreparedPublishEventIdentity(candidate, durable)
+}
+
 func (s *PostgresStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
 	return s.postgresOwner.WithAPIIdempotency(ctx, req, execute)
 }
@@ -2428,6 +2432,10 @@ func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route 
 
 func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
 	return s.eventSQLiteOwner.ValidateInboundPublicationIntegrity(ctx)
+}
+
+func (s *SQLiteRuntimeStore) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable bus.PreparedPublishEvent) error {
+	return s.eventSQLiteOwner.VerifyPreparedPublishEventIdentity(candidate, durable)
 }
 
 func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {

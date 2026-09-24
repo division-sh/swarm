@@ -269,6 +269,12 @@ type PreparedPublishEventReader interface {
 	LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error)
 }
 
+// PreparedPublishEventIdentityVerifier delegates exact duplicate identity to
+// the selected store's event-record owner rather than reinterpreting it in routing.
+type PreparedPublishEventIdentityVerifier interface {
+	VerifyPreparedPublishEventIdentity(events.AdmittedEvent, PreparedPublishEvent) error
+}
+
 type PreparedPublishEvent struct {
 	Event          events.AdmittedEvent
 	Settlement     events.RouteSettlement

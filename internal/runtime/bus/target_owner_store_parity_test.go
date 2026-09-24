@@ -100,6 +100,16 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 				t.Fatalf("create restarted EventBus: %v", err)
 			}
 			deliveries := subscribeInternalDeliveriesForTest(t, restarted, persisted[0].Recipient.ID())
+			duplicatePlan, err := restarted.CheckPublishRecipientPlan(ctx, evt)
+			if err != nil {
+				t.Fatalf("preflight exact duplicate from durable route: %v", err)
+			}
+			if duplicatePlan.TargetFailure != "" || len(duplicatePlan.DeliveryRoutes) != 1 ||
+				duplicatePlan.DeliveryRoutes[0].Recipient.ID() != persisted[0].Recipient.ID() ||
+				duplicatePlan.DeliveryRoutes[0].Target != persisted[0].Target ||
+				!duplicatePlan.DeliveryRoutes[0].ConnectClaim.Equal(persisted[0].ConnectClaim) {
+				t.Fatalf("durable duplicate preflight = %#v, want original route %#v", duplicatePlan, persisted[0])
+			}
 			duplicateCtx := runtimedelivery.WithRoute(
 				runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID),
 				events.DeliveryRoute{Target: events.MustExistingEntityTarget(events.RouteIdentity{
@@ -123,6 +133,21 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 				json.RawMessage(`{"entity_id":"different"}`), 0, runID, "",
 				events.EventEnvelope{}, routingSource, evt.CreatedAt(),
 			)
+			if _, err := restarted.CheckPublishRecipientPlan(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
+				t.Fatalf("conflicting duplicate preflight error = %v, want event identity conflict", err)
+			}
+			wrongSource, err := events.NewRootRoutingSource(uuid.NewString())
+			if err != nil {
+				t.Fatalf("construct conflicting source: %v", err)
+			}
+			conflictingSource := eventtest.RunCreatingRootIngressWithRoutingSource(
+				eventID, events.EventType("root.ready"), "root-producer", "",
+				json.RawMessage(`{"entity_id":"consumer-one"}`), 0, runID, "",
+				events.EventEnvelope{}, wrongSource, evt.CreatedAt(),
+			)
+			if _, err := restarted.CheckPublishRecipientPlan(ctx, conflictingSource); !errors.Is(err, events.ErrEventIdentityConflict) {
+				t.Fatalf("conflicting source preflight error = %v, want event identity conflict", err)
+			}
 			if err := restarted.Publish(duplicateCtx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("conflicting duplicate error = %v, want event identity conflict", err)
 			}
@@ -144,6 +169,9 @@ func TestCrossFlowMaterializingTargetOwnershipRoundTripOnBothBackends(t *testing
 				}
 			case <-time.After(2 * time.Second):
 				t.Fatal("timed out waiting for persisted receiver-owned replay")
+			}
+			if _, err := restarted.CheckPublishRecipientPlan(ctx, evt); err != nil {
+				t.Fatalf("preflight committed output after delivery settlement: %v", err)
 			}
 			if len(persisted) != 1 || persisted[0].Target != wantOwner {
 				t.Fatalf("original persisted target changed after replay: %#v", persisted)
@@ -208,6 +236,9 @@ func TestPreparedPublishAggregateCorruptionRejectsBothStoreReadbackAndExactDupli
 			duplicateCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			if err := restarted.Publish(duplicateCtx, evt); err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
 				t.Fatalf("corrupt exact duplicate error = %v, want aggregate contradiction", err)
+			}
+			if _, err := restarted.CheckPublishRecipientPlan(duplicateCtx, evt); err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
+				t.Fatalf("corrupt duplicate preflight error = %v, want aggregate contradiction", err)
 			}
 			after := loadPreparedDeliveryCorruption(t, ctx, db, backend, evt.ID(), events.EncodeDeliveryRouteIdentity(corruptIdentity))
 			if before != after {

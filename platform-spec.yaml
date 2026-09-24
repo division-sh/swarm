@@ -1238,6 +1238,15 @@ contract_formats:
           duplicate is idempotent even after the run becomes terminal and creates no rows or lifecycle transition. A
           duplicate event_id with different persisted event facts fails closed. Only a genuinely new event proceeds to
           the locked running-or-paused check.
+        duplicate_recipient_preflight: >
+          A read-only recipient preflight for a previously committed event consumes its validated durable publication
+          aggregate and the selected store's exact persisted-event identity comparison before consulting live receiver
+          eligibility. It reports the original delivery routes for an exact duplicate, including after the receiver
+          completes, but never treats event_id existence alone as authority. Changed payload, schema binding, source,
+          target, lineage, or other immutable event facts fail closed. A genuinely new event still requires fresh
+          receiver preflight, and preflight success never substitutes for the publication claim, lifecycle checks, or
+          exact duplicate decision at commit. Recovered terminal tool output follows this same path; it cannot mint a
+          new event or invoke the provider again merely because its original receiver is now terminal.
         duplicate_operation_boundary: >
           The selected-store append owner returns an explicit inserted or exact-duplicate outcome. When event append is
           part of an event-plus-side-effects operation, exact duplicate terminates that whole operation before route

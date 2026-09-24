@@ -2437,6 +2437,28 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 		return PublishRecipientPlan{}, err
 	}
 	evt = admitted.Event()
+	if reader := eb.durable.PreparedEvents; reader != nil {
+		durable, found, err := loadValidatedPreparedPublishEvent(ictx, reader, admitted.ID())
+		if err != nil {
+			return PublishRecipientPlan{}, fmt.Errorf("load durable event before recipient preflight: %w", err)
+		}
+		if found {
+			admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable.Event)
+			if err != nil {
+				return PublishRecipientPlan{}, err
+			}
+			verifier, ok := reader.(PreparedPublishEventIdentityVerifier)
+			if !ok {
+				return PublishRecipientPlan{}, errors.New("prepared publication identity verifier is required")
+			}
+			if err := verifier.VerifyPreparedPublishEventIdentity(admitted, durable); err != nil {
+				return PublishRecipientPlan{}, err
+			}
+			plan := routePlanFromManifest(evt, deliveryRecipientManifest{DeliveryRoutes: durable.DeliveryRoutes}, routeIntentProducerRecipientMaterializer)
+			plan.ConnectEvaluation = durable.Settlement.Ledger()
+			return eb.publishRecipientPlan(evt, plan), nil
+		}
+	}
 	plan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ictx), evt, false)
 	if err != nil {
 		return PublishRecipientPlan{}, err
