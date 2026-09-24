@@ -185,8 +185,11 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 					}
 					collector := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 					before, started := collector.Snapshot(), time.Now()
+					beforeDeliveries, beforeAttempts := catalogDeliveryAttemptCounts(t, h, catalogRuntimeRunID)
 					defer func() {
 						after := collector.Snapshot()
+						afterDeliveries, afterAttempts := catalogDeliveryAttemptCounts(t, h, catalogRuntimeRunID)
+						t.Logf("2412 activity handoff backend=%s deliveries=%d claim_attempts=%d", backend, afterDeliveries-beforeDeliveries, afterAttempts-beforeAttempts)
 						t.Logf("2412 activity cost backend=%s elapsed=%s begin=%d reads=%d writes=%d commit_attempts=%d rollbacks=%d revision_exec=%d revision_query=%d revision_queryrow=%d", backend, time.Since(started),
 							after.Total.BeginAttempts-before.Total.BeginAttempts, after.Total.ReadCommits-before.Total.ReadCommits, after.Total.WriteCommits-before.Total.WriteCommits,
 							after.Total.CommitAttempts-before.Total.CommitAttempts, after.Total.RollbackAttempts-before.Total.RollbackAttempts,
