@@ -676,7 +676,7 @@ func (d engineDispatcher) dispatchIntentDisposition(ctx context.Context, intent 
 
 func (d engineDispatcher) dispatchIntentDispositionWithBoundary(ctx context.Context, intent runtimeengine.EmitIntent, boundary publicationSettlementBoundary) (runtimepipelineobligation.Disposition, bool, error) {
 	queued, outcome, err := d.dispatchIntentWithBoundary(ctx, intent, boundary)
-	decision := classifyPipelineDispatch(outcome, err, queued, runtimepipelineobligation.PurposePublication, false)
+	decision := classifyPipelineDispatch(outcome, err, queued, runtimepipelineobligation.PurposePublication, pipelineDispatchOutboxFinal)
 	if decision.action != pipelineDispatchSettle {
 		return runtimepipelineobligation.Disposition{}, false, err
 	}

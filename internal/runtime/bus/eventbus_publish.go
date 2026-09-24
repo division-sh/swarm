@@ -1415,17 +1415,13 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 		return drainErr
 	}
 	defer func() { err = errors.Join(err, drainDeferred()) }()
-	if err != nil && !interception.Outcome.Committed && interception.Outcome.ContinueDispatch() {
-		return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_dispatch_failed", eventBusFailure(err, "dispatch_committed_publish"))))
+	purpose := pipelinePublishPurpose(evt)
+	decision := classifyPipelineDispatch(interception.Outcome, err, false, purpose, pipelineDispatchPublishInterceptors)
+	if decision.action != pipelineDispatchContinue {
+		return errors.Join(err, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
 	}
 	postCommitErr := err
 	defer func() { err = errors.Join(postCommitErr, err) }()
-	if _, retry := interception.Outcome.RetryRelease(); retry {
-		return nil
-	}
-	if disposition, ok := interception.Outcome.Disposition(); ok {
-		return eb.settleCommittedPublish(ctx, publicationClaim, disposition)
-	}
 
 	if interception.EventPassthrough {
 		liveRecipients := inboundPlan.LiveRecipients
@@ -1440,11 +1436,9 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 			if dispatchErr == nil && !dispatch.complete() {
 				dispatchErr = eb.logAuthoritativeDeliveryIncomplete(workCtx, evt, dispatch.expected, dispatch.delivered, dispatch.missing, dispatch.timedOut, dispatch.cause)
 			}
-			if err := dispatchErr; err != nil {
-				if errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-					return err
-				}
-				return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_delivery_failed", eventBusFailure(err, "deliver_route_plan"))))
+			decision := classifyPipelineDispatch(runtimepipelineobligation.Continue(), dispatchErr, false, purpose, pipelineDispatchPublishRoutes)
+			if decision.action != pipelineDispatchContinue {
+				return errors.Join(dispatchErr, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
 			}
 			if len(dispatch.delivered) > 0 {
 				delivered := deliveryTargetKeySubscriberIDs(dispatch.delivered)
@@ -1453,8 +1447,10 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 			}
 		}
 		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
-			if err := eb.publishDeferred(workCtx, *inboundPlan.CycleEscalation); err != nil {
-				return errors.Join(err, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(err, "publish_deferred"))))
+			deferredErr := eb.publishDeferred(workCtx, *inboundPlan.CycleEscalation)
+			decision := classifyPipelineDispatch(runtimepipelineobligation.Continue(), deferredErr, false, purpose, pipelineDispatchPublishDeferred)
+			if decision.action != pipelineDispatchContinue {
+				return errors.Join(deferredErr, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
 			}
 		}
 		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
@@ -1463,16 +1459,26 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	}
 	eb.logPublished(ctx, evt, 0)
 
-	if deferredErr := drainDeferred(); deferredErr != nil {
-		return errors.Join(deferredErr, eb.settleCommittedPublish(ctx, publicationClaim, committedPublishFailureDisposition(evt, "pipeline_deferred_publish_failed", eventBusFailure(deferredErr, "publish_deferred"))))
+	deferredErr := drainDeferred()
+	decision = classifyPipelineDispatch(runtimepipelineobligation.Continue(), deferredErr, false, purpose, pipelineDispatchPublishDeferred)
+	if decision.action != pipelineDispatchContinue {
+		return errors.Join(deferredErr, eb.applyCommittedPublishDecision(ctx, publicationClaim, decision))
 	}
-	if evt.Type() == events.EventType("mailbox.card_decided") {
-		return eb.settleCommittedDecisionPublish(ctx, publicationClaim)
+	decision = classifyPipelineDispatch(runtimepipelineobligation.Continue(), nil, false, purpose, pipelineDispatchPublishFinal)
+	return eb.applyCommittedPublishDecision(ctx, publicationClaim, decision)
+}
+
+func (eb *EventBus) applyCommittedPublishDecision(ctx context.Context, claim *pipelinePublicationClaim, decision pipelineDispatchDecision) error {
+	switch decision.action {
+	case pipelineDispatchPending, pipelineDispatchRetryRelease:
+		return nil
+	case pipelineDispatchSettle:
+		return eb.settleCommittedPublish(ctx, claim, decision.disposition)
+	case pipelineDispatchMarkDecisionProcessed:
+		return eb.settleCommittedDecisionPublish(ctx, claim)
+	default:
+		return fmt.Errorf("committed publication cannot finish with dispatch action %d", decision.action)
 	}
-	if err := eb.settleCommittedPublish(ctx, publicationClaim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (eb *EventBus) settleCommittedDecisionPublish(ctx context.Context, claim *pipelinePublicationClaim) error {
@@ -1494,23 +1500,6 @@ func (eb *EventBus) settleCommittedPublish(ctx context.Context, claim *pipelineP
 		return nil
 	}
 	return claim.Settle(ctx, disposition)
-}
-
-func committedPublishFailureDisposition(evt events.Event, reason string, failure *runtimefailures.Envelope) runtimepipelineobligation.Disposition {
-	reason = pipelineDispositionFailureReason(reason, failure)
-	if evt.Type() == events.EventType("mailbox.card_decided") {
-		return runtimepipelineobligation.Quarantined(reason, failure)
-	}
-	return runtimepipelineobligation.Terminal(reason, failure)
-}
-
-func pipelineDispositionFailureReason(fallback string, failure *runtimefailures.Envelope) string {
-	if failure != nil {
-		if code := strings.TrimSpace(failure.Detail.Code); code != "" {
-			return code
-		}
-	}
-	return strings.TrimSpace(fallback)
 }
 
 type deliveryRouteInterception struct {

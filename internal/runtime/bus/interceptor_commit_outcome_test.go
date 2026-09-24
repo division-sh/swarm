@@ -85,6 +85,52 @@ func assertInterceptorOutcomeDrained(t *testing.T, bus *EventBus, events ...even
 	}
 }
 
+func TestPipelinePendingFaultParityAcrossCommittedPublishAndOutbox(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		err  error
+	}{
+		{"ingress_paused", ErrRuntimeIngressPaused},
+		{"run_blocked", ErrRunDispatchBlocked},
+		{"delivery_incomplete", errAuthoritativeDeliveryIncomplete},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ordinary := receiverProjectionEvent("ordinary-" + testCase.name)
+			ordinaryBus, ordinaryOwner := interceptorOutcomeBus(t, newTargetRouteMemoryStore(), &outcomeTestInterceptor{err: testCase.err})
+			claim, err := ordinaryBus.claimPipelinePublication(context.Background(), ordinary.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			projection, err := ordinaryBus.receiverProjection(context.Background(), ordinary.DeliveryContext())
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = ordinaryBus.completeCommittedPublishDispatch(context.Background(), ordinary, RoutePlan{}, claim, projection)
+			if !errors.Is(err, testCase.err) {
+				t.Fatalf("ordinary dispatch error = %v, want %v", err, testCase.err)
+			}
+			if _, settled := ordinaryOwner.settlements[ordinary.ID()]; settled {
+				t.Fatal("ordinary pending error minted a terminal disposition")
+			}
+			if err := claim.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+
+			outbox := receiverProjectionEvent("outbox-" + testCase.name)
+			outboxStore := newTargetRouteMemoryStore()
+			seedCommittedNoDeliveryForTest(t, outboxStore, outbox)
+			outboxBus, outboxOwner := interceptorOutcomeBus(t, outboxStore, &outcomeTestInterceptor{err: testCase.err})
+			_, complete, err := (engineDispatcher{bus: outboxBus}).dispatchIntentDisposition(context.Background(), runtimeengine.EmitIntent{Event: outbox})
+			if !errors.Is(err, testCase.err) || complete {
+				t.Fatalf("outbox pending disposition = complete:%t error:%v, want incomplete %v", complete, err, testCase.err)
+			}
+			if _, settled := outboxOwner.settlements[outbox.ID()]; settled {
+				t.Fatal("outbox pending error minted a terminal disposition")
+			}
+		})
+	}
+}
+
 // These are bus-boundary injections over existing prepared-event fixtures, not
 // SQL COMMIT or process-death proofs. Exact-duplicate controls must only drain
 // the staged operation, never append or execute the mutation again.

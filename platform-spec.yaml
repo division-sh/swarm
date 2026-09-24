@@ -36957,6 +36957,16 @@ durable_pipeline_processing_obligation_authority:
       cursor wrapper and later recovery opens a fresh selected-store cursor.
   disposition_contract:
     vocabulary: [acknowledged, deferred, terminal_error, dead_letter, quarantined]
+    dispatch_decision: >
+      One EventBus decision owner classifies execution outcomes and dispatch failures for ordinary and inbound
+      committed publication, committed outbox/group publication, and claimed recovery. Foreground classification
+      is phase-aware: interceptor completion may continue through routes and deferred publications, and only the
+      final phase may acknowledge the platform obligation. Runtime ingress pause, blocked run dispatch, and
+      incomplete authoritative delivery leave the obligation pending and its claim releasable for recovery across
+      every path. An explicit retry releases without durable disposition; a typed terminal disposition retains
+      its exact failure. An acknowledged business commit is not reclassified by later cleanup failure, while a
+      later independent route or deferred-publication failure must not be hidden by an earlier successful phase.
+      Decision-route publication keeps its distinct processed/quarantined writes through the selected-store owner.
     retry_release: >
       A typed execution outcome outside the durable disposition vocabulary. It stops current dispatch and leaves the
       exact durable obligation replayable solely by releasing its current claim; it is never encoded as deferred.

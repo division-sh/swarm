@@ -873,6 +873,99 @@ type postCommitErrorInterceptor struct {
 	err     error
 }
 
+type pendingPostCommitInterceptor struct{ err error }
+
+func (i pendingPostCommitInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return false, nil, runtimepipelineobligation.Continue(), i.err
+}
+
+func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, fault := range []struct {
+			name string
+			err  error
+		}{
+			{"ingress_paused", runtimebus.ErrRuntimeIngressPaused},
+			{"run_blocked", runtimebus.ErrRunDispatchBlocked},
+		} {
+			t.Run(backend+"/"+fault.name, func(t *testing.T) {
+				var selected interface {
+					runtimebus.EventStore
+					runtimerunlifecycle.OperationOwner
+					runtimerunlifecycle.CandidateStore
+					PipelineObligations() runtimepipelineobligation.Store
+				}
+				var db *sql.DB
+				placeholder := "?"
+				if backend == "sqlite" {
+					selected = storetest.StartSQLiteRuntimeStore(t)
+					db = storetest.DatabaseForTest(selected)
+				} else {
+					var cleanup func()
+					_, db, cleanup = testutil.StartPostgres(t)
+					t.Cleanup(cleanup)
+					selected = storetest.AdmitPostgresRuntimeStore(t, db)
+					placeholder = "$1::uuid"
+				}
+				ctx := testAuthorActivityContext(context.Background())
+				runID, eventID := uuid.NewString(), uuid.NewString()
+				if err := ensureTestEventBusSourceArtifact(selected, nil, testSourceArtifactFact(nil)); err != nil {
+					t.Fatalf("persist selected source artifact: %v", err)
+				}
+				if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+					t.Fatalf("create run through lifecycle owner: %v", err)
+				}
+				eb, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
+					Interceptors: []runtimebus.EventInterceptor{pendingPostCommitInterceptor{err: fault.err}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				event := eventtest.ExistingRunRootIngress(eventID, events.EventType("task.failed"), "", "", []byte(`{}`), 0, runID,
+					events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Now().UTC())
+				if err := eb.Publish(ctx, event); !errors.Is(err, fault.err) {
+					t.Fatalf("publish error = %v, want %v", err, fault.err)
+				}
+				var eventCount int
+				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE event_id = "+placeholder, eventID).Scan(&eventCount); err != nil {
+					t.Fatal(err)
+				}
+				var receiptCount int
+				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_receipts WHERE event_id = "+placeholder+" AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'", eventID).Scan(&receiptCount); err != nil {
+					t.Fatal(err)
+				}
+				if eventCount != 1 || receiptCount != 0 {
+					t.Fatalf("committed event count = %d, pipeline receipt count = %d; want 1, 0", eventCount, receiptCount)
+				}
+				claim, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
+				if err != nil {
+					t.Fatalf("reclaim pending publication: %v", err)
+				}
+				if claim.EventID() != eventID {
+					t.Fatalf("claimed event %s, want %s", claim.EventID(), eventID)
+				}
+				if err := selected.PipelineObligations().Release(ctx, claim); err != nil {
+					t.Fatalf("release recovery claim: %v", err)
+				}
+				recovered, err := newScopedTestEventBus(selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sweep, err := recovered.SweepPipelineObligations(ctx, 10)
+				if err != nil {
+					t.Fatalf("recover pending publication: %v", err)
+				}
+				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_receipts WHERE event_id = "+placeholder+" AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'", eventID).Scan(&receiptCount); err != nil {
+					t.Fatal(err)
+				}
+				if receiptCount != 1 {
+					t.Fatalf("recovered success receipt count = %d, sweep=%+v; want 1", receiptCount, sweep)
+				}
+			})
+		}
+	}
+}
+
 func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
 	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
