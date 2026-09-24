@@ -382,7 +382,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection Transition":                                                      3,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::construct internal/runtime/pipeline.contractHandlerExecutionResult": 2,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::execution projection RuleSelection":                                 2,
-		"internal/runtime/pipeline.PipelineCoordinator.finishClaimedNodeAttempt::execution projection RuleSelection":                                                  2,
+		"internal/runtime/pipeline.PipelineCoordinator.finishClaimedNodeAttempt::execution projection RuleSelection":                                                     2,
 		"internal/runtime/pipeline.PreviewContractHandlerExecution::construct internal/runtime/pipeline.HandlerPreview":                                                  1,
 		"internal/runtime/pipeline.PreviewContractHandlerExecution::execution projection RuleSelection":                                                                  2,
 		"internal/runtime/pipeline.PreviewContractHandlerExecution::execution projection Transition":                                                                     1,
