@@ -511,13 +511,13 @@ func waitForMutationProtocolFanOutCut(t *testing.T, db *sql.DB, runID, parentID 
 	return [2]string{}
 }
 
-func installMutationProtocolLateRollback(t *testing.T, db *sql.DB, backend, runID string, after int64) {
+func installMutationProtocolLateRollback(t *testing.T, db *sql.DB, backend, runID, laterEventID string) {
 	t.Helper()
 	name := "mutation_protocol_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	condition := fmt.Sprintf("NEW.run_id='%s' AND NEW.revision>%d", runID, after)
+	condition := fmt.Sprintf("NEW.run_id='%s' AND EXISTS (SELECT 1 FROM events WHERE event_id='%s')", runID, laterEventID)
 	query := fmt.Sprintf("CREATE TRIGGER %s BEFORE INSERT ON run_fork_revisions WHEN %s BEGIN SELECT RAISE(ABORT,'mutation_protocol_late_rollback'); END", name, condition)
 	if backend == "postgres" {
-		function := fmt.Sprintf("CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'mutation_protocol_late_rollback'; END $$", name)
+		function := fmt.Sprintf("CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF %s THEN RAISE EXCEPTION 'mutation_protocol_late_rollback'; END IF; RETURN NEW; END $$", name, condition)
 		if _, err := db.Exec(function); err != nil {
 			t.Fatal(err)
 		}
@@ -526,7 +526,7 @@ func installMutationProtocolLateRollback(t *testing.T, db *sql.DB, backend, runI
 				t.Error(err)
 			}
 		})
-		query = fmt.Sprintf("CREATE TRIGGER %s BEFORE INSERT ON run_fork_revisions FOR EACH ROW WHEN (%s) EXECUTE FUNCTION %s()", name, condition, name)
+		query = fmt.Sprintf("CREATE TRIGGER %s BEFORE INSERT ON run_fork_revisions FOR EACH ROW EXECUTE FUNCTION %s()", name, name)
 	}
 	if _, err := db.Exec(query); err != nil {
 		t.Fatal(err)
@@ -549,6 +549,8 @@ func TestMutationProtocolFanOutCutSurvivesLaterRollbackAndForkReadbackBothStores
 			fixture := newMutationProtocolJourneyFixtureWithRoot(t, backend, root)
 			served := fixture.start(t, true)
 			runID := uuid.NewString()
+			second := eventtest.ExistingRunRootIngress(uuid.NewString(), "start.requested", "mutation-protocol-journey", "", []byte(`{"token":"rollback-token"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+			installMutationProtocolLateRollback(t, fixture.db, backend, runID, second.ID())
 			seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "mutation-protocol-journey", "", []byte(`{"token":"seeded"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 			if err := served.runtime.Bus.PublishAndWait(served.ctx, seed); err != nil {
 				t.Fatal(err)
@@ -626,8 +628,6 @@ func TestMutationProtocolFanOutCutSurvivesLaterRollbackAndForkReadbackBothStores
 					t.Fatalf("fork planner omitted grouped child %s at revision %d: %v", child, childCut, historical)
 				}
 			}
-			installMutationProtocolLateRollback(t, fixture.db, backend, runID, history.head)
-			second := eventtest.ExistingRunRootIngress(uuid.NewString(), "start.requested", "mutation-protocol-journey", "", []byte(`{"token":"rollback-token"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 			if err := served.runtime.Bus.PublishAndWait(served.ctx, second); err == nil || !strings.Contains(err.Error(), "mutation_protocol_late_rollback") {
 				t.Fatalf("later mutation did not roll back at revision finalization: %v", err)
 			}
