@@ -2456,7 +2456,9 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			}
 			plan := routePlanFromManifest(evt, deliveryRecipientManifest{DeliveryRoutes: durable.DeliveryRoutes}, routeIntentProducerRecipientMaterializer)
 			plan.ConnectEvaluation = durable.Settlement.Ledger()
-			return eb.publishRecipientPlan(evt, plan), nil
+			result := eb.publishRecipientPlan(evt, plan)
+			result.canonicalAuthority = true
+			return result, nil
 		}
 	}
 	plan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ictx), evt, false)
