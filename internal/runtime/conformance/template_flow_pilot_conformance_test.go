@@ -287,7 +287,6 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		StateRepo:     fanOutPinRouteStateRepo{},
 		MutationOwner: fanOutPinRouteMutationOwner{},
 		Locker:        fanOutPinRouteLocker{},
-		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -623,12 +622,6 @@ type fanOutPinRouteLocker struct{}
 
 func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
-}
-
-type fanOutPinRouteDispatcher struct{}
-
-func (fanOutPinRouteDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
-	return nil
 }
 
 type fanOutPinRouteMemoryStore struct {

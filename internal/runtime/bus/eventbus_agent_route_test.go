@@ -197,6 +197,7 @@ func newExactHandoffProofStore(t *testing.T, failOnce bool) *exactHandoffProofSt
 			session_agent_flow_instance_id TEXT,
 			session_agent_flow_instance_path TEXT,
 			open_marker BOOLEAN NOT NULL,
+			closure_kind TEXT NOT NULL,
 			outcome TEXT,
 			reason_code TEXT,
 			failure BLOB,

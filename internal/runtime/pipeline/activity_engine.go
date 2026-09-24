@@ -98,36 +98,6 @@ type pipelineActivityDispatcher struct {
 	emissions   *pipelineEmissionPlan
 }
 
-func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, intents []runtimeengine.ActivityIntent, committedRequests []runtimeengine.EmitIntent) error {
-	if len(intents) == 0 {
-		return nil
-	}
-	if d.coordinator == nil || d.coordinator.bus == nil {
-		return fmt.Errorf("activity dispatcher requires pipeline bus")
-	}
-	dispatcher := d.coordinator.bus.EngineDispatcher()
-	if dispatcher == nil {
-		return fmt.Errorf("activity dispatcher requires pipeline outbox dispatcher")
-	}
-	immediate := make([]runtimeengine.ActivityIntent, 0, len(intents))
-	for _, intent := range intents {
-		intent = intent.Normalized()
-		if intent.ApprovalDecision == "" {
-			immediate = append(immediate, intent)
-		}
-	}
-	if len(committedRequests) != len(immediate) {
-		return fmt.Errorf("committed activity requests = %d, want %d immediate activities", len(committedRequests), len(immediate))
-	}
-	for index, intent := range immediate {
-		request := committedRequests[index].Event
-		if request.ID() != activityRequestEventID(intent) || request.Type() != activityRequestEventType || request.CreatedAt().IsZero() {
-			return fmt.Errorf("immediate activity %s lacks its exact committed request event", intent.ActivityID)
-		}
-	}
-	return dispatcher.DispatchPostCommit(ctx, committedRequests)
-}
-
 func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, intent runtimeengine.ActivityIntent) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {
 	intent = intent.Normalized()
 	executionMode, err := decisioncard.CausalExecutionMode(ctx)

@@ -226,7 +226,7 @@ func (f *compiledAdapterFixture) execute(event string, evt events.Event) (contra
 	if !ok {
 		f.t.Fatalf("missing authored handler %s", event)
 	}
-	return f.pc.executeNodeContractHandler(f.ctx, f.node, handler, workflowTriggerContext{Event: evt, HandlerEventKey: event, State: f.state()}, false)
+	return executeNodeContractHandlerWithHandoff(f.t, f.pc, f.ctx, f.node, handler, workflowTriggerContext{Event: evt, HandlerEventKey: event, State: f.state()}, false)
 }
 
 func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {

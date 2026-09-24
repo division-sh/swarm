@@ -89,7 +89,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 			}
 			waitServedEventPublishDeliveryStatusCount(t, rt.DB, rt.Backend, seed.EventID, "node", producer.Key(), "dead_letter", 1)
 			var settled int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='dead_letter'`, seed.EventID).Scan(&settled); err != nil {
+			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='dead_letter'`, seed.EventID).Scan(&settled); err != nil {
 				t.Fatal(err)
 			}
 			if settled != 1 {
@@ -185,7 +185,7 @@ func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRunt
 	// Settlement and its required handoff must be durable before inspecting the
 	// exact claim census. No elapsed-time or assertion extension is introduced.
 	var settled int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, eventID).Scan(&settled); err != nil {
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, eventID).Scan(&settled); err != nil {
 		t.Fatal(err)
 	}
 	if settled != 1 {

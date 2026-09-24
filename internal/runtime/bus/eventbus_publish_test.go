@@ -269,7 +269,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		}
 		if err := db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
-			FROM event_delivery_outcomes o
+			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 			WHERE d.event_id = $1::uuid
 		`, evt.ID()).Scan(&state.OutcomeRows); err != nil {
@@ -317,7 +317,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		}
 		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 			SELECT COUNT(*)
-			FROM event_delivery_outcomes o
+			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 			WHERE d.event_id = ?
 		`, evt.ID()).Scan(&state.OutcomeRows); err != nil {

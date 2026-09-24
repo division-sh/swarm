@@ -102,7 +102,7 @@ func repeatedStaticRunSnapshot(t *testing.T, db *sql.DB, runID string) map[strin
 		"events":         `SELECT * FROM events WHERE run_id=$1 ORDER BY event_id`,
 		"deliveries":     `SELECT * FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`,
 		"receipts":       `SELECT r.* FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 ORDER BY r.event_id,r.subscriber_type,r.subscriber_id`,
-		"outcomes":       `SELECT o.* FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id=o.delivery_id WHERE d.run_id=$1 ORDER BY o.delivery_id,o.claim_version`,
+		"outcomes":       `SELECT o.* FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id=o.delivery_id WHERE d.run_id=$1 ORDER BY o.delivery_id,o.claim_version`,
 	} {
 		rows, err := db.Query(query, runID)
 		if err != nil {

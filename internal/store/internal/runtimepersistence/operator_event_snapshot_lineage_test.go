@@ -116,7 +116,7 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 		t.Fatalf("load lawful fork ordinal: count=%d err=%v", len(input.Items), err)
 	}
 	unused := forkOrdinalUnusedDependencies{}
-	executor, err := engine.NewExecutor(engine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused, Dispatcher: unused}, nil)
+	executor, err := engine.NewExecutor(engine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -107,11 +107,11 @@ func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, attempt *mu
 	deadLetterID := uuid.NewString()
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO dead_letters (
-			dead_letter_id, original_event_id, delivery_id, claim_version, original_event, original_payload, entity_id, flow_instance,
+			dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, entity_id, flow_instance,
 			failure, retry_count, chain_depth, handler_node, created_at
 		)
 			SELECT
-				$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, 0),
+				$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, 0), CASE WHEN NULLIF($3, '') IS NULL THEN NULL ELSE 'settled' END,
 				$5, $6::jsonb, NULLIF($7, '')::uuid, $8,
 				$9::jsonb, $10, $11, NULLIF($12, ''), $13::timestamptz
 		WHERE NOT EXISTS (
@@ -275,7 +275,7 @@ func insertSQLiteDeadLetterRecord(ctx context.Context, tx *sql.Tx, attempt *muta
 	deadLetterID := uuid.NewString()
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO dead_letters (
-			dead_letter_id, original_event_id, delivery_id, claim_version, original_event, original_payload, entity_id, flow_instance,
+			dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, entity_id, flow_instance,
 			failure, retry_count, chain_depth, handler_node, created_at
 		)
 		SELECT
@@ -283,6 +283,7 @@ func insertSQLiteDeadLetterRecord(ctx context.Context, tx *sql.Tx, attempt *muta
 			?,
 			NULLIF(?, ''),
 			NULLIF(?, 0),
+			CASE WHEN NULLIF(?, '') IS NULL THEN NULL ELSE 'settled' END,
 				?,
 				?,
 				?,
@@ -304,6 +305,7 @@ func insertSQLiteDeadLetterRecord(ctx context.Context, tx *sql.Tx, attempt *muta
 		rec.OriginalEventID,
 		rec.DeliveryID,
 		rec.ClaimVersion,
+		rec.DeliveryID,
 		rec.OriginalEvent,
 		string(rec.OriginalPayload),
 		sqliteNullUUID(rec.EntityID),

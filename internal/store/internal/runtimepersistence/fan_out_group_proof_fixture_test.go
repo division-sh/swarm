@@ -466,7 +466,7 @@ func (f *groupProofFixture) store() pipelineobligation.Store {
 func (f *groupProofFixture) snapshot(t *testing.T) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}
-	for _, table := range []string{"runs", "events", "event_deliveries", "event_delivery_outcomes", "event_receipts", "committed_replay_scopes", "decision_card_route_obligations", "fan_out_intents", "fan_out_outcomes", "run_fork_revisions", "run_fork_revision_heads", "run_fork_fact_revisions"} {
+	for _, table := range []string{"runs", "events", "event_deliveries", "event_delivery_attempts", "event_receipts", "committed_replay_scopes", "decision_card_route_obligations", "fan_out_intents", "fan_out_outcomes", "run_fork_revisions", "run_fork_revision_heads", "run_fork_fact_revisions"} {
 		rows, err := f.db.QueryContext(f.ctx, "SELECT * FROM "+table)
 		if err != nil {
 			t.Fatal(err)

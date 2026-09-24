@@ -164,6 +164,10 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			if rolledBack.Status != runtimedelivery.StatusInProgress || rolledBack.ClaimVersion != claimed.Claim.Version() {
 				t.Fatalf("delivery after faulted run cancellation = %#v, want original claim", rolledBack)
 			}
+			rolledBackOutcomes, err := selected.Outcomes(ctx, claimed.Snapshot.DeliveryID)
+			if err != nil || len(rolledBackOutcomes) != 0 {
+				t.Fatalf("faulted terminalization leaked settlement: outcomes=%#v err=%v", rolledBackOutcomes, err)
+			}
 			query := `SELECT status FROM runs WHERE run_id = ?`
 			if backend.name == "postgres" {
 				query = `SELECT status FROM runs WHERE run_id = $1::uuid`
@@ -189,6 +193,34 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			}
 			if snapshot.Status != runtimedelivery.StatusDeadLetter || snapshot.Failure == nil || snapshot.ReasonCode != "run_cancelled" {
 				t.Fatalf("terminalized delivery = %#v", snapshot)
+			}
+			outcomes, err := selected.Outcomes(ctx, snapshot.DeliveryID)
+			if err != nil || len(outcomes) != 1 || outcomes[0].ClaimVersion != claimed.Claim.Version()+1 || outcomes[0].Outcome != "terminalized" || outcomes[0].ReasonCode != "run_cancelled" || outcomes[0].SideEffects != nil || outcomes[0].Duration != 0 || outcomes[0].SettledAt.IsZero() {
+				t.Fatalf("terminalization must expose only synthetic N+1 settlement: outcomes=%#v err=%v", outcomes, err)
+			}
+			query = `SELECT claim_version, settlement_ref_kind FROM dead_letters WHERE delivery_id=?`
+			if backend.name == "postgres" {
+				query = `SELECT claim_version, settlement_ref_kind FROM dead_letters WHERE delivery_id=$1::uuid`
+			}
+			var linkedVersion int64
+			var referenceKind string
+			if err := fixture.db.QueryRowContext(ctx, query, snapshot.DeliveryID).Scan(&linkedVersion, &referenceKind); err != nil || linkedVersion != claimed.Claim.Version()+1 || referenceKind != "settled" {
+				t.Fatalf("terminal dead letter reference = %d/%q err=%v, want synthetic settled version", linkedVersion, referenceKind, err)
+			}
+			interruptedReferenceID := uuid.NewString()
+			query = `INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, ?, ?, 'settled', 'delivery.interrupted', '{}', '', '{"class":"lifecycle_conflict"}')`
+			if backend.name == "postgres" {
+				query = `INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'settled', 'delivery.interrupted', '{}'::jsonb, '', '{"class":"lifecycle_conflict"}'::jsonb)`
+			}
+			if _, err := fixture.db.ExecContext(ctx, query, interruptedReferenceID, eventID, snapshot.DeliveryID, claimed.Claim.Version()); err == nil {
+				t.Fatal("interrupted parent attempt accepted a linked dead letter")
+			}
+			query = `UPDATE event_delivery_attempts SET closure_kind='parent_interrupted' WHERE delivery_id=? AND claim_version=?`
+			if backend.name == "postgres" {
+				query = `UPDATE event_delivery_attempts SET closure_kind='parent_interrupted' WHERE delivery_id=$1::uuid AND claim_version=$2`
+			}
+			if _, err := fixture.db.ExecContext(ctx, query, snapshot.DeliveryID, claimed.Claim.Version()+1); err == nil {
+				t.Fatal("linked settled attempt was reclassified after settlement")
 			}
 
 			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{})

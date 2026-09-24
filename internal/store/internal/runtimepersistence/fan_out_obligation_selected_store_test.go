@@ -1895,7 +1895,7 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 				}
 			}
 			unused := forkOrdinalUnusedDependencies{}
-			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused, Dispatcher: unused}, nil)
+			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

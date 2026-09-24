@@ -343,7 +343,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatalf("frozen entity changed: %s", got)
 					}
 					unused := forkOrdinalUnusedDependencies{}
-					executor, err := engine.NewExecutor(engine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused, Dispatcher: unused}, nil)
+					executor, err := engine.NewExecutor(engine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused}, nil)
 					if err != nil {
 						t.Fatal(err)
 					}

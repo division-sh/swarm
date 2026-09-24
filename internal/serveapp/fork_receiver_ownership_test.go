@@ -260,10 +260,10 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 	}
 	var status, outcome, failure string
 	var claim, outcomeClaim, outcomes int
-	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.claim_version,o.outcome,COALESCE(CAST(o.failure AS TEXT),'') FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcomeClaim, &outcome, &failure); err != nil {
+	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.claim_version,o.outcome,COALESCE(CAST(o.failure AS TEXT),'') FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcomeClaim, &outcome, &failure); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
 		t.Fatal(err)
 	}
 	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {
@@ -904,10 +904,10 @@ func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRunt
 	}
 	var status, outcome string
 	var claim, outcomeClaim, outcomes int
-	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.outcome,o.claim_version FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcome, &outcomeClaim); err != nil {
+	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.outcome,o.claim_version FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcome, &outcomeClaim); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
 		t.Fatal(err)
 	}
 	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {

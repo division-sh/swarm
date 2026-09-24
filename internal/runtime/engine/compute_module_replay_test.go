@@ -228,7 +228,6 @@ func newComputeModuleReplayExecutor(t *testing.T, source semanticview.Source) *r
 		StateRepo:     replayStateRepo{},
 		MutationOwner: replayMutationOwner{},
 		Locker:        replayLocker{},
-		Dispatcher:    replayDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)

@@ -408,8 +408,8 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	if _, err := deliveryTx.ExecContext(deliveryTxCtx, `
 		INSERT INTO event_delivery_attempts (
 			delivery_id, claim_version, claim_token, started_at, lease_expires_at,
-			current_delivery_id, open_marker
-		) VALUES ($1::uuid, 1, $2::uuid, NOW(), NOW() + INTERVAL '1 minute', $1::uuid, TRUE)
+			current_delivery_id, open_marker, closure_kind
+		) VALUES ($1::uuid, 1, $2::uuid, NOW(), NOW() + INTERVAL '1 minute', $1::uuid, TRUE, 'open')
 	`, deliveryID, uuid.NewString()); err != nil {
 		t.Fatalf("stage delivery attempt: %v", err)
 	}

@@ -41,7 +41,7 @@ func transitionTestRequest(t testing.TB, node identity.ExecutableNode, event str
 func transitionTestExecutor(t testing.TB, source semanticview.Source) (*Executor, *transitionMutationRecorder) {
 	t.Helper()
 	recorder := &transitionMutationRecorder{}
-	exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: recorder, Locker: stubLocker{}, Dispatcher: stubDispatcher{}, WorkflowLifecycle: &testWorkflowLifecycleOwner{}}, stubEvaluator{bools: map[string]bool{"true": true, "false": false}})
+	exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: recorder, Locker: stubLocker{}, WorkflowLifecycle: &testWorkflowLifecycleOwner{}}, stubEvaluator{bools: map[string]bool{"true": true, "false": false}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -404,9 +404,9 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 	case FamilyDeadLetters:
 		spec = projectionSpec{
 			query: `SELECT CAST(d.dead_letter_id AS TEXT), CAST(d.original_event_id AS TEXT), COALESCE(CAST(d.delivery_id AS TEXT), ''), d.handler_node, d.created_at,
-				COALESCE(d.claim_version, 0), o.outcome, o.reason_code, o.failure, o.settled_at`,
+				COALESCE(d.claim_version, 0), a.outcome, a.reason_code, a.failure, a.completed_at`,
 			source: `dead_letters d JOIN events e ON e.event_id = d.original_event_id
-				LEFT JOIN event_delivery_outcomes o ON o.delivery_id = d.delivery_id AND o.claim_version = d.claim_version`, runAlias: "e",
+				LEFT JOIN event_delivery_attempts a ON a.delivery_id = d.delivery_id AND a.claim_version = d.claim_version AND a.closure_kind = 'settled'`, runAlias: "e",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "outcome_settled_at": valueTime, "outcome_failure": valueJSON}, "dead_letter_id", "original_event_id", "delivery_id", "handler_node", "created_at", "claim_version", "outcome", "outcome_reason_code", "outcome_failure", "outcome_settled_at"),
 		}
 	case FamilyFanOutObligations:

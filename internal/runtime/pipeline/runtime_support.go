@@ -81,10 +81,7 @@ func pipelineFlowScope(ctx context.Context) string {
 }
 
 type pipelineEmissionPlan struct {
-	committed bool
-	// Direct callers collect commit evidence without deferring their dispatch.
-	dispatchInline bool
-	events         []events.Event
+	events []events.Event
 }
 
 func (p *pipelineEmissionPlan) appendEvent(event events.Event) {

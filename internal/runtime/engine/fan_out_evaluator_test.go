@@ -58,7 +58,7 @@ func preparedFanOutFixture(t testing.TB) (*Executor, fanoutobligation.Intent, ev
 		RootEntities: rc.EntityContractsDocument{"subject": {Fields: map[string]rc.EntityFieldDecl{"offset": {Type: "integer"}}}},
 	}
 	source := &fanOutCensusCountingSource{Source: fanOutSourceWithBundleIdentity(t, bundle)}
-	exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{}, PayloadShaper: stubPayloadShaper{}}, nil)
+	exec, err := NewExecutor(RuntimeDependencies{Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, PayloadShaper: stubPayloadShaper{}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

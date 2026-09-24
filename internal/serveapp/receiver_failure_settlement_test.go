@@ -87,7 +87,7 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 				t.Fatalf("receiver rejection left claimed work: %s", status)
 			}
 			var outcomes int
-			if err := rt.DB.QueryRow(`SELECT count(*) FROM event_delivery_outcomes WHERE delivery_id=$1 AND outcome='dead_letter'`, claim.DeliveryID()).Scan(&outcomes); err != nil {
+			if err := rt.DB.QueryRow(`SELECT count(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1 AND outcome='dead_letter'`, claim.DeliveryID()).Scan(&outcomes); err != nil {
 				t.Fatal(err)
 			}
 			if outcomes != 1 {
@@ -110,7 +110,7 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 			if duplicate.EventID != published.EventID {
 				t.Fatal("exact duplicate created another event")
 			}
-			if err := rt.DB.QueryRow(`SELECT count(*) FROM event_delivery_outcomes WHERE delivery_id=$1`, claim.DeliveryID()).Scan(&outcomes); err != nil {
+			if err := rt.DB.QueryRow(`SELECT count(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1`, claim.DeliveryID()).Scan(&outcomes); err != nil {
 				t.Fatal(err)
 			}
 			if outcomes != 1 {

@@ -40,7 +40,7 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 }
 
 const deliveryCurrentAttemptForeignKey = "FOREIGN KEY (delivery_id, current_attempt_version, current_attempt_open) REFERENCES event_delivery_attempts(delivery_id, claim_version, open_marker) DEFERRABLE INITIALLY DEFERRED"
-const deadLetterDeliveryOutcomeForeignKey = "FOREIGN KEY (delivery_id, claim_version) REFERENCES event_delivery_outcomes(delivery_id, claim_version)"
+const deadLetterSettledAttemptForeignKey = "FOREIGN KEY (delivery_id, claim_version, settlement_ref_kind) REFERENCES event_delivery_attempts(delivery_id, claim_version, closure_kind)"
 
 // PostgreSQL requires the referenced table to exist when a foreign key is
 // declared. SQLite permits the same authoritative inline DDL to reference the
@@ -54,9 +54,9 @@ func deferPostgresForwardReferences(statement string, deferred []string) (string
 			deferred = append(deferred, "ALTER TABLE event_deliveries ADD CONSTRAINT event_deliveries_current_attempt_fk "+deliveryCurrentAttemptForeignKey)
 		}
 	case "dead_letters":
-		if strings.Contains(statement, deadLetterDeliveryOutcomeForeignKey) {
-			statement = strings.Replace(statement, ",\n    "+deadLetterDeliveryOutcomeForeignKey, "", 1)
-			deferred = append(deferred, "ALTER TABLE dead_letters ADD CONSTRAINT dead_letters_delivery_outcome_fk "+deadLetterDeliveryOutcomeForeignKey)
+		if strings.Contains(statement, deadLetterSettledAttemptForeignKey) {
+			statement = strings.Replace(statement, ",\n    "+deadLetterSettledAttemptForeignKey, "", 1)
+			deferred = append(deferred, "ALTER TABLE dead_letters ADD CONSTRAINT dead_letters_settled_attempt_fk "+deadLetterSettledAttemptForeignKey)
 		}
 	}
 	return statement, deferred
@@ -281,8 +281,6 @@ func platformTableOrder(name string) int {
 		return 81
 	case "event_delivery_attempts":
 		return 82
-	case "event_delivery_outcomes":
-		return 83
 	case "committed_replay_scopes":
 		return 84
 	case "run_fork_delivery_event_replays":

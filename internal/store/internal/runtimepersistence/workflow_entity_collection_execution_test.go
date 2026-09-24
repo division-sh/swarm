@@ -89,7 +89,6 @@ func TestExecutorQueryEntitiesResultIncludesStateOnlyRowOnBothStores(t *testing.
 				StateRepo:         selectedEntityCollectionExecutionState{},
 				MutationOwner:     selectedEntityCollectionExecutionMutation{},
 				Locker:            selectedEntityCollectionExecutionLocker{},
-				Dispatcher:        selectedEntityCollectionExecutionDispatcher{},
 			}, nil)
 			if err != nil {
 				t.Fatalf("new executor: %v", err)

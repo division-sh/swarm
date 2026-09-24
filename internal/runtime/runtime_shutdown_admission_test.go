@@ -188,16 +188,12 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			started_at TIMESTAMP NOT NULL, lease_expires_at TIMESTAMP NOT NULL,
 			current_delivery_id TEXT, active_session_id TEXT, session_delivery_id TEXT, session_run_id TEXT,
 			session_subscriber_type TEXT, session_agent_id TEXT, open_marker BOOLEAN NOT NULL,
+			closure_kind TEXT NOT NULL,
 			session_agent_name_owner TEXT, session_agent_name_source TEXT, session_agent_route_presence TEXT,
 			session_agent_flow_scope_key TEXT, session_agent_flow_instance_id TEXT, session_agent_flow_instance_path TEXT,
 			outcome TEXT,
 			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER,
 			completed_at TIMESTAMP, PRIMARY KEY(delivery_id, claim_version)
-		)`,
-		`CREATE TABLE event_delivery_outcomes (
-			delivery_id TEXT NOT NULL, claim_version INTEGER NOT NULL, outcome TEXT NOT NULL,
-			reason_code TEXT, failure BLOB, side_effects BLOB NOT NULL DEFAULT '[]', duration_ms INTEGER NOT NULL,
-			settled_at TIMESTAMP NOT NULL, PRIMARY KEY(delivery_id, claim_version)
 		)`,
 		`CREATE TABLE author_activity_order (
 			singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),

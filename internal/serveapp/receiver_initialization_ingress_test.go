@@ -125,7 +125,7 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 			t.Fatalf("initialization publication lost exact typed config/source: %+v", public)
 		}
 		var settled int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_outcomes o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, eventID).Scan(&settled); err != nil {
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.event_id=$1 AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, eventID).Scan(&settled); err != nil {
 			t.Fatal(err)
 		}
 		if settled != 1 {
@@ -148,7 +148,7 @@ func receiverIngressApplicationSnapshot(t *testing.T, rt servedControlProofRunti
 	all, out := snapshotForkReceiverApplication(t, rt), map[string][]string{}
 	for _, table := range []string{
 		"runs", "events", "flow_instances", "flow_instance_runtime_readiness", "entity_state", "entity_mutations", "routing_rules",
-		"event_deliveries", "event_delivery_attempts", "event_delivery_outcomes", "event_receipts", "committed_replay_scopes", "api_idempotency",
+		"event_deliveries", "event_delivery_attempts", "event_receipts", "committed_replay_scopes", "api_idempotency",
 		"author_activity_order", "author_activity_occurrences", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions",
 	} {
 		if _, exists := all[table]; !exists {

@@ -52,7 +52,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
 
 			node := pipelineSourceNode(t, pc.SemanticSource(), "validation", "w-node")
-			result, err := pc.executeNodeContractHandler(ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
+			result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, node, exactOnceCreateEntityHandler(), workflowTriggerContext{
 				Event:           evt,
 				HandlerEventKey: "thing.created",
 				State: WorkflowState{
@@ -332,7 +332,7 @@ func assertDeliveryOutcomeCount(t *testing.T, store *workflowInstanceStore, ctx 
 	if store.isSQLite() {
 		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
-			FROM event_delivery_outcomes o
+			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 			WHERE d.event_id = ?
 			  AND d.subscriber_type = 'node'
@@ -341,7 +341,7 @@ func assertDeliveryOutcomeCount(t *testing.T, store *workflowInstanceStore, ctx 
 	} else {
 		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
-			FROM event_delivery_outcomes o
+			FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 			WHERE d.event_id = $1::uuid
 			  AND d.subscriber_type = 'node'

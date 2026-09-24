@@ -743,14 +743,13 @@ func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *test
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 
-	dispatcher := pipelineActivityDispatcher{coordinator: pc}
 	intent := testActivityIntent("https://example.com/source")
 	requests, err := activityRequestEmitIntents([]runtimeengine.ActivityIntent{intent})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dispatcher.DispatchActivities(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}, requests); err != nil {
-		t.Fatalf("DispatchActivities: %v", err)
+	if err := pc.transferCommittedHandlerFollowUp(testAuthorActivityContext(t, context.Background()), handlerCommittedFollowUp{ActivityIntents: []runtimeengine.ActivityIntent{intent}, ActivityRequests: requests}, nil); err != nil {
+		t.Fatalf("transferCommittedHandlerFollowUp: %v", err)
 	}
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("published events = %d, want 1 request event", got)
@@ -765,11 +764,57 @@ func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *test
 	if got, want := evt.CreatedAt(), requests[0].Event.CreatedAt(); !got.Equal(want) {
 		t.Fatalf("dispatched request timestamp = %s, want committed %s", got, want)
 	}
-	if err := dispatcher.DispatchActivities(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}, nil); err == nil {
+	if err := pc.transferCommittedHandlerFollowUp(testAuthorActivityContext(t, context.Background()), handlerCommittedFollowUp{ActivityIntents: []runtimeengine.ActivityIntent{intent}}, nil); err == nil {
 		t.Fatal("missing committed request must not reconstruct an activity event")
 	}
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("missing-evidence retry published %d events, want one", got)
+	}
+}
+
+type independentCommittedHandoffBus struct {
+	*recordingPipelineBus
+	calls   [][]runtimeengine.EmitIntent
+	failure error
+}
+
+func (b *independentCommittedHandoffBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
+	return b
+}
+
+func (b *independentCommittedHandoffBus) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	b.calls = append(b.calls, append([]runtimeengine.EmitIntent(nil), intents...))
+	if len(b.calls) == 1 {
+		return b.failure
+	}
+	return nil
+}
+
+func TestCommittedHandlerHandoffAttemptsIndependentSiblingsAfterCancellation(t *testing.T) {
+	firstFailure := errors.New("first committed dispatch failed")
+	bus := &independentCommittedHandoffBus{recordingPipelineBus: &recordingPipelineBus{}, failure: firstFailure}
+	pc := &PipelineCoordinator{bus: bus}
+	activity := testActivityIntent("https://example.com/source")
+	requests, err := activityRequestEmitIntents([]runtimeengine.ActivityIntent{activity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emitted := handlerTestRootIngress("", events.EventType("custom.emitted"), "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = pc.transferCommittedHandlerFollowUp(ctx, handlerCommittedFollowUp{
+		Emissions:        []runtimeengine.EmitIntent{{Event: emitted}},
+		ActivityIntents:  []runtimeengine.ActivityIntent{activity},
+		ActivityRequests: requests,
+	}, nil)
+	if !errors.Is(err, firstFailure) {
+		t.Fatalf("first committed dispatch diagnostic = %v, want original error", err)
+	}
+	if len(bus.calls) != 2 || len(bus.calls[0]) != 1 || len(bus.calls[1]) != 1 || bus.calls[0][0].Event.ID() != emitted.ID() || bus.calls[1][0].Event.ID() != requests[0].Event.ID() {
+		t.Fatalf("committed siblings were not both attempted after cancellation: %#v", bus.calls)
 	}
 }
 

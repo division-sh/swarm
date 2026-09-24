@@ -1071,18 +1071,14 @@ func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql
 		query = `
 			SELECT COUNT(*)
 			FROM event_delivery_attempts a
-			JOIN event_delivery_outcomes o
-			  ON o.delivery_id=a.delivery_id AND o.claim_version=a.claim_version
 			WHERE a.delivery_id=$1::uuid AND a.claim_version=$2 AND a.claim_token=$3::uuid
-			  AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
+			  AND a.closure_kind='settled' AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
 		if a.dialect == DialectSQLite {
 			query = `
 				SELECT COUNT(*)
 				FROM event_delivery_attempts a
-				JOIN event_delivery_outcomes o
-				  ON o.delivery_id=a.delivery_id AND o.claim_version=a.claim_version
 				WHERE a.delivery_id=? AND a.claim_version=? AND a.claim_token=?
-				  AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
+				  AND a.closure_kind='settled' AND a.open_marker=FALSE AND a.completed_at IS NOT NULL`
 		}
 	case record.Status == StatusDeadLetter && record.ClaimVersion == claim.Version()+1:
 		// Parent terminalization closes the interrupted attempt and records one
@@ -1092,14 +1088,12 @@ func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql
 			FROM event_delivery_attempts interrupted
 			JOIN event_delivery_attempts terminal
 			  ON terminal.delivery_id=interrupted.delivery_id AND terminal.claim_version=$4
-			JOIN event_delivery_outcomes o
-			  ON o.delivery_id=terminal.delivery_id AND o.claim_version=terminal.claim_version
 			WHERE interrupted.delivery_id=$1::uuid
 			  AND interrupted.claim_version=$2 AND interrupted.claim_token=$3::uuid
-			  AND interrupted.open_marker=FALSE AND interrupted.completed_at IS NOT NULL
+			  AND interrupted.closure_kind='parent_interrupted' AND interrupted.open_marker=FALSE AND interrupted.completed_at IS NOT NULL
 			  AND interrupted.outcome='terminalized'
-			  AND terminal.open_marker=FALSE AND terminal.completed_at IS NOT NULL
-			  AND terminal.outcome='terminalized' AND o.outcome='terminalized'`
+			  AND terminal.closure_kind='settled' AND terminal.open_marker=FALSE AND terminal.completed_at IS NOT NULL
+			  AND terminal.outcome='terminalized'`
 		args = append(args, record.ClaimVersion)
 		if a.dialect == DialectSQLite {
 			query = `
@@ -1107,14 +1101,12 @@ func (a *Adapter) providerOriginRecoveryDisposition(ctx context.Context, tx *sql
 				FROM event_delivery_attempts interrupted
 				JOIN event_delivery_attempts terminal
 				  ON terminal.delivery_id=interrupted.delivery_id AND terminal.claim_version=?
-				JOIN event_delivery_outcomes o
-				  ON o.delivery_id=terminal.delivery_id AND o.claim_version=terminal.claim_version
 				WHERE interrupted.delivery_id=?
 				  AND interrupted.claim_version=? AND interrupted.claim_token=?
-				  AND interrupted.open_marker=FALSE AND interrupted.completed_at IS NOT NULL
+				  AND interrupted.closure_kind='parent_interrupted' AND interrupted.open_marker=FALSE AND interrupted.completed_at IS NOT NULL
 				  AND interrupted.outcome='terminalized'
-				  AND terminal.open_marker=FALSE AND terminal.completed_at IS NOT NULL
-				  AND terminal.outcome='terminalized' AND o.outcome='terminalized'`
+				  AND terminal.closure_kind='settled' AND terminal.open_marker=FALSE AND terminal.completed_at IS NOT NULL
+				  AND terminal.outcome='terminalized'`
 			args = []any{record.ClaimVersion, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
 		}
 	default:
@@ -1459,16 +1451,16 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 	}
 	query := `
 		SELECT delivery_id::text, claim_version, outcome, COALESCE(reason_code, ''),
-			failure, side_effects, duration_ms, settled_at
-		FROM event_delivery_outcomes
-		WHERE delivery_id = $1::uuid
+			failure, side_effects, duration_ms, completed_at
+		FROM event_delivery_attempts
+		WHERE delivery_id = $1::uuid AND closure_kind = 'settled'
 		ORDER BY claim_version`
 	if a.dialect == DialectSQLite {
 		query = `
 			SELECT delivery_id, claim_version, outcome, COALESCE(reason_code, ''),
-				failure, side_effects, duration_ms, settled_at
-			FROM event_delivery_outcomes
-			WHERE delivery_id = ?
+				failure, side_effects, duration_ms, completed_at
+			FROM event_delivery_attempts
+			WHERE delivery_id = ? AND closure_kind = 'settled'
 			ORDER BY claim_version`
 	}
 	rows, err := q.QueryContext(ctx, query, deliveryID)
@@ -2443,7 +2435,7 @@ func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx
 	query := `
 		UPDATE event_delivery_attempts
 		SET outcome = 'terminalized', reason_code = $1, failure = $2::jsonb,
-			side_effects = '[]'::jsonb, duration_ms = 0, completed_at = $3,
+			side_effects = '[]'::jsonb, duration_ms = 0, completed_at = $3, closure_kind = 'parent_interrupted',
 			current_delivery_id = NULL, open_marker = FALSE
 		WHERE delivery_id = $4::uuid AND claim_version = $5 AND claim_token = $6::uuid AND open_marker = TRUE`
 	args := []any{reason, failureRaw, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
@@ -2451,7 +2443,7 @@ func (a *Adapter) closeAttemptForTerminalization(ctx context.Context, tx *sql.Tx
 		query = `
 			UPDATE event_delivery_attempts
 			SET outcome = 'terminalized', reason_code = ?, failure = ?,
-				side_effects = '[]', duration_ms = 0, completed_at = ?,
+				side_effects = '[]', duration_ms = 0, completed_at = ?, closure_kind = 'parent_interrupted',
 				current_delivery_id = NULL, open_marker = FALSE
 			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
@@ -2474,15 +2466,15 @@ func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, att
 	query := `
 		INSERT INTO event_delivery_attempts (
 			delivery_id, claim_version, claim_token, started_at, lease_expires_at,
-			open_marker, outcome, reason_code, failure, side_effects, duration_ms, completed_at
-		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, FALSE, 'terminalized', $6, $7::jsonb, '[]'::jsonb, 0, $4)`
+			open_marker, closure_kind, outcome, reason_code, failure, side_effects, duration_ms, completed_at
+		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, FALSE, 'settled', 'terminalized', $6, $7::jsonb, 'null'::jsonb, 0, $4)`
 	args := []any{deliveryID, version, token, now, now.Add(time.Second), reason, failureRaw}
 	if a.dialect == DialectSQLite {
 		query = `
 			INSERT INTO event_delivery_attempts (
 				delivery_id, claim_version, claim_token, started_at, lease_expires_at,
-				open_marker, outcome, reason_code, failure, side_effects, duration_ms, completed_at
-			) VALUES (?, ?, ?, ?, ?, FALSE, 'terminalized', ?, ?, '[]', 0, ?)`
+				open_marker, closure_kind, outcome, reason_code, failure, side_effects, duration_ms, completed_at
+			) VALUES (?, ?, ?, ?, ?, FALSE, 'settled', 'terminalized', ?, ?, 'null', 0, ?)`
 		args = []any{deliveryID, version, token, now, now.Add(time.Second), reason, failureRaw, now}
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
@@ -2491,7 +2483,7 @@ func (a *Adapter) insertTerminalizedAttempt(ctx context.Context, tx *sql.Tx, att
 	if err := attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID); err != nil {
 		return err
 	}
-	return a.insertOutcome(ctx, tx, attempt, deliveryID, version, "terminalized", reason, failure, nil, 0, now)
+	return declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)
 }
 
 func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) (deliveryRecord, time.Time, error) {
@@ -2513,10 +2505,10 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 }
 
 func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
-	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE)`
+	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open')`
 	args := []any{deliveryID, version, token, startedAt, expiresAt}
 	if a.dialect == DialectSQLite {
-		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE)`
+		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE, 'open')`
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record delivery claim attempt: %w", err)
@@ -2528,10 +2520,10 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, attempt *mutati
 	if record.claimToken == "" || record.ClaimVersion <= 0 {
 		return fmt.Errorf("%w: expired in-progress delivery has no current claim", ErrConflict)
 	}
-	query := `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = $1, current_delivery_id = NULL, open_marker = FALSE WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid AND open_marker = TRUE`
+	query := `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = $1, current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'lease_expired' WHERE delivery_id = $2::uuid AND claim_version = $3 AND claim_token = $4::uuid AND open_marker = TRUE`
 	args := []any{now, record.DeliveryID, record.ClaimVersion, record.claimToken}
 	if a.dialect == DialectSQLite {
-		query = `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = ?, current_delivery_id = NULL, open_marker = FALSE WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
+		query = `UPDATE event_delivery_attempts SET outcome = 'lease_expired', completed_at = ?, current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'lease_expired' WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -2557,7 +2549,7 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *muta
 		UPDATE event_delivery_attempts
 		SET outcome = $1, reason_code = NULLIF($2, ''), failure = NULLIF($3, '')::jsonb,
 			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6,
-			current_delivery_id = NULL, open_marker = FALSE
+			current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'settled'
 		WHERE delivery_id = $7::uuid AND claim_version = $8 AND claim_token = $9::uuid AND open_marker = TRUE`
 	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
 	if a.dialect == DialectSQLite {
@@ -2565,7 +2557,7 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *muta
 			UPDATE event_delivery_attempts
 			SET outcome = ?, reason_code = NULLIF(?, ''), failure = NULLIF(?, ''),
 				side_effects = ?, duration_ms = ?, completed_at = ?,
-				current_delivery_id = NULL, open_marker = FALSE
+				current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'settled'
 			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
@@ -2578,29 +2570,8 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *muta
 	if err := attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
 		return err
 	}
-	return a.insertOutcome(ctx, tx, attempt, claim.DeliveryID(), claim.Version(), outcome, reason, failure, sideEffects, duration, now)
-}
-
-func (a *Adapter) insertOutcome(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, deliveryID string, version int64, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
-	failureRaw, err := encodeFailure(failure)
-	if err != nil {
-		return err
-	}
-	sideEffectsRaw, err := json.Marshal(sideEffects)
-	if err != nil {
-		return fmt.Errorf("encode delivery side effects: %w", err)
-	}
-	query := `INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, settled_at) VALUES ($1::uuid, $2, $3, NULLIF($4, ''), NULLIF($5, '')::jsonb, $6::jsonb, $7, $8)`
-	args := []any{deliveryID, version, outcome, reason, failureRaw, string(sideEffectsRaw), duration.Milliseconds(), now}
-	if a.dialect == DialectSQLite {
-		query = `INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, settled_at) VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`
-	}
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("record exact delivery outcome: %w", err)
-	}
-	// Outcomes are joined into dead-letter history, including diagnostics that
-	// existed before this outcome was recorded.
-	return declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)
+	// Existing diagnostics join the newly settled attempt in historical cuts.
+	return declareOutcomeDeadLetterEffects(ctx, tx, attempt, claim.DeliveryID(), claim.Version())
 }
 
 func (a *Adapter) recordTransition(ctx context.Context, attempt *mutationprotocol.Attempt, record deliveryRecord, transition string, failure *runtimefailures.Envelope, occurredAt time.Time) error {

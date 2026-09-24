@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -33,6 +34,15 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func executeNodeContractHandlerWithHandoff(t *testing.T, pc *PipelineCoordinator, ctx context.Context, node runtimeidentity.ExecutableNode, handler runtimecontracts.SystemNodeEventHandler, trigger workflowTriggerContext, preview bool, deferFollowUp ...bool) (contractHandlerExecutionResult, error) {
+	t.Helper()
+	result, err := pc.executeNodeContractHandler(ctx, node, handler, trigger, preview, deferFollowUp...)
+	if !preview && len(deferFollowUp) == 0 && result.Committed {
+		err = errors.Join(err, pc.transferCommittedHandlerFollowUp(ctx, result.FollowUp, nil))
+	}
+	return result, err
+}
 
 func handlerTestRootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	if strings.TrimSpace(runID) == "" {
@@ -396,7 +406,7 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 	}
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Compute: &runtimecontracts.ComputeSpec{
 			Operation: runtimecontracts.ComputeOpModule,
 			StoreAs:   "computed.rendered_bundle",
@@ -537,7 +547,7 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 	}
 }
 
-func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.T) {
+func TestExecuteNodeContractHandlerDefersCommittedEmissions(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -547,7 +557,7 @@ func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.
 	}
 	ctx := testAuthorActivityContext(t, context.Background())
 
-	result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
@@ -559,11 +569,8 @@ func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.
 	if !result.Handled {
 		t.Fatal("expected handled result")
 	}
-	if got := len(result.Emissions); got != 1 {
-		t.Fatalf("deferred emission count = %d, want 1", got)
-	}
-	if got := string(result.Emissions[0].Type()); got != "custom.emitted" {
-		t.Fatalf("deferred emission type = %q, want custom.emitted", got)
+	if !result.Committed || len(result.FollowUp.Emissions) != 1 {
+		t.Fatalf("committed fixture lost deferred follow-up: committed=%t emissions=%d", result.Committed, len(result.FollowUp.Emissions))
 	}
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("bus published count = %d, want 0 before deferred dispatch", got)
@@ -579,7 +586,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 		module:         handlerEngineProjectNodeModule(t),
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
@@ -605,7 +612,7 @@ func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testi
 		module:         handlerEngineProjectNodeModule(t),
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress(
@@ -676,7 +683,7 @@ node-a:
 		}),
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Minted Entity")},
@@ -727,7 +734,7 @@ func TestExecuteNodeContractHandlerPreservesCanonicalDefaultWhenWriteSourceIsMis
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 	)
 	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},
@@ -803,7 +810,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 	)
 	seedExactOnceEvent(t, pc.workflowStore, ctx, evt)
-	result, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "business_brief"},
@@ -884,7 +891,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + 1")},
@@ -947,7 +954,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "revision_count", Value: runtimecontracts.CELExpression("entity.revision_count + payload.missing_delta")},
@@ -1000,7 +1007,7 @@ func TestExecuteNodeContractHandlerPersistsCanonicalDefaultPresenceCheckDataAccu
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("validation.spec_requested"), "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	_, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == null")},
@@ -1451,7 +1458,7 @@ node-a:
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	result, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && entity.kill_reason == ""`},
 		Emit: runtimecontracts.EmitSpec{
@@ -1602,7 +1609,7 @@ node-a:
 			time.Time{},
 		)
 		seedPipelineEventRecord(t, ctx, db, event)
-		_, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), handler, workflowTriggerContext{
+		_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), handler, workflowTriggerContext{
 			Event: event,
 			State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 		}, false)
@@ -1684,7 +1691,7 @@ node-a:
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("candidate.ready"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	result, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Guard:        &runtimecontracts.GuardSpec{Check: `entity.status == "pending"`},
 		Emit: runtimecontracts.EmitSpec{
@@ -1799,7 +1806,7 @@ node-a:
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	trigger := handlerTestRootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, testPipelineRunID, "", events.EventEnvelope{}, time.Time{})
 	seedPipelineEventRecord(t, ctx, db, trigger)
-	result, err := pc.executeNodeContractHandler(ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
 		Clear:        &runtimecontracts.ClearSpec{Targets: []string{"entity.revision_count"}},
 		Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
@@ -1958,7 +1965,7 @@ func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *tes
 		module: &previewWorkflowModule{bundle: bundle},
 	}
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("done"), Metadata: map[string]any{}},
 	}, false)
@@ -1982,7 +1989,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 		module:         handlerEngineProjectNodeModule(t),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2046,7 +2053,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsMaterializedFieldPresenceChe
 		module:         handlerEngineProjectNodeModule(t, map[string]runtimecontracts.EntityFieldDecl{"kill_reason": {Type: "text"}}),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2125,7 +2132,7 @@ node-a:
 		},
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2275,7 +2282,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRules(
 		module:         handlerEngineProjectNodeModule(t),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
@@ -2313,7 +2320,7 @@ func TestExecuteNodeContractHandlerRejectsAmbiguousHandlerTopLevelEmitWithRulesW
 		module:         handlerEngineProjectNodeModule(t),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "default.emitted"},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{ID: "pick-rule", Condition: "true", AdvancesTo: "done"},
@@ -2351,7 +2358,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 		module:         handlerEngineProjectNodeModule(t),
 	}
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
 				{TargetField: "branch_target", Value: runtimecontracts.LiteralExpression("handler")},
@@ -2380,7 +2387,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	})
 	entityID := "ent-1"
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("00000000-0000-0000-0000-000000000002", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Unix(2, 0).UTC()),
@@ -2404,7 +2411,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 	})
 	entityID := "ent-1"
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 		Rules: []runtimecontracts.HandlerRuleEntry{
 			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
@@ -2434,7 +2441,7 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 	})
 	entityID := "ent-1"
 
-	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "account.bucketed",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2593,7 +2600,7 @@ func newDeclarativeEmitContractCoordinatorWithBundle(bundle *runtimecontracts.Wo
 func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t *testing.T) {
 	pc, bus := newDeclarativeEmitContractCoordinator(t, "custom.emitted")
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -2657,7 +2664,7 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 		Payload: runtimecontracts.EventPayloadSpec{},
 	}))
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
 			Check:  "payload.score >= 70.0",
 			OnFail: "escalate:guard.failed",
@@ -2722,7 +2729,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 		},
 	}))
 
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Guard: &runtimecontracts.GuardSpec{
 			Check: "payload.score >= 70.0",
 			OnFailSpec: runtimecontracts.GuardFailureSpec{
@@ -2840,7 +2847,7 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmedi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			pc, bus := newDeclarativeEmitContractCoordinator(t, "custom.emitted")
-			_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), tc.handler, workflowTriggerContext{
+			_, err := executeNodeContractHandlerWithHandoff(t, pc, testPipelineCoordinatorRunContext(t, pc), pipelineNode(t, ".", "node-a"), tc.handler, workflowTriggerContext{
 				Event: tc.event,
 				State: tc.state,
 			}, false)

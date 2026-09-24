@@ -624,11 +624,8 @@ func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Con
 	if evt.Type() == activityRequestEventType {
 		return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, emissions)
 	}
-	if emissions == nil {
-		emissions = &pipelineEmissionPlan{dispatchInline: true}
-	}
-	handled, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
-	if emissions.committed {
+	handled, committed, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
+	if committed {
 		return handled, runtimepipelineobligation.ExecutionOutcome{Committed: true}, err
 	}
 	if err == nil {
@@ -644,43 +641,44 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, node 
 }
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context, node identity.ExecutableNode, evt events.Event) (bool, error) {
-	return pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node, evt, nil)
+	handled, _, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, node, evt, nil)
+	return handled, err
 }
 
-func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (handled bool, resultErr error) {
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (handled, committed bool, resultErr error) {
 	var probeErr error
 	defer func() { resultErr = errors.Join(resultErr, probeErr) }()
 	if pc == nil {
-		return false, nil
+		return false, false, nil
 	}
 	if !node.Valid() {
-		return false, nil
+		return false, false, nil
 	}
 	source := pc.SemanticSource()
 	if source == nil {
-		return false, nil
+		return false, false, nil
 	}
 	trigger := strings.TrimSpace(string(evt.Type()))
 	if trigger == "" {
-		return false, nil
+		return false, false, nil
 	}
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, node, evt)
 	if resolved.Failure != "" {
-		return false, fmt.Errorf("resolve workflow handler for node %s: %s", node.Key(), resolved.Failure)
+		return false, false, fmt.Errorf("resolve workflow handler for node %s: %s", node.Key(), resolved.Failure)
 	}
 	if !resolved.Matched {
-		return false, nil
+		return false, false, nil
 	}
 	handler := resolved.Handler
 	handlerEventKey := resolved.HandlerEventKey
 	deliveryStore := pc.deliveryStore
 	if deliveryStore == nil {
-		return false, fmt.Errorf("workflow node delivery lifecycle owner is required")
+		return false, false, fmt.Errorf("workflow node delivery lifecycle owner is required")
 	}
 	route, routeOK := runtimedelivery.RouteFromContext(ctx)
 	recipientNode, recipientOK := route.Recipient.Node()
 	if !routeOK || !recipientOK || !recipientNode.Equal(node) {
-		return false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", node.Key())
+		return false, false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", node.Key())
 	}
 	nodeFlowID := strings.TrimSpace(resolved.FlowID)
 	if nodeFlowID == "" {
@@ -688,19 +686,19 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	}
 	handlerFact, err := NewDeliveryTargetHandler(node)
 	if err != nil {
-		return false, fmt.Errorf("workflow node %s target handler: %w", node.Key(), err)
+		return false, false, fmt.Errorf("workflow node %s target handler: %w", node.Key(), err)
 	}
 	handlerFact = handlerFact.ForEvent(events.EventType(handlerEventKey))
 	claim, claimed := runtimedelivery.ClaimFromContext(ctx)
 	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != node.Key()) {
-		return false, fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
+		return false, false, fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
 	}
 	recoveryClaim := claimed
 	for {
 		if !claimed {
 			authorityProvider := pc.deliveryRuntime
 			if authorityProvider == nil {
-				return false, fmt.Errorf("workflow node delivery continuation authority is required")
+				return false, false, fmt.Errorf("workflow node delivery continuation authority is required")
 			}
 			reportCarrierFailure := func(err error) {
 				diaglog.ProcessLog(diaglog.LevelError, "pipeline", "workflow node delivery carrier transfer failed",
@@ -708,13 +706,13 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			}
 			admission, err := admitWorkflowNodeDelivery(ctx, evt, route, authorityProvider, deliveryStore, reportCarrierFailure)
 			if err != nil {
-				return false, err
+				return false, false, err
 			}
 			if admission.postCommitErr != nil {
 				defer func() { resultErr = errors.Join(resultErr, admission.postCommitErr) }()
 			}
 			if admission.handled {
-				return true, nil
+				return true, false, nil
 			}
 			claim = admission.claim
 		}
@@ -725,7 +723,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		started := time.Now()
 		heartbeat, heartbeatErr := runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
 		if heartbeatErr != nil {
-			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
+			return false, false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
 		defer func() { resultErr = errors.Join(resultErr, heartbeat.Stop()) }()
 		executionCtx := heartbeat.Context()
@@ -745,16 +743,24 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				Event:           application.Event(),
 				HandlerEventKey: handlerEventKey,
 				State:           application.State(),
-			}, false, emissions != nil && !emissions.dispatchInline)
+			}, false, emissions != nil)
 		}()
+		if result.Committed {
+			err = errors.Join(err, pc.transferCommittedHandlerFollowUp(executionCtx, result.FollowUp, emissions))
+		}
+		if emissions != nil {
+			for _, diagnostic := range result.DiagnosticEmissions {
+				emissions.appendEvent(diagnostic)
+			}
+		}
 		handled, finishErr, finishProbeErr := pc.finishClaimedNodeAttempt(claimedNodeAttempt{
 			ctx: executionCtx, statusCtx: attemptCtx, node: node, event: evt,
 			claim: claim, heartbeat: heartbeat, started: started,
-			result: result, executionErr: err, emissions: emissions,
+			result: result, executionErr: err,
 			retryBase: semanticview.HandlerRetryBase(source), recoveryClaim: recoveryClaim,
 		})
 		probeErr = errors.Join(probeErr, finishProbeErr)
-		return handled, finishErr
+		return handled, result.Committed, finishErr
 	}
 }
 
@@ -767,23 +773,64 @@ type claimedNodeAttempt struct {
 	started        time.Time
 	result         contractHandlerExecutionResult
 	executionErr   error
-	emissions      *pipelineEmissionPlan
 	retryBase      time.Duration
 	recoveryClaim  bool
+}
+
+func (pc *PipelineCoordinator) transferCommittedHandlerFollowUp(ctx context.Context, followUp handlerCommittedFollowUp, deferred *pipelineEmissionPlan) error {
+	immediate := make([]runtimeengine.ActivityIntent, 0, len(followUp.ActivityIntents))
+	for _, activity := range followUp.ActivityIntents {
+		activity = activity.Normalized()
+		if activity.ApprovalDecision == "" {
+			immediate = append(immediate, activity)
+		}
+	}
+	var activityErr error
+	if len(followUp.ActivityRequests) != len(immediate) {
+		activityErr = fmt.Errorf("committed activity requests = %d, want %d immediate activities", len(followUp.ActivityRequests), len(immediate))
+	} else {
+		for index, activity := range immediate {
+			request := followUp.ActivityRequests[index].Event
+			if request.ID() != activityRequestEventID(activity) || request.Type() != activityRequestEventType || request.CreatedAt().IsZero() {
+				activityErr = fmt.Errorf("immediate activity %s lacks its exact committed request event", activity.ActivityID)
+				break
+			}
+		}
+	}
+	if deferred != nil {
+		deferred.appendIntents(followUp.Emissions)
+		if activityErr == nil {
+			deferred.appendIntents(followUp.ActivityRequests)
+		}
+		return activityErr
+	}
+	if len(followUp.Emissions) == 0 && len(followUp.ActivityRequests) == 0 {
+		return activityErr
+	}
+	if pc.bus == nil || pc.bus.EngineDispatcher() == nil {
+		return errors.Join(activityErr, errors.New("committed handler follow-up requires post-commit dispatcher"))
+	}
+	dispatcher := pc.bus.EngineDispatcher()
+	postCommitCtx := context.WithoutCancel(ctx)
+	var emitErr, requestErr error
+	if len(followUp.Emissions) > 0 {
+		emitErr = dispatcher.DispatchPostCommit(postCommitCtx, followUp.Emissions)
+	}
+	if activityErr == nil && len(followUp.ActivityRequests) > 0 {
+		requestErr = dispatcher.DispatchPostCommit(postCommitCtx, followUp.ActivityRequests)
+	}
+	return errors.Join(activityErr, emitErr, requestErr)
 }
 
 // finishClaimedNodeAttempt is the single outcome handoff after execution. A
 // committed result is never converted into a retry because cleanup failed.
 func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (handled bool, resultErr, probeErr error) {
 	defer func() { resultErr = errors.Join(resultErr, a.heartbeat.Stop()) }()
-	if err := consumeHandlerSettlementEvidence(a.result, a.claim, a.emissions); err != nil {
+	if err := consumeHandlerSettlementEvidence(a.result, a.claim); err != nil {
 		return false, errors.Join(a.executionErr, err), nil
 	}
 	committed := a.executionErr == nil || a.result.Committed || a.result.SettledDeliveryClaim != nil
 	if committed {
-		for _, emitted := range a.result.Emissions {
-			a.emissions.appendEvent(emitted)
-		}
 		probeErr = pc.notifyTestLifecycleHandlerCompleted(a.ctx, a.node.Key(), a.event, "completed")
 	} else {
 		probeErr = pc.notifyTestLifecycleHandlerCompleted(a.ctx, a.node.Key(), a.event, "failed")
@@ -899,11 +946,8 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 	return true, settlementErr, probeErr
 }
 
-func consumeHandlerSettlementEvidence(result contractHandlerExecutionResult, claim runtimedelivery.Claim, emissions *pipelineEmissionPlan) error {
+func consumeHandlerSettlementEvidence(result contractHandlerExecutionResult, claim runtimedelivery.Claim) error {
 	// A malformed post-commit result is still committed; never reclassify it as a retryable write.
-	if emissions != nil {
-		emissions.committed = result.Committed
-	}
 	if result.SettledDeliveryClaim != nil && !result.SettledDeliveryClaim.Same(claim) {
 		return fmt.Errorf("workflow node engine settled a different delivery claim")
 	}

@@ -1164,9 +1164,9 @@ func assertDeliverySettlementRolledBack(t *testing.T, ctx context.Context, backe
 	if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimVersion != claimed.Claim.Version() {
 		t.Fatalf("faulted settlement snapshot = %#v, want original in-progress claim", snapshot)
 	}
-	query := `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=$1::text AND transition IN ('dead_letter', 'terminalized'))`
+	query := `SELECT (SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=$1::text AND transition IN ('dead_letter', 'terminalized'))`
 	if !backend.postgres {
-		query = `SELECT (SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id=?), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=?), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=? AND transition IN ('dead_letter', 'terminalized'))`
+		query = `SELECT (SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=?), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=?), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=? AND transition IN ('dead_letter', 'terminalized'))`
 	}
 	args := []any{claimed.Snapshot.DeliveryID}
 	if !backend.postgres {
@@ -1291,8 +1291,8 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	}
 
 	assertDeliverySQLRejected(t, backend, "unreferenced second open attempt",
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE)`,
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE)`,
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open')`,
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE, 'open')`,
 		[]any{claimed.Snapshot.DeliveryID, claimed.Claim.Version() + 1, uuid.NewString(), now, now.Add(time.Minute)})
 
 	terminatedEvent := deliveryLifecycleEvent("schema-terminated-session-" + backend.name)
@@ -1328,10 +1328,34 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDeliverySQLRejected(t, backend, "outcome without exact attempt",
-		`INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, side_effects, duration_ms, settled_at) VALUES ($1::uuid, 99, 'delivered', '[]'::jsonb, 0, $2)`,
-		`INSERT INTO event_delivery_outcomes (delivery_id, claim_version, outcome, side_effects, duration_ms, settled_at) VALUES (?, 99, 'delivered', '[]', 0, ?)`,
+	assertDeliverySQLRejected(t, backend, "settled attempt without required evidence",
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'settled', 'delivered', $2)`,
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 'delivered', ?2)`,
 		[]any{outcomeProof.DeliveryID(), now})
+	assertDeliverySQLRejected(t, backend, "settled attempt without outcome",
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, duration_ms, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'settled', 0, $2)`,
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, duration_ms, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 0, ?2)`,
+		[]any{outcomeProof.DeliveryID(), now})
+	assertDeliverySQLRejected(t, backend, "settled attempt without completion time",
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'settled', 'delivered', 0)`,
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 'delivered', 0)`,
+		[]any{outcomeProof.DeliveryID(), now})
+	assertDeliverySQLRejected(t, backend, "expired attempt cannot carry settlement duration",
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'lease_expired', 'lease_expired', 0, $2)`,
+		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'lease_expired', 'lease_expired', 0, ?2)`,
+		[]any{outcomeProof.DeliveryID(), now})
+	assertDeliverySQLRejected(t, backend, "open attempt cannot own a linked dead letter",
+		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'settled', 'delivery.schema', '{}'::jsonb, '', '{"class":"lifecycle_conflict"}'::jsonb)`,
+		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, ?, ?, 'settled', 'delivery.schema', '{}', '', '{"class":"lifecycle_conflict"}')`,
+		[]any{uuid.NewString(), sessionEvent.ID(), claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
+	assertDeliverySQLRejected(t, backend, "partial-null settlement reference cannot bypass the FK",
+		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, $3::uuid, 'settled', 'delivery.schema', '{}'::jsonb, '', '{"class":"lifecycle_conflict"}'::jsonb)`,
+		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, ?, 'settled', 'delivery.schema', '{}', '', '{"class":"lifecycle_conflict"}')`,
+		[]any{uuid.NewString(), sessionEvent.ID(), claimed.Snapshot.DeliveryID})
+	assertDeliverySQLRejected(t, backend, "contradictory open settlement tag",
+		`UPDATE event_delivery_attempts SET closure_kind='settled' WHERE delivery_id=$1::uuid AND claim_version=$2`,
+		`UPDATE event_delivery_attempts SET closure_kind='settled' WHERE delivery_id=? AND claim_version=?`,
+		[]any{claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
 
 	deadLetterEvent := deliveryLifecycleEvent("schema-dead-letter-failure-" + backend.name)
 	deadLetterRoute := deliveryLifecycleConformanceRoute(t, deadLetterEvent.RunID(), "agent", "schema-agent-"+backend.name)
@@ -1548,9 +1572,9 @@ func expireDeliveryClaimForConformance(t *testing.T, ctx context.Context, backen
 
 func assertDeliveryAttemptHistory(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
 	t.Helper()
-	query := `SELECT claim_version, outcome FROM event_delivery_attempts WHERE delivery_id = $1::uuid ORDER BY claim_version`
+	query := `SELECT claim_version, closure_kind, outcome FROM event_delivery_attempts WHERE delivery_id = $1::uuid ORDER BY claim_version`
 	if !backend.postgres {
-		query = `SELECT claim_version, outcome FROM event_delivery_attempts WHERE delivery_id = ? ORDER BY claim_version`
+		query = `SELECT claim_version, closure_kind, outcome FROM event_delivery_attempts WHERE delivery_id = ? ORDER BY claim_version`
 	}
 	rows, err := backend.db.QueryContext(ctx, query, deliveryID)
 	if err != nil {
@@ -1559,12 +1583,13 @@ func assertDeliveryAttemptHistory(t *testing.T, ctx context.Context, backend del
 	defer rows.Close()
 	type attempt struct {
 		version int64
+		closure string
 		outcome string
 	}
 	var attempts []attempt
 	for rows.Next() {
 		var current attempt
-		if err := rows.Scan(&current.version, &current.outcome); err != nil {
+		if err := rows.Scan(&current.version, &current.closure, &current.outcome); err != nil {
 			t.Fatalf("scan delivery attempt history: %v", err)
 		}
 		attempts = append(attempts, current)
@@ -1572,9 +1597,17 @@ func assertDeliveryAttemptHistory(t *testing.T, ctx context.Context, backend del
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read delivery attempt history: %v", err)
 	}
-	if len(attempts) != 2 || attempts[0] != (attempt{version: 1, outcome: "lease_expired"}) || attempts[1] != (attempt{version: 2, outcome: "delivered"}) {
+	if len(attempts) != 2 || attempts[0] != (attempt{version: 1, closure: "lease_expired", outcome: "lease_expired"}) || attempts[1] != (attempt{version: 2, closure: "settled", outcome: "delivered"}) {
 		t.Fatalf("delivery attempt history = %#v", attempts)
 	}
+	outcomes, err := backend.store.Outcomes(ctx, deliveryID)
+	if err != nil || len(outcomes) != 1 || outcomes[0].ClaimVersion != 2 || outcomes[0].Outcome != "delivered" {
+		t.Fatalf("expired attempt appeared as settlement: outcomes=%#v err=%v", outcomes, err)
+	}
+	assertDeliverySQLRejected(t, backend, "expired attempt cannot own a linked dead letter",
+		`INSERT INTO dead_letters (dead_letter_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, 1, 'settled', 'delivery.expired', '{}'::jsonb, '', '{"class":"lifecycle_conflict"}'::jsonb)`,
+		`INSERT INTO dead_letters (dead_letter_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, 1, 'settled', 'delivery.expired', '{}', '', '{"class":"lifecycle_conflict"}')`,
+		[]any{uuid.NewString(), deliveryID})
 }
 
 func assertDeliveryAttemptLeaseMatchesObligation(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string, version int64) {
@@ -1765,9 +1798,7 @@ func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context,
 		"current_attempt_open", "settled_at")
 	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "event_delivery_attempts",
 		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "current_delivery_id",
-		"active_session_id", "session_delivery_id", "session_run_id", "session_subscriber_type", "session_agent_id", "open_marker", "outcome")
-	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "event_delivery_outcomes",
-		"delivery_id", "claim_version", "outcome", "side_effects", "duration_ms", "settled_at")
+		"active_session_id", "session_delivery_id", "session_run_id", "session_subscriber_type", "session_agent_id", "open_marker", "closure_kind", "outcome", "side_effects", "duration_ms", "completed_at")
 }
 
 var (

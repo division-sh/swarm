@@ -28,7 +28,7 @@ func TestDeleteSelectedContractForkStatePreservesCompletionTombstones(t *testing
 			for _, table := range []string{
 				"agent_lifecycle_diagnostic_outbox", "fan_out_obligation_barriers", "fan_out_outcomes", "fan_out_intents",
 				"dead_letters", "run_fork_delivery_event_replays", "event_delivery_handler_rule_selections",
-				"event_delivery_outcomes", "event_delivery_attempts", "event_deliveries", "agent_sessions",
+				"event_delivery_attempts", "event_deliveries", "agent_sessions",
 				"run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries",
 				"run_fork_selected_contract_executions", "event_receipts", "committed_replay_scopes", "timers",
 				"activity_attempts", "entity_mutations", "agent_turns", "agent_conversation_audits",

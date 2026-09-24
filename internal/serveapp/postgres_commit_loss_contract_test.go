@@ -214,7 +214,7 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	if err := observer.QueryRow(`SELECT count(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, eventID).Scan(&deliveries); err != nil {
 		t.Fatal(err)
 	}
-	if err := observer.QueryRow(`SELECT count(*) FROM event_delivery_outcomes o JOIN event_deliveries d ON d.delivery_id=o.delivery_id WHERE d.event_id=$1 AND o.outcome='delivered'`, eventID).Scan(&outcomes); err != nil {
+	if err := observer.QueryRow(`SELECT count(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id=o.delivery_id WHERE d.event_id=$1 AND o.outcome='delivered'`, eventID).Scan(&outcomes); err != nil {
 		t.Fatal(err)
 	}
 	if deliveries != 1 || outcomes != 1 {

@@ -150,9 +150,6 @@ func NewExecutor(deps RuntimeDependencies, evaluator Evaluator) (*Executor, erro
 	if deps.Locker == nil {
 		return nil, ErrMissingEntityLocker
 	}
-	if deps.Dispatcher == nil {
-		return nil, ErrMissingDispatcher
-	}
 	if deps.MaxChainDepth <= 0 {
 		deps.MaxChainDepth = DefaultMaxChainDepth
 	}
@@ -560,26 +557,6 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	result.EmitIntents = append([]EmitIntent(nil), intents...)
 	result.ActivityIntents = append([]ActivityIntent(nil), activityIntents...)
 	result.ActivityRequestIntents = append([]EmitIntent(nil), activityRequests...)
-	if req.DeferCommittedDispatch {
-		return result, postCommitErr
-	}
-	if len(intents) > 0 {
-		if err := e.deps.Dispatcher.DispatchPostCommit(ctx, intents); err != nil {
-			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_post_commit")
-			postCommitErr = errors.Join(postCommitErr, err)
-		}
-	}
-	if len(activityIntents) > 0 {
-		if e.deps.ActivityDispatcher == nil {
-			err := fmt.Errorf("%w: activity dispatcher is required when handler declares activity", ErrInvalidConfig)
-			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
-			return result, errors.Join(postCommitErr, err)
-		}
-		if err := e.deps.ActivityDispatcher.DispatchActivities(ctx, activityIntents, activityRequests); err != nil {
-			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
-			return result, errors.Join(postCommitErr, err)
-		}
-	}
 	return result, postCommitErr
 }
 

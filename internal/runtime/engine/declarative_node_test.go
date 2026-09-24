@@ -28,7 +28,6 @@ func TestNewDeclarativeNode_StoresNodeID(t *testing.T) {
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -65,7 +64,6 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -93,7 +91,6 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -120,7 +117,6 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)

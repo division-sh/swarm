@@ -508,7 +508,7 @@ func assertDeliveryAuthorityOutcomeCount(t *testing.T, db *sql.DB, eventID, node
 	var got int
 	if err := db.QueryRowContext(testAuthorActivityContext(t, context.Background()), `
 		SELECT COUNT(*)
-		FROM event_delivery_outcomes o
+		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'node'

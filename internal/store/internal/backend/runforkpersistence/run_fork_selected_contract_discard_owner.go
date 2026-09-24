@@ -128,7 +128,6 @@ func deleteSelectedContractForkState(ctx context.Context, tx *sql.Tx, forkRunID 
 		{"dead letters", `DELETE FROM dead_letters WHERE original_event_id IN (SELECT event_id FROM events WHERE run_id = $1)`},
 		{"replay lineage", `DELETE FROM run_fork_delivery_event_replays WHERE fork_run_id = $1`},
 		{"handler rule selections", `DELETE FROM event_delivery_handler_rule_selections WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1 OR event_id IN (SELECT event_id FROM events WHERE run_id = $1))`},
-		{"delivery outcomes", `DELETE FROM event_delivery_outcomes WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1 OR event_id IN (SELECT event_id FROM events WHERE run_id = $1))`},
 		{"delivery attempts", `DELETE FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1 OR event_id IN (SELECT event_id FROM events WHERE run_id = $1))`},
 		{"deliveries", `DELETE FROM event_deliveries WHERE run_id = $1 OR event_id IN (SELECT event_id FROM events WHERE run_id = $1)`},
 		{"sessions", `DELETE FROM agent_sessions WHERE run_id = $1`},
