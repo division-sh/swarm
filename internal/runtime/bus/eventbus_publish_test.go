@@ -339,6 +339,51 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	})
 }
 
+func TestEventBusZeroRouteExactDuplicateRetainsDurableAuthorityBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext(context.Background())
+			var selected interface {
+				runtimebus.EventStore
+				runtimerunlifecycle.OperationOwner
+				runtimerunlifecycle.CandidateStore
+			}
+			if backend == "sqlite" {
+				selected = storetest.StartSQLiteRuntimeStore(t)
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+			}
+			runID := uuid.NewString()
+			if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("task.completed"), "api.v1", "",
+				[]byte(`{"ok":true}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, evt, nil, runtimepipelineobligation.ScopeSubscribed)
+			eb, err := newScopedTestEventBus(selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.UsesCanonicalRouteAuthority() || len(plan.DeliveryRoutes) != 0 || plan.TargetFailure != "" {
+				t.Fatalf("committed zero-route preflight = %#v, want exact durable no-delivery authority", plan)
+			}
+			conflicting := eventtest.ExistingRunRootIngress(evt.ID(), evt.Type(), "api.v1", "",
+				[]byte(`{"ok":false}`), 0, runID, events.EventEnvelope{}, evt.CreatedAt())
+			if _, err := eb.CheckPublishRecipientPlan(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
+				t.Fatalf("conflicting zero-route preflight error = %v, want event identity conflict", err)
+			}
+			if err := eb.Publish(ctx, evt); err != nil {
+				t.Fatalf("publish exact zero-route duplicate: %v", err)
+			}
+		})
+	}
+}
+
 func assertEventBusExactDuplicateIsOperationNoOp(
 	t *testing.T,
 	eventStore runtimebus.EventStore,

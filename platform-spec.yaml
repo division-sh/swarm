@@ -1241,8 +1241,9 @@ contract_formats:
         duplicate_recipient_preflight: >
           A read-only recipient preflight for a previously committed event consumes its validated durable publication
           aggregate and the selected store's exact persisted-event identity comparison before consulting live receiver
-          eligibility. It reports the original delivery routes for an exact duplicate, including after the receiver
-          completes, but never treats event_id existence alone as authority. Changed payload, schema binding, source,
+          eligibility. It uses the original delivery routes or exact no-delivery settlement as canonical authority
+          for an exact duplicate, including after the receiver completes, but never treats event_id existence alone as
+          authority. Changed payload, schema binding, source,
           target, lineage, or other immutable event facts fail closed. A genuinely new event still requires fresh
           receiver preflight, and preflight success never substitutes for the publication claim, lifecycle checks, or
           exact duplicate decision at commit. Recovered terminal tool output follows this same path; it cannot mint a
