@@ -371,7 +371,7 @@ func (eb *EventBus) processClaimedPipelineWork(
 	if dispatchErr == nil {
 		outcome, dispatchErr = eb.RecoverPersistedPipeline(ctx, work, recipients)
 	}
-	decision := classifyPipelineDispatch(outcome, dispatchErr, false, work.Claim.Purpose(), true)
+	decision := classifyPipelineDispatch(outcome, dispatchErr, false, work.Claim.Purpose(), pipelineDispatchRecoveryFinal)
 	switch decision.action {
 	case pipelineDispatchPending:
 		return false, false, nil, dispatchErr
