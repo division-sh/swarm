@@ -138,6 +138,30 @@ func (s *EventSQLiteOwner) LoadPreparedPublishEvent(ctx context.Context, eventID
 	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
 }
 
+func (s *EventPostgresOwner) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable runtimebus.PreparedPublishEvent) error {
+	return verifyPreparedPublishEventIdentity(candidate, durable)
+}
+
+func (s *EventSQLiteOwner) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable runtimebus.PreparedPublishEvent) error {
+	return verifyPreparedPublishEventIdentity(candidate, durable)
+}
+
+func verifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable runtimebus.PreparedPublishEvent) error {
+	if err := durable.Validate(); err != nil {
+		return err
+	}
+	want, err := eventrecord.FromAdmitted(candidate, durable.Settlement)
+	if err != nil {
+		return err
+	}
+	got, err := eventrecord.FromAdmitted(durable.Event, durable.Settlement)
+	if err != nil {
+		return err
+	}
+	_, err = resolveExistingEventIdentity(candidate.ID(), want, got, true)
+	return err
+}
+
 func deliveryRoutesFromSnapshots(snapshots []runtimedelivery.Snapshot) []events.DeliveryRoute {
 	routes := make([]events.DeliveryRoute, 0, len(snapshots))
 	for _, snapshot := range snapshots {
