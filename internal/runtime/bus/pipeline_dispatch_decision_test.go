@@ -38,6 +38,7 @@ func TestPipelineDispatchDecisionMatrix(t *testing.T) {
 		{"committed_decision_processed", runtimepipelineobligation.ExecutionOutcome{Committed: true}, nil, false, runtimepipelineobligation.PurposeDecisionRoute, true, pipelineDispatchMarkDecisionProcessed, "", "", false},
 		{"committed_decision_cleanup_failure", runtimepipelineobligation.ExecutionOutcome{Committed: true}, testErr, false, runtimepipelineobligation.PurposeDecisionRoute, true, pipelineDispatchMarkDecisionProcessed, "", "", false},
 		{"ordinary_success", runtimepipelineobligation.Continue(), nil, false, runtimepipelineobligation.PurposePublication, false, pipelineDispatchSettle, runtimepipelineobligation.DispositionAcknowledged, "pipeline_persisted", false},
+		{"ordinary_recovery_success", runtimepipelineobligation.Continue(), nil, false, runtimepipelineobligation.PurposeRecovery, true, pipelineDispatchSettle, runtimepipelineobligation.DispositionAcknowledged, "pipeline_persisted", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
