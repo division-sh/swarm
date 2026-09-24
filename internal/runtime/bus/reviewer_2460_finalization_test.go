@@ -346,6 +346,33 @@ func TestCommittedDispatchMatchesOnlyStagedSourceOrProjectedEvent(t *testing.T) 
 }
 
 func TestCommittedDispatchFencedPreflightReleasesEveryExactClaim(t *testing.T) {
+	testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t, func(process *worklifetime.Process, owner *worklifetime.RuntimeOccurrence) error {
+		return owner.Fence()
+	}, worklifetime.ErrAdmissionFenced)
+}
+
+func TestCommittedDispatchRetiredPreflightReleasesEveryExactClaim(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		retire func(*worklifetime.Process, *worklifetime.RuntimeOccurrence) error
+	}{
+		{name: "runtime", retire: func(_ *worklifetime.Process, owner *worklifetime.RuntimeOccurrence) error {
+			owner.Retire()
+			return nil
+		}},
+		{name: "process", retire: func(process *worklifetime.Process, _ *worklifetime.RuntimeOccurrence) error {
+			process.Retire()
+			return nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t, tc.retire, worklifetime.ErrRetired)
+		})
+	}
+}
+
+func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T, stop func(*worklifetime.Process, *worklifetime.RuntimeOccurrence) error, wantErr error) {
+	t.Helper()
 	ctx := testAuthorActivityContext(context.Background())
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: "review-committed-dispatch"})
@@ -390,15 +417,29 @@ func TestCommittedDispatchFencedPreflightReleasesEveryExactClaim(t *testing.T) {
 	if err := bus.FinalizeEnginePublications(ctx, evidence); err != nil {
 		t.Fatal(err)
 	}
-	if err := owner.Fence(); err != nil {
+	claims := make([]*pipelinePublicationClaim, len(intents))
+	for i, intent := range intents {
+		operation, ok := pendingOutboxOperationForTest(bus, intent.Event.ID())
+		if !ok || operation.publicationClaim == nil {
+			t.Fatalf("committed output %s has no exact claim", intent.Event.ID())
+		}
+		claims[i] = operation.publicationClaim
+	}
+	if err := stop(process, owner); err != nil {
 		t.Fatal(err)
 	}
-	if err := bus.EngineDispatcher().DispatchPostCommit(ctx, intents); !errors.Is(err, worklifetime.ErrAdmissionFenced) {
-		t.Fatalf("fenced dispatch = %v", err)
+	if err := bus.EngineDispatcher().DispatchPostCommit(ctx, intents); !errors.Is(err, wantErr) {
+		t.Fatalf("terminal dispatch = %v, want %v", err, wantErr)
 	}
-	for _, intent := range intents {
+	for i, intent := range intents {
 		if _, pending := pendingOutboxOperationForTest(bus, intent.Event.ID()); pending {
-			t.Fatalf("fenced output %s retained process-local claim", intent.Event.ID())
+			t.Errorf("terminal output %s retained process-local operation", intent.Event.ID())
+		}
+		if !claims[i].released.Load() {
+			t.Errorf("terminal output %s retained exact claim", intent.Event.ID())
+		}
+		if _, found, err := store.LoadPreparedPublishEvent(context.Background(), intent.Event.ID()); err != nil || !found {
+			t.Errorf("terminal output %s lost committed publication: found=%t err=%v", intent.Event.ID(), found, err)
 		}
 	}
 }

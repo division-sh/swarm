@@ -376,7 +376,7 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	}
 	ctx, lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
-		if errors.Is(err, worklifetime.ErrAdmissionFenced) {
+		if errors.Is(err, worklifetime.ErrAdmissionFenced) || errors.Is(err, worklifetime.ErrRetired) {
 			return errors.Join(err, d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
 		}
 		return err
