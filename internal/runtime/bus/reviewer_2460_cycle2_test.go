@@ -173,7 +173,7 @@ func TestOrdinaryCommittedPublicationDiagnosticRetainsDispatchAuthority(t *testi
 	}
 }
 
-func TestCommittedDispatchCancellationReleasesExactBatchClaims(t *testing.T) {
+func TestCommittedDispatchCancellationSettlesExactBatchClaims(t *testing.T) {
 	for _, mode := range []string{"immediate", "intercepted", "deferred"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
@@ -227,12 +227,18 @@ func TestCommittedDispatchCancellationReleasesExactBatchClaims(t *testing.T) {
 					err = errors.Join(err, bus.publishDeferred(cancelled, intent.Event))
 				}
 			}
-			if err == nil {
-				t.Fatal("cancelled dispatch succeeded")
+			if err != nil {
+				t.Fatalf("committed dispatch after caller cancellation: %v", err)
 			}
 			for i, intent := range intents {
 				if _, pending := pendingOutboxOperationForTest(bus, intent.Event.ID()); pending || !claims[i].released.Load() {
 					t.Errorf("output %d pending=%t released=%t", i, pending, claims[i].released.Load())
+				}
+				store.mu.Lock()
+				got := store.receipts[intent.Event.ID()]
+				store.mu.Unlock()
+				if got != "processed" {
+					t.Errorf("output %d durable receipt=%q, want processed", i, got)
 				}
 			}
 		})

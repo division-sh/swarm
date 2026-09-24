@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -375,7 +376,10 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	}
 	ctx, lease, err := d.bus.beginRuntimeWork(ctx)
 	if err != nil {
-		return errors.Join(err, d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
+		if errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			return errors.Join(err, d.releaseUndispatchedPostCommit(context.WithoutCancel(ctx), intents))
+		}
+		return err
 	}
 	if lease != nil {
 		defer func() { _ = lease.Done() }()
@@ -585,9 +589,6 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 			}
 		}
 	}()
-	if ctx.Err() != nil {
-		return result, errors.Join(ctx.Err(), d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), fallback.Event))
-	}
 	ctx, err = d.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return result, err
