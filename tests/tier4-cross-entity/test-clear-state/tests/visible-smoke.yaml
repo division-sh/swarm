@@ -3,6 +3,9 @@ setup:
   entities:
   - as: entity
     type: test_entity
+    fields:
+      accumulated_count: 5
+      accumulated_total: 250
 steps:
 - publish: state.clear_requested
   payload: {}
@@ -13,3 +16,4 @@ expect:
   entities:
   - ref: entity
     current_state: cleared
+    fields: {}
