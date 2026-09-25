@@ -8,6 +8,7 @@ worker:
           - {source_field: batch_id, target_field: batch_id}
           - {source_field: item_id, target_field: item_id}
           - {source_field: value, target_field: value}
+      advances_to: registered
     item.finished:
       guard:
         id: still_registered
