@@ -105,6 +105,7 @@ func requireSelectedForkDurablePublicReads(t *testing.T, rt servedControlProofRu
 			t.Fatalf("selected event list/get disagree: %+v / %+v", event, exact)
 		}
 	}
+	requireReceiverPublicReadback(t, rt, runID)
 	var trace struct {
 		Trace []operatorread.RunDebugTraceRow `json:"trace"`
 	}
