@@ -15,7 +15,7 @@ import (
 )
 
 var conformance2394Units = []string{
-	"conformance-2", "conformance-2394-core", "conformance-2394-core-rest", "conformance-2394-pressure", "conformance-2394-pressure-rest", "conformance-2394-reporter",
+	"conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter",
 }
 
 const conformance2394Soak = "TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores"
@@ -138,7 +138,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration",
 		"TestCanonicalFormsRegistryPinsHandlerActionRetirement",
 	}
-	want := []int{122, 4, 10, 2, 3, 1}
+	want := []int{122, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -160,7 +160,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[0], generatedResultsProof); i == len(groups[0]) || groups[0][i] != generatedResultsProof {
 		t.Fatalf("general conformance partition omitted generated-results guard %s", generatedResultsProof)
 	}
-	t.Log("complete disjoint census:142 =122 general +4 D3 +10 core rest +2 reservation pressure +3 remaining pressure +1 reporter")
+	t.Log("complete disjoint census:142 =122 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

@@ -370,10 +370,10 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
 	serveappUnits := []string{
-		"serveapp-channel", "serveapp-runtime", "serveapp-release", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-text",
-		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z", "serveapp-journeys-p",
-		"serveapp-mailbox", "serveapp-mailbox-p-q", "serveapp-mailbox-r-z", "serveapp-mailbox-response", "serveapp-misc-light",
-		"serveapp-selected", "serveapp-selected-geometry", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-i-rest", "serveapp-other-late", "serveapp-standing",
+		"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-text",
+		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
+		"serveapp-mailbox", "serveapp-mailbox-p-q", "serveapp-mailbox-r-z",
+		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-standing",
 	}
 	var serveappPatterns []*regexp.Regexp
 	for _, id := range serveappUnits {
@@ -419,7 +419,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "apiv1"), apiPatterns)
 	var conformanceUnits []testplanning.ProofUnit
-	for _, id := range []string{"conformance-1", "conformance-serving-cardinality", "conformance-h", "conformance-2", "conformance-2394-core", "conformance-2394-core-rest", "conformance-2394-pressure", "conformance-2394-pressure-rest", "conformance-2394-reporter", "conformance-soak-sqlite", "conformance-soak-postgres"} {
+	for _, id := range []string{"conformance-1", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter", "conformance-soak-sqlite", "conformance-soak-postgres"} {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
 			t.Fatalf("%s must retain its complete uncached conformance partition", id)
@@ -441,7 +441,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
 		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-01-c", "store-runtime-full-02", "store-runtime-full-02-f", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-03-m-o", "store-runtime-full-04", "store-runtime-full-04-rest", "store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06", "store-runtime-full-06-rest"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-03-m-o", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]
