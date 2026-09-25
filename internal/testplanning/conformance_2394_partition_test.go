@@ -126,7 +126,8 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	// #2307 adds these eight general roots to the reviewed 113-root census.
-	// No prior root, backend, or command envelope moves between partitions.
+	// The generated-results guard adds one more. No prior root, backend, or
+	// command envelope moves between partitions.
 	actionRetirementRoots := []string{
 		"TestActionRetirementCorpusLedgerIsComplete",
 		"TestActionRetirementCorpusHasNoLiveAuthoredActions",
@@ -137,7 +138,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration",
 		"TestCanonicalFormsRegistryPinsHandlerActionRetirement",
 	}
-	want := []int{121, 14, 5, 1}
+	want := []int{122, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -154,6 +155,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
 			t.Fatalf("general conformance partition omitted reviewed #2307 root %s", name)
 		}
+	}
+	const generatedResultsProof = "TestActionRetirementCorpusExcludesGeneratedTestResults"
+	if i := sort.SearchStrings(groups[0], generatedResultsProof); i == len(groups[0]) || groups[0][i] != generatedResultsProof {
+		t.Fatalf("general conformance partition omitted generated-results guard %s", generatedResultsProof)
 	}
 	t.Log("complete disjoint census:141 =121 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
