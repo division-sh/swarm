@@ -6,7 +6,7 @@ processor:
     process.requested:
       guard:
         id: counter_check
-        check: "entity.counter < 3"
+        check: "has(entity.counter) && entity.counter < 3"
       data_accumulation:
         writes:
           - target_field: counter

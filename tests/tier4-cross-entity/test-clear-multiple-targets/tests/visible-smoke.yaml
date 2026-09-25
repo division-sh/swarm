@@ -3,6 +3,9 @@ setup:
   entities:
   - as: entity
     type: test_entity
+    fields:
+      accumulated_count: 10
+      dedup_key: abc123
 steps:
 - publish: state.reset_requested
   payload: {}
@@ -13,3 +16,4 @@ expect:
   entities:
   - ref: entity
     current_state: cleared
+    fields: {}
