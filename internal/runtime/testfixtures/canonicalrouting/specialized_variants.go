@@ -40,7 +40,7 @@ pins:
   event_handlers:
     task.assigned:
       guard:
-        check: "entity.priority >= 0"
+        check: "has(entity.priority) && entity.priority >= 0"
       advances_to: done
 `)
 	return root
@@ -295,6 +295,7 @@ widget.started:
   subscribes_to: [widget.scored]
   event_handlers:
     widget.scored:
+      guard: {check: "has(entity.score)"}
       data_accumulation:
         source_event: widget.scored
         writes:
