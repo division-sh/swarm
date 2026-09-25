@@ -9,13 +9,13 @@ import (
 )
 
 type HandlerDeclarativeEmitSite struct {
-	Source    string
-	SiteKey   string
-	RuleID    string
-	RuleRef   runtimeidentity.DeclarationIdentity
-	RuleIndex int
-	Spec      EmitSpec
-	ItemAlias string
+	Source         string
+	SiteKey        string
+	RuleID         string
+	RuleRef        runtimeidentity.DeclarationIdentity
+	RuleIndex      int
+	Spec           EmitSpec
+	ItemAlias      string
 	ResourceSource *FanOutResourceSource
 }
 
