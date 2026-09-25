@@ -11,13 +11,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -37,18 +41,36 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := runtimecorrelation.WithRunID(testAuthorActivitySourceArtifactContext(), fixture.sourceRun)
+			source := stateOnlyAcquisitionSourceWithMode(t, "freeze", runtimecontracts.FlowModeTemplate)
+			bundle, ok := semanticview.Bundle(source)
+			if !ok || bundle.SourceArtifact == nil {
+				t.Fatal("freeze domain source artifact is required")
+			}
+			fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(fact.BundleHash()), fixture.sourceRun)
 			var surface forkedDomainConsumerSurface
 			if fixture.postgres != nil {
 				surface = fixture.postgres
 			} else {
 				surface = fixture.sqlite
 			}
+			owner, ok := surface.(interface {
+				runtimerunlifecycle.OperationOwner
+				sourceartifactfixture.Writer
+			})
+			if !ok {
+				t.Fatal("freeze domain source owner is required")
+			}
+			sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
+			if _, err := owner.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{RunID: fixture.sourceRun, Source: fact}); err != nil {
+				t.Fatalf("bind freeze domain source: %v", err)
+			}
+			fixture.sourceBundleHash = fact.BundleHash()
 
 			entityID := uuid.NewString()
 			entity := runtimetools.EntityCreateRecord{
-				RunID: fixture.sourceRun, EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "work_item",
-				CurrentState: "active", FieldsJSON: json.RawMessage(`{"value":1}`), CreatedAt: fixture.forkedAt.Add(-time.Minute),
+				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
+				CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"domain"}`), CreatedAt: fixture.forkedAt.Add(-time.Minute),
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
 			}
 			if _, err := surface.CreateEntity(ctx, entity); err != nil {
@@ -80,7 +102,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			_, err := surface.CreateEntity(ctx, lateEntity)
 			requireForkedSourceRefusal(t, "create entity", err)
 			_, err = surface.SaveEntityField(ctx, runtimetools.EntityFieldUpdate{
-				RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "value", ValueJSON: json.RawMessage(`2`),
+				Source: source, RunID: fixture.sourceRun, EntityID: entityID, FieldPath: "account_id", Value: "changed",
 				Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "source-freeze"},
 			})
 			requireForkedSourceRefusal(t, "save entity field and mutation log", err)

@@ -10,11 +10,16 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -289,20 +294,34 @@ func TestWorkflowTargetPresenceOwnsEveryValidTransition(t *testing.T) {
 func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores(t *testing.T) {
 	type producerStore interface {
 		runtimepipeline.WorkflowEngineMutationOwner
+		runtimerunlifecycle.OperationOwner
+		sourceartifactfixture.Writer
 		SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
 		CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			store, ok := selected.(producerStore)
-			if !ok {
-				t.Fatalf("%s selected store does not expose supported state-only producers", backend)
-			}
 			for _, producer := range []string{"scenario_setup", "entity_tool"} {
 				t.Run(producer, func(t *testing.T) {
+					selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+					store, ok := selected.(producerStore)
+					if !ok {
+						t.Fatalf("%s selected store does not expose supported state-only producers", backend)
+					}
 					flowID := producer + "-" + uuid.NewString()
 					instancePath := flowID + "/receiver"
+					source := stateOnlyAcquisitionSourceWithMode(t, flowID, runtimecontracts.FlowModeTemplate)
+					bundle, ok := semanticview.Bundle(source)
+					if !ok || bundle.SourceArtifact == nil {
+						t.Fatal("state-only producer source artifact is required")
+					}
+					sourceartifactfixture.RequireArtifact(t, ctx, store, bundle.SourceArtifact)
+					if _, err := store.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
+						RunID: runID, Source: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+					}); err != nil {
+						t.Fatalf("bind state-only producer source: %v", err)
+					}
+					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact))
 					entityID := uuid.NewString()
 					createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					switch producer {
@@ -319,7 +338,7 @@ func TestSupportedStateOnlyProducersReachWorkflowCompanionTransitionOnBothStores
 						}
 					case "entity_tool":
 						if _, err := store.CreateEntity(ctx, runtimetools.EntityCreateRecord{
-							RunID: runID, EntityID: entityID, FlowInstance: instancePath,
+							Source: source, RunID: runID, EntityID: entityID, FlowInstance: instancePath,
 							EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`),
 							CreatedAt: createdAt, Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "producer-proof", HandlerStep: "create_entity"},
 						}); err != nil {

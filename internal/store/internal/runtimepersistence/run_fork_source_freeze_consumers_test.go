@@ -21,19 +21,20 @@ import (
 )
 
 type forkedConsumerTestBackend struct {
-	name      string
-	db        *sql.DB
-	postgres  *PostgresStore
-	sqlite    *SQLiteRuntimeStore
-	sourceRun string
-	continued string
-	forkedAt  time.Time
+	name             string
+	db               *sql.DB
+	postgres         *PostgresStore
+	sqlite           *SQLiteRuntimeStore
+	sourceRun        string
+	sourceBundleHash string
+	continued        string
+	forkedAt         time.Time
 }
 
 func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerTestBackend {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	out := &forkedConsumerTestBackend{name: backend, sourceRun: uuid.NewString(), continued: uuid.NewString(), forkedAt: now}
+	out := &forkedConsumerTestBackend{name: backend, sourceRun: uuid.NewString(), sourceBundleHash: authorActivityTestBundleHash, continued: uuid.NewString(), forkedAt: now}
 	switch backend {
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
@@ -64,12 +65,12 @@ func newForkedConsumerTestBackend(t *testing.T, backend string) *forkedConsumerT
 
 func (b *forkedConsumerTestBackend) freeze(t *testing.T) {
 	t.Helper()
-	ctx := testAuthorActivitySourceArtifactContext()
+	ctx := testAuthorActivityContextForBundle(b.sourceBundleHash)
 	if b.postgres != nil {
 		lineage := runForkActivationLineage{
 			SourceRunID: b.sourceRun, ForkRunID: b.continued, ForkEventID: uuid.NewString(),
 			ForkEventName: "consumer.freeze", ForkEventTime: b.forkedAt, SourceRunStatus: "running", ForkStatus: "paused",
-			SourceBundleHash: authorActivityTestBundleHash, ForkBundleHash: authorActivityTestBundleHash,
+			SourceBundleHash: b.sourceBundleHash, ForkBundleHash: authorActivityTestBundleHash,
 		}
 		if err := commitRunForkSourceFreezeForTest(ctx, b.postgres, lineage, b.forkedAt, true); err != nil {
 			t.Fatal(err)
