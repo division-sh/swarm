@@ -331,13 +331,6 @@ func artifactActionResultNodeID(t testing.TB) string {
 
 func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 	enteredAt := time.Now().UTC()
-	fields := map[string]any{
-		"repo_id":          "11111111-1111-1111-1111-111111111111",
-		"namespace":        "tenant-alpha",
-		"partition_key":    "project-42",
-		"display_slug":     "Demo Artifact",
-		"source_record_id": "record-123",
-	}
 	return runtimepipeline.WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      "repo-scaffold/inst-1",
@@ -347,7 +340,7 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 		CurrentState:    "ready",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Fields:          fields,
+		Fields:          map[string]any{},
 		EntityType:      "test_entity",
 	}
 }
