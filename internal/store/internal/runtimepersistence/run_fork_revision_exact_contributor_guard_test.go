@@ -305,7 +305,7 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 			"sqliteDeliveryAdapter.CommitPipelineHandoff(ctx, attempt, claim.EventID())",
 		}},
 		{"pipelinepersistence/fan_out_obligation.go", "insertFanOutEntitySourceRevisionTx", []string{"facts.AddFact(runID, privaterunforkrevision.FamilyEntityMutations, mutationID)"}},
-		{"pipelinepersistence/fan_out_obligation.go", "commitFanOutIntentTx", []string{"insertFanOutIntentSQL(ctx, tx, postgres, attempt, request, stateFields, triggerEventID, createdAt)"}},
+		{"pipelinepersistence/fan_out_obligation.go", "commitFanOutIntentTx", []string{"insertFanOutIntentSQL(ctx, tx, postgres, resourceData, attempt, request, stateFields, triggerEventID, createdAt)"}},
 		{"pipelinepersistence/fan_out_obligation.go", "insertFanOutIntentSQL", []string{"privaterunforkrevision.FanOutIntentFact(request.Key)", "facts.AddFacts(request.Key.RunID, ref)"}},
 		{"pipelinepersistence/fan_out_owner.go", "blockFanOutClaim", []string{"privaterunforkrevision.FanOutIntentFact(request.Claim.Key)", "attempt.AddFacts(request.Claim.Key.RunID, ref)"}},
 		{"pipelinepersistence/fan_out_owner.go", "commitFanOutChunk", []string{
