@@ -380,13 +380,12 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/engine.BuildEntityAssignmentAnalysis::call internal/runtime/semanticview.WorkflowStageTopology": 1,
 		"internal/runtime/engine.BuildEntityAssignmentAnalysis::carrier fields":                                           13,
 		"internal/runtime/engine.BuildEntityAssignmentAnalysis::edge inventory":                                           1,
-		"internal/runtime/engine.BuildEntityAssignmentAnalysis::graph metadata":                                           4,
-		"internal/runtime/engine.EntityAssignmentAnalysis.StageFacts::graph metadata":                                     1,
+		"internal/runtime/engine.BuildEntityAssignmentAnalysis::graph metadata":                                           1,
 		"internal/runtime/engine.entityAssignmentEdgeSelects::carrier fields":                                             5,
 		// T20/#2424: exact observation transport, including explicit NotReached at
 		// preparation exits; none of these sites reconstructs a final fact.
-		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::construct internal/runtime/pipeline.contractHandlerExecutionResult":                   18,
-		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection RuleSelection":                                                   18,
+		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::construct internal/runtime/pipeline.contractHandlerExecutionResult":                   19,
+		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection RuleSelection":                                                   19,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::execution projection Transition":                                                      3,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::construct internal/runtime/pipeline.contractHandlerExecutionResult": 2,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeHandlerPlanResultWithEmissionPlan::execution projection RuleSelection":                                 2,

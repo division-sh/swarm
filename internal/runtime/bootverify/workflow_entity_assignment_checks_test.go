@@ -101,6 +101,16 @@ func TestEntityDefiniteAssignmentLoops(t *testing.T) {
 			if got := analysis.StageFacts("exhausted").Has("brief"); got != (variant != "backedge only") {
 				t.Fatalf("escape brief assigned=%v for %s", got, variant)
 			}
+			projection := bundle.Semantics.StageTopologies["review"]
+			projection.InitialStage = "exhausted"
+			bundle.Semantics.StageTopologies["review"] = projection
+			fromCompiledStage, err := engine.BuildEntityAssignmentAnalysis(source, "review")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := fromCompiledStage.StageFacts("working").Has("brief"); got != (variant == "start assignment") {
+				t.Fatalf("mutable initial-stage projection changed assignment facts: got %v for %s", got, variant)
+			}
 		})
 	}
 }

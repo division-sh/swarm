@@ -78,8 +78,12 @@ func BuildEntityAssignmentAnalysis(source semanticview.Source, flowID string) (*
 			a.initial.AssignValue(name, field.Type, decl.Initial)
 		}
 	}
-	a.topology, _ = semanticview.WorkflowStageTopology(source, flowID)
-	if a.topology.InitialStage == "" {
+	var found bool
+	a.topology, found = semanticview.WorkflowStageTopology(source, flowID)
+	if !found || !a.topology.ValidStageCatalog() {
+		return nil, fmt.Errorf("flow %s has no compiled stage catalog", flowID)
+	}
+	if !a.topology.HasInitialStage() {
 		// Without stages, preserve only initializer facts invariant under every
 		// possible handler outcome. A prior clear/replacement remains possible.
 		for changed := true; changed; {
@@ -101,7 +105,11 @@ func BuildEntityAssignmentAnalysis(source semanticview.Source, flowID string) (*
 		}
 		return a, nil
 	}
-	a.stages[a.topology.InitialStage] = a.initial.Clone()
+	initialStage, err := a.topology.InitialStageRef()
+	if err != nil {
+		return nil, err
+	}
+	a.stages[initialStage.ID()] = a.initial.Clone()
 	// A first reachable predecessor initializes a stage; every additional
 	// predecessor intersects it. The immutable first-entry seed participates on
 	// every iteration, so a loop backedge cannot certify first entry.
@@ -117,7 +125,7 @@ func BuildEntityAssignmentAnalysis(source semanticview.Source, flowID string) (*
 				changed = true
 			}
 		}
-		merge(a.topology.InitialStage, a.initial)
+		merge(initialStage.ID(), a.initial)
 		for _, edge := range a.topology.Edges {
 			before, reached := a.stages[edge.From]
 			if !reached {
@@ -174,7 +182,7 @@ func (a *EntityAssignmentAnalysis) StageFacts(stage string) entityruntime.Assign
 	if facts, reached := a.stages[stage]; reached {
 		return facts.Clone()
 	}
-	if a.topology.InitialStage == "" {
+	if !a.topology.HasInitialStage() {
 		return a.initial.Clone()
 	}
 	return entityruntime.AssignmentFacts{}
