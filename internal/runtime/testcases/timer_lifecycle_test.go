@@ -23,7 +23,7 @@ func TestGenericBundle_TimerLifecyclePatterns(t *testing.T) {
 	if handler.AdvancesTo != "completed" {
 		t.Fatalf("expected timeout to force completion, got %q", handler.AdvancesTo)
 	}
-	if got := runtimecontracts.HandlerEmitEvents(handler); !hasAll(got, "delivery/item.completed") {
+	if got := runtimecontracts.HandlerEmitEvents(handler, nil); !hasAll(got, "delivery/item.completed") {
 		t.Fatalf("expected timeout completion emission, got %v", got)
 	}
 	if fields := handler.DataAccumulation.TargetFields(); !hasAll(fields, "timed_out", "status") {

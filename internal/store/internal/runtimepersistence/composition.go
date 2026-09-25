@@ -208,7 +208,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	pipelineOwner, err := storepipeline.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency)
+	pipelineOwner, err := storepipeline.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency, durableData)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +458,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	pipelineOwner, err := storepipeline.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency, store.now)
+	pipelineOwner, err := storepipeline.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, apiIdempotency, durableData, store.now)
 	if err != nil {
 		return nil, err
 	}

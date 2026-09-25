@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -20,6 +21,7 @@ func commitFanOutIntentTx(
 	ctx context.Context,
 	attempt *mutationprotocol.Attempt,
 	postgres bool,
+	resourceData *storedurabledata.Owner,
 	request fanoutobligation.IntentRequest,
 	stateRunID string,
 	stateFields json.RawMessage,
@@ -34,7 +36,7 @@ func commitFanOutIntentTx(
 		return fmt.Errorf("fan-out intent run disagrees with engine mutation")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return insertFanOutIntentSQL(ctx, tx, postgres, attempt, request, stateFields, triggerEventID, createdAt)
+		return insertFanOutIntentSQL(ctx, tx, postgres, resourceData, attempt, request, stateFields, triggerEventID, createdAt)
 	})
 }
 
@@ -43,8 +45,8 @@ type fanOutRevisionSink interface {
 	AddFacts(string, ...privaterunforkrevision.FactRef) error
 }
 
-func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, facts fanOutRevisionSink, request fanoutobligation.IntentRequest, stateFields json.RawMessage, triggerEventID string, createdAt time.Time) error {
-	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, facts, request, stateFields, triggerEventID, createdAt)
+func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, resourceData *storedurabledata.Owner, facts fanOutRevisionSink, request fanoutobligation.IntentRequest, stateFields json.RawMessage, triggerEventID string, createdAt time.Time) error {
+	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, resourceData, facts, request, stateFields, triggerEventID, createdAt)
 	if err != nil {
 		return err
 	}
@@ -127,6 +129,7 @@ func bindFanOutSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
+	resourceData *storedurabledata.Owner,
 	facts fanOutRevisionSink,
 	request fanoutobligation.IntentRequest,
 	stateFields json.RawMessage,
@@ -168,9 +171,11 @@ func bindFanOutSourceTx(
 		}
 		source.MutationID = mutationID
 	case fanoutobligation.SourceResourceVersion:
-		var present int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM resource_version_pins WHERE run_id=$1 AND flow_path=$2 AND event_name=$3 AND version_id=$4`, request.Key.RunID, source.Declaration.FlowPath, source.Declaration.EventName, source.VersionID).Scan(&present); err != nil {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out resource source requires exact run pin: %w", err)
+		if resourceData == nil {
+			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out resource source owner is required")
+		}
+		if err := resourceData.BindPinnedSourceTx(ctx, tx, request.Key.RunID, request.PlanRef.BundleHash, source.Declaration, source.VersionID, request.Cardinality); err != nil {
+			return fanoutobligation.SourceRef{}, err
 		}
 	default:
 		return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out source kind %q is unsupported", source.Kind)

@@ -71,6 +71,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		return err
 	}
 	populateEventSchemaOwnershipIndex(bundle)
+	if err := loadDurableDataDeclarations(bundle); err != nil {
+		return err
+	}
 	semantics.Guards = appendPlatformBuiltinGuardEntries(semantics.Guards, bundle.Platform.BuiltinHooks.Guards)
 	semantics.RootAgentFacts = bundle.RootRequiredAgentFacts()
 	if bundle.RootSchema != nil {
@@ -142,6 +145,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 			semantics.writePinOwners[writePin] = appendIfMissingString(semantics.writePinOwners[writePin], flowID)
 		}
 	}
+	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
+		return fmt.Errorf("compile fan_out: %s", failures[0].Error())
+	}
 	for _, record := range bundle.ScopedNodeRecords() {
 		node, _ := record.Identity()
 		flowID := strings.TrimSpace(record.Source.FlowPath)
@@ -186,7 +192,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 			ID:                   nodeRef.NodeID(),
 			ExecutionType:        EffectiveSystemNodeExecutionType(node),
 			RuntimeSubscriptions: EffectiveSystemNodeSubscriptions(node),
-			Produces:             EffectiveSystemNodeProduces(node),
+			Produces:             EffectiveSystemNodeProduces(bundle, nodeRef, node),
 		}
 		semantics.EffectiveNodes[nodeRef.Key()] = effective
 		if len(node.EventHandlers) == 0 {

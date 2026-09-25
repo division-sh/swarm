@@ -1445,16 +1445,18 @@ func (o *Owner) loadStoredVersionPayload(ctx context.Context, tx *sql.Tx, ref ru
 	var version runtimedata.Version
 	var manifestJSON []byte
 	var pruned any
+	var payloadPresent bool
 	version.VersionID = versionID
 	query := o.query(`
-		SELECT sequence_alias, manifest_json, COALESCE(business_key_field, ''), canonical_schema_bytes, canonical_jsonl, pruned_at
+		SELECT sequence_alias, manifest_json, COALESCE(business_key_field, ''), canonical_schema_bytes, canonical_jsonl,
+		       (canonical_jsonl IS NOT NULL), pruned_at
 		FROM resource_versions WHERE version_id = %s AND flow_path = %s AND event_name = %s
 	`, 3)
 	if o.dialect == dialectPostgres {
 		query += " FOR UPDATE"
 	}
 	err := tx.QueryRowContext(ctx, query, versionID, ref.FlowPath, ref.EventName).Scan(
-		&version.SequenceAlias, &manifestJSON, &version.BusinessKey, &version.CanonicalSchema, &version.CanonicalJSONL, &pruned,
+		&version.SequenceAlias, &manifestJSON, &version.BusinessKey, &version.CanonicalSchema, &version.CanonicalJSONL, &payloadPresent, &pruned,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimedata.Version{}, false, nil
@@ -1472,6 +1474,9 @@ func (o *Owner) loadStoredVersionPayload(ctx context.Context, tx *sql.Tx, ref ru
 	if present {
 		version.PrunedAt = &value
 	}
+	if payloadPresent && version.CanonicalJSONL == nil {
+		version.CanonicalJSONL = []byte{}
+	}
 	derived, deriveErr := version.Manifest.VersionID()
 	if deriveErr != nil || derived != versionID || version.Manifest.Declaration != ref ||
 		runtimedata.SchemaDigestFor(version.CanonicalSchema) != version.Manifest.SchemaDigest {
@@ -1482,14 +1487,14 @@ func (o *Owner) loadStoredVersionPayload(ctx context.Context, tx *sql.Tx, ref ru
 		return runtimedata.Version{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s row key is contradictory", versionID)
 	}
 	if version.PrunedAt == nil {
-		if version.CanonicalJSONL == nil {
+		if !payloadPresent {
 			return runtimedata.Version{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s has no payload or tombstone", versionID)
 		}
 		compiled, defects := runtimedata.CompileJSONL(ref, mustDecodeSchema(version.CanonicalSchema), businessKey, version.CanonicalJSONL)
 		if len(defects) != 0 || compiled.VersionID != versionID {
 			return runtimedata.Version{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s payload is contradictory", versionID)
 		}
-	} else if version.CanonicalJSONL != nil {
+	} else if payloadPresent {
 		return runtimedata.Version{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s tombstone retains payload", versionID)
 	}
 	return version, true, nil

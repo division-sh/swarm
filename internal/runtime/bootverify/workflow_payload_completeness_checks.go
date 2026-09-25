@@ -178,7 +178,19 @@ func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidenti
 			RuntimeFields: owned,
 		})
 	}
-	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, source.FanOutPlansForHandler(node, triggerEventType)) {
+		if site.ResourceSource != nil {
+			resolution := semanticview.ResolveEventSchema(source, node.FlowPath(), site.EventType())
+			fields := map[string]struct{}{}
+			for _, field := range resolution.FieldNames() {
+				fields[field] = struct{}{}
+			}
+			out = append(out, payloadCompletenessEmitSite{
+				EventType: site.EventType(), Label: payloadCompletenessDeclarativeSiteLabel(site),
+				Fields: fields, RuntimeFields: fields,
+			})
+			continue
+		}
 		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec, nil)
 	}
 	if handler.Guard != nil {

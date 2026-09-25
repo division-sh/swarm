@@ -594,7 +594,7 @@ func commitWorkflowEngineMutation(
 					triggerEventID = command.FanOutIntent.Source.EventID
 					createdAt = time.Now().UTC()
 				}
-				if err := commitFanOutIntentTx(txctx, attempt, postgres, *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
+				if err := commitFanOutIntentTx(txctx, attempt, postgres, store.resourceSourceOwner(), *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
 					return err
 				}
 				if command.FanOutBarrier != nil {

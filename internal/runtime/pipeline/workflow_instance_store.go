@@ -13,6 +13,7 @@ import (
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -632,6 +633,7 @@ type workflowInstanceStore struct {
 	instanceReader         WorkflowInstancePersistenceReader
 	entityStateReader      WorkflowEntityStatePersistenceReader
 	entityCollectionReader WorkflowEntityCollectionPersistenceReader
+	resourceSource         runtimeengine.ResourceSourceReader
 	targetReader           WorkflowTargetPersistenceReader
 	initialCommits         WorkflowInitialMaterializationCommitOwner
 	deliverySignalMu       sync.RWMutex
@@ -676,6 +678,7 @@ type WorkflowPersistence struct {
 // surface. It exposes semantic operations only; transaction, backend, and SQL
 // capabilities remain private to the selected store.
 type WorkflowPersistenceOwner interface {
+	runtimeengine.ResourceSourceReader
 	entityquery.Reader
 	runtimeworkflowroute.RecoveryReader
 	runtimeactivityresult.Reader
@@ -709,6 +712,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		timerActivations:  owner, readiness: owner, standingServices: owner,
 		decisionRoutes: owner, instanceReader: owner, initialCommits: owner,
 		entityStateReader: owner, entityCollectionReader: owner, targetReader: owner,
+		resourceSource: owner,
 	}}
 }
 
@@ -732,7 +736,7 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.fanOutObligations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
-		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil
+		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.initialCommits != nil && p.store.resourceSource != nil
 }
 
 // LoadDynamicFlowRuntimeReadiness returns the exact durable readiness owner for
