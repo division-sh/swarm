@@ -19,7 +19,7 @@ phase-two:
     phase.advanced:
       guard:
         id: verify_state_committed
-        check: "entity.batch_id != \"\""
+        check: "has(entity.batch_id) && entity.batch_id != \"\""
         on_fail: reject
       advances_to: done
       emit:

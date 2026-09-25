@@ -11,10 +11,10 @@ validator:
           - id: confidence_min
             check: "payload.confidence >= policy.min_confidence"
           - id: depth_ok
-            check: "entity.depth <= policy.max_depth"
+            check: "has(entity.depth) && entity.depth <= policy.max_depth"
           - id: no_flags
-            check: "entity.flag_count == 0"
+            check: "has(entity.flag_count) && entity.flag_count == 0"
           - id: under_cap
-            check: "entity.item_count < policy.max_items"
+            check: "has(entity.item_count) && entity.item_count < policy.max_items"
         on_fail: discard
       advances_to: accepted

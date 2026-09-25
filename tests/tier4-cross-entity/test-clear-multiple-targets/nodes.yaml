@@ -4,10 +4,10 @@ test-node:
   produces: [state.reset_completed]
   event_handlers:
     state.reset_requested:
-      clear:
-        targets:
-          - accumulator_state
-          - pending_dedup
+      data_accumulation:
+        writes:
+          - {op: clear, target: entity.accumulated_count}
+          - {op: clear, target: entity.dedup_key}
       emit:
         event: state.reset_completed
       advances_to: cleared
