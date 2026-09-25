@@ -264,6 +264,9 @@ func stageGateValidationBundle(plan runtimecontracts.WorkflowGatePlan, fields ma
 		},
 	}
 	compileBootverifySchemasPreservingPlans(bundle)
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{
+		".": runtimecontracts.BuildWorkflowStageTopology(".", "awaiting_review", []string{"awaiting_review", "complete"}, []string{"complete"}, nil, nil, nil),
+	}
 	return bundle
 }
 

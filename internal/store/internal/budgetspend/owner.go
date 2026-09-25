@@ -14,7 +14,6 @@ import (
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 type BudgetPostgresOwner struct {
@@ -116,18 +115,19 @@ func (s *BudgetPostgresOwner) ResolveFlowInstance(ctx context.Context, runID str
 	return strings.TrimSpace(flowInstance), nil
 }
 
-func (s *BudgetPostgresOwner) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
+func (s *BudgetPostgresOwner) ListBudgetProjectionTargets(ctx context.Context) ([]budgetspend.ProjectionTarget, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres budget spend store is required")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT es.run_id::text, es.entity_id::text
+		SELECT es.run_id::text, es.entity_id::text, run.bundle_hash,
+		       COALESCE(fi.flow_template, ''), COALESCE(es.flow_instance, ''), COALESCE(es.current_state, '')
 		FROM entity_state es
 		JOIN runs run ON run.run_id = es.run_id
+		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE run.status IN (`+storerunstate.ActiveStateSQLValues+`)
-		  AND NOT (es.current_state = ANY($1::text[]))
 		ORDER BY es.run_id::text ASC, es.created_at ASC, es.entity_id::text ASC
-	`, pq.Array(normalizeBudgetTerminalStates(terminalStates)))
+	`)
 	if err != nil {
 		return nil, fmt.Errorf("list postgres budget projection targets: %w", err)
 	}
@@ -249,28 +249,20 @@ func (s *BudgetSQLiteOwner) ResolveFlowInstance(ctx context.Context, runID strin
 	return strings.TrimSpace(flowInstance), nil
 }
 
-func (s *BudgetSQLiteOwner) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
+func (s *BudgetSQLiteOwner) ListBudgetProjectionTargets(ctx context.Context) ([]budgetspend.ProjectionTarget, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite budget spend store is required")
 	}
-	args := make([]any, 0, len(terminalStates))
 	query := `
-		SELECT es.run_id, es.entity_id
+		SELECT es.run_id, es.entity_id, run.bundle_hash,
+		       COALESCE(fi.flow_template, ''), COALESCE(es.flow_instance, ''), COALESCE(es.current_state, '')
 		FROM entity_state es
 		JOIN runs run ON run.run_id = es.run_id
+		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
 		WHERE run.status IN (` + storerunstate.ActiveStateSQLValues + `)
 	`
-	states := normalizeBudgetTerminalStates(terminalStates)
-	if len(states) > 0 {
-		placeholders := make([]string, 0, len(states))
-		for _, state := range states {
-			placeholders = append(placeholders, "?")
-			args = append(args, state)
-		}
-		query += " AND es.current_state NOT IN (" + strings.Join(placeholders, ", ") + ")"
-	}
 	query += " ORDER BY es.run_id ASC, es.created_at ASC, es.entity_id ASC"
-	rows, err := s.backend.QueryContext(ctx, query, args...)
+	rows, err := s.backend.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite budget projection targets: %w", err)
 	}
@@ -378,35 +370,16 @@ func normalizeBudgetSpendQuery(query budgetspend.SpendQuery) budgetspend.SpendQu
 	return query
 }
 
-func normalizeBudgetTerminalStates(states []string) []string {
-	out := make([]string, 0, len(states))
-	seen := map[string]struct{}{}
-	for _, state := range states {
-		state = strings.TrimSpace(state)
-		if state == "" {
-			continue
-		}
-		if _, ok := seen[state]; ok {
-			continue
-		}
-		seen[state] = struct{}{}
-		out = append(out, state)
-	}
-	return out
-}
-
 func scanBudgetProjectionTargets(rows *sql.Rows) ([]budgetspend.ProjectionTarget, error) {
 	out := make([]budgetspend.ProjectionTarget, 0)
 	for rows.Next() {
 		var target budgetspend.ProjectionTarget
-		if err := rows.Scan(&target.RunID, &target.EntityID); err != nil {
+		if err := rows.Scan(&target.RunID, &target.EntityID, &target.BundleHash, &target.FlowTemplate, &target.FlowInstance, &target.Stage); err != nil {
 			return nil, fmt.Errorf("scan budget projection target: %w", err)
 		}
 		target.RunID = strings.TrimSpace(target.RunID)
 		target.EntityID = strings.TrimSpace(target.EntityID)
-		if target.RunID != "" && target.EntityID != "" {
-			out = append(out, target)
-		}
+		out = append(out, target)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read budget projection targets: %w", err)

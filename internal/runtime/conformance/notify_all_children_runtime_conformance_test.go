@@ -53,6 +53,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -2233,7 +2234,7 @@ func notifyAllChildrenTerminalCatalog(source semanticview.Source) runtimerunlife
 			flows[path] = states
 		}
 	}
-	return runtimerunlifecycle.NewTerminalCatalog(workflow, flows)
+	return stagecatalogfixture.NewTerminalCatalog(workflow, flows)
 }
 
 func loadNotifyAllChildrenAgentsByID(

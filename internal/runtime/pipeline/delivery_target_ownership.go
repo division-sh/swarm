@@ -48,10 +48,20 @@ func NewDeliveryTargetAvailability(stage, status string, terminated bool) Delive
 }
 
 func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID string) error {
-	if source != nil {
-		for _, terminal := range source.FlowTerminalStages(flowID) {
-			if strings.EqualFold(strings.TrimSpace(terminal), a.stage) {
-				return &TerminalReceiverError{FlowID: flowID, Stage: a.stage}
+	if a.stage != "" {
+		graph, ok := semanticview.WorkflowStageTopology(source, flowID)
+		if !ok || graph.FlowID != flowID {
+			return fmt.Errorf("receiver flow %q has no selected compiled stage topology", flowID)
+		}
+		if graph.StageCount() == 0 && a.stage == "pending" {
+			// Stateless persistence has no authored lifecycle stages.
+		} else {
+			stage, err := graph.ResolveStage(a.stage)
+			if err != nil {
+				return fmt.Errorf("receiver stage admission: %w", err)
+			}
+			if stage.IsTerminal() {
+				return &TerminalReceiverError{FlowID: flowID, Stage: stage.ID()}
 			}
 		}
 	}

@@ -136,7 +136,7 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 			const agentID = "committed-inbound-observer"
 			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound-instance", "committed-inbound", agentID)
 			probe := &inboundCommittedFinalizerProbe{}
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{TestLifecycleProbe: probe}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{TestLifecycleProbe: probe}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,7 +212,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			const agentID = "acknowledged-telegram-observer"
 			const providerEventID = "8201"
 			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram-instance", "ack-telegram", agentID)
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -298,7 +298,7 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 				const entityID = "77000000-0000-0000-0000-000000000002"
 				const agentID = "hostile-result-telegram-observer"
 				ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "hostile-result-instance", "hostile-result", agentID)
-				bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+				bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -374,7 +374,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -23,6 +23,7 @@ import (
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	modernc "modernc.org/sqlite"
@@ -188,7 +189,7 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 				// killed settlement can authorize the candidate tested at restart.
 				candidates := fixture.store.(runlifecycle.CandidateStore)
 				if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
-					result, err := candidates.ExecuteCompletionCandidate(ctx, pending, runlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}))
+					result, err := candidates.ExecuteCompletionCandidate(ctx, pending, stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}))
 					if err != nil || result.Outcome != runlifecycle.OutcomeAwaitMutation {
 						t.Fatalf("drain setup candidate: %#v %v", result, err)
 					}
@@ -419,7 +420,7 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	})
 	observed := &pipelineCrashCandidateObserver{CandidateStore: candidates, results: make(chan pipelineCrashCandidateResult, 8)}
 	executor, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: authorActivityTestBundleHash},
-		runlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runlifecycle.ExecutorOptions{})
+		stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runlifecycle.ExecutorOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

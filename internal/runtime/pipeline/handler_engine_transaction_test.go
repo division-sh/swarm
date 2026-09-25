@@ -1397,7 +1397,11 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	state := WorkflowState{}
-	source := semanticview.Wrap(admitSyntheticEntityContractsForTest(t, &runtimecontracts.WorkflowContractBundle{}, "", map[string]string{"scoring": "scoring_entity"}))
+	bundle := admitSyntheticEntityContractsForTest(t, &runtimecontracts.WorkflowContractBundle{}, "", map[string]string{"scoring": "scoring_entity"})
+	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{
+		"scoring": runtimecontracts.BuildWorkflowStageTopology("scoring", "queued", []string{"queued"}, nil, nil, nil, nil),
+	}
+	source := semanticview.Wrap(bundle)
 
 	gotID, _, err := resolveHandlerEntityIDForFlow(source, "scoring", handler, "", handlerTestRootIngress("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
 	if err != nil {

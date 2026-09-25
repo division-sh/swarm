@@ -44,7 +44,7 @@ func checkLoopValidation(c *checkerContext) []Finding {
 				findings = append(findings, loopFinding(location, fmt.Sprintf("max_attempts policy %s must be a positive integer", key)))
 			}
 		}
-		states := stringSet(c.source.FlowStates(plan.FlowID))
+		states := stringSet(topology.StageIDs())
 		if len(states) == 0 || !flowUsesAuthoredStages(c.source, plan.FlowID) {
 			findings = append(findings, loopFinding(location, "loops require an authored stages: lifecycle"))
 			continue

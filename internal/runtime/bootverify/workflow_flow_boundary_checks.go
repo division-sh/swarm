@@ -416,7 +416,7 @@ func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionVali
 			displayFlowID:  displayFlowID,
 			semanticFlowID: flowID,
 			schema:         schema,
-			stateful:       bootverifyFlowStateful(c.source, flowID, schema),
+			stateful:       bootverifyFlowStateful(c.source, flowID),
 			retiredStatic:  retiredStaticMultiEntityAcquisitionFlow(c.source, flowID, schema),
 			normalPrimary:  normalPrimaryEntityFlow(c.source, flowID, schema),
 			inputs:         normalizeStringSet(c.source.FlowInputEvents(flowID)),
@@ -426,23 +426,13 @@ func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionVali
 	return scopes
 }
 
-func bootverifyFlowInitialStage(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) string {
-	if initial := strings.TrimSpace(schema.LoweredInitialState()); initial != "" || schema.UsesAuthoredStages() || schema.HasLegacyLifecycleFields() {
-		return initial
-	}
-	if source == nil {
-		return ""
-	}
-	return strings.TrimSpace(source.FlowInitialStage(strings.TrimSpace(flowID)))
-}
-
-func bootverifyFlowStateful(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) bool {
-	return bootverifyFlowInitialStage(source, flowID, schema) != ""
+func bootverifyFlowStateful(source semanticview.Source, flowID string) bool {
+	return compiledInitialStageForFlow(source, flowID) != ""
 }
 
 func retiredStaticMultiEntityAcquisitionFlow(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) bool {
 	mode := strings.TrimSpace(schema.Mode)
-	return bootverifyFlowStateful(source, flowID, schema) && strings.EqualFold(mode, runtimecontracts.FlowModeStatic)
+	return bootverifyFlowStateful(source, flowID) && strings.EqualFold(mode, runtimecontracts.FlowModeStatic)
 }
 
 func retiredStaticMultiEntityAcquisitionMessage(flowID, eventType, nodeID, label string) string {
@@ -450,7 +440,7 @@ func retiredStaticMultiEntityAcquisitionMessage(flowID, eventType, nodeID, label
 }
 
 func normalPrimaryEntityFlow(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) bool {
-	return bootverifyFlowStateful(source, flowID, schema) && strings.TrimSpace(schema.Mode) == ""
+	return bootverifyFlowStateful(source, flowID) && strings.TrimSpace(schema.Mode) == ""
 }
 
 func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, eventType, field string) bool {

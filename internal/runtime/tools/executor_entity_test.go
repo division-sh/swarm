@@ -2709,7 +2709,7 @@ foreign:
 	}, time.Now().UTC().Truncate(time.Second))
 	validationID := mustCreateEntityID(t, ctx, exec, map[string]any{
 		"flow_instance": "analyzer-flow/validation-1",
-		"initial_state": "researching",
+		"initial_state": "queued",
 		"fields": map[string]any{
 			"status": "open",
 		},

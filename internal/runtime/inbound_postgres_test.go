@@ -48,6 +48,17 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
+func newBoundedInboundTestEventBus(t *testing.T, selected runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
+	t.Helper()
+	bundle := loadRuntimeTempBundle(t, map[string]string{
+		"schema.yaml":                   "name: bounded-standing-connector\n",
+		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
+	})
+	opts.ContractBundle = semanticview.Wrap(bundle)
+	return newScopedTestEventBus(t, selected, opts, differentEvents...)
+}
+
 func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -67,7 +78,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -170,7 +181,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -273,7 +284,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -375,7 +386,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -437,7 +448,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -500,7 +511,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -566,7 +577,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -625,7 +636,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
+	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -687,7 +698,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
+	bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -756,7 +767,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
-	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
+	bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -947,7 +958,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
-			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, tc.providerEventName)
+			bus, err := newBoundedInboundTestEventBus(t, pg, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1039,7 +1050,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
-			bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, tc.providerEventName)
+			bus, err := newBoundedInboundTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}

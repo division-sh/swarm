@@ -494,8 +494,8 @@ func (s *PostgresStore) ListAuthorActivity(ctx context.Context, opts authoractiv
 	return s.activityPostgresOwner.ListAuthorActivity(ctx, opts)
 }
 
-func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
-	return s.budgetPostgresOwner.ListBudgetProjectionTargets(ctx, terminalStates)
+func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context) ([]budgetspend.ProjectionTarget, error) {
+	return s.budgetPostgresOwner.ListBudgetProjectionTargets(ctx)
 }
 
 func (s *PostgresStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
@@ -1702,8 +1702,8 @@ func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts author
 	return s.activitySQLiteOwner.ListAuthorActivity(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, terminalStates []string) ([]budgetspend.ProjectionTarget, error) {
-	return s.budgetSQLiteOwner.ListBudgetProjectionTargets(ctx, terminalStates)
+func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context) ([]budgetspend.ProjectionTarget, error) {
+	return s.budgetSQLiteOwner.ListBudgetProjectionTargets(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {

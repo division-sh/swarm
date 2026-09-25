@@ -29,6 +29,7 @@ import (
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -1017,7 +1018,7 @@ func TestStandaloneCompletionCandidatePublishesChangedGateRevisionParity(t *test
 			publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
 			beforeRevision := runForkRevisionHeadForProof(t, ctx, fixture.db, backend.name == "postgres", runID)
 
-			executeStandaloneCompletionCandidateWithCatalog(t, ctx, fixture.store, runID, runtimerunlifecycle.NewTerminalCatalog(
+			executeStandaloneCompletionCandidateWithCatalog(t, ctx, fixture.store, runID, stagecatalogfixture.NewTerminalCatalog(
 				nil, map[string][]string{"launch/review": {"done"}},
 			))
 			if got := loadDecisionCardGateActivation(t, fixture.db, backend.name == "postgres", runID, entityID); got.Status != gateruntime.StatusSuperseded || got.SupersededReason != "run_completed" {

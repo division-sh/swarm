@@ -1,8 +1,11 @@
 package serveapp
 
 import (
+	"context"
+
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
@@ -14,12 +17,15 @@ type serveRuntimePersistence struct {
 	deps         runtime.RuntimeDeps
 	schema       store.SchemaBootstrapper
 	sourceWriter sourceArtifactDataWriter
-	data         durabledata.ResourceAccessStore
+	sourceReader interface {
+		GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+	}
+	data durabledata.ResourceAccessStore
 }
 
 func projectServeRuntimePersistence(owner *storeselected.Owner) serveRuntimePersistence {
 	return serveRuntimePersistence{
-		deps: owner.RuntimeDeps(), schema: owner.Schema(), sourceWriter: owner.SourceArtifactWriter(), data: owner.DataAccess(),
+		deps: owner.RuntimeDeps(), schema: owner.Schema(), sourceWriter: owner.SourceArtifactWriter(), sourceReader: owner.SourceArtifactStore(), data: owner.DataAccess(),
 	}
 }
 

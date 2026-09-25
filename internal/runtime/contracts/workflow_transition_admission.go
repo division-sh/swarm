@@ -2,8 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"slices"
-	"strings"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
@@ -44,14 +42,11 @@ type CompiledTransition struct {
 // GuardTerminationTarget preserves the existing kill disposition's flow-local
 // target selection. It is not an authored transition edge.
 func (t WorkflowStageTopology) GuardTerminationTarget() string {
-	for _, stages := range [][]string{t.TerminalStages, t.Stages} {
-		for _, stage := range stages {
-			if strings.EqualFold(stage, "killed") {
-				return stage
-			}
-		}
+	ref, err := t.ResolveStage("killed")
+	if err != nil {
+		return ""
 	}
-	return ""
+	return ref.ID()
 }
 
 func (t CompiledTransition) FlowID() string                  { return t.flow }
@@ -78,10 +73,12 @@ func (t CompiledTransition) ValidateAgainst(graph WorkflowStageTopology) error {
 }
 
 func (t WorkflowStageTopology) AdmitTransition(site WorkflowTransitionSite, from, to string) (CompiledTransition, error) {
-	if !slices.Contains(t.Stages, from) || !slices.Contains(t.Stages, to) {
+	fromRef, fromErr := t.ResolveStage(from)
+	toRef, toErr := t.ResolveStage(to)
+	if fromErr != nil || toErr != nil {
 		return CompiledTransition{}, fmt.Errorf("flow %s transition requires declared source and target: %s -> %s", t.FlowID, from, to)
 	}
-	if from != to && slices.Contains(t.TerminalStages, from) {
+	if fromRef.ID() != toRef.ID() && fromRef.IsTerminal() {
 		return CompiledTransition{}, fmt.Errorf("flow %s cannot exit terminal stage %s", t.FlowID, from)
 	}
 	var result CompiledTransition

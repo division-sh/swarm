@@ -795,8 +795,32 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 		if strings.TrimSpace(flowID) == "." && !schema.UsesAuthoredStages() {
 			continue
 		}
-		states := stringSet(c.source.FlowStates(flowID))
+		states := declaredStatesForFlow(c.source, flowID)
 		initial := strings.TrimSpace(c.source.FlowInitialStage(flowID))
+		if graph, ok := semanticview.WorkflowStageTopology(c.source, flowID); ok && graph.FlowID == flowID && graph.ValidStageCatalog() {
+			compiledInitial := ""
+			if graph.HasInitialStage() {
+				ref, err := graph.InitialStageRef()
+				if err != nil {
+					c.stateFindings = append(c.stateFindings, Finding{
+						CheckID:  "state_machine_coherence",
+						Severity: "error",
+						Message:  fmt.Sprintf("flow %s selected compiled initial stage is undeclared", flowID),
+						Location: strings.TrimSpace(flowID),
+					})
+				} else {
+					compiledInitial = ref.ID()
+				}
+			}
+			if initial != compiledInitial {
+				c.stateFindings = append(c.stateFindings, Finding{
+					CheckID:  "state_machine_coherence",
+					Severity: "error",
+					Message:  fmt.Sprintf("flow %s authored initial stage %q disagrees with selected compiled initial stage %q", flowID, initial, compiledInitial),
+					Location: strings.TrimSpace(flowID),
+				})
+			}
+		}
 		if initial != "" {
 			if _, ok := states[initial]; !ok {
 				c.stateFindings = append(c.stateFindings, Finding{
@@ -1233,22 +1257,38 @@ func flowIsStateless(source semanticview.Source, flowID string) bool {
 	if source == nil {
 		return false
 	}
-	return strings.TrimSpace(source.FlowInitialStage(strings.TrimSpace(flowID))) == "" && len(source.FlowStates(strings.TrimSpace(flowID))) == 0
+	flowID = strings.TrimSpace(flowID)
+	graph, ok := semanticview.WorkflowStageTopology(source, flowID)
+	return ok && graph.FlowID == flowID && graph.ValidStageCatalog() && graph.StageCount() == 0 && !graph.HasInitialStage()
 }
 
 func declaredStatesForFlow(source semanticview.Source, flowID string) map[string]struct{} {
+	return stringSet(compiledStageIDsForFlow(source, flowID))
+}
+
+func compiledStageIDsForFlow(source semanticview.Source, flowID string) []string {
 	flowID = strings.TrimSpace(flowID)
-	var states []string
-	var terminals []string
-	states = source.FlowStates(flowID)
-	terminals = source.FlowTerminalStages(flowID)
-	out := stringSet(states)
-	for _, terminal := range terminals {
-		if terminal = strings.TrimSpace(terminal); terminal != "" {
-			out[terminal] = struct{}{}
-		}
+	graph, ok := semanticview.WorkflowStageTopology(source, flowID)
+	if !ok || graph.FlowID != flowID || !graph.ValidStageCatalog() {
+		return nil
 	}
-	return out
+	return graph.StageIDs()
+}
+
+func compiledInitialStageForFlow(source semanticview.Source, flowID string) string {
+	if source == nil {
+		return ""
+	}
+	flowID = strings.TrimSpace(flowID)
+	graph, ok := semanticview.WorkflowStageTopology(source, flowID)
+	if !ok || graph.FlowID != flowID || !graph.HasInitialStage() {
+		return ""
+	}
+	initial, err := graph.InitialStageRef()
+	if err != nil {
+		return ""
+	}
+	return initial.ID()
 }
 
 type lifecycleFlowSchemaEntry struct {

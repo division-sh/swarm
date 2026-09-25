@@ -629,7 +629,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, 'account', 'active', '{"account_id":"acct-agent"}'::jsonb, NOW(), NOW())
+		VALUES ($1::uuid, $2::uuid, $3, 'account', 'pending', '{"account_id":"acct-agent"}'::jsonb, NOW(), NOW())
 	`, runtimeflowidentity.EntityID(instanceRoute.InstancePath), eventBusTestRunID, instanceRoute.InstancePath); err != nil {
 		t.Fatalf("seed account entity state: %v", err)
 	}

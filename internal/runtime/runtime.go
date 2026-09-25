@@ -150,6 +150,7 @@ type RuntimeDeps struct {
 	DataAccessStore               durabledata.ResourceAccessStore
 	HumanTaskStore                runtimetools.HumanTaskCardStore
 	BudgetSpendStore              budgetspend.Store
+	BudgetStageSourceLoader       func(context.Context, string) (semanticview.Source, error)
 	InboundStore                  InboundPersistence
 	RuntimeIngressStore           runtimeingress.Store
 	ScenarioExecutionProfiles     runtimepipeline.ScenarioExecutionProfileReader
@@ -1236,10 +1237,14 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return nil, fmt.Errorf("workflow run lifecycle completion executor requires the generic schedule lifecycle")
 		}
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.SourceArtifactFact.BundleHash()}
+		terminalCatalog, err := runLifecycleTerminalCatalog(source)
+		if err != nil {
+			return nil, fmt.Errorf("build run lifecycle stage catalog: %w", err)
+		}
 		executor, err := runtimerunlifecycle.NewExecutor(
 			candidateOwner,
 			scope,
-			runLifecycleTerminalCatalog(source),
+			terminalCatalog,
 			workOccurrence,
 			runtimerunlifecycle.ExecutorOptions{GenericSchedules: rt.GenericSchedules},
 		)
@@ -1315,7 +1320,9 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	}
 
 	if runtimeDeps.BudgetSpendStore != nil {
-		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source, rt.ExecutionPosture)
+		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source, rt.ExecutionPosture, BudgetRecoveryStageSources{
+			CurrentBundleHash: boot.SourceArtifactFact.BundleHash(), Load: runtimeDeps.BudgetStageSourceLoader,
+		})
 	}
 
 	backendProfile, err := cfg.LLMBackendProfile()

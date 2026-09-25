@@ -16,10 +16,16 @@ func validateWorkflowInitialEntry(source semanticview.Source, instance WorkflowI
 	if !found || graph.FlowID != instance.WorkflowName {
 		return fmt.Errorf("workflow initial entry requires the exact compiled flow %q", instance.WorkflowName)
 	}
-	want := graph.InitialStage
+	want := ""
 	// Stateless instances retain the existing storage posture, not a graph edge.
-	if want == "" && len(graph.Stages) == 0 {
+	if graph.StageCount() == 0 {
 		want = "pending"
+	} else {
+		ref, err := graph.InitialStageRef()
+		if err != nil {
+			return fmt.Errorf("workflow initial entry: %w", err)
+		}
+		want = ref.ID()
 	}
 	if want == "" || initialStage != want || instance.CurrentState != want {
 		return fmt.Errorf("workflow initial entry must match canonical initial stage %q and prepared state %q, got %q", want, instance.CurrentState, initialStage)

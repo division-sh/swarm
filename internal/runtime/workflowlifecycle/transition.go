@@ -22,7 +22,9 @@ func NewCompiledTransition(compiled contracts.CompiledTransition, selected handl
 
 // Guard termination is an execution outcome, not an authored topology edge.
 func NewGuardTermination(graph contracts.WorkflowStageTopology, node identity.ExecutableNode, handler, guard, from, to string, guards []string) (Transition, error) {
-	if !node.Valid() || node.FlowPath() != graph.FlowID || !slices.Contains(graph.Stages, from) || !slices.Contains(graph.Stages, to) {
+	_, fromErr := graph.ResolveStage(from)
+	_, toErr := graph.ResolveStage(to)
+	if !node.Valid() || node.FlowPath() != graph.FlowID || fromErr != nil || toErr != nil {
 		return Transition{}, fmt.Errorf("guard termination requires exact declared flow stages")
 	}
 	t := Transition{from: from, to: to, guardNode: node, guardHandler: handler, guardName: guard, guards: slices.Clone(guards), selection: handlerselection.NotApplicable()}
@@ -77,7 +79,9 @@ func (t Transition) ValidateAgainst(graph contracts.WorkflowStageTopology) error
 	if t.compiled != nil {
 		return t.compiled.ValidateAgainst(graph)
 	}
-	if !slices.Contains(graph.Stages, t.from) || !slices.Contains(graph.Stages, t.to) {
+	_, fromErr := graph.ResolveStage(t.from)
+	_, toErr := graph.ResolveStage(t.to)
+	if fromErr != nil || toErr != nil {
 		return fmt.Errorf("guard termination requires declared source and target")
 	}
 	if t.to != graph.GuardTerminationTarget() {

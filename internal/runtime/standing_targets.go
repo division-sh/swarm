@@ -529,6 +529,20 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 		}
 		declaration := plan.declaration
 		instance := plan.instance
+		graph, found := semanticview.WorkflowStageTopology(source, declaration.FlowPath)
+		if !found || graph.FlowID != declaration.FlowPath || !graph.ValidStageCatalog() {
+			return nil, nil, nil, fmt.Errorf("standing target %q has no selected compiled stage topology for flow %q", plan.serviceID, declaration.FlowPath)
+		}
+		initialState := ""
+		if graph.StageCount() > 0 {
+			initial, err := graph.InitialStageRef()
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("standing target %q initial stage: %w", plan.serviceID, err)
+			}
+			initialState = initial.ID()
+		} else if graph.HasInitialStage() {
+			return nil, nil, nil, fmt.Errorf("standing target %q stateless flow carries an initial stage", plan.serviceID)
+		}
 		selectedPlans = append(selectedPlans, plan)
 		mutations = append(mutations, runtimepipeline.StandingTargetMutation{
 			Candidate: runtimepipeline.StandingServiceCandidate{
@@ -538,7 +552,7 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 			Activation: runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				Instance:       instance,
-				InitialState:   source.FlowInitialStage(declaration.FlowPath),
+				InitialState:   initialState,
 				Config:         map[string]any{},
 				Bookkeeping: map[string]any{
 					"activation":  runtimecontracts.FlowActivationStanding,

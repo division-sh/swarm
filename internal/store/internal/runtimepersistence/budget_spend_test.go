@@ -79,13 +79,18 @@ func TestSQLiteRuntimeStoreBudgetSpendPersistence(t *testing.T) {
 	if flow != "flow/active" {
 		t.Fatalf("flow instance = %q, want flow/active", flow)
 	}
-	targets, err := store.ListBudgetProjectionTargets(ctx, []string{"done"})
+	targets, err := store.ListBudgetProjectionTargets(ctx)
 	if err != nil {
 		t.Fatalf("ListBudgetProjectionTargets: %v", err)
 	}
-	wantTargets := []budgetspend.ProjectionTarget{{RunID: runID, EntityID: activeEntity}}
-	if !reflect.DeepEqual(targets, wantTargets) {
-		t.Fatalf("budget projection targets = %#v, want %#v", targets, wantTargets)
+	if len(targets) != 2 {
+		t.Fatalf("budget projection targets = %#v, want both raw active-run targets", targets)
+	}
+	stages := map[string]string{activeEntity: "active", terminalEntity: "done"}
+	for _, target := range targets {
+		if target.RunID != runID || target.BundleHash == "" || target.Stage != stages[target.EntityID] || target.FlowInstance == "" {
+			t.Fatalf("budget target lost source/flow/stage evidence: %#v", target)
+		}
 	}
 
 	since := now.Add(-time.Hour)
@@ -206,13 +211,17 @@ func TestPostgresStoreBudgetSpendPersistenceQueries(t *testing.T) {
 		t.Fatalf("flow = %q, want flow/1", flow)
 	}
 
-	targets, err := pg.ListBudgetProjectionTargets(ctx, []string{"done"})
+	targets, err := pg.ListBudgetProjectionTargets(ctx)
 	if err != nil {
 		t.Fatalf("ListBudgetProjectionTargets: %v", err)
 	}
-	wantTargets := []budgetspend.ProjectionTarget{{RunID: runID, EntityID: entityID}}
-	if !reflect.DeepEqual(targets, wantTargets) {
-		t.Fatalf("budget projection targets = %#v, want %#v", targets, wantTargets)
+	if len(targets) != 2 {
+		t.Fatalf("budget projection targets = %#v, want both raw active-run targets", targets)
+	}
+	for _, target := range targets {
+		if target.RunID != runID || target.BundleHash == "" || target.FlowInstance == "" || target.Stage == "" {
+			t.Fatalf("budget target lost source/flow/stage evidence: %#v", target)
+		}
 	}
 
 	since := recordedAt.Add(-time.Hour)

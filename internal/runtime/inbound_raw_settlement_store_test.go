@@ -285,6 +285,9 @@ func providerRawSettlementSemanticSource(flowID, eventName string) semanticview.
 	pin := runtimecontracts.FlowInputEventPin{Event: eventName, Source: runtimecontracts.FlowInputPinSourceExternal}
 	schema := runtimecontracts.FlowSchemaDocument{
 		Name: flowID, Mode: runtimecontracts.FlowModeStatic,
+		StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+			{ID: "active", Initial: true}, {ID: "done", Terminal: true},
+		}},
 		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{pin}}},
 	}
 	flow := runtimecontracts.FlowContractView{

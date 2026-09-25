@@ -1,11 +1,89 @@
 package contracts
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
+
+// StageRef is valid only for the compiled flow that resolved it. The exported
+// topology slices are projections; modifying them cannot change stage meaning.
+type StageRef struct {
+	catalog  *workflowStageCatalog
+	id       string
+	terminal bool
+}
+
+type workflowStageCatalog struct {
+	flowID   string
+	initial  string
+	terminal map[string]bool
+}
+
+func (r StageRef) ID() string       { return r.id }
+func (r StageRef) IsTerminal() bool { return r.catalog != nil && r.terminal }
+
+func (t WorkflowStageTopology) ResolveStage(id string) (StageRef, error) {
+	if t.stageCatalog == nil || t.stageCatalog.flowID != t.FlowID {
+		return StageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
+	}
+	terminal, ok := t.stageCatalog.terminal[id]
+	if !ok {
+		return StageRef{}, fmt.Errorf("stage %q is not declared in flow %q", id, t.FlowID)
+	}
+	return StageRef{catalog: t.stageCatalog, id: id, terminal: terminal}, nil
+}
+
+func (t WorkflowStageTopology) RequireStage(ref StageRef) error {
+	if t.stageCatalog == nil || ref.catalog == nil || ref.catalog != t.stageCatalog {
+		return fmt.Errorf("stage reference does not belong to flow %q", t.FlowID)
+	}
+	terminal, ok := t.stageCatalog.terminal[ref.id]
+	if !ok || terminal != ref.terminal {
+		return fmt.Errorf("stage reference disagrees with flow %q", t.FlowID)
+	}
+	return nil
+}
+
+func (t WorkflowStageTopology) StageCount() int {
+	if t.stageCatalog == nil {
+		return 0
+	}
+	return len(t.stageCatalog.terminal)
+}
+
+func (t WorkflowStageTopology) StageIDs() []string {
+	if !t.ValidStageCatalog() {
+		return nil
+	}
+	ids := make([]string, 0, len(t.stageCatalog.terminal))
+	for id := range t.stageCatalog.terminal {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (t WorkflowStageTopology) ValidStageCatalog() bool {
+	return t.stageCatalog != nil && t.stageCatalog.flowID == t.FlowID
+}
+
+func (t WorkflowStageTopology) SameStageCatalog(other WorkflowStageTopology) bool {
+	return t.ValidStageCatalog() && other.ValidStageCatalog() && t.stageCatalog == other.stageCatalog
+}
+
+func (t WorkflowStageTopology) InitialStageRef() (StageRef, error) {
+	if !t.ValidStageCatalog() {
+		return StageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
+	}
+	return t.ResolveStage(t.stageCatalog.initial)
+}
+
+func (t WorkflowStageTopology) HasInitialStage() bool {
+	return t.ValidStageCatalog() && t.stageCatalog.initial != ""
+}
 
 // BuildWorkflowStageTopology lowers every lifecycle transition carrier through
 // one graph owner. Callers provide timers already scoped to the requested flow.
@@ -35,6 +113,11 @@ func BuildWorkflowStageTopology(
 		InitialStage:   initial,
 		Stages:         sortedStringSet(stageSet),
 		TerminalStages: sortedStringSet(terminalSet),
+		stageCatalog:   &workflowStageCatalog{flowID: flowID, initial: initial, terminal: make(map[string]bool, len(stageSet))},
+	}
+	for stage := range stageSet {
+		_, isTerminal := terminalSet[stage]
+		topology.stageCatalog.terminal[stage] = isTerminal
 	}
 	for _, transition := range transitions {
 		if transition.Node.FlowPath() != flowID {

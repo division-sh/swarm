@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegates "github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -462,7 +463,7 @@ func assertCompletionBlockerExecution(
 	result, err := fixture.store.ExecuteCompletionCandidate(
 		ctx,
 		request.Candidate,
-		runtimerunlifecycle.NewTerminalCatalog(
+		stagecatalogfixture.NewTerminalCatalog(
 			nil,
 			map[string][]string{semanticRunFixtureFlow: {"completed"}},
 		),
@@ -505,7 +506,7 @@ func readCompletionBlockerSummaries(
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	catalog := runtimerunlifecycle.NewTerminalCatalog(
+	catalog := stagecatalogfixture.NewTerminalCatalog(
 		nil,
 		map[string][]string{semanticRunFixtureFlow: {"completed"}},
 	)

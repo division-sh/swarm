@@ -34,7 +34,7 @@ func ReadRunSummary(
 		return runtimeentity.RunSummary{}, fmt.Errorf("entity run summary requires selected store, run_id, and terminal catalog")
 	}
 	query := `
-		SELECT LOWER(COALESCE(es.current_state, '')),
+		SELECT COALESCE(es.current_state, ''),
 		       COALESCE(es.flow_instance, ''),
 		       COALESCE(fi.flow_template, '')
 		FROM entity_state es
@@ -46,7 +46,7 @@ func ReadRunSummary(
 	case SummaryDialectSQLite:
 	case SummaryDialectPostgres:
 		query = `
-			SELECT LOWER(COALESCE(es.current_state, '')),
+			SELECT COALESCE(es.current_state, ''),
 			       COALESCE(es.flow_instance, ''),
 			       COALESCE(fi.flow_template, '')
 			FROM entity_state es

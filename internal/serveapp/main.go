@@ -141,6 +141,8 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
+	RepoRoot               string
+	PlatformPackBases      *packartifact.PlatformPackBaseGenerationOwner
 	ExecutionPosture       executionposture.Posture
 	Ctx                    context.Context
 	Stores                 serveRuntimePersistence
@@ -552,6 +554,28 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	}
 	runtimeDeps := req.Stores.runtimeDeps()
 	runtimeDeps.Config = req.Config
+	if req.Stores.sourceReader != nil {
+		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, bundleHash string) (semanticview.Source, error) {
+			record, err := req.Stores.sourceReader.GetSourceArtifact(ctx, bundleHash)
+			if err != nil {
+				return nil, err
+			}
+			if record.BundleHash != bundleHash {
+				return nil, fmt.Errorf("budget source artifact does not match selected bundle_hash %q", bundleHash)
+			}
+			artifact, err := record.Decode()
+			if err != nil {
+				return nil, err
+			}
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(req.RepoRoot, artifact, req.Loaded.runningSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+				PlatformPackBases: req.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return semanticview.Wrap(bundle), nil
+		}
+	}
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("load scenario derivation profiles: %w", err)
@@ -1263,6 +1287,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		packLoad := bundlePackLoads[i]
 		request := serveRuntimeBundleContextRequest{
+			RepoRoot:               repo,
+			PlatformPackBases:      platformPackBases,
 			ExecutionPosture:       req.Purpose,
 			DataProjectionRoot:     req.DataProjectionRoot,
 			Ctx:                    ctx,

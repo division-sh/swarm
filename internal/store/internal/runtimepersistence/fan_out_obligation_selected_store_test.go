@@ -44,6 +44,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -1036,7 +1037,7 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 				intercept,
 				occurrence,
 				completing.bundleHash,
-				runtimerunlifecycle.NewTerminalCatalog(nil, terminals),
+				stagecatalogfixture.NewTerminalCatalog(nil, terminals),
 			)
 			registration, err := candidateRegistrar.RegisterCompletionCandidateSink(
 				runtimeCtx,

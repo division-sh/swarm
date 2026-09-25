@@ -25,7 +25,7 @@ type forkedDomainConsumerSurface interface {
 	CreateEntity(context.Context, runtimetools.EntityCreateRecord) (runtimetools.EntityCreateResult, error)
 	SaveEntityField(context.Context, runtimetools.EntityFieldUpdate) (runtimetools.EntityFieldWriteResult, error)
 	RecordSpend(context.Context, budgetspend.SpendRecord) error
-	ListBudgetProjectionTargets(context.Context, []string) ([]budgetspend.ProjectionTarget, error)
+	ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error)
 	UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error
 	DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
 	RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
@@ -91,7 +91,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				Provider: "test", Transport: "test", ResolvedModel: "test", InputTokens: 1, OutputTokens: 1,
 				CostUSD: 0.01, InvocationType: "test", UsageAccounting: "exact", RecordedAt: fixture.forkedAt,
 			}))
-			targets, err := surface.ListBudgetProjectionTargets(ctx, []string{"done"})
+			targets, err := surface.ListBudgetProjectionTargets(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

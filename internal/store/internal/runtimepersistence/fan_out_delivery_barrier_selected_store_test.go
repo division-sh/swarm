@@ -31,6 +31,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -220,7 +221,7 @@ func TestFanOutDeliveryBarrierCandidateReturnsExactPostCommitScheduleActivationO
 				selected.(runtimerunlifecycle.CandidateStore),
 				fixture.bundleHash,
 				fixture.runID,
-				runtimerunlifecycle.NewTerminalCatalog([]string{"completed"}, nil),
+				stagecatalogfixture.NewTerminalCatalog([]string{"completed"}, nil),
 			)
 			if err != nil {
 				t.Fatalf("execute barrier completion candidate: %v", err)

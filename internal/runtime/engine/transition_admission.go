@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
@@ -19,10 +18,10 @@ func (e *Executor) validateSourceStage(flowID, stage string) error {
 		return nil
 	}
 	// Stateless persistence uses pending without declaring a lifecycle stage.
-	if len(graph.Stages) == 0 && stage == "pending" {
+	if graph.StageCount() == 0 && stage == "pending" {
 		return nil
 	}
-	if !slices.Contains(graph.Stages, stage) {
+	if _, err := graph.ResolveStage(stage); err != nil {
 		return fmt.Errorf("%w: source stage %q is not declared in flow %s", ErrInvalidTransition, stage, flowID)
 	}
 	return nil

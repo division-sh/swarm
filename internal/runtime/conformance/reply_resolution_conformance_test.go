@@ -934,7 +934,7 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		VALUES ($1::uuid, $2, $3::jsonb, $4, $4, $4)
 		ON CONFLICT (run_id, instance_path) DO NOTHING`
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
-		VALUES ($1::uuid, $2::uuid, $3, 'requester_state', 'active')
+		VALUES ($1::uuid, $2::uuid, $3, 'requester_state', $4)
 		ON CONFLICT (run_id, entity_id) DO NOTHING`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		flowQuery = `INSERT OR IGNORE INTO flow_instances (run_id, instance_path, flow_template, mode, config, status)
@@ -943,7 +943,7 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 			(run_id, instance_path, plan, topology_ready_at, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?)`
 		query = `INSERT OR IGNORE INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
-			VALUES (?, ?, ?, 'requester_state', 'active')`
+			VALUES (?, ?, ?, 'requester_state', ?)`
 	}
 	for _, owner := range replyConformanceTargetOwners() {
 		if _, err := db.ExecContext(ctx, flowQuery, runID, owner.FlowInstance, templatereply.RequesterFlowID); err != nil {
@@ -973,7 +973,7 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		if _, err := db.ExecContext(ctx, readinessQuery, readinessArgs...); err != nil {
 			t.Fatalf("seed reply conformance readiness %s: %v", owner.FlowInstance, err)
 		}
-		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance); err != nil {
+		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance, "active"); err != nil {
 			t.Fatalf("seed reply conformance target owner %s: %v", owner.FlowInstance, err)
 		}
 	}
@@ -988,7 +988,7 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 	if _, err := db.ExecContext(ctx, providerFlowQuery, runID, templatereply.ProviderFlowID, templatereply.ProviderFlowID); err != nil {
 		t.Fatalf("seed reply conformance provider flow owner: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, query, runID, providerEntityID, templatereply.ProviderFlowID); err != nil {
+	if _, err := db.ExecContext(ctx, query, runID, providerEntityID, templatereply.ProviderFlowID, "pending"); err != nil {
 		t.Fatalf("seed reply conformance provider target owner: %v", err)
 	}
 }

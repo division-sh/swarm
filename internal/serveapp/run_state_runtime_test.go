@@ -25,12 +25,12 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -195,7 +195,7 @@ func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, source runtim
 	}
 	if _, err := storetest.ExecuteRunCompletionCandidate(
 		runStatusAuthorActivityContext(source), pg, bundleHash, runID,
-		storerunlifecycle.NewTerminalCatalog([]string{"ready"}, map[string][]string{"run-status-test": {"ready"}}),
+		stagecatalogfixture.NewTerminalCatalog([]string{"ready"}, map[string][]string{"run-status-test": {"ready"}}),
 	); err != nil {
 		t.Fatalf("execute normal run completion candidate: %v", err)
 	}

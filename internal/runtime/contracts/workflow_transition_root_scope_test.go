@@ -62,12 +62,11 @@ func TestCompiledTransitionRootTopologyUsesExactSchema(t *testing.T) {
 func TestCompiledTransitionRootTopologyNeverUsesAggregateFallback(t *testing.T) {
 	for _, root := range []*FlowSchemaDocument{nil, {StageDeclarations: FlowStageDeclarations{Declared: true}}} {
 		semantics := WorkflowSemanticView{
-			InitialStage:   "root-descriptor-initial",
-			Stages:         []WorkflowStageContract{{ID: "foreign", Phase: "child"}},
-			TerminalStages: []string{"foreign"},
-			FlowStates:     map[string][]string{".": {"foreign"}, "child": {"foreign"}},
-			FlowInitial:    map[string]string{".": "foreign", "child": "foreign"},
-			FlowTerminal:   map[string][]string{".": {"foreign"}, "child": {"foreign"}},
+			InitialStage: "root-descriptor-initial",
+			Stages:       []WorkflowStageContract{{ID: "foreign", Phase: "child"}},
+			FlowStates:   map[string][]string{".": {"foreign"}, "child": {"foreign"}},
+			FlowInitial:  map[string]string{".": "foreign", "child": "foreign"},
+			FlowTerminal: map[string][]string{".": {"foreign"}, "child": {"foreign"}},
 		}
 		graph := deriveWorkflowStageTopologies(root, semantics)["."]
 		bundle := &WorkflowContractBundle{RootSchema: root, Semantics: semantics}

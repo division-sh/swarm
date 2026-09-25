@@ -87,6 +87,7 @@ func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
 		}
 		bundle.RootTypes = rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
 		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}}
+		compileBootverifySchemasPreservingPlans(bundle)
 		findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})
 		if safe && len(findings) != 0 {
 			t.Fatalf("safe gate context: %#v", findings)

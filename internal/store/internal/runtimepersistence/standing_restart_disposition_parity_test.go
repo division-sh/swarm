@@ -14,6 +14,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -718,7 +719,7 @@ func (f standingDispositionParityFixture) terminalize(t *testing.T, ctx context.
 			owner,
 			f.hash,
 			runID,
-			runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+			stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
 		)
 		if err != nil {
 			t.Fatalf("complete standing run %s: %v", runID, err)

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -26,15 +27,16 @@ import (
 //
 // Completion accounting is owned by the selected-store completion settlement.
 type BudgetTracker struct {
-	store          budgetspend.Store
-	bus            *runtimebus.EventBus
-	cfg            *config.Config
-	logger         *RuntimeLogger
-	mailbox        runtimetools.MailboxPersistence
-	mailboxFrom    string
-	thresholds     budgetThresholds
-	terminalStates []string
-	posture        executionposture.Posture
+	store        budgetspend.Store
+	bus          *runtimebus.EventBus
+	cfg          *config.Config
+	logger       *RuntimeLogger
+	mailbox      runtimetools.MailboxPersistence
+	mailboxFrom  string
+	thresholds   budgetThresholds
+	stageSources BudgetRecoveryStageSources
+	source       semanticview.Source
+	posture      executionposture.Posture
 
 	mu        sync.Mutex
 	lastState map[string]string // key(scope|entity_id) => ok|warning|throttle|emergency
@@ -49,22 +51,24 @@ type budgetThresholds struct {
 	Emergency float64
 }
 
-func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture) *BudgetTracker {
-	var terminalStates []string
-	if source != nil {
-		terminalStates = source.FlowTerminalStages(".")
-	}
+type BudgetRecoveryStageSources struct {
+	CurrentBundleHash string
+	Load              func(context.Context, string) (semanticview.Source, error)
+}
+
+func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, stageSources BudgetRecoveryStageSources) *BudgetTracker {
 	return &BudgetTracker{
-		store:          store,
-		bus:            bus,
-		cfg:            cfg,
-		logger:         logger,
-		mailbox:        mailbox,
-		mailboxFrom:    "runtime",
-		thresholds:     budgetThresholdsFromSource(source),
-		terminalStates: normalizeBudgetStateList(terminalStates),
-		posture:        posture,
-		lastState:      make(map[string]string),
+		store:        store,
+		bus:          bus,
+		cfg:          cfg,
+		logger:       logger,
+		mailbox:      mailbox,
+		mailboxFrom:  "runtime",
+		thresholds:   budgetThresholdsFromSource(source),
+		stageSources: stageSources,
+		source:       source,
+		posture:      posture,
+		lastState:    make(map[string]string),
 	}
 }
 
@@ -153,12 +157,46 @@ func (t *BudgetTracker) ProjectRecoveryBudgetState(ctx context.Context) error {
 		return nil
 	}
 
-	targets, err := t.store.ListBudgetProjectionTargets(ctx, t.TerminalInstanceStates())
+	targets, err := t.store.ListBudgetProjectionTargets(ctx)
 	if err != nil {
 		return fmt.Errorf("list recovered budget projection targets: %w", err)
 	}
 	projected := make(map[string]struct{}, len(targets))
+	classifiers := make(map[string]runtimecontracts.WorkflowStageClassifier)
 	for _, target := range targets {
+		bundleHash := target.BundleHash
+		if bundleHash == "" {
+			return fmt.Errorf("budget recovery projection target for run %q has no selected bundle_hash", target.RunID)
+		}
+		classifier, ok := classifiers[bundleHash]
+		if !ok {
+			selected := t.source
+			if bundleHash != t.stageSources.CurrentBundleHash {
+				if t.stageSources.Load == nil {
+					return fmt.Errorf("budget recovery has no selected source loader for bundle_hash %q", bundleHash)
+				}
+				selected, err = t.stageSources.Load(ctx, bundleHash)
+				if err != nil {
+					return fmt.Errorf("load budget recovery source %q: %w", bundleHash, err)
+				}
+			}
+			bundle, bound := semanticview.Bundle(selected)
+			if !bound || bundle == nil || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != bundleHash {
+				return fmt.Errorf("budget recovery source %q does not match selected bundle_hash", bundleHash)
+			}
+			classifier, err = selectedWorkflowStageClassifier(selected)
+			if err != nil {
+				return fmt.Errorf("compile budget recovery stages for %q: %w", bundleHash, err)
+			}
+			classifiers[bundleHash] = classifier
+		}
+		terminal, known := classifier.Terminal(target.FlowTemplate, target.FlowInstance, target.Stage)
+		if !known {
+			return fmt.Errorf("budget recovery target run %q entity %q has undeclared stage %q for selected flow %q/%q", target.RunID, target.EntityID, target.Stage, target.FlowTemplate, target.FlowInstance)
+		}
+		if terminal {
+			continue
+		}
 		entityID := strings.TrimSpace(target.EntityID)
 		if entityID == "" {
 			return fmt.Errorf("budget recovery projection target for run %q has no entity_id", strings.TrimSpace(target.RunID))
@@ -172,15 +210,6 @@ func (t *BudgetTracker) ProjectRecoveryBudgetState(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (t *BudgetTracker) TerminalInstanceStates() []string {
-	if t == nil {
-		return nil
-	}
-	out := make([]string, len(t.terminalStates))
-	copy(out, t.terminalStates)
-	return out
 }
 
 func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error {
@@ -473,24 +502,4 @@ func normalizePercentValue(value float64) float64 {
 		return value / 100.0
 	}
 	return value
-}
-
-func normalizeBudgetStateList(states []string) []string {
-	if len(states) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(states))
-	seen := make(map[string]struct{}, len(states))
-	for _, state := range states {
-		state = strings.TrimSpace(state)
-		if state == "" {
-			continue
-		}
-		if _, ok := seen[state]; ok {
-			continue
-		}
-		seen[state] = struct{}{}
-		out = append(out, state)
-	}
-	return out
 }

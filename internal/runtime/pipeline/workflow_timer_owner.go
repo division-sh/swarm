@@ -228,9 +228,9 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		}
 	}
 	currentState := strings.TrimSpace(instance.CurrentState)
-	initialState := strings.TrimSpace(workflowInitialStateForFlow(source, instance.WorkflowName))
-	if initialState == "" {
-		initialState = strings.TrimSpace(source.WorkflowInitialStage())
+	initialState, err := workflowInitialStateForFlow(source, instance.WorkflowName)
+	if err != nil {
+		return err
 	}
 	initialEntryOpen := currentState == initialState
 	desired := map[string]WorkflowTimerActivation{}

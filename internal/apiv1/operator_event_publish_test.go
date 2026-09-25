@@ -1200,7 +1200,7 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
-	seedEventPublishEntityState(t, db, source, runID, targetEntityID, targetFlowInstance, "waiting")
+	seedEventPublishEntityState(t, db, source, runID, targetEntityID, targetFlowInstance, "pending")
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
 		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb,
@@ -1270,7 +1270,7 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 
 	flowInstance := "operating/inst-1"
 	entityID := runtimeflowidentity.EntityID(flowInstance)
-	seedEventPublishEntityState(t, db, source, runID, entityID, flowInstance, "waiting")
+	seedEventPublishEntityState(t, db, source, runID, entityID, flowInstance, "pending")
 
 	followUp := rpcCall(t, handler, eventPublishBody(runID, bundleHash, "review.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"root-follow-up"}`, entityID), "operator-test", "idem-root-template-collision-follow-up"))
 	if followUp.Error != nil {
@@ -1501,7 +1501,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
-	seedEventPublishEntityState(t, db, source, runID, targetEntityID, targetFlowInstance, "waiting")
+	seedEventPublishEntityState(t, db, source, runID, targetEntityID, targetFlowInstance, "pending")
 	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
@@ -1509,9 +1509,9 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	mismatchEntityID := uuid.NewString()
-	seedEventPublishEntityState(t, db, source, runID, mismatchEntityID, "operating/other", "waiting")
+	seedEventPublishEntityState(t, db, source, runID, mismatchEntityID, "operating/other", "pending")
 	unroutableEntityID := uuid.NewString()
-	seedEventPublishEntityState(t, db, source, runID, unroutableEntityID, "orphan/inst-1", "waiting")
+	seedEventPublishEntityState(t, db, source, runID, unroutableEntityID, "orphan/inst-1", "pending")
 
 	tests := []struct {
 		name       string

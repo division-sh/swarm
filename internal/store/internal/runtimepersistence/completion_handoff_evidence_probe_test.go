@@ -10,6 +10,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 )
 
 type completionHandoffEvidenceProbeSink struct {
@@ -121,7 +122,7 @@ func TestCompletionCommittedEvidenceAfterHandoffFailureProbe(t *testing.T) {
 					})
 					observed := &pipelineCrashCandidateObserver{CandidateStore: reader, results: make(chan pipelineCrashCandidateResult, 8)}
 					executor, err := runtimerunlifecycle.NewExecutor(observed, runtimerunlifecycle.CandidateScope{BundleHash: bundleHash},
-						runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runtimerunlifecycle.ExecutorOptions{})
+						stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}), occurrence, runtimerunlifecycle.ExecutorOptions{})
 					if err != nil {
 						t.Fatal(err)
 					}

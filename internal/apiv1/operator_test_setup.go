@@ -308,7 +308,9 @@ func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContr
 		})
 	}
 	currentState := strings.TrimSpace(entity.CurrentState)
-	if currentState == "" || !testSetupStringSliceContains(bundle.FlowStates(flowID), currentState) {
+	graph, found := bundle.WorkflowStageTopology(flowID)
+	_, stageErr := graph.ResolveStage(currentState)
+	if currentState == "" || !found || graph.FlowID != flowID || stageErr != nil {
 		return NewInvalidParamsError(map[string]any{
 			"field":         fieldPrefix + ".current_state",
 			"reason":        "must be a declared state for the selected flow",
@@ -391,14 +393,4 @@ func declaredTestSetupGateNames(bundle *runtimecontracts.WorkflowContractBundle,
 		}
 	}
 	return out
-}
-
-func testSetupStringSliceContains(values []string, want string) bool {
-	want = strings.TrimSpace(want)
-	for _, value := range values {
-		if strings.TrimSpace(value) == want {
-			return true
-		}
-	}
-	return false
 }

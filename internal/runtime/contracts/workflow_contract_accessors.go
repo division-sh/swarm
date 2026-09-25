@@ -35,12 +35,6 @@ func (b *WorkflowContractBundle) WorkflowStages() []WorkflowStageContract {
 	}
 	return b.Semantics.Stages
 }
-func (b *WorkflowContractBundle) WorkflowTerminalStages() []string {
-	if b == nil {
-		return nil
-	}
-	return b.Semantics.TerminalStages
-}
 func (b *WorkflowContractBundle) WorkflowInitialStage() string {
 	if b == nil {
 		return ""

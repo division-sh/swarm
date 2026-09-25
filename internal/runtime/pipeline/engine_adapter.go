@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -772,7 +771,10 @@ func (r pipelineEngineStateRepo) prepareMutation(
 			workflowName = firstNonEmptyString(workflowName, semanticview.RootExecutionFlowID(source))
 			workflowVersion = source.WorkflowVersion()
 		}
-		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+		initialState, err := workflowInitialStateForFlow(source, flowID)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
 		mode := workflowPersistedFlowMode(source, flowID)
 		if mode == "" {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization rejects unsupported persistence mode for flow %s", flowID)
@@ -1200,11 +1202,12 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 		if currentState == "" && builtin != "state_in_phase" {
 			return true, true, nil
 		}
-		if !slices.Contains(graph.Stages, currentState) {
+		stage, err := graph.ResolveStage(currentState)
+		if err != nil {
 			return false, true, fmt.Errorf("%w: stage %q is not declared in flow %s", runtimeengine.ErrInvalidConfig, currentState, graph.FlowID)
 		}
 		if builtin != "state_in_phase" {
-			return !slices.Contains(graph.TerminalStages, currentState), true, nil
+			return !stage.IsTerminal(), true, nil
 		}
 		required := strings.TrimSpace(entry.PolicyRef)
 		if required != "" {
@@ -1332,6 +1335,9 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if instance == nil {
 		return nil
 	}
+	if instance.EnteredStageAt.IsZero() {
+		return fmt.Errorf("workflow mutation requires materialized entry time")
+	}
 	previousBuckets := cloneStringAnyMap(instance.StateBuckets)
 	if instance.Fields == nil {
 		instance.Fields = map[string]any{}
@@ -1350,10 +1356,11 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		instance.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
 	}
 	if strings.TrimSpace(instance.CurrentState) == "" {
-		instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
-	}
-	if instance.EnteredStageAt.IsZero() {
-		return fmt.Errorf("workflow mutation requires materialized entry time")
+		initialState, err := workflowInitialStateForFlow(source, flowID)
+		if err != nil {
+			return err
+		}
+		instance.CurrentState = initialState
 	}
 	existingGates := cloneWorkflowGates(instance.Gates)
 	if len(mutation.StateCarrier.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
@@ -1461,7 +1468,11 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 		return false
 	}
 	graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
-	return ok && slices.Contains(graph.TerminalStages, state)
+	if !ok || graph.FlowID != flowID {
+		return false
+	}
+	ref, err := graph.ResolveStage(state)
+	return err == nil && ref.IsTerminal()
 }
 
 func cloneEvent(evt events.Event) events.Event {
@@ -1549,15 +1560,29 @@ func workflowScopedGateKey(source semanticview.Source, flowID, gate string) stri
 	return strings.Trim(scopeKey+"/"+gate, "/")
 }
 
-func workflowInitialStateForFlow(source semanticview.Source, flowID string) string {
+func workflowInitialStateForFlow(source semanticview.Source, flowID string) (string, error) {
 	flowID = strings.TrimSpace(flowID)
 	if source == nil {
-		return ""
+		return "", fmt.Errorf("initial stage requires selected semantic source")
 	}
 	if flowID == "" {
-		return strings.TrimSpace(source.WorkflowInitialStage())
+		flowID = "."
 	}
-	return strings.TrimSpace(source.FlowInitialStage(flowID))
+	graph, found := semanticview.WorkflowStageTopology(source, flowID)
+	if !found || graph.FlowID != flowID || !graph.ValidStageCatalog() {
+		return "", fmt.Errorf("initial stage requires exact compiled flow %q", flowID)
+	}
+	if graph.StageCount() == 0 {
+		if graph.HasInitialStage() {
+			return "", fmt.Errorf("stateless flow %q carries an initial stage", flowID)
+		}
+		return "pending", nil
+	}
+	ref, err := graph.InitialStageRef()
+	if err != nil {
+		return "", err
+	}
+	return ref.ID(), nil
 }
 
 func workflowScopeKey(source semanticview.Source, flowID string) string {
