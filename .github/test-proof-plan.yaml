@@ -704,7 +704,7 @@ units:
   store-runtime-full-01:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: '^(Test($|[A-C].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
+    run: '^(Test($|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -745,7 +745,8 @@ units:
   store-runtime-full-03:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: '^Test([G-H]|[M-O]).*$'
+    # TestC moves here after full01 exceeded its unchanged command budget.
+    run: '^Test(C.*|[G-H].*|[M-O].*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
