@@ -489,7 +489,7 @@ store_parity:
       risk_dimensions: [writer_ownership]
       evidence:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [budget-recovery-parity]}
-      runtime_deps: [BudgetSpendStore]
+      runtime_deps: [BudgetSpendStore, BudgetStageSourceLoader]
       platform_tables: [budget_admission_scopes, runtime_effect_budget_reservations, spend_ledger]
     - id: timer_schedule
       semantic_owners: [internal/runtime timer obligations]

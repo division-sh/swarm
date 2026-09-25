@@ -44,6 +44,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -1251,9 +1252,9 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 		tc.lifecycle,
 		gateRecoveryBundle,
 		runID,
-		runtimerunlifecycle.NewTerminalCatalog(
-			bundle.Semantics.TerminalStages,
-			map[string][]string{".": bundle.Semantics.TerminalStages},
+		stagecatalogfixture.NewTerminalCatalog(
+			bundle.FlowTerminalStages("."),
+			map[string][]string{".": bundle.FlowTerminalStages(".")},
 		),
 	)
 	if err != nil {

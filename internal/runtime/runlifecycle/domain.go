@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 	"time"
 
@@ -788,68 +787,33 @@ func (r CompletionResult) Validate() error {
 }
 
 type TerminalCatalog struct {
-	Workflow []string
-	Flows    map[string][]string
+	compiled CompiledStageCatalog
 }
 
-func NewTerminalCatalog(workflow []string, flows map[string][]string) TerminalCatalog {
-	out := TerminalCatalog{
-		Workflow: normalizeStates(workflow),
-		Flows:    make(map[string][]string, len(flows)),
+// CompiledStageCatalog is the narrow read boundary for the source-owned graph.
+// Its implementation must resolve exact flow and stage references, not names
+// from a terminal-only projection.
+type CompiledStageCatalog interface {
+	Terminal(flowTemplate, flowInstance, state string) (terminal, known bool)
+	Valid() bool
+}
+
+func NewCompiledTerminalCatalog(owner CompiledStageCatalog) (TerminalCatalog, error) {
+	if owner == nil || !owner.Valid() {
+		return TerminalCatalog{}, fmt.Errorf("completion requires selected compiled stage catalog")
 	}
-	for key, states := range flows {
-		key = strings.Trim(strings.TrimSpace(key), "/")
-		states = normalizeStates(states)
-		if key != "" && len(states) > 0 {
-			out.Flows[key] = states
-		}
-	}
-	if len(out.Flows) == 0 {
-		out.Flows = nil
-	}
-	return out
+	return TerminalCatalog{compiled: owner}, nil
 }
 
 func (c TerminalCatalog) Empty() bool {
-	return len(c.Workflow) == 0 && len(c.Flows) == 0
+	return c.compiled == nil
 }
 
 func (c TerminalCatalog) Terminal(flowTemplate, flowInstance, state string) (bool, bool) {
-	state = strings.ToLower(strings.TrimSpace(state))
-	if state == "" {
+	if c.compiled == nil {
 		return false, false
 	}
-	for _, raw := range []string{flowTemplate, flowInstance} {
-		key := strings.Trim(strings.TrimSpace(raw), "/")
-		if key == "" {
-			continue
-		}
-		if states, ok := c.Flows[key]; ok {
-			i := sort.SearchStrings(states, state)
-			return i < len(states) && states[i] == state, true
-		}
-	}
-	if strings.TrimSpace(flowInstance) != "" || len(c.Workflow) == 0 {
-		return false, false
-	}
-	i := sort.SearchStrings(c.Workflow, state)
-	return i < len(c.Workflow) && c.Workflow[i] == state, true
-}
-
-func normalizeStates(states []string) []string {
-	seen := make(map[string]struct{}, len(states))
-	for _, state := range states {
-		state = strings.ToLower(strings.TrimSpace(state))
-		if state != "" {
-			seen[state] = struct{}{}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for state := range seen {
-		out = append(out, state)
-	}
-	sort.Strings(out)
-	return out
+	return c.compiled.Terminal(flowTemplate, flowInstance, state)
 }
 
 type CandidateStore interface {

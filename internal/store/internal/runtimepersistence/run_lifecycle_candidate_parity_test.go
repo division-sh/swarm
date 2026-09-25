@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -158,7 +159,7 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 			immediateResult, err := fixture.store.ExecuteCompletionCandidate(
 				ctx,
 				duplicateImmediate.Candidate,
-				runtimerunlifecycle.NewTerminalCatalog(
+				stagecatalogfixture.NewTerminalCatalog(
 					nil,
 					map[string][]string{semanticRunFixtureFlow: {"completed"}},
 				),

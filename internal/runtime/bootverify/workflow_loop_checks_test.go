@@ -80,7 +80,11 @@ func TestLoopValidationRejectsRepeatAwayFromEntry(t *testing.T) {
 
 func TestLoopValidationRejectsEscapeTargetThatReconnectsToRegion(t *testing.T) {
 	bundle := loopValidationBundle()
-	bundle.Semantics.TerminalStages = []string{"approved"}
+	for i := range bundle.RootSchema.StageDeclarations.Entries {
+		if bundle.RootSchema.StageDeclarations.Entries[i].ID == "exhausted" {
+			bundle.RootSchema.StageDeclarations.Entries[i].Terminal = false
+		}
+	}
 	bundle.Nodes["controller"].EventHandlers["escalation.reopened"] = runtimecontracts.SystemNodeEventHandler{AdvancesTo: "drafting"}
 	bundle.Events["escalation.reopened"] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}}
 	refreshLoopValidationTopology(bundle)
@@ -216,10 +220,9 @@ func loopValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		Events: events,
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"controller": {EventHandlers: handlers}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage:   "research",
-			Stages:         []runtimecontracts.WorkflowStageContract{{ID: "research"}, {ID: "drafting"}, {ID: "review"}, {ID: "exhausted"}, {ID: "approved"}},
-			TerminalStages: []string{"exhausted", "approved"},
-			Loops:          []runtimecontracts.WorkflowLoopPlan{{FlowID: ".", ID: "revision", RevisionField: revisionField, MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "exhausted"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"}, Operations: operations}},
+			InitialStage: "research",
+			Stages:       []runtimecontracts.WorkflowStageContract{{ID: "research"}, {ID: "drafting"}, {ID: "review"}, {ID: "exhausted"}, {ID: "approved"}},
+			Loops:        []runtimecontracts.WorkflowLoopPlan{{FlowID: ".", ID: "revision", RevisionField: revisionField, MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "exhausted"}, EntryStage: "drafting", RegionStages: []string{"drafting", "review"}, Operations: operations}},
 		},
 	}
 	refreshLoopValidationTopology(bundle)
@@ -238,7 +241,7 @@ func refreshLoopValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 	}
 	bundle.Semantics.HandlerTransitions = transitions
 	topology := runtimecontracts.BuildWorkflowStageTopology(".", bundle.Semantics.InitialStage,
-		[]string{"research", "drafting", "review", "exhausted", "approved"}, bundle.Semantics.TerminalStages,
+		[]string{"research", "drafting", "review", "exhausted", "approved"}, bundle.RootSchema.LoweredTerminalStates(),
 		transitions, bundle.Semantics.Timers, bundle.Semantics.Loops)
 	bundle.Semantics.StageTopologies = map[string]runtimecontracts.WorkflowStageTopology{".": topology}
 	bundle.Semantics.Loops = runtimecontracts.BindWorkflowLoopRegions(bundle.Semantics.Loops, bundle.Semantics.StageTopologies)

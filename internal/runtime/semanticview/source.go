@@ -20,7 +20,6 @@ type Source interface {
 	PlatformSpec() runtimecontracts.PlatformSpecDocument
 	WorkflowEntitySchema() runtimecontracts.EntitySchema
 	WorkflowStages() []runtimecontracts.WorkflowStageContract
-	WorkflowTerminalStages() []string
 	WorkflowInitialStage() string
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
 	WorkflowJoins() []runtimecontracts.WorkflowJoinPlan

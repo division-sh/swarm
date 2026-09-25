@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -69,11 +70,16 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 
 func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) {
 	blueprint := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one"}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+			"review": runtimecontracts.BuildWorkflowStageTopology("review", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
+		}},
+	})
 	active := ActiveTargetDescriptor{ID: "one", FlowInstance: blueprint.FlowInstance, EntityID: eventtest.UUID("exact-owner")}
 	unavailable := active
 	unavailable.Availability = runtimepipeline.NewDeliveryTargetAvailability("active", "draining", false)
 	for _, descriptors := range [][]ActiveTargetDescriptor{{active, unavailable}, {unavailable, active}} {
-		projection := selectedRunTargetOwnerProjection{required: true}
+		projection := selectedRunTargetOwnerProjection{required: true, source: source}
 		for _, descriptor := range descriptors {
 			projection.descriptors = appendActiveTargetDescriptor(projection.descriptors, descriptor)
 		}

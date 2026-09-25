@@ -257,10 +257,22 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	}
 	name := strings.TrimSpace(asString(payload["name"]))
 	currentState := strings.TrimSpace(asString(payload["initial_state"]))
-	if currentState == "" && source != nil {
-		currentState = strings.TrimSpace(source.FlowInitialStage(flowID))
+	stageFlowID := flowID
+	if stageFlowID == "" {
+		stageFlowID = "."
+	}
+	graph, found := semanticview.WorkflowStageTopology(source, stageFlowID)
+	if !found || graph.FlowID != stageFlowID || !graph.ValidStageCatalog() {
+		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state", "flow": stageFlowID})
+	}
+	initial, err := graph.InitialStageRef()
+	if err != nil {
+		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state"}, err)
 	}
 	if currentState == "" {
+		currentState = initial.ID()
+	}
+	if currentState != initial.ID() {
 		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state"})
 	}
 

@@ -166,7 +166,6 @@ func TestCompiledTransitionRootGateUsesScopedStageMetadata(t *testing.T) {
 		}
 		gate := &bundle.Semantics.Gates[0]
 		// A sibling may terminate at the root's live gate stage and declare other stages.
-		bundle.Semantics.TerminalStages = append(bundle.Semantics.TerminalStages, gate.Stage)
 		bundle.Semantics.Stages = append(bundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: "child_only", Phase: "child"})
 		bundle.Semantics.FlowStates["child"] = []string{gate.Stage, "child_only"}
 		bundle.Semantics.FlowTerminal["child"] = []string{gate.Stage}

@@ -602,7 +602,7 @@ func TestBuildStageGraphShowsDeliveryJoinCompletionFromHandlerScope(t *testing.T
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "active", Stages: []runtimecontracts.WorkflowStageContract{{ID: "active"}, {ID: "done"}}, TerminalStages: []string{"done"},
+			InitialStage: "active", Stages: []runtimecontracts.WorkflowStageContract{{ID: "active"}, {ID: "done"}},
 			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{".": topology},
 		},
 	}

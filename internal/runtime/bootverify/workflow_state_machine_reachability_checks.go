@@ -24,7 +24,7 @@ func (c *checkerContext) stateReachability() []Finding {
 		if flowID == "." && !usesStages {
 			continue
 		}
-		initial := strings.TrimSpace(c.source.FlowInitialStage(flowID))
+		initial := compiledInitialStageForFlow(c.source, flowID)
 		if initial == "" {
 			continue
 		}

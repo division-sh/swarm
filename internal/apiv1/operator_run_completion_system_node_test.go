@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 )
 
 func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testing.T) {
@@ -152,7 +153,7 @@ func runCompletionTerminalCatalog(source semanticview.Source) runtimerunlifecycl
 		flows[scope.Path] = states
 		flows[scope.OwningFlowID] = states
 	}
-	return runtimerunlifecycle.NewTerminalCatalog(source.FlowTerminalStages(""), flows)
+	return stagecatalogfixture.NewTerminalCatalog(source.FlowTerminalStages(""), flows)
 }
 
 type runCompletionSystemNodeModule struct {

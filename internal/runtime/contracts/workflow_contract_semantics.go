@@ -34,7 +34,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 		InitialStage:           rootSchemaInitialStage(bundle.RootSchema),
 		EntitySchema:           entitySchema,
 		Stages:                 deriveWorkflowStages(bundle.RootSchema, bundle.FlowSchemas),
-		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.FlowSchemas),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Joins:                  nil,
 		Loops:                  deriveWorkflowLoopPlans(bundle, nil),
@@ -755,44 +754,6 @@ func deriveWorkflowStages(root *FlowSchemaDocument, schemas map[string]FlowSchem
 			}
 			seen[key] = struct{}{}
 			out = append(out, stage)
-		}
-	}
-	return out
-}
-
-func deriveWorkflowTerminalStages(root *FlowSchemaDocument, schemas map[string]FlowSchemaDocument) []string {
-	out := make([]string, 0)
-	seen := make(map[string]struct{})
-	if root != nil {
-		for _, state := range root.LoweredTerminalStates() {
-			state = strings.TrimSpace(state)
-			if state == "" {
-				continue
-			}
-			if _, exists := seen[state]; exists {
-				continue
-			}
-			seen[state] = struct{}{}
-			out = append(out, state)
-		}
-	}
-	flowIDs := make([]string, 0, len(schemas))
-	for flowID := range schemas {
-		flowIDs = append(flowIDs, flowID)
-	}
-	sort.Strings(flowIDs)
-	for _, flowID := range flowIDs {
-		schema := schemas[flowID]
-		for _, state := range schema.LoweredTerminalStates() {
-			state = strings.TrimSpace(state)
-			if state == "" {
-				continue
-			}
-			if _, exists := seen[state]; exists {
-				continue
-			}
-			seen[state] = struct{}{}
-			out = append(out, state)
 		}
 	}
 	return out

@@ -1560,6 +1560,14 @@ func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evalu
 	if primary.EntityType != entity.EntityType {
 		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].type = %q, want declared entity type %q for flow %s", entity.Alias, entity.EntityType, primary.EntityType, scenarioFlowLabel(flowID))
 	}
+	stageFlowID := flowID
+	if stageFlowID == "" {
+		stageFlowID = "."
+	}
+	graph, found := r.bundle.WorkflowStageTopology(stageFlowID)
+	if !found || graph.FlowID != stageFlowID || !graph.ValidStageCatalog() {
+		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].flow %q has no selected compiled stage catalog", entity.Alias, stageFlowID)
+	}
 	currentState := ""
 	if entity.StateSet {
 		value, err := evaluator.evalValue(entity.CurrentState)
@@ -1568,12 +1576,15 @@ func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evalu
 		}
 		currentState = optionalScenarioString(value)
 	} else {
-		currentState = strings.TrimSpace(r.bundle.FlowInitialStage(flowID))
+		initial, err := graph.InitialStageRef()
+		if err == nil {
+			currentState = initial.ID()
+		}
 	}
 	if currentState == "" {
 		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state is required because flow %s has no initial state", entity.Alias, scenarioFlowLabel(flowID))
 	}
-	if !scenarioStringSliceContains(r.bundle.FlowStates(flowID), currentState) {
+	if _, err := graph.ResolveStage(currentState); err != nil {
 		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state %q is not declared for flow %s", entity.Alias, currentState, scenarioFlowLabel(flowID))
 	}
 	fields, err := r.evaluateScenarioSetupFields(evaluator, primary, entity)

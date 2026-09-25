@@ -176,7 +176,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if !exactDelivery && !handler.CreateEntity && entityID != "" && originalEntityID != "" && originalEntityID != entityID && strings.TrimSpace(triggerCtx.State.EntityID) == "" {
 		triggerCtx.State.EntityID = entityID
 	}
-	if handler.Join == nil && terminalStateHandlerRejected(pc, flowID, triggerCtx.State, handler) {
+	terminalRejected, err := terminalStateHandlerRejected(pc, flowID, triggerCtx.State, handler)
+	if err != nil {
+		return contractHandlerExecutionResult{RuleSelection: handlerselection.NotReached()}, err
+	}
+	if handler.Join == nil && terminalRejected {
 		outcome := &handlerExecutionOutcome{
 			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},
@@ -403,8 +407,12 @@ func resolveHandlerEntityIDForFlowAtNode(
 			if err != nil {
 				return "", evt, err
 			}
+			initialStage, err := workflowInitialStateForFlow(source, flowID)
+			if err != nil {
+				return "", evt, err
+			}
 			state.EntityID = entityID
-			state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
+			state.Stage = NormalizeWorkflowStateID(initialStage)
 			state.Status = ""
 			state.Metadata = workflowCreateEntityFields(source, flowID)
 			state.Control = workflowStateControlFromIdentity(instance, entityType)
@@ -545,26 +553,20 @@ func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerO
 	}
 }
 
-func terminalStateHandlerRejected(pc *PipelineCoordinator, flowID string, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) bool {
+func terminalStateHandlerRejected(pc *PipelineCoordinator, flowID string, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) (bool, error) {
 	if pc == nil || pc.SemanticSource() == nil || state.Stage == "" {
-		return false
+		return false, nil
 	}
-	return terminalStageContains(pc.SemanticSource().FlowTerminalStages(flowID), string(state.Stage))
-}
-
-func terminalStageContains(stages []string, current string) bool {
-	return stageSetContains(stages, current)
-}
-
-func stageSetContains(stages []string, current string) bool {
-	current = strings.TrimSpace(current)
-	if current == "" {
-		return false
+	graph, ok := semanticview.WorkflowStageTopology(pc.SemanticSource(), flowID)
+	if !ok || graph.FlowID != flowID {
+		return false, fmt.Errorf("selected flow %q has no exact compiled stage topology", flowID)
 	}
-	for _, stage := range stages {
-		if strings.TrimSpace(stage) == current {
-			return true
-		}
+	if graph.StageCount() == 0 && state.Stage == "pending" {
+		return false, nil
 	}
-	return false
+	ref, err := graph.ResolveStage(string(state.Stage))
+	if err != nil {
+		return false, err
+	}
+	return ref.IsTerminal(), nil
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -373,7 +374,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	}
 	sinkRegistration.Release()
 	observed := &pipelineCrashCandidateObserver{CandidateStore: fixture.store.(runlifecycle.CandidateStore), results: make(chan pipelineCrashCandidateResult, 8)}
-	lifecycle, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: fact.BundleHash()}, runlifecycle.NewTerminalCatalog(nil, map[string][]string{".": {"done", "exhausted"}}), work, runlifecycle.ExecutorOptions{})
+	lifecycle, err := runlifecycle.NewExecutor(observed, runlifecycle.CandidateScope{BundleHash: fact.BundleHash()}, stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{".": {"done", "exhausted"}}), work, runlifecycle.ExecutorOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,6 +19,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -160,7 +161,7 @@ func TestRunLifecycleSameRevisionCommittedHandoffParity(t *testing.T) {
 				t,
 				intercept,
 				occurrence,
-				runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+				stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
 			)
 			registration, err := registrar.RegisterCompletionCandidateSink(
 				runtimeCtx,
@@ -229,7 +230,7 @@ func TestRunLifecyclePauseResumeSuccessorRaceParity(t *testing.T) {
 				t,
 				intercept,
 				occurrence,
-				runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+				stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
 			)
 			registration, err := registrar.RegisterCompletionCandidateSink(
 				runtimeCtx,
@@ -365,7 +366,7 @@ func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
 				releaseFirst:   make(chan struct{}),
 				secondExecuted: make(chan struct{}),
 			}
-			catalog := runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
+			catalog := stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
 			oldExecutor := newRunLifecycleParityExecutorForScope(t, intercept, oldOccurrence, runLifecycleCandidateParityBundleHash, catalog)
 			newExecutor := newRunLifecycleParityExecutorForScope(t, intercept, newOccurrence, runLifecycleCandidateParityReplacementHash, catalog)
 			oldRegistration, err := registrar.RegisterCompletionCandidateSink(

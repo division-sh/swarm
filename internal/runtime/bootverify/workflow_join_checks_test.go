@@ -314,7 +314,7 @@ func joinValidationBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"join-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"item.completed": {Join: &spec}}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			InitialStage: "awaiting", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}}, TerminalStages: []string{"attention"},
+			InitialStage: "awaiting", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}},
 		},
 	}
 	rebuildJoinValidationTopology(bundle)

@@ -80,7 +80,6 @@ type WorkflowSemanticView struct {
 	InitialStage           string
 	EntitySchema           EntitySchema
 	Stages                 []WorkflowStageContract
-	TerminalStages         []string
 	Timers                 []WorkflowTimerContract
 	Joins                  []WorkflowJoinPlan
 	Loops                  []WorkflowLoopPlan
@@ -400,6 +399,7 @@ type WorkflowStageTopology struct {
 	TerminalStages []string
 	Edges          []WorkflowStageTopologyEdge
 	Handlers       []WorkflowHandlerStageScope
+	stageCatalog   *workflowStageCatalog
 }
 
 type WorkflowHandlerStageScope struct {

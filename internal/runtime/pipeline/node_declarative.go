@@ -115,7 +115,11 @@ func prepareHandlerMaterializationStateAtNode(source semanticview.Source, node i
 	state.Control.EntityType = entityType
 	state.EntityID = strings.TrimSpace(entityID)
 	if strings.TrimSpace(string(state.Stage)) == "" {
-		state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
+		initialStage, err := workflowInitialStateForFlow(source, flowID)
+		if err != nil {
+			return err
+		}
+		state.Stage = NormalizeWorkflowStateID(initialStage)
 	}
 	return nil
 }

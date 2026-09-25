@@ -262,7 +262,7 @@ func (c *checkerContext) validateTimerCancelStateReachability(timer runtimecontr
 	if _, ok := declaredStates[cancelState]; !ok {
 		return
 	}
-	initial := timerFlowInitialState(c.source, flowID)
+	initial := compiledInitialStageForFlow(c.source, flowID)
 	if strings.TrimSpace(initial) == "" {
 		return
 	}
@@ -417,17 +417,6 @@ func timerHandlerMatchesEvent(source semanticview.Source, flowID, eventType stri
 	return false
 }
 
-func timerFlowInitialState(source semanticview.Source, flowID string) string {
-	if source == nil {
-		return ""
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "." {
-		return strings.TrimSpace(source.WorkflowInitialStage())
-	}
-	return strings.TrimSpace(source.FlowInitialStage(flowID))
-}
-
 func timerValidationFlowLabel(flowID string) string {
 	if flowID = strings.TrimSpace(flowID); flowID != "" {
 		return flowID
@@ -486,8 +475,8 @@ func flowStatesForTimer(source semanticview.Source, flowID string) []string {
 	if source == nil {
 		return nil
 	}
-	if flowID != "" {
-		return source.FlowStates(flowID)
+	if flowID == "" {
+		flowID = "."
 	}
-	return source.FlowStates(".")
+	return compiledStageIDsForFlow(source, flowID)
 }

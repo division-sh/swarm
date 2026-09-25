@@ -102,6 +102,9 @@ func stageTimerValidationBundle(timer runtimecontracts.WorkflowTimerContract) *r
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Timers: []runtimecontracts.WorkflowTimerContract{timer},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				".": runtimecontracts.BuildWorkflowStageTopology(".", "awaiting_review", []string{"awaiting_review", "expired"}, []string{"expired"}, nil, []runtimecontracts.WorkflowTimerContract{timer}, nil),
+			},
 		},
 	}
 }

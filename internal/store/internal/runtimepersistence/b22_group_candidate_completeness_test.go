@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 )
 
 func TestB22GroupMixedCandidateWakeAndRestartBothStores(t *testing.T) {
@@ -52,7 +53,7 @@ func TestB22GroupMixedCandidateWakeAndRestartBothStores(t *testing.T) {
 				store := f.raw.(runLifecycleCandidateParityStore)
 				activityScope, _ := authoractivity.ScopeFromContext(f.ctx)
 				scope := runlifecycle.CandidateScope{BundleHash: activityScope.BundleHash}
-				catalog := runlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
+				catalog := stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
 				before, err := store.ListCompletionCandidates(f.ctx, scope, runlifecycle.CandidateCursor{}, 128)
 				if err != nil || len(before.Candidates) != 1 || before.Candidates[0].RunID != f.runID {
 					t.Fatalf("coalesced prefix candidate=%+v err=%v", before, err)

@@ -2135,6 +2135,9 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 				Name:         "review",
 				InitialStage: "queued",
 				FlowInitial:  map[string]string{"review": "queued"},
+				StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+					"review": runtimecontracts.BuildWorkflowStageTopology("review", "queued", []string{"queued", "done"}, []string{"done"}, nil, nil, nil),
+				},
 			},
 		}),
 	})

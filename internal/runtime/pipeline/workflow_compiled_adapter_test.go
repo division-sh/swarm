@@ -29,9 +29,13 @@ import (
 )
 
 func compiledAdapterSource(t *testing.T, initialTimer ...bool) *contracts.WorkflowContractBundle {
+	return compiledAdapterSourceWithKillStages(t, "  killed: {terminal: true}\n", initialTimer...)
+}
+
+func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initialTimer ...bool) *contracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: adapter-proof\nstages:\n  ready: {initial: true}\n  Ready: {terminal: true}\n  working: {}\n  shared: {}\n  done: {terminal: true}\n  killed: {terminal: true}\n",
+		"schema.yaml":   "name: adapter-proof\nstages:\n  ready: {initial: true}\n  Ready: {terminal: true}\n  working: {}\n  shared: {}\n  done: {terminal: true}\n" + killStages,
 		"entities.yaml": "test_entity:\n  marker: text\n",
 		"events.yaml":   "direct: {}\ninherited: {}\nrule: {}\ncomplete: {}\nself: {}\nwrite_only: {}\nunmatched: {}\nemit_only: {}\nobserved: {}\nkill: {}\nreject: {}\ndiscard: {}\nguarded: {}\nguard_observed:\n  marker: text\n",
 		"nodes.yaml": `router:
@@ -391,6 +395,38 @@ func TestPipelineCompiledTransitionGuardDispositionOnBothStores(t *testing.T) {
 	}
 }
 
+func TestGuardKillUsesExactStageInEitherDeclarationOrderBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, tc := range []struct {
+			name, stages, wantStage string
+		}{
+			{"lower_first", "  killed: {terminal: true}\n  Killed: {terminal: true}\n", "killed"},
+			{"upper_first", "  Killed: {terminal: true}\n  killed: {terminal: true}\n", "killed"},
+			{"upper_only", "  Killed: {terminal: true}\n", "ready"},
+		} {
+			t.Run(backend+"/"+tc.name, func(t *testing.T) {
+				bundle := compiledAdapterSourceWithKillStages(t, tc.stages)
+				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				evt := f.event("kill")
+				result, err := f.execute("kill", evt)
+				if err != nil || result.Outcome == nil || result.Outcome.Status != HandlerOutcomeKilled {
+					t.Fatalf("kill disposition: result=%#v err=%v", result, err)
+				}
+				after, found := f.load()
+				if !found || after.CurrentState != tc.wantStage {
+					t.Fatalf("kill selected wrong-case stage: state=%#v found=%v", after, found)
+				}
+				if tc.wantStage == "ready" && len(after.TransitionHistory) != 0 {
+					t.Fatalf("absent exact killed invented a transition: %#v", after.TransitionHistory)
+				}
+				if tc.wantStage == "killed" && (len(after.TransitionHistory) != 1 || after.TransitionHistory[0].TriggerEventID != evt.ID()) {
+					t.Fatalf("exact kill transition lost history: %#v", after.TransitionHistory)
+				}
+			})
+		}
+	}
+}
+
 func TestPipelineCompiledTransitionStageGuardsOnBothStores(t *testing.T) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -544,6 +580,94 @@ func TestTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStores(t *test
 				t.Fatalf("duplicate terminal receiver failure added outcome: outcomes=%#v err=%v", outcomes, err)
 			}
 		})
+	}
+}
+
+func TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores(t *testing.T) {
+	bundle := compiledAdapterSource(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}, Policies: map[string]WorkflowEventPolicy{"write_only": {Consume: true}}}}
+			evt := f.event("write_only")
+			route := events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(f.node),
+				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
+			}
+			owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
+			if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+				t.Fatal(err)
+			}
+			id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempt := withWorkflowNodeDeliveryRoute(f.ctx, route)
+			for i := 0; i < 2; i++ {
+				handled, err := f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
+				if err != nil || !handled {
+					t.Fatalf("delivery attempt %d: handled=%v err=%v", i, handled, err)
+				}
+			}
+			after, found := f.load()
+			if !found || after.CurrentState != "ready" || after.Fields["marker"] != "written" || len(after.TransitionHistory) != 0 {
+				t.Fatalf("nonterminal ready effect/readback: state=%#v found=%v", after, found)
+			}
+			snapshot, err := owner.Snapshot(f.ctx, id)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
+				t.Fatalf("claim settlement: snapshot=%#v err=%v", snapshot, err)
+			}
+			outcomes, err := owner.Outcomes(f.ctx, id)
+			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != string(runtimedelivery.StatusDelivered) {
+				t.Fatalf("duplicate settlement: outcomes=%#v err=%v", outcomes, err)
+			}
+		})
+	}
+}
+
+func TestInactiveCompanionRefusesNonterminalClaimBothStores(t *testing.T) {
+	bundle := compiledAdapterSource(t)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, status := range []string{"draining", "terminated"} {
+			t.Run(backend+"/"+status, func(t *testing.T) {
+				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
+				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}, Policies: map[string]WorkflowEventPolicy{"write_only": {Consume: true}}}}
+				inactive, _ := f.load()
+				inactive.Status = status
+				if status == "terminated" {
+					inactive.TerminatedAt = time.Now().UTC()
+				}
+				if err := f.store.upsert(f.ctx, inactive); err != nil {
+					t.Fatalf("persist inactive companion: %v", err)
+				}
+				before, _ := f.load()
+				evt := f.event("write_only")
+				route := events.DeliveryRoute{
+					Recipient: events.MustNodeDeliveryRecipient(f.node),
+					Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
+				}
+				owner := f.pc.deliveryStore.(*pipelineTestDeliveryOwner)
+				if err := owner.commitInitial(f.ctx, evt, route); err != nil {
+					t.Fatal(err)
+				}
+				id, err := runtimedelivery.DeliveryID(evt.ID(), route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				handled, err := f.pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(f.ctx, route), evt)
+				if err == nil || !handled {
+					t.Fatalf("inactive receiver must refuse claimed delivery: handled=%v err=%v", handled, err)
+				}
+				after, _ := f.load()
+				if !reflect.DeepEqual(before, after) || f.bus.publishedCount() != 0 {
+					t.Fatalf("inactive receiver changed business state: before=%#v after=%#v", before, after)
+				}
+				snapshot, err := owner.Snapshot(f.ctx, id)
+				if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+					t.Fatalf("inactive receiver claim did not settle: snapshot=%#v err=%v", snapshot, err)
+				}
+			})
+		}
 	}
 }
 

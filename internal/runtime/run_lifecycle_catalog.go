@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -20,35 +21,62 @@ func runLifecycleRequiresGenericSchedules(source semanticview.Source) bool {
 	return false
 }
 
-func runLifecycleTerminalCatalog(source semanticview.Source) runtimerunlifecycle.TerminalCatalog {
+func runLifecycleTerminalCatalog(source semanticview.Source) (runtimerunlifecycle.TerminalCatalog, error) {
+	classifier, err := selectedWorkflowStageClassifier(source)
+	if err != nil {
+		return runtimerunlifecycle.TerminalCatalog{}, err
+	}
+	return runtimerunlifecycle.NewCompiledTerminalCatalog(classifier)
+}
+
+func selectedWorkflowStageClassifier(source semanticview.Source) (runtimecontracts.WorkflowStageClassifier, error) {
 	if source == nil {
-		return runtimerunlifecycle.TerminalCatalog{}
+		return runtimecontracts.WorkflowStageClassifier{}, fmt.Errorf("stage classifier requires selected semantic source")
 	}
-	workflow := source.FlowTerminalStages(".")
-	flows := make(map[string][]string)
-	add := func(key string, states []string) {
-		key = strings.Trim(strings.TrimSpace(key), "/")
-		if key != "" && len(states) > 0 {
-			flows[key] = states
+	workflow, ok := semanticview.WorkflowStageTopology(source, ".")
+	if !ok || workflow.FlowID != "." {
+		return runtimecontracts.WorkflowStageClassifier{}, fmt.Errorf("stage classifier requires selected compiled root topology")
+	}
+	flows := make(map[string]runtimecontracts.WorkflowStageTopology)
+	add := func(key string, graph runtimecontracts.WorkflowStageTopology) error {
+		if key == "" {
+			return nil
 		}
+		if previous, exists := flows[key]; exists && !previous.SameStageCatalog(graph) {
+			return fmt.Errorf("stage classifier flow key %q resolves to multiple compiled stage catalogs", key)
+		}
+		flows[key] = graph
+		return nil
 	}
-	if workflowName := strings.Trim(strings.TrimSpace(source.WorkflowName()), "/"); workflowName != "" {
-		add(workflowName, workflow)
+	if workflowName := strings.TrimSpace(source.WorkflowName()); workflowName != "" {
+		if err := add(workflowName, workflow); err != nil {
+			return runtimecontracts.WorkflowStageClassifier{}, err
+		}
 	}
 	for flowID := range source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
+		if flowID == "" || flowID == "." {
 			continue
 		}
-		states := source.FlowTerminalStages(flowID)
-		add(flowID, states)
-		add(source.FlowPath(flowID), states)
+		graph, ok := semanticview.WorkflowStageTopology(source, flowID)
+		if !ok || graph.FlowID != flowID {
+			return runtimecontracts.WorkflowStageClassifier{}, fmt.Errorf("stage classifier flow %q has no selected compiled topology", flowID)
+		}
+		for _, key := range []string{flowID, source.FlowPath(flowID)} {
+			if err := add(key, graph); err != nil {
+				return runtimecontracts.WorkflowStageClassifier{}, err
+			}
+		}
 	}
 	for _, scope := range source.FlowScopes() {
-		states := source.FlowTerminalStages(scope.ID)
-		add(scope.ID, states)
-		add(scope.Path, states)
-		add(scope.OwningFlowID, states)
+		graph, ok := semanticview.WorkflowStageTopology(source, scope.ID)
+		if !ok || graph.FlowID != scope.ID {
+			return runtimecontracts.WorkflowStageClassifier{}, fmt.Errorf("stage classifier scope %q has no selected compiled topology", scope.ID)
+		}
+		for _, key := range []string{scope.ID, scope.Path} {
+			if err := add(key, graph); err != nil {
+				return runtimecontracts.WorkflowStageClassifier{}, err
+			}
+		}
 	}
-	return runtimerunlifecycle.NewTerminalCatalog(workflow, flows)
+	return runtimecontracts.NewWorkflowStageClassifier(workflow, flows)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -35,6 +37,7 @@ type budgetRecoveryParityStore interface {
 	runtimemanager.ManagerPersistence
 	storetest.AgentFixtureStore
 	runtimetools.MailboxPersistence
+	sourceartifactfixture.Reader
 }
 
 func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
@@ -66,12 +69,19 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			now := time.Now().UTC().Truncate(time.Second)
 			runA, runB := uuid.NewString(), uuid.NewString()
-			entityA, entityB, terminalEntity := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# budget-stage-second-source\n"))
 			seedBudgetRecoveryRun(t, ctx, db, postgres, runA, now)
-			seedBudgetRecoveryRun(t, ctx, db, postgres, runB, now.Add(time.Second))
+			secondRun := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, StartedAt: now.Add(time.Second)}
+			if postgres {
+				runlifecyclefixture.RequirePostgres(t, ctx, db, secondRun)
+			} else {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, secondRun)
+			}
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, entityA, "active", now)
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, entityB, "active", now.Add(time.Second))
-			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, terminalEntity, "done", now.Add(2*time.Second))
+			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, terminalEntity, "done", now.Add(2*time.Second))
+			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, crossSourceEntity, "done", now.Add(3*time.Second))
 
 			for _, seed := range []struct {
 				runID  string
@@ -79,12 +89,17 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			}{
 				{runID: runA, record: budgetRecoverySpend(t, entityA, "flow/a", 9.5, now)},
 				{runID: runB, record: budgetRecoverySpend(t, entityB, "flow/b", 9.5, now)},
-				{runID: runB, record: budgetRecoverySpend(t, terminalEntity, "flow/done", 9.5, now)},
+				{runID: runA, record: budgetRecoverySpend(t, terminalEntity, "flow/done", 9.5, now)},
+				{runID: runB, record: budgetRecoverySpend(t, crossSourceEntity, "flow/cross-source", 9.5, now)},
 				{record: budgetRecoverySpend(t, "", "global", 9.5, now)},
 			} {
 				spendCtx := ctx
 				if seed.runID != "" {
 					spendCtx = runtimecorrelation.WithRunID(spendCtx, seed.runID)
+					if seed.runID == runB {
+						spendCtx = runtimecorrelation.WithSourceArtifactFact(spendCtx, sourceartifactfixture.FactFor(otherArtifact))
+						spendCtx = runtimeauthoractivity.WithScope(spendCtx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, otherArtifact.BundleHash()))
+					}
 				}
 				if err := selected.RecordSpend(spendCtx, seed.record); err != nil {
 					t.Fatalf("seed retained spend: %v", err)
@@ -96,24 +111,53 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				t.Fatalf("NewEventBus: %v", err)
 			}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				SourceArtifact: authorActivityTestSourceArtifact,
 				RootSchema: &runtimecontracts.FlowSchemaDocument{
 					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
 						{ID: "active", Initial: true}, {ID: "done", Terminal: true},
 					}},
 				},
+				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"flow": {}},
+				Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+					".":    runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
+					"flow": runtimecontracts.BuildWorkflowStageTopology("flow", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
+				}},
 				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 					"budget_warning_percent":   {Value: 50},
 					"budget_throttle_percent":  {Value: 75},
 					"budget_emergency_percent": {Value: 90},
 				}},
 			})
+			otherSource := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				SourceArtifact: otherArtifact,
+				FlowSchemas:    map[string]runtimecontracts.FlowSchemaDocument{"flow": {}},
+				Semantics: runtimecontracts.WorkflowSemanticView{Version: otherArtifact.BundleHash(), StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+					".":    runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
+					"flow": runtimecontracts.BuildWorkflowStageTopology("flow", "active", []string{"active", "done", "closed"}, []string{"closed"}, nil, nil, nil),
+				}},
+			})
+			loads := 0
 			tracker := runtimepkg.NewBudgetTracker(selected, bus, &config.Config{Extensions: map[string]any{
 				"budget": map[string]any{
 					"system_monthly_cap":     40,
 					"global_monthly_cap":     10,
 					"per_entity_monthly_cap": 10,
 				},
-			}}, selected, nil, source, executionposture.Live)
+			}}, selected, nil, source, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
+				CurrentBundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
+				Load: func(ctx context.Context, hash string) (semanticview.Source, error) {
+					loads++
+					persisted, err := selected.GetSourceArtifact(ctx, hash)
+					if err != nil {
+						return nil, err
+					}
+					decoded, err := persisted.Decode()
+					if err != nil || decoded.BundleHash() != otherArtifact.BundleHash() {
+						return nil, fmt.Errorf("budget recovery selected source mismatch: decoded=%v err=%v", decoded, err)
+					}
+					return otherSource, nil
+				},
+			})
 			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
@@ -168,14 +212,20 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			if _, err := manager.RecoverWithStartupReplayDiagnostics(managedCtx); err != nil {
 				t.Fatalf("RecoverWithStartupReplayDiagnostics with process context: %v", err)
 			}
-			assertRecoveredBudgetState(t, tracker, entityA, entityB, terminalEntity)
-			assertBudgetRecoverySideEffects(t, ctx, db, 4, 4)
+			assertRecoveredBudgetState(t, tracker, entityA, entityB, terminalEntity, crossSourceEntity)
+			if loads != 1 {
+				t.Fatalf("selected source loads = %d, want one per recovery pass", loads)
+			}
+			assertBudgetRecoverySideEffects(t, ctx, db, 5, 5)
 
 			if _, err := manager.RecoverWithStartupReplayDiagnostics(managedCtx); err != nil {
 				t.Fatalf("repeated RecoverWithStartupReplayDiagnostics with process context: %v", err)
 			}
-			assertRecoveredBudgetState(t, tracker, entityA, entityB, terminalEntity)
-			assertBudgetRecoverySideEffects(t, ctx, db, 4, 4)
+			assertRecoveredBudgetState(t, tracker, entityA, entityB, terminalEntity, crossSourceEntity)
+			if loads != 2 {
+				t.Fatalf("selected source loads after repeated recovery = %d, want one per pass", loads)
+			}
+			assertBudgetRecoverySideEffects(t, ctx, db, 5, 5)
 		})
 	}
 }
@@ -216,13 +266,21 @@ func seedBudgetRecoveryRun(t *testing.T, ctx context.Context, db *sql.DB, postgr
 
 func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, state string, at time.Time) {
 	t.Helper()
+	instance := "flow/" + entityID
+	instanceQuery := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES (?, ?, 'flow', 'static', '{}', 'active')`
+	if postgres {
+		instanceQuery = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status) VALUES ($1::uuid, $2, 'flow', 'static', '{}'::jsonb, 'active')`
+	}
+	if _, err := db.ExecContext(ctx, instanceQuery, runID, instance); err != nil {
+		t.Fatalf("seed flow instance %s: %v", instance, err)
+	}
 	query := `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (?, ?, ?, 'budget_recovery', ?, '{}', '{}', '{}', 1, ?, ?, ?)
 	`
-	args := []any{runID, entityID, "flow/" + entityID, state, at, at, at}
+	args := []any{runID, entityID, instance, state, at, at, at}
 	if postgres {
 		query = `
 			INSERT INTO entity_state (
@@ -236,13 +294,14 @@ func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, pos
 	}
 }
 
-func assertRecoveredBudgetState(t *testing.T, tracker *runtimepkg.BudgetTracker, entityA, entityB, terminalEntity string) {
+func assertRecoveredBudgetState(t *testing.T, tracker *runtimepkg.BudgetTracker, entityA, entityB, terminalEntity, crossSourceEntity string) {
 	t.Helper()
 	wants := map[string]string{
-		"system":   tracker.CurrentState("system", ""),
-		"global":   tracker.CurrentState("global", ""),
-		"entity_a": tracker.CurrentState("entity", entityA),
-		"entity_b": tracker.CurrentState("entity", entityB),
+		"system":       tracker.CurrentState("system", ""),
+		"global":       tracker.CurrentState("global", ""),
+		"entity_a":     tracker.CurrentState("entity", entityA),
+		"entity_b":     tracker.CurrentState("entity", entityB),
+		"cross_source": tracker.CurrentState("entity", crossSourceEntity),
 	}
 	for name, got := range wants {
 		if got != "emergency" {

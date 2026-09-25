@@ -708,7 +708,9 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.Workspaces == nil {
 		managerOptions.Workspaces = options.Workspace
 	}
-	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source, options.ExecutionPosture)
+	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source, options.ExecutionPosture, swaruntime.BudgetRecoveryStageSources{
+		CurrentBundleHash: req.LoadedSource.SourceArtifactFact.BundleHash(),
+	})
 	managerOptions.Budget = budget
 	if options.AgentFactory != nil {
 		return selectedContractAgentRuntimeFactory{factory: options.AgentFactory, options: managerOptions}, nil

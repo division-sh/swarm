@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -177,7 +178,7 @@ func seedCompletionShortCircuitFanOut(t *testing.T, fixture runLifecycleCandidat
 }
 
 func completionShortCircuitCatalog() runtimerunlifecycle.TerminalCatalog {
-	return runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
+	return stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
 }
 
 func loadCompletionShortCircuitSummaries(ctx context.Context, fixture runLifecycleCandidateParityFixture, runID string, now time.Time) (runCompletionOwnerSummaries, error) {

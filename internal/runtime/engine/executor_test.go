@@ -563,7 +563,6 @@ func sourceWithKilledState() semanticview.Source {
 				{ID: "pending"},
 				{ID: "killed"},
 			},
-			TerminalStages: []string{"killed"},
 		},
 	})
 }

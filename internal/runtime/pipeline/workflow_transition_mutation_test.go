@@ -108,8 +108,8 @@ func TestPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStores(t *t
 	}
 	projectedCause := func(flow string, edge contracts.WorkflowStageTopologyEdge) *workflowlifecycle.Transition {
 		t.Helper()
-		projection := graph
-		projection.FlowID, projection.Edges = flow, []contracts.WorkflowStageTopologyEdge{edge}
+		projection := contracts.BuildWorkflowStageTopology(flow, "ready", graph.Stages, graph.TerminalStages, nil, nil, nil)
+		projection.Edges = []contracts.WorkflowStageTopologyEdge{edge}
 		admitted, err := projection.AdmitTransition(edge.Site(), edge.From, edge.To)
 		if err != nil {
 			t.Fatal(err)

@@ -83,6 +83,9 @@ func applyMaterializedEngineStateMutationForTest(
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
 	}
+	if instance.CurrentState == "" {
+		instance.CurrentState = "pending"
+	}
 	if err := applyEngineStateMutation(instance, mutation, allowedFields, source, flowID); err != nil {
 		t.Fatalf("apply materialized engine state mutation: %v", err)
 	}
@@ -427,9 +430,8 @@ func TestPrepareTerminalFlowInstanceDeactivationIgnoresRootWorkflowEntity(t *tes
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:           "root",
-			InitialStage:   "pending",
-			TerminalStages: []string{"done"},
+			Name:         "root",
+			InitialStage: "pending",
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"root": {},

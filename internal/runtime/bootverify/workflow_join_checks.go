@@ -95,13 +95,13 @@ func checkJoinValidation(c *checkerContext) []Finding {
 				if !spec.OnCompleteFound || joinRuleEmpty(spec.OnComplete) {
 					findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" requires a non-empty on_complete outcome"))
 				}
-				findings = append(findings, validateJoinOutcome(c.source, declarationLocation, flowID, nodeID, eventType, "on_complete", spec.OnComplete, c.source.FlowStates(flowID), resultType, true)...)
+				findings = append(findings, validateJoinOutcome(c.source, declarationLocation, flowID, nodeID, eventType, "on_complete", spec.OnComplete, compiledStageIDsForFlow(c.source, flowID), resultType, true)...)
 				continue
 			}
 			if !flowUsesAuthoredStages(c.source, flowID) {
 				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" requires an authored stages: lifecycle"))
 			}
-			if spec.Stage == "" || !containsString(c.source.FlowStates(flowID), spec.Stage) {
+			if spec.Stage == "" || !containsString(compiledStageIDsForFlow(c.source, flowID), spec.Stage) {
 				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s references unknown stage %q", prefix, spec.Stage)))
 			}
 			findings = append(findings, c.validateJoinPaths(declarationLocation, flowID, nodeID, eventType, spec)...)
@@ -128,8 +128,8 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			} else if !joinDelayValid(c.source, flowID, spec.Timeout.After) {
 				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s timeout.after %q must be a positive duration or resolved policy-scalar duration", prefix, spec.Timeout.After)))
 			}
-			findings = append(findings, validateJoinOutcome(c.source, declarationLocation, flowID, nodeID, eventType, "on_complete", spec.OnComplete, c.source.FlowStates(flowID), resultType, false)...)
-			findings = append(findings, validateJoinOutcome(c.source, declarationLocation, flowID, nodeID, eventType, "timeout", spec.Timeout.Outcome, c.source.FlowStates(flowID), resultType, false)...)
+			findings = append(findings, validateJoinOutcome(c.source, declarationLocation, flowID, nodeID, eventType, "on_complete", spec.OnComplete, compiledStageIDsForFlow(c.source, flowID), resultType, false)...)
+			findings = append(findings, validateJoinOutcome(c.source, declarationLocation, flowID, nodeID, eventType, "timeout", spec.Timeout.Outcome, compiledStageIDsForFlow(c.source, flowID), resultType, false)...)
 		}
 	}
 	return findings

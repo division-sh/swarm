@@ -20,6 +20,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -289,7 +290,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 				countingStore,
 				occurrence,
 				secondHash,
-				runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{"standing/root": {"completed"}}),
+				stagecatalogfixture.NewTerminalCatalog(nil, map[string][]string{"standing/root": {"completed"}}),
 			)
 			registration, err := registrar.RegisterCompletionCandidateSink(
 				runtimeCtx,

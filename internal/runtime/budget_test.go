@@ -19,55 +19,93 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
-	trackerA := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-				{ID: "active", Initial: true}, {ID: "done", Terminal: true},
-			}},
-		},
-	}), executionposture.Live)
-	trackerB := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-				{ID: "active", Initial: true}, {ID: "closed", Terminal: true},
-			}},
-		},
-	}), executionposture.Live)
-
-	if got, want := trackerA.TerminalInstanceStates(), []string{"done"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("trackerA.TerminalInstanceStates() = %#v, want %#v", got, want)
+func TestBudgetRecoveryStageClassifierKeepsFlowScopedTerminality(t *testing.T) {
+	root := runtimecontracts.BuildWorkflowStageTopology(".", "ready", []string{"ready", "done"}, []string{"done"}, nil, nil, nil)
+	child := runtimecontracts.BuildWorkflowStageTopology("child", "done", []string{"ready", "done"}, []string{"ready"}, nil, nil, nil)
+	owner, err := runtimecontracts.NewWorkflowStageClassifier(root, map[string]runtimecontracts.WorkflowStageTopology{"child": child})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got, want := trackerB.TerminalInstanceStates(), []string{"closed"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("trackerB.TerminalInstanceStates() = %#v, want %#v", got, want)
+	for _, tc := range []struct {
+		flow, stage     string
+		terminal, known bool
+	}{
+		{"", "done", true, true}, {"child", "done", false, true},
+		{"child", "ready", true, true}, {"", "ready", false, true},
+		{"child", "Done", false, false}, {"foreign", "done", false, false},
+	} {
+		got, known := owner.Terminal(tc.flow, tc.flow, tc.stage)
+		if got != tc.terminal || known != tc.known {
+			t.Errorf("flow %q stage %q: terminal=%v known=%v, want %v/%v", tc.flow, tc.stage, got, known, tc.terminal, tc.known)
+		}
 	}
 }
 
-func TestBudgetTrackerUsesRootTerminalStagesNotChildAggregate(t *testing.T) {
-	tracker := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{
-				Declared: true,
-				Entries: []runtimecontracts.FlowStageDeclaration{
-					{ID: "ready", Initial: true},
-					{ID: "done"},
-					{ID: "archived", Terminal: true},
-				},
-			},
+func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
+	artifactA := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# selected-budget-source-a\n"))
+	hashA := artifactA.BundleHash()
+	artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# selected-budget-source-b\n"))
+	hashB := artifactB.BundleHash()
+	makeSource := func(hash string, terminal string) semanticview.Source {
+		return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Semantics: runtimecontracts.WorkflowSemanticView{Version: hash, StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+				".": runtimecontracts.BuildWorkflowStageTopology(".", "shared", []string{"shared", "fresh"}, []string{terminal}, nil, nil, nil),
+			}},
+			Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+				"budget_warning_percent": {Value: 50}, "budget_throttle_percent": {Value: 75}, "budget_emergency_percent": {Value: 90},
+			}},
+		})
+	}
+	sourceA, sourceB := makeSource(hashA, "fresh"), makeSource(hashB, "shared")
+	bundleA, _ := semanticview.Bundle(sourceA)
+	bundleA.SourceArtifact = artifactA
+	bundleB, _ := semanticview.Bundle(sourceB)
+	bundleB.SourceArtifact = artifactB
+	const entityA, entityB, terminalB = "entity-a", "entity-b", "terminal-b"
+	store := &budgetSpendStoreCapture{sum: 0.95, targets: []budgetspend.ProjectionTarget{
+		{RunID: "run-a", EntityID: entityA, BundleHash: hashA, Stage: "shared"},
+		{RunID: "run-b", EntityID: terminalB, BundleHash: hashB, Stage: "shared"},
+		{RunID: "run-b", EntityID: entityB, BundleHash: hashB, Stage: "fresh"},
+		{RunID: "run-b", EntityID: entityA, BundleHash: hashB, Stage: "fresh"},
+	}}
+	eventStore := &bootSelfCheckDescriptorStore{}
+	bus, err := newRuntimeTestEventBus(t, eventStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loads := 0
+	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
+		"budget": map[string]any{"per_entity_monthly_cap": 1},
+	}}, nil, nil, sourceA, executionposture.Live, BudgetRecoveryStageSources{
+		CurrentBundleHash: hashA,
+		Load: func(_ context.Context, hash string) (semanticview.Source, error) {
+			loads++
+			if hash != hashB {
+				t.Fatalf("loaded unexpected bundle %q", hash)
+			}
+			return sourceB, nil
 		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			TerminalStages: []string{"done", "archived"},
-			FlowTerminal: map[string][]string{
-				"child": {"done"},
-			},
-		},
-	}), executionposture.Live)
-
-	if got, want := tracker.TerminalInstanceStates(), []string{"archived"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("TerminalInstanceStates() = %#v, want root-only %#v", got, want)
+	})
+	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
+		t.Fatal(err)
+	}
+	if loads != 1 || tracker.CurrentState("entity", entityA) != "emergency" || tracker.CurrentState("entity", entityB) != "emergency" || tracker.CurrentState("entity", terminalB) != "ok" {
+		t.Fatalf("selected source recovery: loads=%d a=%q b=%q terminal=%q", loads, tracker.CurrentState("entity", entityA), tracker.CurrentState("entity", entityB), tracker.CurrentState("entity", terminalB))
+	}
+	if len(store.sumQueries) != 2 {
+		t.Fatalf("entity dedup/spend queries = %#v, want exactly two", store.sumQueries)
+	}
+	bundleA.SourceArtifact = artifactB
+	store.sumQueries = nil
+	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err == nil {
+		t.Fatal("current runtime source with foreign artifact was accepted")
+	}
+	if len(store.sumQueries) != 0 {
+		t.Fatalf("mismatched current source changed entity budget projection: %#v", store.sumQueries)
 	}
 }
 
@@ -88,7 +126,7 @@ func (s *budgetSpendStoreCapture) ResolveFlowInstance(context.Context, string, s
 	return "", nil
 }
 
-func (s *budgetSpendStoreCapture) ListBudgetProjectionTargets(context.Context, []string) ([]budgetspend.ProjectionTarget, error) {
+func (s *budgetSpendStoreCapture) ListBudgetProjectionTargets(context.Context) ([]budgetspend.ProjectionTarget, error) {
 	s.calls = append(s.calls, "targets")
 	return append([]budgetspend.ProjectionTarget(nil), s.targets...), nil
 }
@@ -143,7 +181,7 @@ func TestBudgetTrackerProjectsCommittedCompletionIntoThresholdEventAndEmergencyS
 	})
 	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
 		"budget": map[string]any{"system_monthly_cap": 1},
-	}}, mailbox, nil, source, executionposture.Live)
+	}}, mailbox, nil, source, executionposture.Live, BudgetRecoveryStageSources{})
 
 	tracker.ProjectCommittedCompletionSpend(testAuthorActivityContext(context.Background()), runtimeeffects.CompletionSpendProjection{AttemptID: "attempt-1"})
 	events := eventStore.appendedEvents()
@@ -181,7 +219,7 @@ func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 		"budget_warning_percent": {Value: 50}, "budget_throttle_percent": {Value: 75}, "budget_emergency_percent": {Value: 90},
 	}}})
-	tracker := NewBudgetTracker(spendStore, bus, &config.Config{Extensions: map[string]any{"budget": map[string]any{"system_monthly_cap": 1}}}, nil, nil, source, executionposture.Live)
+	tracker := NewBudgetTracker(spendStore, bus, &config.Config{Extensions: map[string]any{"budget": map[string]any{"system_monthly_cap": 1}}}, nil, nil, source, executionposture.Live, BudgetRecoveryStageSources{})
 	runID, parentID := uuid.NewString(), uuid.NewString()
 	inbound := eventtest.RunCreatingRootIngressWithMode(parentID, "work.received", "gateway", "task-1", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(), executionmode.Mock)
 	ctx := runtimecorrelation.WithInboundEvent(testAuthorActivityContext(context.Background()), inbound)
@@ -198,13 +236,15 @@ func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
 }
 
 func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext(t *testing.T) {
+	artifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# recovery-scopes\n"))
+	bundleHash := artifact.BundleHash()
 	entityA := "10000000-0000-4000-8000-000000000001"
 	entityB := "20000000-0000-4000-8000-000000000002"
 	store := &budgetSpendStoreCapture{
 		sum: 0.95,
 		targets: []budgetspend.ProjectionTarget{
-			{RunID: "10000000-0000-4000-8000-000000000010", EntityID: entityA},
-			{RunID: "20000000-0000-4000-8000-000000000020", EntityID: entityB},
+			{RunID: "10000000-0000-4000-8000-000000000010", EntityID: entityA, BundleHash: bundleHash, Stage: "active"},
+			{RunID: "20000000-0000-4000-8000-000000000020", EntityID: entityB, BundleHash: bundleHash, Stage: "active"},
 		},
 	}
 	eventStore := &bootSelfCheckDescriptorStore{}
@@ -213,6 +253,10 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		SourceArtifact: artifact,
+		Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
+			".": runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
+		}},
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"budget_warning_percent":   {Value: 50},
 			"budget_throttle_percent":  {Value: 75},
@@ -225,7 +269,7 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 			"global_monthly_cap":     1,
 			"per_entity_monthly_cap": 1,
 		},
-	}}, nil, nil, source, executionposture.Live)
+	}}, nil, nil, source, executionposture.Live, BudgetRecoveryStageSources{CurrentBundleHash: bundleHash})
 
 	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("ProjectRecoveryBudgetState: %v", err)

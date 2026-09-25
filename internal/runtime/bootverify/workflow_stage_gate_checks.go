@@ -37,12 +37,12 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 		} else {
 			seen[key] = location
 		}
-		states := normalizedGateSet(c.source.FlowStates(flowID))
-		terminal := normalizedGateSet(c.source.FlowTerminalStages(flowID))
-		if _, ok := states[stage]; !ok {
+		graph, graphOK := semanticview.WorkflowStageTopology(c.source, flowID)
+		stageRef, stageErr := graph.ResolveStage(stage)
+		if !graphOK || graph.FlowID != flowID || stageErr != nil {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("gate source stage %s is not declared", stage)))
 		}
-		if _, ok := terminal[stage]; ok {
+		if stageErr == nil && stageRef.IsTerminal() {
 			findings = append(findings, stageGateFinding(location, fmt.Sprintf("terminal stage %s cannot own an actionable gate", stage)))
 		}
 		entityType, _ := semanticview.ResolveEntityStructuralType(c.source, flowID)
@@ -70,7 +70,7 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 			case target == stage:
 				findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s targets the current stage %s; use a bounded loop row for re-entry", verdict, stage)))
 			default:
-				if _, ok := states[target]; !ok {
+				if _, err := graph.ResolveStage(target); !graphOK || graph.FlowID != flowID || err != nil {
 					findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s advances_to undeclared stage %s", verdict, target)))
 				}
 			}
@@ -204,16 +204,6 @@ func stageGateExpressionText(expression runtimecontracts.ExpressionValue) string
 		}
 	}
 	return ""
-}
-
-func normalizedGateSet(values []string) map[string]struct{} {
-	out := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			out[value] = struct{}{}
-		}
-	}
-	return out
 }
 
 func workflowStageIDs(stages []runtimecontracts.WorkflowStageContract) []string {
