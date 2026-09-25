@@ -179,7 +179,7 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 }
 
 func TestEntityDefiniteAssignmentStages(t *testing.T) {
-	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "bypass", "same destination outcomes", "on_complete outcomes", "same event different node", "zero trip", "backedge cannot prove first entry"} {
+	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "nontransitioning guarded reader", "nontransitioning clear", "bypass", "same destination outcomes", "on_complete outcomes", "same event different node", "zero trip", "backedge cannot prove first entry"} {
 		t.Run(variant, func(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: assignment-proof\n")
@@ -196,6 +196,7 @@ work.scored:
   score: integer
 work.consume: {}
 work.bypass: {}
+work.clear: {}
 work.result:
   score: integer
 `)
@@ -231,6 +232,18 @@ work.result:
 			}
 			if variant == "guard short circuit" {
 				nodes = strings.Replace(nodes, `guard: {check: "_entity.current_state == 'consume'"}`, `guard: {check: "_entity.current_state == 'consume' && entity.score > 0"}`, 1)
+			}
+			if variant == "nontransitioning guarded reader" {
+				nodes = strings.Replace(nodes, "      advances_to: done\n", "", 1)
+			}
+			if variant == "nontransitioning clear" {
+				nodes = strings.Replace(nodes, "subscribes_to: [work.opened, work.scored, work.consume, work.bypass]", "subscribes_to: [work.opened, work.scored, work.consume, work.bypass, work.clear]", 1)
+				nodes += `    work.clear:
+      guard: {check: "_entity.current_state == 'consume'"}
+      data_accumulation:
+        writes:
+          - {op: clear, target: entity.score}
+`
 			}
 			if variant == "same destination outcomes" || variant == "on_complete outcomes" {
 				nodes = strings.Replace(nodes, "      data_accumulation:\n        writes: [score]\n      advances_to: consume", `      rules:
@@ -278,7 +291,7 @@ work.result:
 					missing = true
 				}
 			}
-			wantMissing := variant == "bypass" || variant == "same destination outcomes" || variant == "on_complete outcomes" || variant == "same event different node" || variant == "zero trip" || variant == "backedge cannot prove first entry"
+			wantMissing := variant == "nontransitioning clear" || variant == "bypass" || variant == "same destination outcomes" || variant == "on_complete outcomes" || variant == "same event different node" || variant == "zero trip" || variant == "backedge cannot prove first entry"
 			if missing != wantMissing {
 				t.Fatalf("missing=%t, want %t: %#v", missing, wantMissing, findings)
 			}
