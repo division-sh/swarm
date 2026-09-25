@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/testplanning"
 )
 
 func TestWholeJobEvidenceIsExactAndIncludesAllCosts(t *testing.T) {
@@ -60,6 +62,40 @@ func testWholeJobEvidence(t *testing.T, event string) {
 	var report bytes.Buffer
 	if err := WriteBudgetMarkdown(&report, result); err != nil || !strings.Contains(report.String(), "60s | 5s | 50s") {
 		t.Fatalf("whole-job markdown=%s err=%v", report.String(), err)
+	}
+	skippedSoak := ActionJob{
+		ID: 99, RunID: 1, RunAttempt: 1, HeadSHA: workflowHeadSHA,
+		Name: "Go proof ${{ matrix.unit }}", Status: "completed", Conclusion: "skipped",
+	}
+	for _, kind := range []string{"empty_soak", "wrong_head", "wrong_attempt", "not_skipped", "has_steps", "duplicate", "planned_soak"} {
+		t.Run(kind, func(t *testing.T) {
+			candidate := skippedSoak
+			values := append(append([]ActionJob(nil), decoded...), candidate)
+			checkedPlan := plan
+			switch kind {
+			case "wrong_head":
+				values[len(values)-1].HeadSHA = "wrong"
+			case "wrong_attempt":
+				values[len(values)-1].RunAttempt++
+			case "not_skipped":
+				values[len(values)-1].Conclusion = "success"
+			case "has_steps":
+				values[len(values)-1].Steps = []ActionStep{{Name: "Run exact planned proof unit"}}
+			case "duplicate":
+				values = append(values, candidate)
+			case "planned_soak":
+				checkedPlan.Units = append(append([]testplanning.ProofUnit(nil), plan.Units...), testplanning.ProofUnit{ID: "soak", BudgetClass: "soak"})
+			}
+			got := EvaluateBudget(timingTestPolicy(), opts, commands)
+			AttachJobEvidence(&got, checkedPlan, 1, 1, workflowHeadSHA, values)
+			want := BudgetIncomplete
+			if kind == "empty_soak" {
+				want = BudgetPass
+			}
+			if got.Status != want || got.Jobs.UnitCount != len(plan.Units) {
+				t.Fatalf("%s placeholder status=%s jobs=%+v problems=%v", kind, got.Status, got.Jobs, got.Problems)
+			}
+		})
 	}
 	for _, kind := range []string{"missing", "duplicate", "wrong_head", "wrong_attempt", "wrong_run", "unfinished", "failed", "cancelled", "missing_upload", "invalid_time", "unknown_unit", "missing_workflow_head", "wrong_workflow_head", "wrong_command_head"} {
 		t.Run(kind, func(t *testing.T) {
