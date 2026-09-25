@@ -75,6 +75,13 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	if err != nil {
 		return nil, err
 	}
+	if plan.ResourceSource != nil {
+		if intent.Source.Kind != fanoutobligation.SourceResourceVersion || intent.Source.Declaration != plan.ResourceSource.Declaration {
+			return nil, fmt.Errorf("fan-out resource intent disagrees with compiled source")
+		}
+	} else if intent.Source.Kind == fanoutobligation.SourceResourceVersion {
+		return nil, fmt.Errorf("fan-out resource intent has no compiled resource source")
+	}
 
 	payload, err := decodeFanOutPayload(trigger.Payload())
 	if err != nil {
@@ -126,6 +133,9 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	}
 	e.bindFrameExpressionSchemas(frame)
 	emitSpec := plan.Emit
+	if plan.ResourceSource != nil {
+		emitSpec.Event = plan.EmittedEventType()
+	}
 	eventType, err := admittedDeclarativeEmitEventType(frame, emitSpec.EventType())
 	if err != nil {
 		return nil, err
@@ -181,6 +191,20 @@ func (p *FanOutEvaluation) EvaluateOrdinal(ctx context.Context, item any, ordina
 	state.Join, state.Loop = cloneStringAnyMap(state.Join), cloneStringAnyMap(state.Loop)
 	state.FanOut = map[string]any{"item": item, "index": ordinal, "count": p.intent.Request.Cardinality}
 	frame.state, frame.req.State = state, state.State
+	if p.intent.Source.Kind == fanoutobligation.SourceResourceVersion {
+		row, ok := item.(map[string]any)
+		if !ok {
+			return EmitIntent{}, fmt.Errorf("fan-out resource row %d is not an event payload object", ordinal)
+		}
+		nextDepth, err := nextChainDepth(p.intent.Request.Capsule.ChainDepth, p.executor.MaxChainDepth())
+		if err != nil {
+			return EmitIntent{}, err
+		}
+		if p.routeErr != nil {
+			return EmitIntent{}, p.routeErr
+		}
+		return p.executor.newEmitIntentWithEnvelope(&frame, p.emit.Event, cloneStringAnyMap(row), nextDepth, p.envelope)
+	}
 	base := p.executor.currentContext(&frame)
 	// Ref/literal results may alias raw inputs during output-path assembly.
 	// Share a projection only when every evaluated field has CEL result isolation.

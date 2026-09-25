@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1061,7 +1062,7 @@ func routeMaterializationNodeSource(flowID string, node runtimecontracts.SystemN
 			eventsByName[eventType] = runtimecontracts.EventCatalogEntry{}
 		}
 	}
-	for _, eventType := range runtimecontracts.EffectiveSystemNodeProduces(node) {
+	for _, eventType := range runtimecontracts.EffectiveSystemNodeProduces(nil, runtimeidentity.ExecutableNode{}, node) {
 		if eventType = strings.TrimSpace(eventType); eventType != "" {
 			eventsByName[eventType] = runtimecontracts.EventCatalogEntry{}
 		}

@@ -17,7 +17,7 @@ func TestHandlerEmitEventsPreservesCompletionSites(t *testing.T) {
 	}
 
 	want := []string{"handler.completed", "join.completed", "join.timed_out"}
-	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, want) {
+	if got := HandlerEmitEvents(handler, nil); !reflect.DeepEqual(got, want) {
 		t.Fatalf("HandlerEmitEvents() = %#v, want %#v", got, want)
 	}
 }
@@ -41,7 +41,7 @@ func TestHandlerEmitEventsIncludesOnSuccessAfterRules(t *testing.T) {
 		}},
 	}
 
-	got := HandlerEmitEvents(handler)
+	got := HandlerEmitEvents(handler, nil)
 	want := []string{"rule.emitted", "handler.succeeded"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("HandlerEmitEvents() = %#v, want %#v", got, want)
@@ -78,7 +78,7 @@ func TestHandlerRuleEmitTemplateSitesMergeHandlerTemplateWithRuleFields(t *testi
 	if got := len(sites); got != 2 {
 		t.Fatalf("HandlerRuleEmitTemplateSites len = %d, want 2", got)
 	}
-	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, []string{"account.bucketed"}) {
+	if got := HandlerEmitEvents(handler, nil); !reflect.DeepEqual(got, []string{"account.bucketed"}) {
 		t.Fatalf("HandlerEmitEvents = %#v, want one effective account.bucketed", got)
 	}
 	if got := sites[0].Spec.EventType(); got != "account.bucketed" {

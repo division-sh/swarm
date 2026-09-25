@@ -450,7 +450,7 @@ type endpointCensusBuilder struct {
 func (b *endpointCensusBuilder) addNodeEndpoints() {
 	authoredByNodeEvent := map[string]struct{}{}
 	for _, site := range AuthoredEmitSites(b.source) {
-		eventType := site.Spec.EventType()
+		eventType := site.EventType()
 		endpoint := b.endpoint(EventEndpointProducer, EventEndpointNodeHandler, site.FlowPathIdentity(), eventType)
 		endpoint.FlowPath = strings.TrimSpace(site.FlowPath)
 		endpoint.NodeID = site.NodeID()

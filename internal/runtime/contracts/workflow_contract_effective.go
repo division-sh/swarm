@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const (
@@ -270,11 +271,11 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	return out
 }
 
-func EffectiveSystemNodeProduces(node SystemNodeContract) []string {
+func EffectiveSystemNodeProduces(bundle *WorkflowContractBundle, owner runtimeidentity.ExecutableNode, node SystemNodeContract) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(node.EventHandlers))
 	for _, eventType := range sortedContractKeys(node.EventHandlers) {
-		for _, emitted := range HandlerEmitEvents(node.EventHandlers[eventType]) {
+		for _, emitted := range HandlerEmitEvents(node.EventHandlers[eventType], bundle.FanOutPlansForHandler(owner, eventType)) {
 			emitted = strings.TrimSpace(emitted)
 			if emitted == "" {
 				continue

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -28,6 +29,12 @@ var errPipelineTestObligationUnavailable = errors.New("pipeline unit fixture has
 type unavailablePipelineTestObligationOwner struct{}
 
 type unavailablePipelineTestFanOutOwner struct{}
+
+type unavailablePipelineTestResourceSource struct{}
+
+func (unavailablePipelineTestResourceSource) LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error) {
+	return durabledata.PinnedSource{}, errPipelineTestObligationUnavailable
+}
 
 var _ FanOutObligationOwner = unavailablePipelineTestFanOutOwner{}
 
@@ -305,6 +312,7 @@ func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
 		{"entity_collection_reader", p.store.entityCollectionReader == nil},
 		{"target_reader", p.store.targetReader == nil},
 		{"initial_commits", p.store.initialCommits == nil},
+		{"resource_source", p.store.resourceSource == nil},
 	}
 	missing := make([]string, 0, len(roles))
 	for _, role := range roles {
