@@ -92,3 +92,56 @@ func TestEntityLastFieldClearAndColdReloadBothStores(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectedHandlerSparsePresenceWriteAndEmitBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			source := loadWorkflowTempSource(t, map[string]string{
+				"schema.yaml":   "initial_state: active\nstates: [active]\n",
+				"entities.yaml": "test_entity:\n  kill_reason: text?\n  observed_absence: boolean?\n",
+				"events.yaml":   "work.ready: {}\nwork.emitted:\n  observed_absence: boolean\n",
+				"nodes.yaml": `node-a:
+  execution_type: system_node
+  subscribes_to: [work.ready]
+  event_handlers:
+    work.ready:
+      data_accumulation:
+        writes:
+          - target_field: observed_absence
+            expression: "!has(entity.kill_reason)"
+      emit:
+        event: work.emitted
+        fields:
+          observed_absence: {ref: entity.observed_absence}
+`,
+			})
+			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+			})
+			configureWorkflowLifecycleForTest(t, pc)
+			configurePipelineTestDeliveryOwner(t, pc)
+			var ctx context.Context
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+			instance, result := executeExistingOwnerBehavior(t, ctx, pc, "sparse-presence-emit", "work.ready", json.RawMessage(`{}`), nil, nil)
+			if !result.handled || instance.Fields["observed_absence"] != true {
+				t.Fatalf("selected handler did not persist absence decision: handled=%v fields=%#v", result.handled, instance.Fields)
+			}
+			if _, present := instance.Fields["kill_reason"]; present {
+				t.Fatalf("unassigned field materialized: %#v", instance.Fields)
+			}
+			if len(result.emissions) != 1 {
+				t.Fatalf("selected handler emissions = %d, want one", len(result.emissions))
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(result.emissions[0].Payload(), &payload); err != nil || payload["observed_absence"] != true {
+				t.Fatalf("sparse presence payload = %#v, err=%v", payload, err)
+			}
+		})
+	}
+}

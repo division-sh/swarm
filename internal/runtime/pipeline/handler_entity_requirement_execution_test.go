@@ -211,6 +211,9 @@ func executeExistingOwnerBehavior(
 		t.Fatalf("execute %s handler: %v", name, err)
 	}
 	result := existingOwnerExecutionResult{handled: executed.Handled}
+	for _, intent := range executed.FollowUp.Emissions {
+		result.emissions = append(result.emissions, intent.Event)
+	}
 	if executed.Outcome != nil {
 		result.status = executed.Outcome.Status
 	}
@@ -222,8 +225,9 @@ func executeExistingOwnerBehavior(
 }
 
 type existingOwnerExecutionResult struct {
-	handled bool
-	status  HandlerOutcomeStatus
+	handled   bool
+	status    HandlerOutcomeStatus
+	emissions []events.Event
 }
 
 func handlerEntityRequirementExecutionSource() semanticview.Source {
