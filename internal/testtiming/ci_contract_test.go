@@ -370,9 +370,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
 	serveappUnits := []string{
-		"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-text",
+		"serveapp-channel", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
-		"serveapp-mailbox", "serveapp-mailbox-p-q", "serveapp-mailbox-r-z",
+		"serveapp-mailbox", "serveapp-mailbox-p-q",
 		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-standing",
 	}
 	var serveappPatterns []*regexp.Regexp
@@ -401,25 +401,17 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "contracts"), contractsPatterns)
-	apiPatterns := make([]*regexp.Regexp, 0, 2)
-	for _, id := range []string{"api-operator", "api-rest"} {
-		unit, exists := policy.Units[id]
-		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/apiv1"}) || unit.Run == "" || unit.CountMode != "count-1" {
-			t.Fatalf("%s must retain its complete uncached API partition", id)
-		}
-		apiPatterns = append(apiPatterns, regexp.MustCompile(unit.Run))
-		for name, profile := range policy.Profiles {
-			if name == testplanning.ProfileLocal {
-				continue
-			}
-			if !slices.Contains(profile.Units, id) {
-				t.Fatalf("profile %s omits API partition %s", name, id)
-			}
+	apiUnit, ok := policy.Units["api-full"]
+	if !ok || !slices.Equal(apiUnit.Packages, []string{"github.com/division-sh/swarm/internal/apiv1"}) || apiUnit.Run != "" || apiUnit.CountMode != "count-1" {
+		t.Fatalf("api-full unit = %#v, want complete uncached API package", apiUnit)
+	}
+	for name, profile := range policy.Profiles {
+		if name != testplanning.ProfileLocal && !slices.Contains(profile.Units, "api-full") {
+			t.Fatalf("profile %s omits api-full", name)
 		}
 	}
-	assertGoProofPartition(t, filepath.Join(root, "internal", "apiv1"), apiPatterns)
 	var conformanceUnits []testplanning.ProofUnit
-	for _, id := range []string{"conformance-1", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter", "conformance-soak-sqlite", "conformance-soak-postgres"} {
+	for _, id := range []string{"conformance-1", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-soak-sqlite", "conformance-soak-postgres"} {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
 			t.Fatalf("%s must retain its complete uncached conformance partition", id)
@@ -437,11 +429,11 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if err := testplanning.ValidateConformanceProofPartition(filepath.Join(root, "internal", "runtime", "conformance"), conformanceUnits); err != nil {
 		t.Fatal(err)
 	}
-	storeUnit, ok := policy.Units["store-full"]
-	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
-		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
+	storeUnit, ok := policy.Units["store-admission-full"]
+	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage, testPostgresPackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
+		t.Fatalf("store-admission-full unit = %#v, want complete uncached facade and admission proof", storeUnit)
 	}
-	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-03-m-o", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06"}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process", "store-runtime-fork-generation", "store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04", "store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-full-06"}
 	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
 	for _, unitID := range storeRuntimeUnits {
 		unit, exists := policy.Units[unitID]
@@ -455,10 +447,6 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		storeRuntimePatterns = append(storeRuntimePatterns, regexp.MustCompile(unit.Run))
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "store", "internal", "runtimepersistence"), storeRuntimePatterns)
-	testPostgresUnit, ok := policy.Units["testpostgres-full"]
-	if !ok || !slices.Equal(testPostgresUnit.Packages, []string{testPostgresPackage}) || testPostgresUnit.Run != "" || testPostgresUnit.CountMode != "count-1" || testPostgresUnit.BudgetClass != "broad" {
-		t.Fatalf("testpostgres-full unit = %#v, want complete isolated test-manager proof", testPostgresUnit)
-	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false
 		foundServeapp := map[string]bool{}
@@ -472,10 +460,8 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			if slices.Contains(serveappUnits, unit) {
 				foundServeapp[unit] = true
 			}
-			if unit == "store-full" {
+			if unit == "store-admission-full" {
 				foundStore = true
-			}
-			if unit == "testpostgres-full" {
 				foundTestPostgres = true
 			}
 			for _, storeRuntimeUnit := range storeRuntimeUnits {
@@ -493,10 +479,10 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			}
 		}
 		if !foundStore {
-			t.Errorf("profile %s does not include store-full", profileName)
+			t.Errorf("profile %s does not include store-admission-full", profileName)
 		}
 		if !foundTestPostgres {
-			t.Errorf("profile %s does not include testpostgres-full", profileName)
+			t.Errorf("profile %s does not include store-admission-full for testpostgres", profileName)
 		}
 		for _, storeRuntimeUnit := range storeRuntimeUnits {
 			if !foundStoreRuntime[storeRuntimeUnit] {
