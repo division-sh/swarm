@@ -187,8 +187,9 @@ func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.
 	}
 	defer active.Complete(context.Background(), false)
 
-	var output bytes.Buffer
-	waitingAdmission := testRunAdmission(root, &output)
+	output := newObservedOutput("Test capacity is busy.")
+	waitingAdmission := testRunAdmission(root, nil)
+	waitingAdmission.Output = output
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
@@ -196,12 +197,13 @@ func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.
 		result <- err
 	}()
 	waitForWaitingRuns(t, admission, 1)
+	output.Wait(t)
 	statePath := filepath.Join(root, "runs-v1.json")
 	before, err := os.Stat(statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(40 * time.Millisecond)
+	output.WaitRefresh(t)
 	after, err := os.Stat(statePath)
 	if err != nil {
 		t.Fatal(err)
@@ -224,6 +226,53 @@ func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.
 	}
 	if strings.Count(text, "Test capacity is busy.") < 2 {
 		t.Fatalf("queue status did not refresh:\n%s", text)
+	}
+}
+
+func TestRunAdmissionCancellationBeforeFirstReport(t *testing.T) {
+	root := t.TempDir()
+	admission := testRunAdmission(root, nil)
+	active := acquireTestRun(t, admission, context.Background(), "active", 1)
+	defer active.Complete(context.Background(), false)
+
+	output := newObservedOutput("Test capacity is busy.")
+	waiting := testRunAdmission(root, nil)
+	waiting.Output = output
+	beforeReport := make(chan struct{})
+	proceed := make(chan struct{})
+	calls := 0
+	waiting.now = func() time.Time {
+		calls++
+		if calls == 3 {
+			close(beforeReport)
+			<-proceed
+		}
+		return time.Now()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := waiting.Acquire(ctx, testRunCommand("waiting"), 1)
+		result <- err
+	}()
+	<-beforeReport
+	doc, err := admission.loadRegistry()
+	if err != nil || len(doc.Waiting) != 1 {
+		close(proceed)
+		t.Fatalf("waiting registry = %+v, err=%v", doc, err)
+	}
+	if text := output.String(); text != "" {
+		close(proceed)
+		t.Fatalf("queue report preceded controlled cut: %q", text)
+	}
+	cancel()
+	close(proceed)
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled waiter = %v", err)
+	}
+	if got := strings.Count(output.String(), "Test capacity is busy."); got != 1 {
+		t.Fatalf("reports after cancellation = %d, want one in-flight report", got)
 	}
 }
 
@@ -284,24 +333,29 @@ func TestRunAdmissionReportsUnknownETAWhenEvidenceIsMissing(t *testing.T) {
 }
 
 type observedOutput struct {
-	mu       sync.Mutex
-	buffer   bytes.Buffer
-	needle   []byte
-	observed chan struct{}
-	once     sync.Once
+	mu        sync.Mutex
+	buffer    bytes.Buffer
+	needle    []byte
+	observed  chan struct{}
+	refreshed chan struct{}
+	once      sync.Once
+	refresh   sync.Once
 }
 
 func newObservedOutput(needle string) *observedOutput {
-	return &observedOutput{needle: []byte(needle), observed: make(chan struct{})}
+	return &observedOutput{needle: []byte(needle), observed: make(chan struct{}), refreshed: make(chan struct{})}
 }
 
 func (o *observedOutput) Write(p []byte) (int, error) {
 	o.mu.Lock()
 	n, err := o.buffer.Write(p)
-	matched := bytes.Contains(o.buffer.Bytes(), o.needle)
+	matches := bytes.Count(o.buffer.Bytes(), o.needle)
 	o.mu.Unlock()
-	if matched {
+	if matches > 0 {
 		o.once.Do(func() { close(o.observed) })
+	}
+	if matches > 1 {
+		o.refresh.Do(func() { close(o.refreshed) })
 	}
 	return n, err
 }
@@ -318,6 +372,15 @@ func (o *observedOutput) Wait(t *testing.T) {
 	case <-o.observed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for queue report")
+	}
+}
+
+func (o *observedOutput) WaitRefresh(t *testing.T) {
+	t.Helper()
+	select {
+	case <-o.refreshed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second queue report")
 	}
 }
 
