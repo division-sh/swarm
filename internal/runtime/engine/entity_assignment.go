@@ -155,19 +155,21 @@ func BuildEntityAssignmentAnalysis(source semanticview.Source, flowID string) (*
 		}
 		// A committed non-transitioning handler can invalidate a previously
 		// established optional path while staying in its current stage.
-		for _, scope := range a.topology.Handlers {
-			handler, found := source.ExecutableNodeEventHandler(scope.Node, scope.EventType)
-			if !found {
+		for _, record := range source.ExecutableNodeRecords() {
+			node, err := record.Identity()
+			if err != nil || node.FlowPath() != flowID {
 				continue
 			}
-			for _, stage := range scope.Stages {
-				before, reached := a.stages[stage]
-				if !reached || !entityAssignmentGuardAllows(handler, stage) {
-					continue
-				}
-				for _, outcome := range entityAssignmentOutcomes(handler) {
-					if entityAssignmentDestination(handler, outcome) == "" && entityAssignmentOutcomeAllows(outcome, stage) {
-						merge(stage, a.transfer(scope.Node, scope.EventType, handler, outcome, before, nil))
+			for event, handler := range record.Entry.EventHandlers {
+				for _, stage := range a.handlerStages(node, event) {
+					before, reached := a.stages[stage]
+					if !reached || !entityAssignmentGuardAllows(handler, stage) {
+						continue
+					}
+					for _, outcome := range entityAssignmentOutcomes(handler) {
+						if entityAssignmentDestination(handler, outcome) == "" && entityAssignmentOutcomeAllows(outcome, stage) {
+							merge(stage, a.transfer(node, event, handler, outcome, before, nil))
+						}
 					}
 				}
 			}
@@ -189,11 +191,24 @@ func (a *EntityAssignmentAnalysis) StageFacts(stage string) entityruntime.Assign
 }
 
 func (a *EntityAssignmentAnalysis) BeforeRead(node identity.ExecutableNode, event string, handler c.SystemNodeEventHandler, point EntityAssignmentPoint) entityruntime.AssignmentFacts {
-	stages := a.topology.HandlerStages(node, event)
-	if len(stages) == 0 {
-		stages = []string{""}
+	return a.beforeReadInStages(node, event, handler, point, a.handlerStages(node, event))
+}
+
+func (a *EntityAssignmentAnalysis) handlerStages(node identity.ExecutableNode, event string) []string {
+	if stages := a.topology.HandlerStages(node, event); len(stages) != 0 {
+		return stages
 	}
-	return a.beforeReadInStages(node, event, handler, point, stages)
+	stages := make([]string, 0, a.topology.StageCount())
+	for _, id := range a.topology.StageIDs() {
+		stage, err := a.topology.ResolveStage(id)
+		if err == nil && !stage.IsTerminal() {
+			stages = append(stages, stage.ID())
+		}
+	}
+	if len(stages) == 0 {
+		return []string{""}
+	}
+	return stages
 }
 
 func (a *EntityAssignmentAnalysis) beforeReadInStages(node identity.ExecutableNode, event string, handler c.SystemNodeEventHandler, point EntityAssignmentPoint, stages []string) entityruntime.AssignmentFacts {
@@ -232,10 +247,7 @@ func (a *EntityAssignmentAnalysis) UnassignedReads(node identity.ExecutableNode,
 	if point.Step != StepGuard && !point.Condition {
 		return workflowexpr.RequiredEntityReferences(expression, EntityAssignmentPresencePaths(a.BeforeRead(node, event, handler, point)))
 	}
-	stages := a.topology.HandlerStages(node, event)
-	if len(stages) == 0 {
-		stages = []string{""}
-	}
+	stages := a.handlerStages(node, event)
 	missing := map[string]struct{}{}
 	for _, stage := range stages {
 		if point.HasGuardCheckIndex {

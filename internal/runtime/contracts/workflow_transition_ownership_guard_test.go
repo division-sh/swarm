@@ -380,7 +380,6 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/engine.BuildEntityAssignmentAnalysis::call internal/runtime/semanticview.WorkflowStageTopology": 1,
 		"internal/runtime/engine.BuildEntityAssignmentAnalysis::carrier fields":                                           13,
 		"internal/runtime/engine.BuildEntityAssignmentAnalysis::edge inventory":                                           1,
-		"internal/runtime/engine.BuildEntityAssignmentAnalysis::graph metadata":                                           1,
 		"internal/runtime/engine.entityAssignmentEdgeSelects::carrier fields":                                             5,
 		// T20/#2424: exact observation transport, including explicit NotReached at
 		// preparation exits; none of these sites reconstructs a final fact.
