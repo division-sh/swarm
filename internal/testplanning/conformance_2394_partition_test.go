@@ -94,7 +94,7 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 			}
 		}
 	}
-	old := regexp.MustCompile(`^(Test($|[^FH].*)|Example.*|Fuzz.*)$`)
+	old := regexp.MustCompile(`^(Test($|[^FHV].*)|Example.*|Fuzz.*)$`)
 	for _, name := range names {
 		owners := 0
 		for i, pattern := range patterns {
@@ -117,6 +117,47 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 		}
 	}
 	return groups, nil
+}
+
+func TestConformanceVolumeFanOutProofPartition(t *testing.T) {
+	policy, names, _ := conformance2394Fixture(t)
+	const unitID = "conformance-heavy-fanout"
+	const selection = `^TestVolumeFanOut(ExactJobflow1362ImportRouteAndSettleBothStores|ServingCardinalityMixedOutputPartitionEquivalenceBothStores)$`
+	unit := policy.Units[unitID]
+	want := UnitPolicy{
+		Packages: []string{"github.com/division-sh/swarm/internal/runtime/conformance"},
+		Run:      selection, CountMode: "count-1", EnvironmentID: "ci-postgres-gateway-empty-v1", BudgetClass: "full",
+	}
+	if !reflect.DeepEqual(unit, want) {
+		t.Fatalf("heavy fan-out proof envelope changed: %+v", unit)
+	}
+	selected := regexp.MustCompile(selection)
+	general := regexp.MustCompile(policy.Units["conformance-1"].Run)
+	complement := regexp.MustCompile(policy.Units["conformance-2"].Run)
+	var selectedNames []string
+	for _, name := range names {
+		if !strings.HasPrefix(name, "TestVolume") {
+			continue
+		}
+		if !selected.MatchString(name) || general.MatchString(name) || complement.MatchString(name) {
+			t.Fatalf("volume proof %s is missing or overlaps another conformance unit", name)
+		}
+		selectedNames = append(selectedNames, name)
+	}
+	if len(selectedNames) != 2 {
+		t.Fatalf("heavy fan-out partition has %d roots, want two: %v", len(selectedNames), selectedNames)
+	}
+	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+		count := 0
+		for _, id := range policy.Profiles[profile].Units {
+			if id == unitID {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("%s schedules %s %d times, want one", profile, unitID, count)
+		}
+	}
 }
 
 func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
