@@ -45,7 +45,8 @@ func TestExecutorCarriesDeclaredEntityPresenceToReaders(t *testing.T) {
 					},
 					Nodes: map[string]rc.SystemNodeContract{"worker": {EventHandlers: map[string]rc.SystemNodeEventHandler{"work.received": handler}}},
 				}
-				executor, err := NewExecutor(RuntimeDependencies{Source: sourceWithFixtureStages(mustCompileEngineSource(bundle), ".", "active", "active"), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, schemaBoundWildcardEvaluator{})
+				stored := testStateSnapshot("active", map[string]any{"profile": map[string]any{}, "captured": ""}, nil, nil)
+				executor, err := NewExecutor(RuntimeDependencies{Source: sourceWithFixtureStages(mustCompileEngineSource(bundle), ".", "active", "active"), StateRepo: sparseSnapshotRepo{snapshot: stored}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, schemaBoundWildcardEvaluator{})
 				if err != nil {
 					t.Fatal(err)
 				}

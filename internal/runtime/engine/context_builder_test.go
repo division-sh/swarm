@@ -188,7 +188,7 @@ func TestStateMutationAndResultBucketHelpers(t *testing.T) {
 	}
 }
 
-func TestBuildBaseContext_PropagatesEntityMaterializationFailure(t *testing.T) {
+func TestBuildBaseContext_PropagatesPresentEntityValidationFailure(t *testing.T) {
 	input := ContextBuilderInput{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			RootEntities: runtimecontracts.EntityContractsDocument{
@@ -207,12 +207,12 @@ func TestBuildBaseContext_PropagatesEntityMaterializationFailure(t *testing.T) {
 		State: StateSnapshot{
 			EntityID:     "entity-1",
 			CurrentState: "researching",
-			StateCarrier: NewStateCarrier(nil, map[string]bool{}, nil),
+			StateCarrier: NewStateCarrier(map[string]any{"status": "unknown"}, map[string]bool{}, nil),
 		},
 		Payload: map[string]any{},
 	}
 	_, err := BuildBaseContext(input)
-	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared default") {
-		t.Fatalf("BuildBaseContext error = %v, want propagated enum-default invariant violation", err)
+	if err == nil || !strings.Contains(err.Error(), "status") {
+		t.Fatalf("BuildBaseContext error = %v, want invalid present enum rejection", err)
 	}
 }

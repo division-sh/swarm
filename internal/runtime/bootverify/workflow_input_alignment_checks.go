@@ -203,6 +203,9 @@ type dataAccumulationPayloadSourceRef struct {
 }
 
 func dataAccumulationPayloadSourceRefs(write runtimecontracts.WorkflowDataWrite) []dataAccumulationPayloadSourceRef {
+	if write.Operation == runtimecontracts.WorkflowDataOperationClear {
+		return nil
+	}
 	if write.IsContainedOperation() {
 		out := make([]dataAccumulationPayloadSourceRef, 0)
 		out = append(out, expressionPayloadSourceRefs(write.Key, "key")...)

@@ -75,7 +75,6 @@ func applyMaterializedEngineStateMutationForTest(
 	t *testing.T,
 	instance *WorkflowInstance,
 	mutation runtimeengine.StateMutation,
-	allowedFields map[string]struct{},
 	source semanticview.Source,
 	flowID string,
 ) {
@@ -86,7 +85,7 @@ func applyMaterializedEngineStateMutationForTest(
 	if instance.CurrentState == "" {
 		instance.CurrentState = "pending"
 	}
-	if err := applyEngineStateMutation(instance, mutation, allowedFields, source, flowID); err != nil {
+	if err := applyEngineStateMutation(instance, mutation, source, flowID); err != nil {
 		t.Fatalf("apply materialized engine state mutation: %v", err)
 	}
 }
@@ -110,7 +109,10 @@ func assertEntityStateField(t *testing.T, db *sql.DB, entityID, field string, wa
 	}
 }
 
-func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
+func TestApplyEngineStateMutationUsesOnlyCanonicalEntityFields(t *testing.T) {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["research_context"] = runtimecontracts.EntityFieldDecl{Type: "json"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"research_context": map[string]any{"summary": "done"}},
 		StateBuckets: map[string]any{},
@@ -128,12 +130,14 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 			{TargetField: "research_context", SourceField: "research_context"},
 		},
 	}
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, map[string]struct{}{"research_context": {}}, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
 
-	entityProjection, _ := workflowStateBucketObject(*instance, workflowStateBucketEntityProjection)
-	got, ok := entityProjection["research_context"].(map[string]any)
+	got, ok := instance.Fields["research_context"].(map[string]any)
 	if !ok || got["summary"] != "done" {
-		t.Fatalf("entity_projection research_context = %#v", entityProjection["research_context"])
+		t.Fatalf("canonical research_context = %#v", instance.Fields["research_context"])
+	}
+	if _, present := instance.StateBuckets["entity_projection"]; present {
+		t.Fatal("entity mutation created a shadow entity_projection bucket")
 	}
 	if got := instance.Bookkeeping["last_data_accumulation_event"]; got != "research.completed" {
 		t.Fatalf("last_data_accumulation_event = %#v", got)
@@ -149,7 +153,7 @@ func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_c": true}, nil)
 	mutation.SetGate = "g_c"
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
 
 	gates := instance.Gates
 	want := map[string]bool{"g_a": true, "g_b": true, "g_c": true}
@@ -179,7 +183,7 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_validated": true}, nil)
 	mutation.SetGate = "g_validated"
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, source, "child")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, "child")
 
 	gates := instance.Gates
 	if !gates["child/g_validated"] {
@@ -259,6 +263,9 @@ request.received:
 }
 
 func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["flow_path"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields: map[string]any{
 			"flow_path": "child/inst-1",
@@ -268,11 +275,20 @@ func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *
 	mutation := testEngineStateMutation(nil, map[string]bool{"g_ready": true}, nil)
 	mutation.SetGate = "g_ready"
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
 
-	if !instance.Gates["g_ready"] {
+	if !instance.Gates["./g_ready"] {
 		t.Fatalf("gates = %#v, want g_ready=true", instance.Gates)
 	}
+}
+
+func authoredControlCollisionSource() semanticview.Source {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	for _, name := range []string{"business_status", "parent_flow_id", "parent_flow_instance", "parent_entity_id"} {
+		bundle.RootEntities["test_entity"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "text"}
+	}
+	return source
 }
 
 func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t *testing.T) {
@@ -300,7 +316,7 @@ func TestApplyEngineStateMutationPreservesTypedControlAcrossAuthoredCollisions(t
 		"business_status":      "new",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
 	if instance.StorageRef != "review/inst-1" || instance.InstanceID != "inst-1" || instance.EntityID != "child-ent" {
 		t.Fatalf("typed identity = %#v, want original identity", instance)
@@ -339,7 +355,7 @@ func TestApplyEngineStateMutationDoesNotPromoteAuthoredParentRouteNames(t *testi
 		"parent_entity_id":     "parent-ent",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
 	for key, want := range map[string]any{
 		"parent_flow_id": "root", "parent_flow_instance": "root/inst-1", "parent_entity_id": "parent-ent",
@@ -371,7 +387,7 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 		"parent_entity_id":     "wrong-parent",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, authoredControlCollisionSource(), ".")
 
 	if got := instance.Fields["parent_flow_id"]; got != "root" {
 		t.Fatalf("authored parent_flow_id = %#v, want root", got)
@@ -542,7 +558,7 @@ func TestApplyEngineStateMutationRejectsMissingMaterializedEntryTime(t *testing.
 		},
 	}
 
-	err := applyEngineStateMutation(instance, mutation, map[string]struct{}{"name": {}}, source, "scoring")
+	err := applyEngineStateMutation(instance, mutation, source, "scoring")
 	if err == nil || !strings.Contains(err.Error(), "materialized entry time") {
 		t.Fatalf("applyEngineStateMutation error = %v, want materialized entry time refusal", err)
 	}
@@ -563,7 +579,11 @@ func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
 	}
 }
 
-func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumulation(t *testing.T) {
+func TestApplyEngineStateMutationPreservesFieldsAndGatesWithoutShadowProjection(t *testing.T) {
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["composite_score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["test_entity"].Fields["scoring_rubric"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	instance := &WorkflowInstance{
 		Fields:       map[string]any{"composite_score": 0},
 		Gates:        map[string]bool{"g_ready": true},
@@ -575,17 +595,16 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 		"scoring_rubric":  "corpus_rubric",
 	}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, map[string]struct{}{
-		"composite_score": {},
-		"scoring_rubric":  {},
-	}, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, source, ".")
 
-	entityProjection, _ := workflowStateBucketObject(*instance, workflowStateBucketEntityProjection)
-	if got := entityProjection["composite_score"]; got != 71 {
-		t.Fatalf("entity_projection composite_score = %#v, want 71", got)
+	if got := instance.Fields["composite_score"]; got != int64(71) {
+		t.Fatalf("canonical composite_score = %#v, want 71", got)
 	}
-	if got := entityProjection["scoring_rubric"]; got != "corpus_rubric" {
-		t.Fatalf("entity_projection scoring_rubric = %#v", got)
+	if got := instance.Fields["scoring_rubric"]; got != "corpus_rubric" {
+		t.Fatalf("canonical scoring_rubric = %#v", got)
+	}
+	if _, present := instance.StateBuckets["entity_projection"]; present {
+		t.Fatal("entity mutation created a shadow entity_projection bucket")
 	}
 	if !instance.Gates["g_ready"] {
 		t.Fatalf("field-only mutation dropped existing gates: %#v", instance.Gates)
@@ -596,7 +615,7 @@ func TestApplyEngineStateMutationDoesNotCaptureSubjectIDFromMetadata(t *testing.
 	instance := &WorkflowInstance{EntityType: "test_entity"}
 	mutation := testEngineStateMutation(map[string]any{}, nil, nil)
 
-	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, nil, "")
+	applyMaterializedEngineStateMutationForTest(t, instance, mutation, nil, "")
 
 	if got := strings.TrimSpace(asString(instance.Fields["subject_id"])); got != "" {
 		t.Fatalf("metadata subject_id = %q, want removed", got)
@@ -845,10 +864,14 @@ func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	store := newPostgresWorkflowInstanceStoreForTest(db)
+	source := testRootEntityContractSource("root", "test_entity")
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities["test_entity"].Fields["score"] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	bundle.RootEntities["test_entity"].Fields["subject_id"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 	repo := pipelineEngineStateRepo{
 		coordinator: &PipelineCoordinator{
 			workflowStore: store,
-			module:        &pipelineFixtureWorkflowModule{source: testRootEntityContractSource("root", "test_entity")},
+			module:        &pipelineFixtureWorkflowModule{source: source},
 		},
 	}
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")

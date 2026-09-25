@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/platformschema"
 )
 
 func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) (err error) {
@@ -62,7 +63,7 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 		if err := executeSQLitePlans(ctx, conn, request.PlatformPlans); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at) VALUES (1, ?, ?, ?)`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at, entity_presence_model) VALUES (1, ?, ?, ?, ?)`, request.Origin.SwarmVersion, request.Origin.PlatformVersion, request.Origin.CreatedAt.UTC().Format(time.RFC3339Nano), platformschema.EntityPresenceModel); err != nil {
 			return fmt.Errorf("stamp fresh sqlite store origin: %w", err)
 		}
 	case schemaStateCompatible:
@@ -96,9 +97,17 @@ func inspectSQLiteCompatibility(ctx context.Context, q schemaQueryer, expected s
 	}
 	var origin *RuntimeStoreOrigin
 	drift := retiredPlatformTableDrift(tables)
+	actual, err := loadSQLiteSchemaShape(ctx, q, expected)
+	if err != nil {
+		return schemaCompatibilityReport{}, err
+	}
+	drift = append(drift, compareSchemaShapes(expected, actual)...)
 	if _, ok := tables[RuntimeStoreMetadataTable]; !ok {
 		drift = append(drift, "non-empty SQLite store has no runtime_store_metadata origin stamp")
-	} else {
+	} else if len(compareSchemaShapes(
+		schemaShape{Tables: map[string]schemaTableShape{RuntimeStoreMetadataTable: expected.Tables[RuntimeStoreMetadataTable]}},
+		schemaShape{Tables: map[string]schemaTableShape{RuntimeStoreMetadataTable: actual.Tables[RuntimeStoreMetadataTable]}},
+	)) == 0 {
 		origin, err = readRuntimeStoreOrigin(ctx, q)
 		if err != nil {
 			drift = append(drift, "runtime_store_metadata origin row is malformed: "+err.Error())
@@ -106,11 +115,6 @@ func inspectSQLiteCompatibility(ctx context.Context, q schemaQueryer, expected s
 			drift = append(drift, "runtime_store_metadata does not contain the required id=1 origin row")
 		}
 	}
-	actual, err := loadSQLiteSchemaShape(ctx, q, expected)
-	if err != nil {
-		return schemaCompatibilityReport{}, err
-	}
-	drift = append(drift, compareSchemaShapes(expected, actual)...)
 	state := schemaStateCompatible
 	if len(drift) > 0 {
 		state = schemaStateIncompatible

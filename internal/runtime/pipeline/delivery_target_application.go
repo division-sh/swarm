@@ -330,11 +330,14 @@ func materializingDeliveryTargetState(source semanticview.Source, flowID, entity
 	state := WorkflowState{
 		EntityID: owner.Route().EntityID,
 		Stage:    NormalizeWorkflowStateID(initialStage),
-		Metadata: workflowMaterializeEntityFields(source, flowID, nil),
+		Metadata: map[string]any{},
 		Control:  runtimeStateControlForDeliveryTarget(route, entityType),
 	}
 	if handler.CreateEntity {
-		state.Metadata = workflowCreateEntityFields(source, flowID)
+		state.Metadata, err = workflowCreateEntityFields(source, flowID)
+		if err != nil {
+			return WorkflowState{}, err
+		}
 	}
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}

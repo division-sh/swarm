@@ -150,7 +150,7 @@ func TestEntityWritesRetainSchemaGuardBeforeMutation(t *testing.T) {
 	if _, err := owner.CreateEntity(context.Background(), create); !errors.Is(err, refused) {
 		t.Fatalf("create bypassed schema guard: %v", err)
 	}
-	update := runtimetools.EntityFieldUpdate{RunID: runID, EntityID: entityID, FieldPath: "score", ValueJSON: json.RawMessage(`7`)}
+	update := runtimetools.EntityFieldUpdate{RunID: runID, EntityID: entityID, FieldPath: "score", Value: int64(7)}
 	if _, err := owner.SaveEntityField(context.Background(), update); !errors.Is(err, refused) {
 		t.Fatalf("field update bypassed schema guard: %v", err)
 	}

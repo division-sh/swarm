@@ -12,7 +12,7 @@ func TestLeadReview6EntityToolNestedPresence(t *testing.T) {
 	field.IsOptional = true
 	decl.Fields["region"] = field
 	schema.Contract.Types.Types["Metadata"] = decl
-	materialized, err := entityruntime.Materialize(schema.Contract, map[string]any{"metadata": map[string]any{}})
+	materialized, err := entityruntime.NormalizeState(schema.Contract, map[string]any{"metadata": map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
 	}
