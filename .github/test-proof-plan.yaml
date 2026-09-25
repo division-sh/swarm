@@ -73,6 +73,7 @@ profiles:
       - serveapp-channel
       - serveapp-runtime
       - serveapp-release
+      - serveapp-receivers
       - contracts-first
       - contracts-rest
       - api-operator
@@ -155,6 +156,7 @@ profiles:
       - serveapp-channel
       - serveapp-runtime
       - serveapp-release
+      - serveapp-receivers
       - contracts-first
       - contracts-rest
       - api-operator
@@ -237,6 +239,7 @@ profiles:
       - serveapp-channel
       - serveapp-runtime
       - serveapp-release
+      - serveapp-receivers
       - contracts-first
       - contracts-rest
       - api-operator
@@ -319,6 +322,7 @@ profiles:
       - serveapp-channel
       - serveapp-runtime
       - serveapp-release
+      - serveapp-receivers
       - contracts-first
       - contracts-rest
       - api-operator
@@ -725,7 +729,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     # 34287939711: move the independent 53.10s reset and 46.06s rotation
     # journeys to existing lighter units; no backend/case split or extra job.
-    run: '^Test(Canonical.*|Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    run: '^Test(Canonical.*|Channel(Connect.*|Effect.*|Listener.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -740,6 +744,13 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
     run: '^TestRelease.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-receivers:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestReceiver.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
