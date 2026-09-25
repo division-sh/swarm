@@ -46,7 +46,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 				start := func() *releaseServeProcess {
 					process := startReleaseServe(t, releaseProcessSpec{
 						BinaryPath: binary, WorkingDir: root, Source: contracts, ConfigPath: config,
-						Store: backend, APIPort: freeReleaseTCPPort(t), TokenFile: token, Token: goldenAPIToken, Env: env,
+						Store: backend, APIPort: 0, TokenFile: token, Token: goldenAPIToken, Env: env,
 					})
 					ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 					defer cancel()
