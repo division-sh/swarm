@@ -117,26 +117,6 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	return response, nil
 }
 
-func entityJSONPathSegments(path string) ([]string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil, fmt.Errorf("field is required")
-	}
-	if strings.Contains(path, "[") || strings.Contains(path, "]") {
-		return nil, fmt.Errorf("list index writes are not supported for path %s", path)
-	}
-	rawSegments := strings.Split(path, ".")
-	segments := make([]string, 0, len(rawSegments))
-	for _, segment := range rawSegments {
-		segment = strings.TrimSpace(segment)
-		if segment == "" {
-			return nil, fmt.Errorf("field is required")
-		}
-		segments = append(segments, segment)
-	}
-	return segments, nil
-}
-
 func enforceEntityWriteOwnership(ctx context.Context, store EntityPersistence, source semanticview.Source, actor models.AgentConfig, entityID string, logger runtimeToolLogSink) error {
 	flowRoot := actorFlowOwnershipRoot(source, actor)
 	if flowRoot == "" || store == nil {
