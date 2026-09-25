@@ -99,6 +99,14 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 	}
 	seen := map[string]bool{}
 	ids := map[int64]bool{}
+	soakPlanned := false
+	for _, unit := range plan.Units {
+		if unit.BudgetClass == "soak" {
+			soakPlanned = true
+			break
+		}
+	}
+	skippedSoakPlaceholder := false
 	type endpoint struct {
 		at    time.Time
 		delta int
@@ -109,6 +117,16 @@ func AttachJobEvidence(result *BudgetResult, plan testplanning.RunPlan, runID in
 	for _, job := range jobs {
 		if !strings.HasPrefix(job.Name, "Go proof ") {
 			continue
+		}
+		if job.Name == "Go proof ${{ matrix.unit }}" {
+			validPlaceholder := !soakPlanned && !skippedSoakPlaceholder && job.ID > 0 && !ids[job.ID] &&
+				job.RunID == runID && job.RunAttempt == attempt && job.HeadSHA == workflowHeadSHA &&
+				job.Status == "completed" && job.Conclusion == "skipped" && len(job.Steps) == 0
+			if validPlaceholder {
+				skippedSoakPlaceholder = true
+				ids[job.ID] = true
+				continue
+			}
 		}
 		index, ok := expected[job.Name]
 		if !ok {
