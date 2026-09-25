@@ -313,4 +313,7 @@ func TestExcluded(t *testing.T) {}
 	if err := ValidateGoProofPartition(root, []string{"^(Test|Example)"}); err != nil {
 		t.Fatalf("structural partition disagrees with native roots: %v", err)
 	}
+	if err := ValidateGoProofPartition(root, []string{"^(Test|Example)", "^TestExcluded$"}); err == nil || !strings.Contains(err.Error(), "matches no proof") {
+		t.Fatalf("build-excluded test counted in structural partition: %v", err)
+	}
 }

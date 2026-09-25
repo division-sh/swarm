@@ -2,6 +2,7 @@ package testplanning
 
 import (
 	"fmt"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -48,6 +49,13 @@ func validateGoProofMatchersExcept(dir string, matchers []func(string) bool, exc
 	proofs := 0
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		active, err := build.Default.MatchFile(dir, entry.Name())
+		if err != nil {
+			return fmt.Errorf("match active test file %s: %w", entry.Name(), err)
+		}
+		if !active {
 			continue
 		}
 		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, entry.Name()), nil, parser.ParseComments)
