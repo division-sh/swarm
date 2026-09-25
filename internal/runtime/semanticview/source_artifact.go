@@ -319,7 +319,7 @@ func (s bundleSource) ExecutableNodeEffectiveProduces(node runtimeidentity.Execu
 		return nil
 	}
 	return append(
-		runtimecontracts.EffectiveSystemNodeProduces(record.Entry),
+		runtimecontracts.EffectiveSystemNodeProduces(s.bundle, node, record.Entry),
 		s.bundle.GeneratedActivityEventsForExecutableNode(node)...,
 	)
 }

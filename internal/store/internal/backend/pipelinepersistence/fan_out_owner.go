@@ -1,7 +1,6 @@
 package pipelinepersistence
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -20,11 +19,11 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/store/internal/backend/fanoutorigin"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
 const fanOutIntentColumns = `
@@ -276,7 +275,7 @@ func (s *fanOutPostgresOwner) LoadFanOutEvaluation(ctx context.Context, claim fa
 	if err != nil {
 		return runtimepipeline.FanOutEvaluationInput{}, err
 	}
-	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), true, intent)
+	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), true, s.resourceData, intent)
 }
 
 func (s *fanOutSQLiteOwner) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (runtimepipeline.FanOutEvaluationInput, error) {
@@ -290,11 +289,11 @@ func (s *fanOutSQLiteOwner) LoadFanOutEvaluation(ctx context.Context, claim fano
 	if err != nil {
 		return runtimepipeline.FanOutEvaluationInput{}, err
 	}
-	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), false, intent)
+	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), false, s.resourceData, intent)
 }
 
 // Hydrate the immutable source after admission, outside the SQLite writer lock.
-func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, intent fanoutobligation.Intent) (runtimepipeline.FanOutEvaluationInput, error) {
+func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resourceData *storedurabledata.Owner, intent fanoutobligation.Intent) (runtimepipeline.FanOutEvaluationInput, error) {
 	var input runtimepipeline.FanOutEvaluationInput
 	var err error
 	var triggers []events.PersistedReplayEvent
@@ -339,10 +338,17 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, intent
 		}
 		input.Items, err = collectionRangeFromJSON(raw, intent.Request.Cardinality, intent.Cursor, endOrdinal)
 	case fanoutobligation.SourceResourceVersion:
-		if err := db.QueryRowContext(ctx, `SELECT v.canonical_jsonl FROM resource_versions v JOIN resource_version_pins p ON p.version_id=v.version_id AND p.run_id=$1 AND p.flow_path=$2 AND p.event_name=$3 WHERE v.version_id=$4 AND v.pruned_at IS NULL`, intent.Request.Key.RunID, intent.Source.Declaration.FlowPath, intent.Source.Declaration.EventName, intent.Source.VersionID).Scan(&raw); err != nil {
-			return input, err
+		if resourceData == nil {
+			return input, fmt.Errorf("fan-out resource source owner is required")
 		}
-		input.Items, err = collectionRangeFromJSONL(raw, intent.Request.Cardinality, intent.Cursor, endOrdinal)
+		source, sourceErr := resourceData.LoadPinnedSource(ctx, intent.Request.Key.RunID, intent.Request.PlanRef.BundleHash, intent.Source.Declaration)
+		if sourceErr != nil {
+			return input, sourceErr
+		}
+		if source.VersionID != intent.Source.VersionID || source.RowCount != intent.Request.Cardinality {
+			return input, fmt.Errorf("fan-out immutable resource source disagrees with committed intent")
+		}
+		input.Items, err = resourceData.LoadPinnedRowsRange(ctx, intent.Request.Key.RunID, intent.Request.PlanRef.BundleHash, source, intent.Cursor, endOrdinal)
 	default:
 		return input, fmt.Errorf("unsupported fan-out source kind %q", intent.Source.Kind)
 	}
@@ -397,37 +403,6 @@ func collectionRangeFromJSON(raw []byte, want, start, end int) ([]any, error) {
 	}
 	if count != want {
 		return nil, fmt.Errorf("fan-out immutable source cardinality = %d, want %d", count, want)
-	}
-	return items, nil
-}
-
-func collectionRangeFromJSONL(raw []byte, want, start, end int) ([]any, error) {
-	if start < 0 || end < start || end > want {
-		return nil, fmt.Errorf("fan-out resource range [%d,%d) is invalid for cardinality %d", start, end, want)
-	}
-	items := make([]any, 0, end-start)
-	scanner := bufio.NewScanner(bytes.NewReader(raw))
-	scanner.Buffer(make([]byte, 64*1024), durabledata.MaxCanonicalRowBytes+1)
-	count := 0
-	for scanner.Scan() {
-		admitted, err := canonicaljson.Decode(scanner.Bytes())
-		if err != nil {
-			return nil, err
-		}
-		item, err := workflowexpr.ProjectSemanticValue(admitted)
-		if err != nil {
-			return nil, err
-		}
-		if count >= start && count < end {
-			items = append(items, item)
-		}
-		count++
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if count != want {
-		return nil, fmt.Errorf("fan-out immutable resource cardinality = %d, want %d", count, want)
 	}
 	return items, nil
 }

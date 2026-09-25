@@ -3946,13 +3946,14 @@ handler_specification:
     fan_out:
       field: fan_out
       type: object
-      purpose: For each item in a bounded collection, emit one ordinary event through the normal emit pipeline.
+      purpose: For each item in a bounded collection or pinned durable-data version, emit one ordinary event through the normal emit pipeline.
       sub_fields:
-        items_from: string — source collection at exactly one declared top-level payload.* or entity.* field.
-          Nested paths are unsupported in this slice and fail closed until the schema owner can prove the complete
-          terminal path is itself a collection. A missing event catalog entry, primary entity contract, or declared
-          source field is a hard load error even when identity is explicitly authored; identity never authorizes an
-          unresolved collection source.
+        items_from: >-
+          Source at exactly one declared top-level payload.* or entity.* collection field, or data.<event_name>
+          resolving an exact same-flow importable event declaration. Nested collection paths are unsupported and
+          fail closed. A missing event catalog entry, primary entity contract, declared source field or exact
+          durable-data declaration is a hard load error. The data operand never authors a version: the exact run
+          pin supplies it. A pin alone does not trigger fan-out; only an actual handler delivery does.
         as: string — required simple identifier that binds the current item for this row's emit.fields expressions.
           `fan_out.item`, bare `item`, and `fan_out.identity` are not authoring namespaces.
         identity: optional expression over the item alias that declares the stable per-item key. For a statically
@@ -3964,8 +3965,14 @@ handler_specification:
           selects the platform ceiling. The platform ceiling is always enforced even when authors omit max_items.
         emit: string or object — per-item event to emit, optionally with local fields payload construction. During
           fan_out.emit.fields only, the item alias and platform-provided `fan_out.index` are available.
+      resource_source_form: >-
+        For items_from: data.<event_name>, the authored fan_out object contains items_from only. Presence of as,
+        identity, max_items or emit, including explicit null or empty values, is invalid. Each canonical row is
+        published unchanged as the declaration's own event payload; no field-copy projection or alternate emit
+        event exists. The resource declaration's schema validates import, source admission and ordinary publication.
       platform_ceiling:
         max_items: 1000
+        resource_rows: 100000
         overrun: >
           Runtime resolves the immutable source cardinality once per handler activation and checks it before the
           constant-size intent is persisted. If the count exceeds the effective limit, the handler fails closed with
@@ -3979,6 +3986,7 @@ handler_specification:
           - declaration_identity
           - semantic_digest
           - items_from
+          - resource_source_declaration_and_schema_digest
           - collection_type
           - item_type
           - as
@@ -3993,7 +4001,7 @@ handler_specification:
           composition input. Consumers must not independently re-derive item type, omitted scalar identity, effective
           bound, source/write ordering, or emitted payload semantics.
       empty_collection: >
-        An empty collection persists one immediately closed fan-out intent and publishes zero events. Handler
+        An empty collection or pinned resource persists one immediately closed fan-out intent and publishes zero events. Handler
         `advances_to` runs once after that constant-size intent commit, and `fan_out.count` is 0 for same-handler
         data_accumulation.
       collection_iteration: >
@@ -4002,11 +4010,17 @@ handler_specification:
         ordinals; fan_out never sorts or deduplicates the source collection. The pump later publishes each ordinal in
         declared list order through ordinary EventBus publication. Chunk boundaries, retries, bisection, process identity,
         and event_id never own or change iteration order.
+      resource_iteration: >-
+        Pinned resources use their immutable canonical row-key order for both version identity and zero-based
+        activation ordinals. Keyless rows remain a multiset: equal payloads have distinct ordinals and never receive
+        synthetic business keys. The durable-data row ceiling, not the collection ceiling, applies. Serving uses the
+        existing fan-out obligation pump and ordinary EventBus publication, routing and settlement, with no direct
+        delivery or second queue.
       transition_order: Handler `advances_to` fires once after the durable intent is committed, not once per item and not
         after asynchronous issuance or downstream delivery settlement.
       graph_surface: describe --graph renders multiplicity-bearing fan-out edges such as `waiting ->xN line_item.requested`.
       route_authority: >
-        `fan_out.emit` is a normal authored emit site. When it emits a
+        `fan_out.emit` and a compiled resource-row producer are normal emit sites. When they emit a
         pin-declared output event, routing is owned by the same output pin,
         parent connect / ConnectRoutePlan, and EventBus RoutePlan authority as
         handler-level emit, rule emit, on_complete emit, and accumulate timeout
@@ -4045,7 +4059,15 @@ handler_specification:
         immutable_sources:
           event_payload_field: Exact triggering event_id plus one declared top-level payload field.
           entity_field_revision: Exact source run_id, entity_id, top-level field, and immutable entity_mutations mutation_id.
-          resource_version: Exact declaration and version_id, admitted only while the intent run owns the matching durable pin.
+          resource_version: >-
+            Exact same-flow declaration, schema digest, version_id and cardinality, admitted against the selected
+            store's bundle declaration, retained immutable version metadata and exact run pin in the handler's
+            transaction. Pin existence alone is insufficient. A new trigger creates a new intent; retry or restart
+            of one delivery resumes its existing intent without duplicate ordinals. A fork pin override conflicting
+            with outstanding source work fails atomically at the selected historical revision; it cannot reinterpret
+            the inherited intent. Before an intent exists, a fork may choose another pin for a later trigger; settled
+            history retains its original source and outcomes. Current v1 storage holds one JSONL blob per version, so a bounded chunk result
+            still incurs O(version) database read and scan cost. This is not an O(chunk) storage guarantee.
           rule: >-
             Missing, contradictory, pruned, current-state-only, or non-lineage source evidence fails closed. The pump never
             rereads mutable current entity state or the process-current contract. Same-handler source mutation binds the

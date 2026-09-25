@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
@@ -154,8 +155,13 @@ type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
 
+type ResourceSourceReader interface {
+	LoadPinnedSource(ctx context.Context, runID, bundleHash string, ref durabledata.DeclarationRef) (durabledata.PinnedSource, error)
+}
+
 type RuntimeDependencies struct {
 	Source            semanticview.Source
+	ResourceSource    ResourceSourceReader
 	StateRepo         StateRepository
 	EntityCollections EntityCollectionReader
 	MutationOwner     EngineMutationOwner

@@ -688,6 +688,13 @@ func (f FanOutSpec) DeclarationIdentity() (runtimeidentity.DeclarationIdentity, 
 	return f.declarationIdentity, f.declarationIdentity.Valid()
 }
 
+func (f FanOutSpec) ResourceEventName() (string, bool) {
+	if !strings.HasPrefix(f.ItemsFrom, "data.") {
+		return "", false
+	}
+	return strings.TrimPrefix(f.ItemsFrom, "data."), true
+}
+
 func EffectiveFanOutMaxItems(spec FanOutSpec) int {
 	if spec.MaxItems > 0 && spec.MaxItems < DefaultFanOutMaxItems {
 		return spec.MaxItems

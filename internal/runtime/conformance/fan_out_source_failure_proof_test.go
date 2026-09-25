@@ -26,11 +26,16 @@ func TestFanOutServingPayloadEntityAndResourceSnapshotsPreserveOrdinalsBothStore
 			resourceRows := semanticProofRows(34)
 			for i := range resourceRows {
 				resourceRows[i]["account_id"] = fmt.Sprintf("resource-%02d", i)
+				resourceRows[i]["portfolio_id"] = f.runID
+				resourceRows[i]["eligible"] = true
+				resourceRows[i]["ordinal"] = i
+				resourceRows[i]["source_count"] = len(resourceRows)
+				resourceRows[i]["snapshot_threshold"] = 93
 			}
+			resourceSource := f.installPinnedResourceSource(t, resourceRows)
 			// Trigger payload deliberately differs from the pinned resource rows.
-			resourceID := f.submit(t, semanticProofPayloadEvent, semanticProofRows(34), 93)
+			resourceID := f.submit(t, semanticProofResourceEvent, semanticProofRows(34), 93)
 			f.waitIntent(t, resourceID, 0, "open")
-			resourceSource := f.installPinnedResourceSource(t, resourceID, resourceRows)
 			overwriteID := f.submit(t, semanticProofOverwriteEvent, semanticProofRows(1), 10)
 			semanticProofWait(t, func() (bool, error) {
 				var delivered int
@@ -71,10 +76,11 @@ func TestFanOutServingPayloadEntityAndResourceSnapshotsPreserveOrdinalsBothStore
 			node := identitytest.FlowNode(t, "portfolio", "portfolio-coordinator")
 			payloadPlan := f.source.FanOutPlansForHandler(node, semanticProofPayloadEvent)
 			entityPlan := f.source.FanOutPlansForHandler(node, semanticProofEntityEvent)
-			if len(payloadPlan) != 1 || len(entityPlan) != 1 {
+			resourcePlan := f.source.FanOutPlansForHandler(node, semanticProofResourceEvent)
+			if len(payloadPlan) != 1 || len(entityPlan) != 1 || len(resourcePlan) != 1 {
 				t.Fatal("proof requires exact admitted producer plans")
 			}
-			if resourceIntent.Request.PlanRef != payloadPlan[0].Ref {
+			if resourceIntent.Request.PlanRef != resourcePlan[0].Ref || resourcePlan[0].ResourceSource == nil {
 				t.Fatalf("resource fixture changed its compiled evaluator owner: %+v", resourceIntent.Request.PlanRef)
 			}
 			if payloadIntent.Source.Kind != fanoutobligation.SourceEventPayloadField || payloadIntent.Source.EventID != payloadID || payloadIntent.Request.PlanRef != payloadPlan[0].Ref {
@@ -182,6 +188,42 @@ func TestFanOutServingMixedAndCommitFailureIsolationBothStores(t *testing.T) {
 			var leaked int
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND claim_owner IS NOT NULL`, f.runID).Scan(&leaked); err != nil || leaked != 0 {
 				t.Fatalf("claims leaked after isolated dispositions: %d %v", leaked, err)
+			}
+		})
+	}
+}
+
+func TestFanOutPinnedResourceChunkRollbackAndRetryBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newSemanticProofFixture(t, backend, true)
+			release := f.pauseAtEmptyScan(t)
+			defer release()
+			rows := semanticProofRows(4)
+			for index := range rows {
+				rows[index]["account_id"] = fmt.Sprintf("rollback-resource-%02d", index)
+				rows[index]["portfolio_id"] = f.runID
+				rows[index]["eligible"] = true
+				rows[index]["ordinal"] = index
+				rows[index]["source_count"] = len(rows)
+				rows[index]["snapshot_threshold"] = 75
+			}
+			source := f.installPinnedResourceSource(t, rows)
+			trigger := f.submit(t, semanticProofResourceEvent, semanticProofRows(1), 75)
+			f.waitIntent(t, trigger, 0, "open")
+			f.probe.mu.Lock()
+			f.probe.policies[trigger] = semanticProofPolicy{maxCommit: 2}
+			f.probe.mu.Unlock()
+			release()
+			f.waitIntent(t, trigger, len(rows), "closed")
+			f.assertOutcomes(t, trigger, rows, 75, nil)
+			f.probe.mu.Lock()
+			attempts := append([]semanticProofAttempt(nil), f.probe.attempts[trigger]...)
+			faults := append([]semanticProofAttempt(nil), f.probe.sqlFaults[trigger]...)
+			intent := f.probe.intents[trigger]
+			f.probe.mu.Unlock()
+			if intent.Source != source || len(attempts) < 3 || attempts[0] != (semanticProofAttempt{0, 4, true}) || attempts[1] != (semanticProofAttempt{0, 2, false}) || len(faults) == 0 || faults[0] != attempts[0] {
+				t.Fatalf("resource rollback/retry changed exact source or publication sequence: source=%+v attempts=%+v faults=%+v", intent.Source, attempts, faults)
 			}
 		})
 	}

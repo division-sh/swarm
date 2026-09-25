@@ -438,7 +438,11 @@ func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeide
 			out = append(out, ref)
 		}
 	}
-	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+	var plans []runtimecontracts.FanOutCompiledPlan
+	if source != nil {
+		plans = source.FanOutPlansForHandler(node, eventType)
+	}
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, plans) {
 		before := len(out)
 		appendSpec(site.Source, site.SiteKey, site.Spec, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields, site.ItemAlias)
 		for index := before; index < len(out); index++ {

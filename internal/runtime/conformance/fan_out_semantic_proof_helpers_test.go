@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -29,9 +30,14 @@ import (
 )
 
 const (
-	semanticProofPayloadEvent   = "portfolio.proof.payload.requested"
-	semanticProofEntityEvent    = "portfolio.proof.entity.requested"
-	semanticProofOverwriteEvent = "portfolio.proof.overwrite.requested"
+	semanticProofPayloadEvent      = "portfolio.proof.payload.requested"
+	semanticProofEntityEvent       = "portfolio.proof.entity.requested"
+	semanticProofResourceEvent     = "portfolio.proof.resource.requested"
+	semanticProofJobflowEvent      = "portfolio.proof.jobflow.requested"
+	semanticProofKeylessEvent      = "portfolio.proof.keyless.requested"
+	semanticProofRuleDataEvent     = "portfolio.proof.rule_data.requested"
+	semanticProofCompleteDataEvent = "portfolio.proof.complete_data.requested"
+	semanticProofOverwriteEvent    = "portfolio.proof.overwrite.requested"
 )
 
 func TestFanOutSemanticProofFixtureAdmitsExactProducerSites(t *testing.T) {
@@ -54,10 +60,23 @@ func TestFanOutSemanticProofFixtureAdmitsExactProducerSites(t *testing.T) {
 	}
 }
 
+func TestFanOutResourceCrossFlowFixtureCompiles(t *testing.T) {
+	source := semanticProofSourceWithCrossFlow(t, true)
+	node := identitytest.FlowNode(t, notifyallchildren.OwnerFlowID, "portfolio-coordinator")
+	plans := source.FanOutPlansForHandler(node, semanticProofResourceEvent)
+	if len(plans) != 1 || plans[0].ResourceSource == nil || plans[0].EmittedEventType() != "portfolio/account.registered" {
+		t.Fatalf("cross-flow resource source plan = %+v", plans)
+	}
+}
+
 // Extend a copy of the existing admitted numeric fixture, not its shared files.
 func semanticProofSource(t *testing.T) semanticview.Source {
+	return semanticProofSourceWithCrossFlow(t, false)
+}
+
+func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview.Source {
 	t.Helper()
-	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericReporterSink: true, RegistrationUUIDField: true})
+	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericInternalSettlement: !crossFlow, RegistrationUUIDField: true})
 	modify := func(relative string, change func(string) string) {
 		t.Helper()
 		path := filepath.Join(root, notifyallchildren.OwnerFlowID, relative)
@@ -76,20 +95,47 @@ func semanticProofSource(t *testing.T) semanticview.Source {
 		}
 		return strings.Replace(raw, old, next, 1)
 	}
-	eventsToAdd := []string{semanticProofPayloadEvent, semanticProofEntityEvent, semanticProofOverwriteEvent}
+	eventsToAdd := []string{semanticProofPayloadEvent, semanticProofEntityEvent, semanticProofResourceEvent, semanticProofJobflowEvent, semanticProofKeylessEvent, semanticProofRuleDataEvent, semanticProofCompleteDataEvent, semanticProofOverwriteEvent}
 	modify("schema.yaml", func(raw string) string {
 		var added strings.Builder
 		for _, name := range eventsToAdd {
 			fmt.Fprintf(&added, "      - event: %s\n        source: external\n", name)
 		}
-		return replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
+		raw = replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
+		return replace(raw, "      - account.registered\n", "      - account.registered\n      - company.lead\n      - company.keyless\n")
 	})
 	modify("events.yaml", func(raw string) string {
 		raw = replace(raw, "  eligible: boolean\n", "  eligible: boolean\n  ordinal: integer\n  source_count: integer\n  snapshot_threshold: integer\n")
 		for _, name := range eventsToAdd {
 			raw += fmt.Sprintf("%s:\n  portfolio_id: text\n  account_ids: \"[NumericAccount]\"\n  threshold: integer\n", name)
 		}
+		raw += `company.lead:
+  key: slug
+  slug: text
+  name: text
+  domain: text
+  funds: "[text]"
+  sources: "[text]"
+  tvl: number?
+  category: text
+  has_token: boolean
+  note: text
+  on_w3c: boolean
+  ats: JobflowATS?
+  eng_roles: integer
+  fit_titles: "[text]"
+  gem_score: number
+company.keyless:
+  value: text
+`
 		return raw
+	})
+	modify("types.yaml", func(raw string) string {
+		return raw + `  JobflowATS:
+    provider: text
+    ats_slug: text
+    titles: "[text]"
+`
 	})
 	modify("nodes.yaml", func(raw string) string {
 		var subscriptions strings.Builder
@@ -134,6 +180,35 @@ func semanticProofSource(t *testing.T) semanticview.Source {
 `, producer.event, producer.site, producer.source)
 		}
 		raw += fmt.Sprintf(`    %s:
+      fan_out:
+        items_from: data.portfolio/account.registered
+`, semanticProofResourceEvent)
+		raw += fmt.Sprintf(`    %s:
+      fan_out:
+        items_from: data.portfolio/company.lead
+`, semanticProofJobflowEvent)
+		raw += fmt.Sprintf(`    %s:
+      fan_out:
+        items_from: data.portfolio/company.keyless
+`, semanticProofKeylessEvent)
+		raw += fmt.Sprintf(`    %s:
+      rules:
+        - id: unselected
+          condition: payload.threshold < 0
+          fan_out:
+            items_from: data.portfolio/company.lead
+        - id: selected
+          condition: else
+          fan_out:
+            items_from: data.portfolio/company.keyless
+`, semanticProofRuleDataEvent)
+		raw += fmt.Sprintf(`    %s:
+      on_complete:
+        - id: complete
+          fan_out:
+            items_from: data.portfolio/company.keyless
+`, semanticProofCompleteDataEvent)
+		raw += fmt.Sprintf(`    %s:
       data_accumulation:
         writes:
           - source_field: account_ids
@@ -141,7 +216,19 @@ func semanticProofSource(t *testing.T) semanticview.Source {
           - source_field: threshold
             target_field: threshold
 `, semanticProofOverwriteEvent)
-		return raw
+		return `jobflow-lead-observer:
+  execution_type: system_node
+  subscribes_to:
+    - company.lead
+  event_handlers:
+    company.lead: {}
+jobflow-keyless-observer:
+  execution_type: system_node
+  subscribes_to:
+    - company.keyless
+  event_handlers:
+    company.keyless: {}
+` + raw
 	})
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(canonicalrouting.RepoRoot(t), root, contracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)))
 	if err != nil {
@@ -310,14 +397,23 @@ type semanticProofFixture struct {
 	db       *sql.DB
 	source   semanticview.Source
 	runtime  notifyAllChildrenRuntime
+	topology *notifyAllChildrenProcessTopology
 	probe    *semanticProofProbe
 	ctx      context.Context
 	runID    string
 }
 
 func newSemanticProofFixture(t *testing.T, backend string, sqlFaults ...bool) *semanticProofFixture {
+	return newSemanticProofFixtureWithPreparation(t, backend, nil, sqlFaults...)
+}
+
+func newSemanticProofFixtureWithPreparation(t *testing.T, backend string, prepare func(*semanticProofFixture) []durabledata.ExplicitPin, sqlFaults ...bool) *semanticProofFixture {
+	return newSemanticProofFixtureWithSourcePreparation(t, backend, semanticProofSource(t), prepare, sqlFaults...)
+}
+
+func newSemanticProofFixtureWithSourcePreparation(t *testing.T, backend string, source semanticview.Source, prepare func(*semanticProofFixture) []durabledata.ExplicitPin, sqlFaults ...bool) *semanticProofFixture {
 	t.Helper()
-	f := &semanticProofFixture{source: semanticProofSource(t), runID: uuid.NewString()}
+	f := &semanticProofFixture{source: source, runID: uuid.NewString()}
 	if len(sqlFaults) != 0 && sqlFaults[0] {
 		f.selected, f.db = newSemanticProofSQLFaultStore(t, backend)
 	} else if backend == "postgres" {
@@ -329,7 +425,9 @@ func newSemanticProofFixture(t *testing.T, backend string, sqlFaults ...bool) *s
 		f.selected, f.db = selected, storetest.DatabaseForTest(selected)
 	}
 	f.probe = &semanticProofProbe{db: f.db, policies: map[string]semanticProofPolicy{}, intents: map[string]fanoutobligation.Intent{}, attempts: map[string][]semanticProofAttempt{}, sqlFaults: map[string][]semanticProofAttempt{}, outcomeSQLFaults: map[string]int{}, blocks: map[string]pipeline.FanOutBlockRequest{}, retries: map[string]pipeline.FanOutRetryableRelease{}, completed: make(chan semanticProofReceipt, 1024)}
+	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, f.source)), f.selected, f.source)
 	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: f.topology,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			f.probe.PipelineCoordinator = pc
 			return f.probe
@@ -339,7 +437,11 @@ func newSemanticProofFixture(t *testing.T, backend string, sqlFaults ...bool) *s
 	if err := f.runtime.manager.Run(managedConformanceExecutionContextForBundle(t, f.ctx, "fan-out-semantic-proof", f.runtime.sourceArtifactFact)); err != nil {
 		t.Fatal(err)
 	}
-	publishNotifyAllChildrenRunCreatingEvent(t, f.ctx, f.runtime, f.source, f.runID, "portfolio.opened", map[string]any{"portfolio_id": f.runID, "threshold": 75})
+	if prepare == nil {
+		publishNotifyAllChildrenRunCreatingEvent(t, f.ctx, f.runtime, f.source, f.runID, "portfolio.opened", map[string]any{"portfolio_id": f.runID, "threshold": 75})
+	} else {
+		publishSemanticProofRunWithPins(t, f, prepare(f))
+	}
 	return f
 }
 
@@ -384,6 +486,23 @@ func (f *semanticProofFixture) waitIntent(t *testing.T, trigger string, cursor i
 	defer func() {
 		if reached {
 			return
+		}
+		var deliveryStatus string
+		var deliveryFailure []byte
+		if err := f.db.QueryRowContext(f.ctx, `SELECT status,failure FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, f.runID, trigger).Scan(&deliveryStatus, &deliveryFailure); err == nil {
+			t.Logf("trigger delivery status=%s failure=%s", deliveryStatus, deliveryFailure)
+		} else {
+			t.Logf("trigger delivery readback: %v", err)
+		}
+		logs, err := f.db.QueryContext(f.ctx, `SELECT payload FROM events WHERE run_id=$1 AND event_name='platform.runtime_log' ORDER BY insertion_sequence DESC LIMIT 3`, f.runID)
+		if err == nil {
+			defer logs.Close()
+			for logs.Next() {
+				var payload []byte
+				if logs.Scan(&payload) == nil {
+					t.Logf("recent runtime log: %s", payload)
+				}
+			}
 		}
 		f.probe.mu.Lock()
 		policy := f.probe.policies[trigger]

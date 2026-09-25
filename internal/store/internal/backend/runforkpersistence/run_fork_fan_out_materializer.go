@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -22,6 +23,34 @@ import (
 
 type runForkFanOutBarrierOwner interface {
 	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
+}
+
+func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runtimedata.Pin) error {
+	byDeclaration := make(map[runtimedata.DeclarationRef]runtimedata.VersionID, len(pins))
+	for _, pin := range pins {
+		if _, duplicate := byDeclaration[pin.Declaration]; duplicate {
+			return fmt.Errorf("fork has duplicate resource pin for %s", pin.Declaration.Key())
+		}
+		byDeclaration[pin.Declaration] = pin.VersionID
+	}
+	for _, obligation := range plan.FanOutObligations {
+		source := obligation.Intent.Source
+		if source.Kind != fanoutobligation.SourceResourceVersion {
+			continue
+		}
+		outstanding := (obligation.Intent.Status == fanoutobligation.StatusOpen || obligation.Intent.Status == fanoutobligation.StatusBlocked) &&
+			obligation.Intent.Cursor < obligation.Intent.Request.Cardinality
+		outstanding = outstanding || len(obligation.PendingReplays) != 0 ||
+			(obligation.Barrier != nil && obligation.Barrier.Status.BlocksCompletion())
+		if !outstanding {
+			continue
+		}
+		version, pinned := byDeclaration[source.Declaration]
+		if !pinned || version != source.VersionID {
+			return fmt.Errorf("fork cannot override resource %s while source version %s has outstanding fan-out work", source.Declaration.Key(), source.VersionID)
+		}
+	}
+	return nil
 }
 
 func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage) error {

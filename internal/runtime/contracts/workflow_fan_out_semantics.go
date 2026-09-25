@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -14,6 +15,7 @@ type FanOutEffectiveSemantics struct {
 	PlanRef          FanOutPlanRef
 	ItemsFrom        string
 	ItemsPath        paths.Path
+	ResourceSource   *FanOutResourceSource
 	CollectionType   CatalogTypeReference
 	ItemType         ResolvedCatalogType
 	ItemAlias        string
@@ -22,6 +24,11 @@ type FanOutEffectiveSemantics struct {
 	MaxItems         int
 	AuthoredMaxItems int
 	MaxItemsSet      bool
+}
+
+type FanOutResourceSource struct {
+	Declaration  durabledata.DeclarationRef `json:"declaration"`
+	SchemaDigest durabledata.SchemaDigest   `json:"schema_digest"`
 }
 
 type FanOutPlanRef struct {
@@ -52,6 +59,7 @@ type FanOutCompiledPlan struct {
 	Ref               FanOutPlanRef        `json:"ref"`
 	ItemsFrom         string               `json:"items_from"`
 	ItemsPath         paths.Path           `json:"items_path"`
+	ResourceSource    *FanOutResourceSource `json:"resource_source,omitempty"`
 	CollectionType    CatalogTypeReference `json:"collection_type"`
 	ItemType          ResolvedCatalogType  `json:"item_type"`
 	ItemAlias         string               `json:"item_alias"`
@@ -63,6 +71,13 @@ type FanOutCompiledPlan struct {
 	SourceAfterWrites bool                 `json:"source_after_writes"`
 	Writes            []WorkflowDataWrite  `json:"-"`
 	Emit              EmitSpec             `json:"emit"`
+}
+
+func (p FanOutCompiledPlan) EmittedEventType() string {
+	if p.ResourceSource != nil {
+		return p.ResourceSource.Declaration.EventName
+	}
+	return p.Emit.EventType()
 }
 
 type FanOutSiteKind string
@@ -147,15 +162,19 @@ func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.Executab
 	if err != nil {
 		return FanOutCompiledPlan{}, fmt.Errorf("fan_out bundle identity: %w", err)
 	}
-	emit, err := b.LowerEmitSpecFields(EmitFieldLoweringContext{
-		Node: node, TriggerEventType: strings.TrimSpace(eventType), Site: "fan_out.emit",
-	}, spec.Emit)
-	if err != nil {
-		return FanOutCompiledPlan{}, err
+	var emit EmitSpec
+	if effective.ResourceSource == nil {
+		emit, err = b.LowerEmitSpecFields(EmitFieldLoweringContext{
+			Node: node, TriggerEventType: strings.TrimSpace(eventType), Site: "fan_out.emit",
+		}, spec.Emit)
+		if err != nil {
+			return FanOutCompiledPlan{}, err
+		}
 	}
 	plan := FanOutCompiledPlan{
 		Site:      siteRef,
 		ItemsFrom: effective.ItemsFrom, ItemsPath: effective.ItemsPath,
+		ResourceSource: effective.ResourceSource,
 		CollectionType: effective.CollectionType, ItemType: effective.ItemType,
 		ItemAlias: effective.ItemAlias, Identity: effective.Identity,
 		IdentityDerived: effective.IdentityDerived, MaxItems: effective.MaxItems,
@@ -167,6 +186,7 @@ func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.Executab
 	digest, err := canonicaljson.Hash(struct {
 		ElementRef        FanOutElementRef     `json:"element_ref"`
 		ItemsFrom         string               `json:"items_from"`
+		ResourceSource    *FanOutResourceSource `json:"resource_source,omitempty"`
 		CollectionType    CatalogTypeReference `json:"collection_type"`
 		ItemType          ResolvedCatalogType  `json:"item_type"`
 		ItemAlias         string               `json:"item_alias"`
@@ -176,7 +196,7 @@ func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.Executab
 		SourceAfterWrites bool                 `json:"source_after_writes"`
 		Emit              EmitSpec             `json:"emit"`
 	}{
-		ElementRef: FanOutElementRefFrom(ref), ItemsFrom: plan.ItemsFrom,
+		ElementRef: FanOutElementRefFrom(ref), ItemsFrom: plan.ItemsFrom, ResourceSource: plan.ResourceSource,
 		CollectionType: plan.CollectionType, ItemType: plan.ItemType,
 		ItemAlias: plan.ItemAlias, Identity: plan.Identity, IdentityDerived: plan.IdentityDerived,
 		MaxItems: plan.MaxItems, SourceAfterWrites: plan.SourceAfterWrites, Emit: plan.Emit,
@@ -337,6 +357,10 @@ func (b *WorkflowContractBundle) resetFanOutPlans() {
 }
 
 func cloneFanOutCompiledPlan(plan FanOutCompiledPlan) FanOutCompiledPlan {
+	if plan.ResourceSource != nil {
+		resource := *plan.ResourceSource
+		plan.ResourceSource = &resource
+	}
 	plan.ItemsPath.Segments = append([]string(nil), plan.ItemsPath.Segments...)
 	plan.Writes = cloneFanOutWrites(plan.Writes)
 	plan.Emit = cloneEmitSpec(plan.Emit)
@@ -432,6 +456,22 @@ func indexedFanOutSiteSource(scope string, index int, id string) string {
 func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec FanOutSpec) (FanOutEffectiveSemantics, error) {
 	if !node.Valid() {
 		return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out requires an exact executable node owner")
+	}
+	if name, resource := spec.ResourceEventName(); resource {
+		if name == "" || strings.TrimSpace(name) != name {
+			return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from requires an exact event after data.")
+		}
+		if spec.As != "" || spec.Identity != "" || !spec.Emit.Empty() || spec.MaxItemsSet || spec.MaxItems != 0 {
+			return FanOutEffectiveSemantics{}, fmt.Errorf("data-sourced fan_out permits only items_from")
+		}
+		declaration, ok := b.DurableDataDeclarationByName(node.FlowPath(), name)
+		if !ok {
+			return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from %q has no exact importable event declaration in flow %s", spec.ItemsFrom, node.FlowPath())
+		}
+		return FanOutEffectiveSemantics{
+			ItemsFrom: spec.ItemsFrom,
+			ResourceSource: &FanOutResourceSource{Declaration: declaration.Ref, SchemaDigest: declaration.SchemaDigest},
+		}, nil
 	}
 	itemsPath, err := ValidateFanOutItemsSource(spec)
 	if err != nil {

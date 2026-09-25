@@ -183,8 +183,8 @@ func validateLoopInputRevision(source semanticview.Source, plan runtimecontracts
 
 func validateLoopEmitCarriage(source semanticview.Source, plan runtimecontracts.WorkflowLoopPlan, operation runtimecontracts.WorkflowLoopOperationPlan, handler runtimecontracts.SystemNodeEventHandler) []Finding {
 	findings := make([]Finding, 0)
-	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
-		eventType := site.Spec.EventType()
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, source.FanOutPlansForHandler(operation.Node, operation.HandlerEvent)) {
+		eventType := site.EventType()
 		if eventType == "" {
 			continue
 		}

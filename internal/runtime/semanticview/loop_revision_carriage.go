@@ -229,7 +229,7 @@ func compileLoopCarriage(source Source) (*originalLoopCarriage, error) {
 				state.inputs[inputKey] = role
 			}
 			if operation.Kind == contracts.LoopOperationRepeat && !plan.Escape.Emit.Empty() {
-				if err := state.addOutput(source, operation.Node, input.Canonical, plan.Escape.Emit, role); err != nil {
+				if err := state.addOutput(source, operation.Node, input.Canonical, plan.Escape.Emit.EventType(), plan.Escape.Emit.Fields, role); err != nil {
 					return nil, err
 				}
 			}
@@ -276,8 +276,8 @@ func compileLoopCarriage(source Source) (*originalLoopCarriage, error) {
 				}
 				state.fanOuts[plan.Ref] = meaning
 			}
-			for _, site := range contracts.HandlerDeclarativeEmitSites(handlers[event]) {
-				if err := state.addOutput(source, node, handlerEvent, site.Spec, role); err != nil {
+			for _, site := range contracts.HandlerDeclarativeEmitSites(handlers[event], source.FanOutPlansForHandler(node, event)) {
+				if err := state.addOutput(source, node, handlerEvent, site.EventType(), site.Spec.Fields, role); err != nil {
 					return nil, err
 				}
 			}
@@ -286,10 +286,10 @@ func compileLoopCarriage(source Source) (*originalLoopCarriage, error) {
 	return state, nil
 }
 
-func (c *originalLoopCarriage) addOutput(source Source, node identity.ExecutableNode, handler string, spec contracts.EmitSpec, role LoopRevisionRole) error {
-	proof := ResolveFlowEventProof(source, node.FlowPath(), spec.EventType())
+func (c *originalLoopCarriage) addOutput(source Source, node identity.ExecutableNode, handler, eventType string, fields map[string]contracts.ExpressionValue, role LoopRevisionRole) error {
+	proof := ResolveFlowEventProof(source, node.FlowPath(), eventType)
 	if role != (LoopRevisionRole{}) {
-		value, present := spec.Fields[role.field]
+		value, present := fields[role.field]
 		if !proof.HasSchema || !contracts.RequiresLoopRevision(proof.Entry.Payload, role.field) || !present || !contracts.CarriesLoopRevision(value) {
 			return fmt.Errorf("original loop output %s must carry declared text field %s from loop.revision_id", proof.Canonical, role.field)
 		}

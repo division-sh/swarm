@@ -177,6 +177,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err != nil {
 				return err
 			}
+			if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+				return err
+			}
 			existing.DataPins = pins
 			existing.MaterializedFanOutCount = len(plan.FanOutObligations)
 			if routeResolved {
@@ -215,6 +218,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		}
 		pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
 		if err != nil {
+			return err
+		}
+		if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
 			return err
 		}
 		if sourceProfiled {

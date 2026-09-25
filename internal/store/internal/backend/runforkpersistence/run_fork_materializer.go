@@ -132,6 +132,9 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 				if err != nil {
 					return err
 				}
+				if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+					return err
+				}
 				existing.DataPins = pins
 				existing.MaterializedFanOutCount = len(plan.FanOutObligations)
 				materialization = existing
@@ -153,6 +156,9 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			}
 			pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
 			if err != nil {
+				return err
+			}
+			if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
 				return err
 			}
 			if sourceProfiled {
@@ -288,6 +294,9 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				if err != nil {
 					return err
 				}
+				if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
+					return err
+				}
 				existing.DataPins = pins
 				existing.MaterializedFanOutCount = len(plan.FanOutObligations)
 				materialization = existing
@@ -309,6 +318,9 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			}
 			pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
 			if err != nil {
+				return err
+			}
+			if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
 				return err
 			}
 			if sourceProfiled {

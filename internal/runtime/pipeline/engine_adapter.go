@@ -1074,8 +1074,13 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	stateRepo := pipelineEngineStateRepo{coordinator: pc}
 	activityWriter := pipelineActivityIntentWriter{coordinator: pc}
 	publicationPlanner, _ := pc.bus.(EnginePublicationPlanner)
+	var resourceSource runtimeengine.ResourceSourceReader
+	if pc.workflowStore != nil {
+		resourceSource = pc.workflowStore.resourceSource
+	}
 	return runtimeengine.RuntimeDependencies{
 		Source:            source,
+		ResourceSource:    resourceSource,
 		StateRepo:         stateRepo,
 		EntityCollections: pipelineEngineEntityCollectionReader{coordinator: pc},
 		MutationOwner:     pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},

@@ -12,6 +12,22 @@ import (
 	storesourceartifact "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 )
 
+func (s *PostgresStore) LoadPinnedSource(ctx context.Context, runID, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	return s.durableDataOwner.LoadPinnedSource(ctx, runID, bundleHash, ref)
+}
+
+func (s *SQLiteRuntimeStore) LoadPinnedSource(ctx context.Context, runID, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	return s.durableDataOwner.LoadPinnedSource(ctx, runID, bundleHash, ref)
+}
+
+func (s *PostgresStore) LoadPinnedRowsRange(ctx context.Context, runID, bundleHash string, source runtimedata.PinnedSource, start, end int) ([]any, error) {
+	return s.durableDataOwner.LoadPinnedRowsRange(ctx, runID, bundleHash, source, start, end)
+}
+
+func (s *SQLiteRuntimeStore) LoadPinnedRowsRange(ctx context.Context, runID, bundleHash string, source runtimedata.PinnedSource, start, end int) ([]any, error) {
+	return s.durableDataOwner.LoadPinnedRowsRange(ctx, runID, bundleHash, source, start, end)
+}
+
 func (s *PostgresStore) EnsureSourceArtifactWithData(ctx context.Context, artifact *sourceartifact.AdmittedSourceArtifact, catalog runtimedata.Catalog) (sourceartifact.EnsureResult, error) {
 	if s == nil || s.backend == nil || s.sourceArtifactOwner == nil || s.durableDataOwner == nil {
 		return sourceartifact.EnsureResult{}, fmt.Errorf("postgres source artifact and data catalog owners are required")
