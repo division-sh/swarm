@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -135,6 +136,22 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 	var count int
 	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name NOT LIKE 'platform.%'`, seed.RunID).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("direct input introduced an intermediate publication: count=%d err=%v", count, err)
+	}
+	// Completion maintenance may settle after the delivery; do not attribute its
+	// candidate cleanup to the duplicate publication below.
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for {
+		var settled bool
+		if err := rt.DB.QueryRow(`SELECT completion_due_at IS NULL FROM runs WHERE run_id=$1`, seed.RunID).Scan(&settled); err != nil {
+			t.Fatal(err)
+		}
+		if settled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("direct input completion candidate did not settle")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	before := receiverIngressApplicationSnapshot(t, rt)
 	duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
