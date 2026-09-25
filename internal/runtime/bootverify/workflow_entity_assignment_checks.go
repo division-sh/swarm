@@ -12,6 +12,11 @@ import (
 )
 
 func (checker *checkerContext) entityAssignmentReaders(node identity.ExecutableNode, event string, handler c.SystemNodeEventHandler) []expressionReference {
+	// Reader sites and execution outcomes must use the same authored rule identity.
+	// The scoped-node census supplies raw handlers, unlike the executable source.
+	if qualified, err := c.QualifySystemNodeHandlerRuleRefsForEvent(node, event, handler); err == nil {
+		handler = qualified
+	}
 	readers := handlerExecutableReaderExpressionsForSource(checker.source, node, event, handler)
 	analysis := checker.entityAssignmentAnalysis(node.FlowPath())
 	if analysis == nil {
