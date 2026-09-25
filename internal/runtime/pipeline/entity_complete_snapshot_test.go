@@ -145,3 +145,67 @@ func TestSelectedHandlerSparsePresenceWriteAndEmitBothStores(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectedHandlerSparseEqualityMutationsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			for _, tc := range []struct {
+				name       string
+				event      string
+				wantFields map[string]any
+			}{
+				{"ordered-pair-write", "work.set", map[string]any{"left": "new", "right": "new"}},
+				{"paired-clear", "work.clear", map[string]any{}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					db, store := openHandlerEntityRequirementStore(t, backend)
+					source := loadWorkflowTempSource(t, map[string]string{
+						"schema.yaml": "initial_state: active\nstates: [active]\n",
+						"entities.yaml": `test_entity:
+  left: text?
+  right:
+    type: text?
+    equal_to: left
+`,
+						"events.yaml": "work.set: {}\nwork.clear: {}\n",
+						"nodes.yaml": `node-a:
+  execution_type: system_node
+  subscribes_to: [work.set, work.clear]
+  event_handlers:
+    work.set:
+      data_accumulation:
+        writes:
+          - target_field: left
+            expression: "'new'"
+          - target_field: right
+            expression: entity.left
+    work.clear:
+      data_accumulation:
+        writes:
+          - op: clear
+            target: entity.left
+          - op: clear
+            target: entity.right
+`,
+					})
+					pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+						Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
+						PipelineObligations: unavailablePipelineTestObligationOwner{},
+					})
+					configureWorkflowLifecycleForTest(t, pc)
+					configurePipelineTestDeliveryOwner(t, pc)
+					var ctx context.Context
+					if backend == "sqlite" {
+						ctx = sqliteExactOnceRunContext(t, db)
+					} else {
+						ctx = testPipelineRunContext(t, db)
+					}
+					instance, result := executeExistingOwnerBehavior(t, ctx, pc, tc.name, tc.event, json.RawMessage(`{}`), map[string]any{"left": "old", "right": "old"}, nil)
+					if !result.handled || !reflect.DeepEqual(instance.Fields, tc.wantFields) {
+						t.Fatalf("selected handler result: handled=%t fields=%#v, want %#v", result.handled, instance.Fields, tc.wantFields)
+					}
+				})
+			}
+		})
+	}
+}
