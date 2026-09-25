@@ -55,22 +55,22 @@ func (r FanOutElementRef) DeclarationIdentity() (runtimeidentity.DeclarationIden
 }
 
 type FanOutCompiledPlan struct {
-	Site              FanOutSiteRef        `json:"site"`
-	Ref               FanOutPlanRef        `json:"ref"`
-	ItemsFrom         string               `json:"items_from"`
-	ItemsPath         paths.Path           `json:"items_path"`
+	Site              FanOutSiteRef         `json:"site"`
+	Ref               FanOutPlanRef         `json:"ref"`
+	ItemsFrom         string                `json:"items_from"`
+	ItemsPath         paths.Path            `json:"items_path"`
 	ResourceSource    *FanOutResourceSource `json:"resource_source,omitempty"`
-	CollectionType    CatalogTypeReference `json:"collection_type"`
-	ItemType          ResolvedCatalogType  `json:"item_type"`
-	ItemAlias         string               `json:"item_alias"`
-	Identity          string               `json:"identity"`
-	IdentityDerived   bool                 `json:"identity_derived"`
-	MaxItems          int                  `json:"max_items"`
-	AuthoredMaxItems  int                  `json:"authored_max_items"`
-	MaxItemsSet       bool                 `json:"max_items_set"`
-	SourceAfterWrites bool                 `json:"source_after_writes"`
-	Writes            []WorkflowDataWrite  `json:"-"`
-	Emit              EmitSpec             `json:"emit"`
+	CollectionType    CatalogTypeReference  `json:"collection_type"`
+	ItemType          ResolvedCatalogType   `json:"item_type"`
+	ItemAlias         string                `json:"item_alias"`
+	Identity          string                `json:"identity"`
+	IdentityDerived   bool                  `json:"identity_derived"`
+	MaxItems          int                   `json:"max_items"`
+	AuthoredMaxItems  int                   `json:"authored_max_items"`
+	MaxItemsSet       bool                  `json:"max_items_set"`
+	SourceAfterWrites bool                  `json:"source_after_writes"`
+	Writes            []WorkflowDataWrite   `json:"-"`
+	Emit              EmitSpec              `json:"emit"`
 }
 
 func (p FanOutCompiledPlan) EmittedEventType() string {
@@ -184,17 +184,17 @@ func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.Executab
 		Emit:              emit,
 	}
 	digest, err := canonicaljson.Hash(struct {
-		ElementRef        FanOutElementRef     `json:"element_ref"`
-		ItemsFrom         string               `json:"items_from"`
+		ElementRef        FanOutElementRef      `json:"element_ref"`
+		ItemsFrom         string                `json:"items_from"`
 		ResourceSource    *FanOutResourceSource `json:"resource_source,omitempty"`
-		CollectionType    CatalogTypeReference `json:"collection_type"`
-		ItemType          ResolvedCatalogType  `json:"item_type"`
-		ItemAlias         string               `json:"item_alias"`
-		Identity          string               `json:"identity"`
-		IdentityDerived   bool                 `json:"identity_derived"`
-		MaxItems          int                  `json:"max_items"`
-		SourceAfterWrites bool                 `json:"source_after_writes"`
-		Emit              EmitSpec             `json:"emit"`
+		CollectionType    CatalogTypeReference  `json:"collection_type"`
+		ItemType          ResolvedCatalogType   `json:"item_type"`
+		ItemAlias         string                `json:"item_alias"`
+		Identity          string                `json:"identity"`
+		IdentityDerived   bool                  `json:"identity_derived"`
+		MaxItems          int                   `json:"max_items"`
+		SourceAfterWrites bool                  `json:"source_after_writes"`
+		Emit              EmitSpec              `json:"emit"`
 	}{
 		ElementRef: FanOutElementRefFrom(ref), ItemsFrom: plan.ItemsFrom, ResourceSource: plan.ResourceSource,
 		CollectionType: plan.CollectionType, ItemType: plan.ItemType,
@@ -469,7 +469,7 @@ func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeide
 			return FanOutEffectiveSemantics{}, fmt.Errorf("fan_out.items_from %q has no exact importable event declaration in flow %s", spec.ItemsFrom, node.FlowPath())
 		}
 		return FanOutEffectiveSemantics{
-			ItemsFrom: spec.ItemsFrom,
+			ItemsFrom:      spec.ItemsFrom,
 			ResourceSource: &FanOutResourceSource{Declaration: declaration.Ref, SchemaDigest: declaration.SchemaDigest},
 		}, nil
 	}
