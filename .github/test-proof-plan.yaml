@@ -26,7 +26,11 @@ special_packages:
   - github.com/division-sh/swarm/internal/runtime
   - github.com/division-sh/swarm/internal/runtime/conformance
   - github.com/division-sh/swarm/internal/runtime/contracts
+  - github.com/division-sh/swarm/internal/runtime/bus
   - github.com/division-sh/swarm/internal/runtime/llm
+  - github.com/division-sh/swarm/internal/runtime/pipeline
+  - github.com/division-sh/swarm/internal/runtime/runforkexecution
+  - github.com/division-sh/swarm/internal/runtime/semanticview
   - github.com/division-sh/swarm/internal/serveapp
   - github.com/division-sh/swarm/internal/store
   - github.com/division-sh/swarm/internal/testcatalog
@@ -56,6 +60,7 @@ profiles:
       - hitl-releasee2e-burst-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
+      - hitl-releasee2e-journeys-rest
       - hitl-releasee2e-invocation-1
       - hitl-releasee2e-invocation-2
       - hitl-releasee2e-invocation-3
@@ -63,6 +68,10 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - runtime-bus
+      - runtime-pipeline
+      - runtime-runforkexecution
+      - runtime-semanticview
       - serveapp-channel
       - serveapp-runtime
       - serveapp-receivers
@@ -71,29 +80,49 @@ profiles:
       - api-operator
       - api-rest
       - conformance-1
+      - conformance-h
       - conformance-2
       - conformance-2394-core
+      - conformance-2394-core-rest
       - conformance-2394-pressure
+      - conformance-2394-pressure-rest
       - conformance-2394-reporter
       - serveapp-other
+      - serveapp-i-reporter
+      - serveapp-i-rest
+      - serveapp-other-late
       - serveapp-surfaces
+      - serveapp-publication-direct
       - serveapp-publication-text
       - serveapp-journeys-first
+      - serveapp-journeys-a-c
+      - serveapp-journeys-d-l
       - serveapp-journeys-rest
+      - serveapp-journeys-m-z
       - serveapp-mailbox
+      - serveapp-mailbox-p-q
+      - serveapp-mailbox-r-z
+      - serveapp-ma-other
       - serveapp-selected
+      - serveapp-selected-rest
       - serveapp-standing
       - store-full
       - store-runtime-full-01
+      - store-runtime-full-01-c
       - store-runtime-full-02
+      - store-runtime-full-02-f
       - store-runtime-fanout
       - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
+      - store-runtime-full-03-m-o
       - store-runtime-full-04
+      - store-runtime-full-04-rest
       - store-runtime-full-05
       - store-runtime-full-07
+      - store-runtime-full-07-fork
       - store-runtime-full-06
+      - store-runtime-full-06-rest
       - testpostgres-full
   pr-escalated:
     count_mode: count-1
@@ -105,6 +134,8 @@ profiles:
       - catalog-replay-2
       - catalog-replay-3
       - catalog-runtime
+      - catalog-runtime-scatter-safety
+      - catalog-runtime-fork-readiness
       - catalog-runtime-staged
       - hitl-llm-full
       - hitl-releasee2e-rest
@@ -112,6 +143,7 @@ profiles:
       - hitl-releasee2e-burst-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
+      - hitl-releasee2e-journeys-rest
       - hitl-releasee2e-invocation-1
       - hitl-releasee2e-invocation-2
       - hitl-releasee2e-invocation-3
@@ -119,6 +151,10 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - runtime-bus
+      - runtime-pipeline
+      - runtime-runforkexecution
+      - runtime-semanticview
       - serveapp-channel
       - serveapp-runtime
       - serveapp-receivers
@@ -127,29 +163,49 @@ profiles:
       - api-operator
       - api-rest
       - conformance-1
+      - conformance-h
       - conformance-2
       - conformance-2394-core
+      - conformance-2394-core-rest
       - conformance-2394-pressure
+      - conformance-2394-pressure-rest
       - conformance-2394-reporter
       - serveapp-other
+      - serveapp-i-reporter
+      - serveapp-i-rest
+      - serveapp-other-late
       - serveapp-surfaces
+      - serveapp-publication-direct
       - serveapp-publication-text
       - serveapp-journeys-first
+      - serveapp-journeys-a-c
+      - serveapp-journeys-d-l
       - serveapp-journeys-rest
+      - serveapp-journeys-m-z
       - serveapp-mailbox
+      - serveapp-mailbox-p-q
+      - serveapp-mailbox-r-z
+      - serveapp-ma-other
       - serveapp-selected
+      - serveapp-selected-rest
       - serveapp-standing
       - store-full
       - store-runtime-full-01
+      - store-runtime-full-01-c
       - store-runtime-full-02
+      - store-runtime-full-02-f
       - store-runtime-fanout
       - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
+      - store-runtime-full-03-m-o
       - store-runtime-full-04
+      - store-runtime-full-04-rest
       - store-runtime-full-05
       - store-runtime-full-07
+      - store-runtime-full-07-fork
       - store-runtime-full-06
+      - store-runtime-full-06-rest
       - testpostgres-full
   full:
     count_mode: count-1
@@ -161,6 +217,8 @@ profiles:
       - catalog-replay-2
       - catalog-replay-3
       - catalog-runtime
+      - catalog-runtime-scatter-safety
+      - catalog-runtime-fork-readiness
       - catalog-runtime-staged
       - hitl-llm-full
       - hitl-releasee2e-rest
@@ -168,6 +226,7 @@ profiles:
       - hitl-releasee2e-burst-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
+      - hitl-releasee2e-journeys-rest
       - hitl-releasee2e-invocation-1
       - hitl-releasee2e-invocation-2
       - hitl-releasee2e-invocation-3
@@ -175,6 +234,10 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - runtime-bus
+      - runtime-pipeline
+      - runtime-runforkexecution
+      - runtime-semanticview
       - serveapp-channel
       - serveapp-runtime
       - serveapp-receivers
@@ -183,29 +246,49 @@ profiles:
       - api-operator
       - api-rest
       - conformance-1
+      - conformance-h
       - conformance-2
       - conformance-2394-core
+      - conformance-2394-core-rest
       - conformance-2394-pressure
+      - conformance-2394-pressure-rest
       - conformance-2394-reporter
       - serveapp-other
+      - serveapp-i-reporter
+      - serveapp-i-rest
+      - serveapp-other-late
       - serveapp-surfaces
+      - serveapp-publication-direct
       - serveapp-publication-text
       - serveapp-journeys-first
+      - serveapp-journeys-a-c
+      - serveapp-journeys-d-l
       - serveapp-journeys-rest
+      - serveapp-journeys-m-z
       - serveapp-mailbox
+      - serveapp-mailbox-p-q
+      - serveapp-mailbox-r-z
+      - serveapp-ma-other
       - serveapp-selected
+      - serveapp-selected-rest
       - serveapp-standing
       - store-full
       - store-runtime-full-01
+      - store-runtime-full-01-c
       - store-runtime-full-02
+      - store-runtime-full-02-f
       - store-runtime-fanout
       - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
+      - store-runtime-full-03-m-o
       - store-runtime-full-04
+      - store-runtime-full-04-rest
       - store-runtime-full-05
       - store-runtime-full-07
+      - store-runtime-full-07-fork
       - store-runtime-full-06
+      - store-runtime-full-06-rest
       - testpostgres-full
   nightly:
     count_mode: count-1
@@ -217,6 +300,8 @@ profiles:
       - catalog-replay-2
       - catalog-replay-3
       - catalog-runtime
+      - catalog-runtime-scatter-safety
+      - catalog-runtime-fork-readiness
       - catalog-runtime-staged
       - hitl-llm-full
       - hitl-releasee2e-rest
@@ -224,6 +309,7 @@ profiles:
       - hitl-releasee2e-burst-2
       - hitl-releasee2e-golden
       - hitl-releasee2e-journeys
+      - hitl-releasee2e-journeys-rest
       - hitl-releasee2e-invocation-1
       - hitl-releasee2e-invocation-2
       - hitl-releasee2e-invocation-3
@@ -231,6 +317,10 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - runtime-bus
+      - runtime-pipeline
+      - runtime-runforkexecution
+      - runtime-semanticview
       - serveapp-channel
       - serveapp-runtime
       - serveapp-receivers
@@ -239,31 +329,51 @@ profiles:
       - api-operator
       - api-rest
       - conformance-1
+      - conformance-h
       - conformance-2
       - conformance-2394-core
+      - conformance-2394-core-rest
       - conformance-2394-pressure
+      - conformance-2394-pressure-rest
       - conformance-2394-reporter
       - conformance-soak-sqlite
       - conformance-soak-postgres
       - serveapp-other
+      - serveapp-i-reporter
+      - serveapp-i-rest
+      - serveapp-other-late
       - serveapp-surfaces
+      - serveapp-publication-direct
       - serveapp-publication-text
       - serveapp-journeys-first
+      - serveapp-journeys-a-c
+      - serveapp-journeys-d-l
       - serveapp-journeys-rest
+      - serveapp-journeys-m-z
       - serveapp-mailbox
+      - serveapp-mailbox-p-q
+      - serveapp-mailbox-r-z
+      - serveapp-ma-other
       - serveapp-selected
+      - serveapp-selected-rest
       - serveapp-standing
       - store-full
       - store-runtime-full-01
+      - store-runtime-full-01-c
       - store-runtime-full-02
+      - store-runtime-full-02-f
       - store-runtime-fanout
       - store-runtime-fanout-process
       - store-runtime-fork-generation
       - store-runtime-full-03
+      - store-runtime-full-03-m-o
       - store-runtime-full-04
+      - store-runtime-full-04-rest
       - store-runtime-full-05
       - store-runtime-full-07
+      - store-runtime-full-07-fork
       - store-runtime-full-06
+      - store-runtime-full-06-rest
       - testpostgres-full
 units:
   local-catalog-smoke:
@@ -331,7 +441,14 @@ units:
   conformance-1:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^Test[FH].*$'
+    run: '^TestF.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  conformance-h:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestH.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -348,14 +465,28 @@ units:
   conformance-2394-core:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^TestIssue2394(D3.*|Nested.*|Supplemental(Contention|Soak).*|TwentyIntent.*|TwoTen.*)$'
+    run: '^TestIssue2394D3.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  conformance-2394-core-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394(Nested.*|Supplemental(Contention|Soak).*|TwentyIntent.*|TwoTen.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
   conformance-2394-pressure:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^TestIssue2394(Pressure.*|SupplementalPressure.*|TwentyTwoIntentPressure.*)$'
+    run: '^TestIssue2394Pressure.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  conformance-2394-pressure-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394(SupplementalPressure.*|TwentyTwoIntentPressure.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -454,7 +585,21 @@ units:
   catalog-runtime:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
-    run: '^(Test($|[^CS].*|Stage.*|ScatterGatherSafetyBothStores|ScatterGatherFrontierAggregatePreservesRefusalsBothStores|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedForkFlowOwnedReadinessBothStoresInitial|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CS].*|Stage.*|ScatterGatherFrontierAggregatePreservesRefusalsBothStores|SelectedDownstreamPreparationFailsBeforeMaterializationBothStores|SelectedForkRecoveredReceiverReadinessBothStores|SelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic|SelectedForkPendingRootAgentInputBothStores)|Example.*|Fuzz.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  catalog-runtime-scatter-safety:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    run: '^TestScatterGatherSafetyBothStores$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  catalog-runtime-fork-readiness:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    run: '^TestSelectedForkFlowOwnedReadinessBothStoresInitial$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -508,12 +653,39 @@ units:
   hitl-releasee2e-journeys:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^TestC.*$'
+    run: '^TestCompiledProcessFullLifecycle.*$'
     required_children:
       TestCompiledProcessFullLifecycleJourneysSQLitePostgres: [J1-sqlite-graceful, J2-postgres-graceful, J3-sqlite-crash-intrinsic-recover, J4-postgres-crash-intrinsic-recover, J5-sqlite-dev-fresh]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
+  hitl-releasee2e-journeys-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^Test(Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  runtime-bus:
+    packages: [github.com/division-sh/swarm/internal/runtime/bus]
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  runtime-pipeline:
+    packages: [github.com/division-sh/swarm/internal/runtime/pipeline]
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  runtime-runforkexecution:
+    packages: [github.com/division-sh/swarm/internal/runtime/runforkexecution]
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  runtime-semanticview:
+    packages: [github.com/division-sh/swarm/internal/runtime/semanticview]
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
   hitl-releasee2e-invocation-1:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
@@ -603,9 +775,16 @@ units:
   serveapp-surfaces:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # CI 34851793743: structured and text sites each took 277s. Keep complete
-    # top-level families separate; the partition census rejects missed tests.
-    run: '^TestServedPublication(Sites|Direct).*$'
+    # Keep publication-site, direct, and text roots in separate complete units;
+    # the partition census rejects missed tests.
+    run: '^TestServedPublicationSites.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-publication-direct:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestServedPublicationDirect.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -619,40 +798,107 @@ units:
   serveapp-journeys-first:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # Non-selected TestSe* controls plus A-L served journeys (~436s measured).
-    # The RE2 complement excludes TestSel* and TestServed* from the first arm.
-    run: '^(TestSe($|[^lr].*|r($|[^v].*|v($|[^e].*|e($|[^d].*))))|TestServed($|[^M-Z].*))$'
+    # Non-selected TestSe* controls include the startup-abort matrix.
+    run: '^TestSe($|[^lr].*|r($|[^v].*|v($|[^e].*|e($|[^d].*))))$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-journeys-a-c:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestServed[A-C].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-journeys-d-l:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestServed[D-L].*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
   serveapp-journeys-rest:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # CI 34786084117 measured this unit at 548s, including new mailbox cuts.
-    # Keep TestMa* separate; retain every other M* and non-Pu served journey.
-    run: '^(TestM($|[^a].*)|TestServed([M-OQ-Z].*|P($|[^u].*)))$'
+    # Keep non-TestMa M roots separate from mailbox and served journeys.
+    run: '^TestM($|[^a].*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-journeys-m-z:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestServed([M-OQ-Z].*|P($|[^u].*))$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
   serveapp-mailbox:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    # Complete mailbox/managed families, disjoint from the other M* proofs.
-    run: '^TestMa.*$'
+    run: '^TestMailbox[A-O].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-mailbox-p-q:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestMailbox[P-Q].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-mailbox-r-z:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestMailbox[R-Z].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-ma-other:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestMa[^i].*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
   serveapp-selected:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestSel.*$'
+    run: '^TestSelectedForkR.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-selected-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestSelected(Fork($|[^R].*)|Reset.*|Owner.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
   serveapp-other:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^(Test($|[^CMR-Z].*)|TestChannelOnboardingPendingResetRestartToReadyE2E|Example.*|Fuzz.*)$'
+    run: '^Test[ABD-H].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-i-reporter:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^TestIssue2394ServedOriginalReporter.*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-i-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^Test(Issue2394(Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Inbound.*|Initialize.*|Internal.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  serveapp-other-late:
+    packages:
+      - github.com/division-sh/swarm/internal/serveapp
+    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E)|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -672,15 +918,29 @@ units:
   store-runtime-full-01:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^(Test($|[^D-Z].*)|Example.*|Fuzz.*)$
+    run: ^(Test($|[AB].*)|Example.*|Fuzz.*)$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-01-c:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: ^TestC.*$
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
   store-runtime-full-02:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    # Positive RE2 complement of TestFanOut and TestForkG within D-F.
-    run: '^Test([D-E].*|F($|[^ao].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
+    run: '^Test[D-E].*$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-02-f:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    # Positive RE2 complement of FanOut and ForkG within TestF.
+    run: '^Test(F($|[^ao].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -713,14 +973,28 @@ units:
   store-runtime-full-03:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^Test[G-O].*$
+    run: ^Test[G-L].*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-03-m-o:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: ^Test[M-O].*$
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
   store-runtime-full-04:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^Test[P-Q].*$
+    run: ^TestPro.*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-04-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: '^Test(P($|[^r].*|r($|[^o].*))|Q.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -736,15 +1010,29 @@ units:
   store-runtime-full-07:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    # The other 176 TestR tests accounted for 113.56s in the same CI run.
-    run: ^TestRu.*$
+    # Non-RunFork TestRu roots retain their full backend proof.
+    run: '^TestRu($|[^n].*|n($|[^F].*))$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
   store-runtime-full-06:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^Test[S-Z].*$
+    run: ^TestSel.*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-06-rest:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: '^Test(S($|[^e].*|e($|[^l].*))|[T-Z].*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-07-fork:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: '^TestRunFork.*$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

@@ -21199,7 +21199,7 @@ test_specification:
       promoted_by: '#2168, #2321'
       source: internal/releasee2e/testdata/golden_agent_workload
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-rest
+      ci_owner: hitl-releasee2e-golden
       process_boundary: >
         The executor builds the current swarm binary for public structural commands and a separate go test -c
         serveapp binary with TestOwnedMockLifecycleProcessEntry for retained mock execution (H). The child uses
@@ -21240,7 +21240,7 @@ test_specification:
       promoted_by: '#2008, #2321'
       source: internal/releasee2e/testdata/full_lifecycle/standing_telegram
       executor: github.com/division-sh/swarm/internal/releasee2e
-      ci_owner: hitl-releasee2e-rest
+      ci_owner: hitl-releasee2e-journeys
       purpose: >
         Own one production-shaped compiled-process conformance profile that crosses cold authored source admission,
         standing activation, provider ingress, template routing, mock agent execution, workflow timer and decision-card

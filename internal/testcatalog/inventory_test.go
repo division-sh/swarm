@@ -279,7 +279,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if !regexp.MustCompile(policy.Units["catalog-required-inventory"].Run).MatchString("TestCatalogExternalProofPartitionsThroughInventory") {
 		t.Fatal("required inventory unit omits the partition mutation proof")
 	}
-	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2", "hitl-releasee2e-golden", "hitl-releasee2e-journeys"}
+	releaseUnits := []string{"hitl-releasee2e-rest", "hitl-releasee2e-burst-1", "hitl-releasee2e-burst-2", "hitl-releasee2e-golden", "hitl-releasee2e-journeys", "hitl-releasee2e-journeys-rest"}
 	for shard := 1; shard <= 6; shard++ {
 		releaseUnits = append(releaseUnits, fmt.Sprintf("hitl-releasee2e-invocation-%d", shard))
 	}
@@ -294,8 +294,16 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err := testplanning.ValidateGoProofPartition(filepath.Join(catalogRepoRoot(t), "internal/releasee2e"), runs); err != nil {
 		t.Fatal(err)
 	}
-	serveUnits := []string{"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-text", "serveapp-journeys-first", "serveapp-journeys-rest", "serveapp-mailbox", "serveapp-selected", "serveapp-other", "serveapp-standing"}
-	catalogUnits := []string{"catalog-replay-1", "catalog-replay-2", "catalog-replay-3", "catalog-runtime", "catalog-runtime-staged"}
+	serveUnits := []string{
+		"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-direct", "serveapp-publication-text",
+		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-rest", "serveapp-journeys-m-z",
+		"serveapp-mailbox", "serveapp-mailbox-p-q", "serveapp-mailbox-r-z", "serveapp-ma-other",
+		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-i-rest", "serveapp-other-late", "serveapp-standing",
+	}
+	catalogUnits := []string{
+		"catalog-replay-1", "catalog-replay-2", "catalog-replay-3", "catalog-runtime",
+		"catalog-runtime-scatter-safety", "catalog-runtime-fork-readiness", "catalog-runtime-staged",
+	}
 	for pkg, ids := range map[string][]string{"serveapp": serveUnits, "runtime/cataloge2e": catalogUnits} {
 		var selectors []string
 		for _, id := range ids {

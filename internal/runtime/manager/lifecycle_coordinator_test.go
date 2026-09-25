@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -1109,62 +1110,118 @@ func TestLifecycleCoordinatorReplacementRejectsPredecessorDeliveryAdmission(t *t
 }
 
 func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing.T) {
-	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
-	rec := lifecycleTestPersistedAgent(t)
-	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
-		t.Fatalf("register: %v", err)
+	setup := func(t *testing.T) (*agentLifecycleCoordinator, *lifecyclePersistenceProbe, PersistedAgent, context.Context, runtimeeffects.LifecycleToken, chan struct{}) {
+		t.Helper()
+		probe := newLifecyclePersistenceProbe()
+		coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+		rec := lifecycleTestPersistedAgent(t)
+		ctx := testAuthorActivityContext(context.Background())
+		if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, rec, true); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+		beginCoordinatorRun(t, coordinator, ctx, AgentRunModeStandard)
+		initialCtx, token, done, err := replaceCoordinatorLoop(coordinator, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		return coordinator, probe, rec, initialCtx, token, done
 	}
-	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
-	initialCtx, initialToken, initialDone, err := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
-	if err != nil {
-		t.Fatalf("start: %v", err)
+	assertTerminated := func(t *testing.T, coordinator *agentLifecycleCoordinator, rec PersistedAgent) {
+		t.Helper()
+		cell, ok := testLifecycleCell(t, coordinator, rec.Config.ID, "")
+		if !ok {
+			t.Fatal("terminal decision removed the lifecycle cell")
+		}
+		coordinator.mu.Lock()
+		phase := cell.phase
+		loopOwned := cell.execution != nil && (cell.execution.loopCancel != nil || cell.execution.loopDone != nil)
+		coordinator.mu.Unlock()
+		if phase != AgentLifecycleTerminated || loopOwned {
+			t.Fatalf("terminal cell phase=%s loopOwned=%v, want terminated without loop owner", phase, loopOwned)
+		}
 	}
-	go func() {
+
+	t.Run("teardown_commits_first", func(t *testing.T) {
+		coordinator, probe, rec, initialCtx, token, done := setup(t)
+		ctx := testAuthorActivityContext(context.Background())
+		released := make(chan error, 1)
+		go func() {
+			<-initialCtx.Done()
+			released <- releaseCoordinatorLoop(coordinator, token, done)
+		}()
+		if _, err := coordinator.terminateIdentityWithTopology(ctx, rec.Config.Identity, "teardown", AgentLifecycleTerminated, nil); err != nil {
+			t.Fatalf("teardown: %v", err)
+		}
+		if err := <-released; err != nil {
+			t.Fatalf("release predecessor: %v", err)
+		}
+		if _, _, _, err := replaceCoordinatorLoop(coordinator, ctx, rec, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{}); !errors.Is(err, ErrAgentNotFound) {
+			t.Fatalf("restart after terminal decision = %v, want agent not found", err)
+		}
+		if got := len(probe.requestsFor("teardown")); got != 1 {
+			t.Fatalf("terminal commits = %d, want 1", got)
+		}
+		if _, live := coordinator.tokenIdentity(rec.Config.Identity); live {
+			t.Fatal("terminal decision left a live token")
+		}
+		assertTerminated(t, coordinator, rec)
+	})
+
+	t.Run("retirement_rejects_teardown_then_new_teardown_commits", func(t *testing.T) {
+		coordinator, probe, rec, initialCtx, initialToken, initialDone := setup(t)
+		ctx := testAuthorActivityContext(context.Background())
+		type replacement struct {
+			ctx   context.Context
+			token runtimeeffects.LifecycleToken
+			done  chan struct{}
+			err   error
+		}
+		restarted := make(chan replacement, 1)
+		go func() {
+			loopCtx, token, done, err := replaceCoordinatorLoop(coordinator, ctx, rec, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+			restarted <- replacement{loopCtx, token, done, err}
+		}()
 		<-initialCtx.Done()
-		_ = releaseCoordinatorLoop(coordinator, initialToken, initialDone)
-	}()
-
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		<-start
-		loopCtx, token, done, restartErr := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, "restart", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
-		if restartErr == nil && loopCtx != nil {
-			go func() {
-				<-loopCtx.Done()
-				_ = releaseCoordinatorLoop(coordinator, token, done)
-			}()
+		_, err := coordinator.terminateIdentityWithTopology(ctx, rec.Config.Identity, "teardown", AgentLifecycleTerminated, nil)
+		failure, typed := runtimefailures.EnvelopeFromError(err)
+		if !typed || failure.Detail.Code != "agent_retirement_pending" {
+			t.Fatalf("teardown during retirement = %v, want typed retirement-pending conflict", err)
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		<-start
-		_, _ = coordinator.terminateIdentityWithTopology(testAuthorActivityContext(context.Background()), rec.Config.Identity, "teardown", AgentLifecycleTerminated, nil)
-	}()
-	close(start)
-	wg.Wait()
-
-	if token, ok := coordinator.tokenIdentity(rec.Config.Identity); ok {
-		t.Fatalf("restart-versus-teardown left live token %+v", token)
-	}
-	cell, _ := testLifecycleCell(t, coordinator, rec.Config.ID, "")
-	coordinator.mu.Lock()
-	var phase AgentLifecyclePhase
-	var cancel context.CancelFunc
-	var done chan struct{}
-	if cell != nil {
-		phase = cell.phase
-		if cell.execution != nil {
-			cancel, done = cell.execution.loopCancel, cell.execution.loopDone
+		if got := len(probe.requestsFor("teardown")); got != 0 {
+			t.Fatalf("rejected teardown committed %d transitions", got)
 		}
-	}
-	coordinator.mu.Unlock()
-	if cell == nil || phase != AgentLifecycleTerminated || cancel != nil || done != nil {
-		t.Fatalf("final lifecycle cell phase=%s cancel=%v done=%v, want terminated without loop owner", phase, cancel != nil, done != nil)
-	}
+		if err := releaseCoordinatorLoop(coordinator, initialToken, initialDone); err != nil {
+			t.Fatalf("release predecessor: %v", err)
+		}
+		successor := <-restarted
+		if successor.err != nil {
+			t.Fatalf("restart: %v", successor.err)
+		}
+		if successor.token.Generation != initialToken.Generation+1 {
+			t.Fatalf("successor generation = %d, want %d", successor.token.Generation, initialToken.Generation+1)
+		}
+		if token, live := coordinator.tokenIdentity(rec.Config.Identity); !live || token != successor.token {
+			t.Fatalf("successful restart token = %+v live=%v, want %+v", token, live, successor.token)
+		}
+		released := make(chan error, 1)
+		go func() {
+			<-successor.ctx.Done()
+			released <- releaseCoordinatorLoop(coordinator, successor.token, successor.done)
+		}()
+		if _, err := coordinator.terminateIdentityWithTopology(ctx, rec.Config.Identity, "teardown", AgentLifecycleTerminated, nil); err != nil {
+			t.Fatalf("new teardown after retirement: %v", err)
+		}
+		if err := <-released; err != nil {
+			t.Fatalf("release successor: %v", err)
+		}
+		if got := len(probe.requestsFor("teardown")); got != 1 {
+			t.Fatalf("terminal commits = %d, want 1", got)
+		}
+		if token, live := coordinator.tokenIdentity(rec.Config.Identity); live {
+			t.Fatalf("successful teardown left live token %+v", token)
+		}
+		assertTerminated(t, coordinator, rec)
+	})
 }
 
 func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing.T) {
