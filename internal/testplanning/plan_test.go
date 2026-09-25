@@ -79,6 +79,19 @@ func TestRunPlanRejectsWrongDigestAndDuplicatePackage(t *testing.T) {
 	if err := badDigest.Validate(); err == nil || !strings.Contains(err.Error(), "digest") {
 		t.Fatalf("wrong digest error = %v", err)
 	}
+	unknownProfile := plan
+	unknownProfile.Profile = "unknown"
+	unknownProfile.Units = append([]ProofUnit(nil), plan.Units...)
+	for i := range unknownProfile.Units {
+		unknownProfile.Units[i].WorkloadProfile = "unknown"
+	}
+	unknownProfile.Digest, err = planDigest(unknownProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := unknownProfile.Validate(); err == nil || !strings.Contains(err.Error(), "unsupported profile") {
+		t.Fatalf("self-consistent unknown profile error = %v", err)
+	}
 	duplicate := plan
 	duplicate.Digest = ""
 	duplicate.Units[1].Packages = []string{"module/a"}
@@ -276,6 +289,7 @@ func testPolicy() Policy {
 		EscalationPaths: []string{`^internal/runtime/conformance/`},
 		SpecialPackages: []string{"module/catalog"},
 		Profiles: map[string]ProfilePolicy{
+			ProfileLocal:       {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-smoke"}},
 			ProfilePRCommon:    {CountMode: "cache-default", EnvironmentID: "env", Units: []string{"catalog-smoke"}},
 			ProfilePREscalated: {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full"}},
 			ProfileFull:        {CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full"}},

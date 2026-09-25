@@ -85,8 +85,12 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 					count++
 				}
 			}
-			if count != 1 {
-				return nil, fmt.Errorf("%s has %d mandatory %s units, want 1", profile, count, id)
+			want := 1
+			if strings.HasPrefix(id, "conformance-soak-") && profile != ProfileNightly {
+				want = 0
+			}
+			if count != want {
+				return nil, fmt.Errorf("%s has %d scheduled %s units, want %d", profile, count, id, want)
 			}
 		}
 	}

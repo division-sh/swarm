@@ -132,8 +132,8 @@ func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
 }
 
 func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
-	if profile, continuous := goldenContinuousProofProfile(t); profile != "" && !continuous {
-		t.Skipf("forced-restart proof runs in full/nightly, not %s", profile)
+	if profile, _ := goldenContinuousProofProfile(t); profile == "pr-common" || profile == "pr-escalated" {
+		t.Skipf("forced-restart proof runs in local/full/nightly or an affected-claim supplement, not %s", profile)
 	}
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
@@ -213,7 +213,7 @@ func goldenContinuousProofProfile(t *testing.T) (string, bool) {
 	switch profile {
 	case "":
 		return "", false
-	case "pr-common", "pr-escalated":
+	case "local", "pr-common", "pr-escalated":
 		return profile, false
 	case "full", "nightly":
 		return profile, true
@@ -1750,6 +1750,7 @@ func TestGoldenContinuousProofProfileSelection(t *testing.T) {
 		continuous bool
 	}{
 		{profile: ""},
+		{profile: "local"},
 		{profile: "pr-common"},
 		{profile: "pr-escalated"},
 		{profile: "full", continuous: true},
@@ -1757,7 +1758,7 @@ func TestGoldenContinuousProofProfileSelection(t *testing.T) {
 	} {
 		name := test.profile
 		if name == "" {
-			name = "local"
+			name = "raw"
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(goldenProofProfileEnv, test.profile)

@@ -33,6 +33,16 @@ special_packages:
   - github.com/division-sh/swarm/internal/testpostgres
   - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
 profiles:
+  local:
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    units:
+      - catalog-required-inventory
+      - local-catalog-smoke
+      - local-api-parity
+      - local-release-golden-restart
+      - local-release-lifecycle-smoke
+      - local-serveapp-canaries
   pr-common:
     count_mode: cache-default
     environment_id: ci-postgres-gateway-empty-v1
@@ -65,8 +75,6 @@ profiles:
       - conformance-2394-core
       - conformance-2394-pressure
       - conformance-2394-reporter
-      - conformance-soak-sqlite
-      - conformance-soak-postgres
       - serveapp-other
       - serveapp-surfaces
       - serveapp-publication-text
@@ -123,8 +131,6 @@ profiles:
       - conformance-2394-core
       - conformance-2394-pressure
       - conformance-2394-reporter
-      - conformance-soak-sqlite
-      - conformance-soak-postgres
       - serveapp-other
       - serveapp-surfaces
       - serveapp-publication-text
@@ -181,8 +187,6 @@ profiles:
       - conformance-2394-core
       - conformance-2394-pressure
       - conformance-2394-reporter
-      - conformance-soak-sqlite
-      - conformance-soak-postgres
       - serveapp-other
       - serveapp-surfaces
       - serveapp-publication-text
@@ -262,6 +266,67 @@ profiles:
       - store-runtime-full-06
       - testpostgres-full
 units:
+  local-catalog-smoke:
+    packages: [github.com/division-sh/swarm/internal/runtime/cataloge2e]
+    run: '^TestCatalogRequiredSmoke$'
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-api-parity:
+    packages: [github.com/division-sh/swarm/internal/apiv1]
+    run: '^TestPublicSurfaceBackendMatrixCoversSelectedBackendRows$'
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-release-golden-restart:
+    packages: [github.com/division-sh/swarm/internal/releasee2e]
+    run: '^TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends$'
+    required_children:
+      TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends: [sqlite, postgres]
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-release-lifecycle-smoke:
+    packages: [github.com/division-sh/swarm/internal/releasee2e]
+    run: '^TestCompiledProcessFullLifecycleSQLiteSmoke$'
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-serveapp-canaries:
+    packages: [github.com/division-sh/swarm/internal/serveapp]
+    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores)$'
+    required_children:
+      TestMockAgentSupportedSurfaceSQLitePostgres: [sqlite, postgres]
+      TestServedResetRetainClearAndHistoricalReplayBothStores: [default_sqlite/clear=false, default_sqlite/clear=true, explicit_postgres/clear=false, explicit_postgres/clear=true]
+      TestSelectedForkPublicChangedTargetExecutionBothStores: [default_sqlite, explicit_postgres]
+      TestIssue2394ServedStopTwentyBothStores: [default_sqlite, explicit_postgres]
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  parity-served-source-artifact:
+    packages: [github.com/division-sh/swarm/internal/serveapp]
+    run: '^TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  parity-connected-channel-onboarding-surface:
+    packages: [github.com/division-sh/swarm/internal/serveapp]
+    run: '^TestChannelConnectTelegramFirstUserJourney$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  parity-destructive-reset-crash:
+    packages: [github.com/division-sh/swarm/internal/serveapp]
+    run: '^TestResetProcessDeathRecoversBeforeSourceAdmissionBothStores$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  parity-golden-forced-restart:
+    packages: [github.com/division-sh/swarm/internal/releasee2e]
+    run: '^TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
   # CI34349231066: TestF*/TestH* total 69s; the complement totals 56s.
   conformance-1:
     packages:
@@ -417,6 +482,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
     run: '^TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1$'
+    required_children:
+      TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration1: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -424,6 +491,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
     run: '^TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2$'
+    required_children:
+      TestGoldenAgentWorkloadBurstConcurrencyOnBothBackendsIteration2: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -431,6 +500,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
     run: '^TestGolden($|[^AI].*|AgentWorkload($|[^B].*))$'
+    required_children:
+      TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends: [sqlite, postgres]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
@@ -438,6 +509,8 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
     run: '^TestC.*$'
+    required_children:
+      TestCompiledProcessFullLifecycleJourneysSQLitePostgres: [J1-sqlite-graceful, J2-postgres-graceful, J3-sqlite-crash-intrinsic-recover, J4-postgres-crash-intrinsic-recover, J5-sqlite-dev-fresh]
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

@@ -2,7 +2,7 @@
 
 Authority: [lead ruling 5743323725](https://github.com/division-sh/swarm/issues/2394#issuecomment-5743323725).
 
-Every profile (PR common/escalated, full, nightly) includes two required units:
+Nightly and fan-out-affected PR plans include two required units:
 `conformance-soak-sqlite` and `conformance-soak-postgres`. They execute
 `TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores` with exactly one backend
 selected per isolated Ubuntu worker. The ordinary conformance partition uses
@@ -22,9 +22,9 @@ is excluded. The small finite soak is not a substitute.
 
 The two backend cells may run concurrently on separate workers. Each has one
 primary, uncached `-count=1` command; no confirmation retry or race multiplier.
-The command is `go run ./cmd/swarm-test -- ./internal/runtime/conformance -run
-'^TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores$/^BACKEND$' -count=1
--timeout 22m -json`, wrapped by the explicit 1500s command timeout in CI.
+The command is `go run ./cmd/swarm-test --planned PLAN UNIT`, where the
+digest-bound unit contains the exact backend filter, `-count=1`, and 22m Go
+timeout. CI retains the explicit 1500s command timeout.
 
 ## Required Evidence
 
@@ -36,7 +36,9 @@ receipts additionally require the exact backend and parent to pass, with backend
 elapsed at least 900s; wrong backend, skip, short run, missing receipt, or missing
 job cannot qualify. Passing the unchanged test includes its final drain/readback.
 
-The required summary explicitly rejects skipped soak jobs. Timing aggregation
+The required summary rejects skipped soak jobs whenever the plan contains
+either cell. An empty soak matrix is permitted only when the canonical plan
+omits both cells. Timing aggregation
 and timing-model publication await the mandatory lane. Failed PostgreSQL soak
 execution remains a failure; this scheduling change does not repair or waive it.
 

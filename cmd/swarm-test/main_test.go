@@ -14,13 +14,10 @@ import (
 )
 
 func TestParseTestArgs(t *testing.T) {
-	if got, err := parseTestArgs(nil); err != nil || len(got) != 1 || got[0] != "./..." {
-		t.Fatalf("no-argument selection = %v err=%v", got, err)
-	}
 	if got, err := parseTestArgs([]string{"--", "./internal/testpostgres", "-count=1"}); err != nil || strings.Join(got, " ") != "./internal/testpostgres -count=1" {
 		t.Fatalf("focused selection = %v err=%v", got, err)
 	}
-	for _, args := range [][]string{{"go", "test", "./..."}, {"--"}} {
+	for _, args := range [][]string{nil, {"go", "test", "./..."}, {"--"}, {"--", "./..."}} {
 		if _, err := parseTestArgs(args); err == nil {
 			t.Fatalf("legacy/arbitrary grammar accepted: %v", args)
 		}

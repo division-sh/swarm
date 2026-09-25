@@ -391,8 +391,8 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read CI workflow: %v", err)
 	}
-	if !strings.Contains(string(workflow), "SWARM_TEST_PROOF_PROFILE: ${{ needs.ci-plan.outputs.profile }}") {
-		t.Fatal("CI proof units do not receive the canonical planned profile")
+	if !strings.Contains(string(workflow), `go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID"`) {
+		t.Fatal("CI proof units do not consume the canonical digest-bound plan")
 	}
 }
 

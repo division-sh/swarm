@@ -106,21 +106,22 @@ func PlanChanged(repoRoot string, packages []Package, changedFiles []ChangedFile
 
 // TestCommand returns the exact test command represented by plan. Full-suite
 // plans consume the host admission owner; focused plans remain direct.
-func TestCommand(plan Plan, extraArgs []string) []string {
+func TestCommand(plan Plan, extraArgs []string) ([]string, error) {
 	if len(plan.Packages) == 0 && !plan.FullSuite {
-		return nil
+		return nil, nil
 	}
 	if plan.FullSuite {
-		args := []string{"go", "run", "./cmd/swarm-test", "--"}
-		args = append(args, extraArgs...)
-		return append(args, "./...")
+		if len(extraArgs) != 0 {
+			return nil, fmt.Errorf("full-suite fallback accepts no forwarded Go flags; run go run ./cmd/swarm-test --full")
+		}
+		return []string{"go", "run", "./cmd/swarm-test", "--full"}, nil
 	}
 	args := []string{"go", "test"}
 	args = append(args, extraArgs...)
 	for _, pkg := range plan.Packages {
 		args = append(args, pkg.Pattern())
 	}
-	return args
+	return args, nil
 }
 
 // Pattern returns a stable package pattern suitable for go test.

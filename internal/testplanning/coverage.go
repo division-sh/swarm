@@ -37,6 +37,10 @@ func ValidateGoProofPartition(dir string, runs []string) error {
 // Match effective top-level ownership after a caller has validated any exact
 // exclusion and its separately executed replacement.
 func validateGoProofMatchers(dir string, matchers []func(string) bool) error {
+	return validateGoProofMatchersExcept(dir, matchers, nil)
+}
+
+func validateGoProofMatchersExcept(dir string, matchers []func(string) bool, excluded map[string]bool) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -58,6 +62,9 @@ func validateGoProofMatchers(dir string, matchers []func(string) bool) error {
 			}
 			name := function.Name.Name
 			if name == "TestMain" || (!strings.HasPrefix(name, "Test") && !strings.HasPrefix(name, "Example") && !strings.HasPrefix(name, "Fuzz")) {
+				continue
+			}
+			if excluded[name] {
 				continue
 			}
 			proofs++

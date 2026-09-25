@@ -137,6 +137,45 @@ func TestRunAdmissionPublishesOnlySuccessfulDuration(t *testing.T) {
 	}
 }
 
+func TestCompletionTierETAIsNotContaminatedByFocusedHistory(t *testing.T) {
+	root := t.TempDir()
+	admission := testRunAdmission(root, nil)
+	command := RunCommand{Args: []string{"go", "test", "./internal/testplanning", "-json"}, FallbackDuration: 10 * time.Minute}
+	clock := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
+	admission.now = func() time.Time { return clock }
+	focused, err := admission.Acquire(context.Background(), command, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(43 * time.Second)
+	if err := focused.Complete(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	command.ModelOnlyETA = true
+	completed, err := admission.Acquire(context.Background(), command, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := admission.loadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Active) != 1 || doc.Active[0].ExpectedSeconds != 600 {
+		t.Fatalf("completion ETA = %+v, want 600s model despite 43s raw history", doc.Active)
+	}
+	clock = clock.Add(20 * time.Second)
+	if err := completed.Complete(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	doc, err = admission.loadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.History) != 1 || doc.History[0].DurationSeconds != 43 {
+		t.Fatalf("completion run published argv history: %+v", doc.History)
+	}
+}
+
 func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.T) {
 	root := t.TempDir()
 	admission := testRunAdmission(root, nil)

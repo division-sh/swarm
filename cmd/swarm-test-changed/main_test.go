@@ -77,7 +77,7 @@ func TestFullSuiteFallbackExecutesCanonicalWrapper(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run(context.Background(), runConfig{
 		base: "HEAD", repo: repo, includeUncommitted: true,
-		extraGoTestArgs: []string{"-count=1"}, stdout: &stdout, stderr: &stderr,
+		stdout: &stdout, stderr: &stderr,
 	}); err != nil {
 		t.Fatalf("run: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
 	}
@@ -85,8 +85,11 @@ func TestFullSuiteFallbackExecutesCanonicalWrapper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := strings.TrimSpace(string(raw)), "run ./cmd/swarm-test -- -count=1 ./..."; got != want {
+	if got, want := strings.TrimSpace(string(raw)), "run ./cmd/swarm-test --full"; got != want {
 		t.Fatalf("executed command = %q, want %q", got, want)
+	}
+	if err := run(context.Background(), runConfig{base: "HEAD", repo: repo, includeUncommitted: true, extraGoTestArgs: []string{"-count=1"}, stdout: &stdout, stderr: &stderr}); err == nil {
+		t.Fatal("full-suite fallback silently accepted forwarded Go flags")
 	}
 }
 

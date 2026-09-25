@@ -12,29 +12,41 @@ import (
 
 const RunPlanVersion = 1
 
+type BuildOptions struct {
+	IncludeSoak       bool
+	IncludeParityFull bool
+}
+
 type RunPlan struct {
-	Version        int         `json:"version"`
-	PolicyVersion  int         `json:"policy_version"`
-	Profile        string      `json:"profile"`
-	Reason         string      `json:"reason"`
-	HeadSHA        string      `json:"head_sha"`
-	Digest         string      `json:"digest"`
-	TargetSeconds  float64     `json:"target_seconds"`
-	GranularityMax float64     `json:"granularity_max_seconds"`
-	Packages       []string    `json:"packages"`
-	Units          []ProofUnit `json:"units"`
+	Version        int          `json:"version"`
+	PolicyVersion  int          `json:"policy_version"`
+	Profile        string       `json:"profile"`
+	Reason         string       `json:"reason"`
+	HeadSHA        string       `json:"head_sha"`
+	Digest         string       `json:"digest"`
+	BuildContext   BuildContext `json:"build_context"`
+	TargetSeconds  float64      `json:"target_seconds"`
+	GranularityMax float64      `json:"granularity_max_seconds"`
+	Packages       []string     `json:"packages"`
+	Units          []ProofUnit  `json:"units"`
 }
 
 type ProofUnit struct {
-	ID            string   `json:"id"`
-	Packages      []string `json:"packages"`
-	Run           string   `json:"run,omitempty"`
-	Skip          string   `json:"skip,omitempty"`
-	GoTimeout     string   `json:"go_timeout,omitempty"`
-	CountMode     string   `json:"count_mode"`
-	EnvironmentID string   `json:"environment_id"`
-	BudgetClass   string   `json:"budget_class"`
-	WeightSeconds float64  `json:"weight_seconds"`
+	ID                  string              `json:"id"`
+	Packages            []string            `json:"packages"`
+	WorkloadProfile     string              `json:"workload_profile"`
+	ExecutionTier       string              `json:"execution_tier"`
+	Run                 string              `json:"run,omitempty"`
+	Skip                string              `json:"skip,omitempty"`
+	GoTimeout           string              `json:"go_timeout,omitempty"`
+	CountMode           string              `json:"count_mode"`
+	EnvironmentID       string              `json:"environment_id"`
+	BudgetClass         string              `json:"budget_class"`
+	WeightSeconds       float64             `json:"weight_seconds"`
+	SelectedRoots       []TestRoot          `json:"selected_roots,omitempty"`
+	RequiredTests       []RequiredTest      `json:"required_tests,omitempty"`
+	TestBearingPackages []string            `json:"test_bearing_packages,omitempty"`
+	RequiredChildren    map[string][]string `json:"required_children,omitempty"`
 }
 
 type weightedPackage struct {
@@ -42,7 +54,14 @@ type weightedPackage struct {
 	weight float64
 }
 
-func BuildPlan(policy Policy, model WeightModel, packages []string, profile, reason, headSHA string) (RunPlan, error) {
+func BuildPlan(policy Policy, model WeightModel, packages []string, profile, reason, headSHA string, options ...BuildOptions) (RunPlan, error) {
+	if len(options) > 1 {
+		return RunPlan{}, fmt.Errorf("build plan accepts at most one option set")
+	}
+	var option BuildOptions
+	if len(options) == 1 {
+		option = options[0]
+	}
 	if err := policy.Validate(); err != nil {
 		return RunPlan{}, err
 	}
@@ -71,6 +90,25 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		}
 		special[pkg] = true
 	}
+	selectedPackages := append([]string(nil), packages...)
+	if profile == ProfileLocal {
+		selected := map[string]bool{}
+		for _, pkg := range packages {
+			if !special[pkg] {
+				selected[pkg] = true
+			}
+		}
+		for _, id := range profilePolicy.Units {
+			for _, pkg := range policy.Units[id].Packages {
+				selected[pkg] = true
+			}
+		}
+		selectedPackages = selectedPackages[:0]
+		for pkg := range selected {
+			selectedPackages = append(selectedPackages, pkg)
+		}
+		sort.Strings(selectedPackages)
+	}
 	var broad []weightedPackage
 	var total float64
 	var granularityMax float64
@@ -97,16 +135,21 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	if shardCount > policy.Planning.MaxShards {
 		shardCount = policy.Planning.MaxShards
 	}
+	if profile == ProfileLocal {
+		shardCount = 1
+	}
 	if shardCount > len(broad) {
 		shardCount = len(broad)
 	}
 	shards := make([]ProofUnit, shardCount)
 	for i := range shards {
 		shards[i] = ProofUnit{
-			ID:            fmt.Sprintf("broad-%02d", i+1),
-			CountMode:     profilePolicy.CountMode,
-			EnvironmentID: profilePolicy.EnvironmentID,
-			BudgetClass:   "broad",
+			ID:              fmt.Sprintf("broad-%02d", i+1),
+			WorkloadProfile: profile,
+			ExecutionTier:   executionTier(profile, "broad"),
+			CountMode:       profilePolicy.CountMode,
+			EnvironmentID:   profilePolicy.EnvironmentID,
+			BudgetClass:     "broad",
 		}
 	}
 	sort.Slice(broad, func(i, j int) bool {
@@ -124,7 +167,20 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		sort.Strings(shards[i].Packages)
 	}
 	units := append([]ProofUnit(nil), shards...)
-	for _, id := range profilePolicy.Units {
+	unitIDs := append([]string(nil), profilePolicy.Units...)
+	if option.IncludeSoak {
+		if profile != ProfilePRCommon && profile != ProfilePREscalated {
+			return RunPlan{}, fmt.Errorf("affected soak is only an optional PR addition")
+		}
+		unitIDs = append(unitIDs, "conformance-soak-sqlite", "conformance-soak-postgres")
+	}
+	if option.IncludeParityFull {
+		if profile != ProfilePRCommon && profile != ProfilePREscalated {
+			return RunPlan{}, fmt.Errorf("parity supplements are only an optional PR addition")
+		}
+		unitIDs = append(unitIDs, "parity-served-source-artifact", "parity-connected-channel-onboarding-surface", "parity-destructive-reset-crash", "parity-golden-forced-restart")
+	}
+	for _, id := range unitIDs {
 		specialUnit := policy.Units[id]
 		for _, pkg := range specialUnit.Packages {
 			if !discovered[pkg] {
@@ -136,16 +192,24 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			return RunPlan{}, fmt.Errorf("unit %s: %w", id, err)
 		}
 		unit := ProofUnit{
-			ID:            id,
-			Packages:      unitPackages,
-			Run:           specialUnit.Run,
-			Skip:          specialUnit.Skip,
-			GoTimeout:     specialUnit.GoTimeout,
-			CountMode:     specialUnit.CountMode,
-			EnvironmentID: specialUnit.EnvironmentID,
-			BudgetClass:   specialUnit.BudgetClass,
+			ID:               id,
+			WorkloadProfile:  profile,
+			ExecutionTier:    executionTier(profile, specialUnit.BudgetClass),
+			Packages:         unitPackages,
+			Run:              specialUnit.Run,
+			Skip:             specialUnit.Skip,
+			GoTimeout:        specialUnit.GoTimeout,
+			CountMode:        specialUnit.CountMode,
+			EnvironmentID:    specialUnit.EnvironmentID,
+			BudgetClass:      specialUnit.BudgetClass,
+			RequiredChildren: specialUnit.RequiredChildren,
 		}
-		weight, measured := model.UnitSeconds(profile, unit)
+		weightProfile := profile
+		if strings.HasPrefix(id, "parity-") {
+			unit.WorkloadProfile = ProfileFull
+			weightProfile = ProfileFull
+		}
+		weight, measured := model.UnitSeconds(weightProfile, unit)
 		if !measured {
 			weight = policy.Planning.UnknownPackageSeconds
 		}
@@ -160,7 +224,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		HeadSHA:        strings.TrimSpace(headSHA),
 		TargetSeconds:  policy.Planning.TargetSeconds,
 		GranularityMax: granularityMax,
-		Packages:       append([]string(nil), packages...),
+		Packages:       selectedPackages,
 		Units:          units,
 	}
 	if plan.HeadSHA == "" {
@@ -181,6 +245,11 @@ func (p RunPlan) Validate() error {
 	if p.Version != RunPlanVersion {
 		return fmt.Errorf("run plan version = %d, want %d", p.Version, RunPlanVersion)
 	}
+	switch p.Profile {
+	case ProfileLocal, ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly:
+	default:
+		return fmt.Errorf("run plan has unsupported profile %q", p.Profile)
+	}
 	if p.Profile == "" || p.HeadSHA == "" || p.Digest == "" {
 		return fmt.Errorf("run plan profile, head_sha, and digest must be non-empty")
 	}
@@ -189,6 +258,7 @@ func (p RunPlan) Validate() error {
 	}
 	seenUnits := map[string]bool{}
 	seenPackages := map[string][]ProofUnit{}
+	soakBackends := map[string]bool{}
 	for _, unit := range p.Units {
 		if unit.ID == "" || seenUnits[unit.ID] {
 			return fmt.Errorf("run plan has empty or duplicate unit id %q", unit.ID)
@@ -200,11 +270,38 @@ func (p RunPlan) Validate() error {
 		if !validCountMode(unit.CountMode) || unit.EnvironmentID == "" {
 			return fmt.Errorf("unit %s has invalid count/environment identity", unit.ID)
 		}
+		if unit.ExecutionTier != executionTier(p.Profile, unit.BudgetClass) {
+			return fmt.Errorf("unit %s has invalid execution tier %q", unit.ID, unit.ExecutionTier)
+		}
+		if unit.WorkloadProfile != p.Profile && !(strings.HasPrefix(unit.ID, "parity-") && unit.WorkloadProfile == ProfileFull && (p.Profile == ProfilePRCommon || p.Profile == ProfilePREscalated)) {
+			return fmt.Errorf("unit %s has invalid workload profile %q", unit.ID, unit.WorkloadProfile)
+		}
 		if unit.BudgetClass != "broad" && unit.BudgetClass != "full" && unit.BudgetClass != "soak" {
 			return fmt.Errorf("unit %s has unsupported budget class %q", unit.ID, unit.BudgetClass)
 		}
 		if err := validateSoakSelection(unit.Packages, unit.Run, unit.Skip, unit.GoTimeout, unit.CountMode, unit.BudgetClass); err != nil {
 			return fmt.Errorf("unit %s: %w", unit.ID, err)
+		}
+		if unit.BudgetClass == "soak" {
+			backend, _ := SoakBackend(unit.Run)
+			if soakBackends[backend] {
+				return fmt.Errorf("duplicate soak backend %s", backend)
+			}
+			soakBackends[backend] = true
+		}
+		if p.BuildContext.GOOS != "" {
+			if p.BuildContext.GOARCH == "" || p.BuildContext.CGOEnabled == "" {
+				return fmt.Errorf("run plan has incomplete Go build context")
+			}
+			selected := map[string]bool{}
+			for _, root := range unit.SelectedRoots {
+				selected[root.Package+"\x00"+root.Name] = true
+			}
+			for _, required := range unit.RequiredTests {
+				if !selected[required.Package+"\x00"+required.Name] {
+					return fmt.Errorf("unit %s requires unselected root %s.%s", unit.ID, required.Package, required.Name)
+				}
+			}
 		}
 		for _, pkg := range unit.Packages {
 			for _, previous := range seenPackages[pkg] {
@@ -214,6 +311,9 @@ func (p RunPlan) Validate() error {
 			}
 			seenPackages[pkg] = append(seenPackages[pkg], unit)
 		}
+	}
+	if len(soakBackends) != 0 && (!soakBackends["sqlite"] || !soakBackends["postgres"]) {
+		return fmt.Errorf("soak plan requires both backend cells")
 	}
 	wantPackages, err := canonicalStrings(p.Packages)
 	if err != nil {
@@ -235,6 +335,16 @@ func (p RunPlan) Validate() error {
 		return fmt.Errorf("run plan digest %s does not match canonical digest %s", p.Digest, want)
 	}
 	return nil
+}
+
+func executionTier(profile, budget string) string {
+	if budget == "soak" {
+		return "soak"
+	}
+	if profile == ProfileLocal {
+		return "local"
+	}
+	return "full"
 }
 
 func (p RunPlan) Unit(id string) (ProofUnit, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -28,12 +29,29 @@ func run(args []string) int {
 	if len(args) > 0 && args[0] == "--internal-create" {
 		return runCreator(args[1:])
 	}
+	if len(args) == 0 || len(args) == 1 && args[0] == "--full" {
+		profile := testplanning.ProfileLocal
+		if len(args) == 1 {
+			profile = testplanning.ProfileFull
+		}
+		return runCompletion(profile)
+	}
+	if len(args) > 0 && args[0] == "--planned" {
+		return runPlanned(args[1:])
+	}
 	testArgs, err := parseTestArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	return runTestArgs(testArgs, os.Stdout, false, "", "", 0)
+}
+
+func runTestArgs(testArgs []string, output io.Writer, completion bool, workloadProfile, executionTier string, fallback time.Duration) int {
 	command := append([]string{"go", "test"}, testArgs...)
+	if !completion {
+		fallback = timingFallback(testArgs)
+	}
 	capacity, err := testpostgres.RunCapacityFromEnvironment()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -95,7 +113,7 @@ func run(args []string) int {
 	}()
 
 	lease, err := admission.Acquire(queueCtx, testpostgres.RunCommand{
-		Args: command, FallbackDuration: timingFallback(testArgs),
+		Args: command, FallbackDuration: fallback, ModelOnlyETA: completion,
 	}, capacity)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -189,10 +207,14 @@ func run(args []string) int {
 		return failBeforeStart("build child Postgres environment", err)
 	}
 	childEnv = append(childEnv, testpostgres.RunWrapperEnv+"=1")
+	if completion {
+		childEnv = replaceEnvironment(childEnv, "SWARM_TEST_PROOF_PROFILE", workloadProfile)
+		childEnv = replaceEnvironment(childEnv, "SWARM_TEST_EXECUTION_TIER", executionTier)
+	}
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = childEnv
 	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = output
 	cmd.Stderr = os.Stderr
 	if err := prepareChildProcessTree(cmd); err != nil {
 		return failBeforeStart("prepare test process tree", err)
@@ -260,11 +282,13 @@ func receivedSignalExitCode(value int32) int {
 }
 
 func parseTestArgs(args []string) ([]string, error) {
-	if len(args) == 0 {
-		return []string{"./..."}, nil
+	if len(args) == 0 || args[0] != "--" || len(args) == 1 {
+		return nil, fmt.Errorf("usage: go run ./cmd/swarm-test [--full | -- <focused go test args...>]")
 	}
-	if args[0] != "--" || len(args) == 1 {
-		return nil, fmt.Errorf("usage: go run ./cmd/swarm-test [-- <go test args...>]")
+	for _, arg := range args[1:] {
+		if arg == "./..." {
+			return nil, fmt.Errorf("raw ./... passthrough is not completion-bearing; use go run ./cmd/swarm-test --full or direct go test ./...")
+		}
 	}
 	return append([]string(nil), args[1:]...), nil
 }

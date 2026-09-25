@@ -79,8 +79,8 @@ func TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite(t *te
 	if !plan.FullSuite {
 		t.Fatalf("FullSuite = false, want true")
 	}
-	if got, want := TestCommand(plan, nil), []string{"go", "run", "./cmd/swarm-test", "--", "./..."}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("command = %#v, want %#v", got, want)
+	if got, err := TestCommand(plan, nil); err != nil || !reflect.DeepEqual(got, []string{"go", "run", "./cmd/swarm-test", "--full"}) {
+		t.Fatalf("command = %#v, err=%v", got, err)
 	}
 }
 
@@ -121,8 +121,8 @@ func TestPlanChangedRootDocsFallBackToFullSuite(t *testing.T) {
 	if !reflect.DeepEqual(plan.FullSuiteReasons, wantReasons) {
 		t.Fatalf("full suite reasons = %#v, want %#v", plan.FullSuiteReasons, wantReasons)
 	}
-	if got, want := TestCommand(plan, nil), []string{"go", "run", "./cmd/swarm-test", "--", "./..."}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("command = %#v, want %#v", got, want)
+	if got, err := TestCommand(plan, nil); err != nil || !reflect.DeepEqual(got, []string{"go", "run", "./cmd/swarm-test", "--full"}) {
+		t.Fatalf("command = %#v, err=%v", got, err)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestPlanChangedNoChangesSelectsNoPackages(t *testing.T) {
 	if plan.FullSuite || len(plan.Packages) != 0 {
 		t.Fatalf("plan = %#v, want no full suite or packages", plan)
 	}
-	if got := TestCommand(plan, nil); got != nil {
+	if got, err := TestCommand(plan, nil); got != nil || err != nil {
 		t.Fatalf("command = %#v, want nil", got)
 	}
 }
@@ -156,8 +156,8 @@ func TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite(t *testing.T) 
 	if got, want := plan.FullSuiteReasons, []string{path + " has no owning Go package"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("full suite reasons = %#v, want %#v", got, want)
 	}
-	if got, want := TestCommand(plan, nil), []string{"go", "run", "./cmd/swarm-test", "--", "./..."}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("command = %#v, want %#v", got, want)
+	if got, err := TestCommand(plan, nil); err != nil || !reflect.DeepEqual(got, []string{"go", "run", "./cmd/swarm-test", "--full"}) {
+		t.Fatalf("command = %#v, err=%v", got, err)
 	}
 }
 

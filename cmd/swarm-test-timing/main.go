@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -18,38 +21,40 @@ import (
 )
 
 type config struct {
-	inputPath       string
-	markdownPath    string
-	packagesPath    string
-	changedPath     string
-	proofPolicyPath string
-	weightModelPath string
-	planPath        string
-	matrixPath      string
-	evidencePath    string
-	evidenceRoot    string
-	jobsPath        string
-	workflowRunID   int64
-	workflowAttempt int
-	workflowHeadSHA string
-	budgetPath      string
-	resultJSONPath  string
-	event           string
-	profile         string
-	headSHA         string
-	executionSHA    string
-	unitID          string
-	attempt         string
-	sourceRunID     string
-	topN            int
-	exitCode        int
-	elapsedSeconds  float64
-	planCI          bool
-	recordEvidence  bool
-	evaluateBudget  bool
-	updateWeights   bool
-	validatePublish bool
-	assertExecution bool
+	inputPath         string
+	markdownPath      string
+	packagesPath      string
+	changedPath       string
+	changedStatusPath string
+	baseSHA           string
+	proofPolicyPath   string
+	weightModelPath   string
+	planPath          string
+	matrixPath        string
+	evidencePath      string
+	evidenceRoot      string
+	jobsPath          string
+	workflowRunID     int64
+	workflowAttempt   int
+	workflowHeadSHA   string
+	budgetPath        string
+	resultJSONPath    string
+	event             string
+	profile           string
+	headSHA           string
+	executionSHA      string
+	unitID            string
+	attempt           string
+	sourceRunID       string
+	topN              int
+	exitCode          int
+	elapsedSeconds    float64
+	planCI            bool
+	recordEvidence    bool
+	evaluateBudget    bool
+	updateWeights     bool
+	validatePublish   bool
+	assertExecution   bool
 }
 
 func main() {
@@ -58,6 +63,8 @@ func main() {
 	flag.StringVar(&cfg.markdownPath, "markdown", "-", "path to write Markdown output, or - for stdout")
 	flag.StringVar(&cfg.packagesPath, "packages", "", "newline-delimited discovered Go package inventory")
 	flag.StringVar(&cfg.changedPath, "changed-files", "", "newline-delimited changed paths")
+	flag.StringVar(&cfg.changedStatusPath, "changed-status", "", "NUL-delimited git name-status PR delta")
+	flag.StringVar(&cfg.baseSHA, "base-sha", "", "PR base commit for base-or-head soak impact")
 	flag.StringVar(&cfg.proofPolicyPath, "proof-policy", ".github/test-proof-plan.yaml", "canonical proof policy")
 	flag.StringVar(&cfg.weightModelPath, "weight-model", ".github/test-timing-weights.json", "generated historical weight model")
 	flag.StringVar(&cfg.planPath, "plan", "", "run plan path")
@@ -153,12 +160,61 @@ func planCI(cfg config) error {
 	if err != nil {
 		return err
 	}
+	var options testplanning.BuildOptions
+	if cfg.event == "pull_request" {
+		if cfg.changedStatusPath == "" || cfg.baseSHA == "" {
+			return fmt.Errorf("PR planning requires -changed-status and -base-sha")
+		}
+		raw, err := os.ReadFile(cfg.changedStatusPath)
+		if err != nil {
+			return err
+		}
+		changes, err := testplanning.ParseNameStatusZ(raw)
+		if err != nil {
+			return err
+		}
+		changed = changed[:0]
+		for _, change := range changes {
+			changed = append(changed, change.Path)
+			if change.OldPath != "" {
+				changed = append(changed, change.OldPath)
+			}
+		}
+		head, err := testplanning.DiscoverRootInventory(context.Background(), ".")
+		if err != nil {
+			return err
+		}
+		baseRoot, cleanup, err := extractBaseSnapshot(cfg.baseSHA)
+		var base testplanning.RootInventory
+		if err == nil {
+			defer cleanup()
+			base, err = testplanning.DiscoverRootInventory(context.Background(), baseRoot)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "base dependency graph unavailable; schedule both soak cells: %v\n", err)
+		}
+		options, err = testplanning.PRChangeOptions(baseRoot, ".", base, head, changes)
+		if err != nil {
+			return err
+		}
+	}
 	profile, reason, err := policy.ResolveProfile(cfg.event, changed, cfg.profile)
 	if err != nil {
 		return err
 	}
-	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, cfg.headSHA)
+	plan, err := testplanning.BuildPlan(policy, model, packages, profile, reason, cfg.headSHA, options)
 	if err != nil {
+		return err
+	}
+	inventory, err := testplanning.DiscoverRootInventory(context.Background(), ".")
+	if err != nil {
+		return err
+	}
+	proofs, err := testplanning.LoadParityProofs("internal/apiv1/testdata/public_surface_backend_matrix.yaml")
+	if err != nil {
+		return err
+	}
+	if err := testplanning.BindExecution(&plan, inventory, proofs); err != nil {
 		return err
 	}
 	if err := writeJSON(cfg.planPath, plan); err != nil {
@@ -174,6 +230,26 @@ func planCI(cfg config) error {
 	return writePlanMarkdown(cfg.markdownPath, plan)
 }
 
+func extractBaseSnapshot(sha string) (string, func(), error) {
+	root, err := os.MkdirTemp("", "swarm-proof-base-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(root) }
+	archive, err := exec.Command("git", "archive", "--format=tar", sha).Output()
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("archive PR base %s: %w", sha, err)
+	}
+	command := exec.Command("tar", "-xf", "-", "-C", root)
+	command.Stdin = bytes.NewReader(archive)
+	if output, err := command.CombinedOutput(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("extract PR base: %v: %s", err, output)
+	}
+	return root, cleanup, nil
+}
+
 func recordEvidence(cfg config) error {
 	if cfg.planPath == "" || cfg.unitID == "" || cfg.evidencePath == "" || cfg.elapsedSeconds < 0 || cfg.exitCode < 0 || cfg.workflowRunID <= 0 || cfg.workflowAttempt <= 0 {
 		return fmt.Errorf("-plan, -unit, -evidence, non-negative -elapsed-seconds, and non-negative -exit-code are required with -record-evidence")
@@ -185,6 +261,13 @@ func recordEvidence(cfg config) error {
 	unit, err := plan.Unit(cfg.unitID)
 	if err != nil {
 		return err
+	}
+	buildContext, err := testplanning.EffectiveBuildContext(context.Background(), ".")
+	if err != nil {
+		return err
+	}
+	if buildContext != plan.BuildContext {
+		return fmt.Errorf("recorded proof build context differs from the planned build context")
 	}
 	input, closeInput, err := openInput(cfg.inputPath)
 	if err != nil {
@@ -202,6 +285,9 @@ func recordEvidence(cfg config) error {
 		Version:         testtiming.CommandEvidenceVersion,
 		PlanDigest:      plan.Digest,
 		Profile:         plan.Profile,
+		WorkloadProfile: unit.WorkloadProfile,
+		ExecutionTier:   unit.ExecutionTier,
+		BuildContext:    buildContext,
 		HeadSHA:         plan.HeadSHA,
 		UnitID:          unit.ID,
 		Surface:         unit.ID,

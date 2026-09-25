@@ -70,8 +70,11 @@ func run(ctx context.Context, cfg runConfig) error {
 	if err != nil {
 		return err
 	}
-	printPlan(cfg.stdout, plan, cfg.extraGoTestArgs)
-	command := testchanged.TestCommand(plan, cfg.extraGoTestArgs)
+	command, err := testchanged.TestCommand(plan, cfg.extraGoTestArgs)
+	if err != nil {
+		return err
+	}
+	printPlan(cfg.stdout, plan, command)
 	if cfg.dryRun || len(command) == 0 {
 		return nil
 	}
@@ -83,7 +86,7 @@ func run(ctx context.Context, cfg runConfig) error {
 	return cmd.Run()
 }
 
-func printPlan(w io.Writer, plan testchanged.Plan, extraArgs []string) {
+func printPlan(w io.Writer, plan testchanged.Plan, command []string) {
 	fmt.Fprintln(w, "changed files:")
 	if len(plan.ChangedFiles) == 0 {
 		fmt.Fprintln(w, "  <none>")
@@ -113,7 +116,6 @@ func printPlan(w io.Writer, plan testchanged.Plan, extraArgs []string) {
 			}
 		}
 	}
-	command := testchanged.TestCommand(plan, extraArgs)
 	if len(command) == 0 {
 		fmt.Fprintln(w, "go test command:")
 		fmt.Fprintln(w, "  <none>")

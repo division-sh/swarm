@@ -15,7 +15,7 @@ import (
 
 const (
 	BudgetPolicyVersion    = 1
-	CommandEvidenceVersion = 4
+	CommandEvidenceVersion = 5
 	BudgetResultVersion    = 1
 
 	AttemptPrimary        = "primary"
@@ -40,24 +40,27 @@ type CommandBudget struct {
 }
 
 type CommandEvidence struct {
-	WorkflowRunID   int64    `json:"workflow_run_id"`
-	WorkflowAttempt int      `json:"workflow_attempt"`
-	Version         int      `json:"version"`
-	PlanDigest      string   `json:"plan_digest"`
-	Profile         string   `json:"profile"`
-	HeadSHA         string   `json:"head_sha"`
-	UnitID          string   `json:"unit_id"`
-	Surface         string   `json:"surface"`
-	Attempt         string   `json:"attempt"`
-	ElapsedSeconds  float64  `json:"elapsed_seconds"`
-	ExitCode        int      `json:"exit_code"`
-	Packages        []string `json:"packages"`
-	EnvironmentID   string   `json:"environment_id"`
-	CountMode       string   `json:"count_mode"`
-	Run             string   `json:"run,omitempty"`
-	Skip            string   `json:"skip,omitempty"`
-	GoTimeout       string   `json:"go_timeout,omitempty"`
-	Report          Report   `json:"report"`
+	WorkflowRunID   int64                     `json:"workflow_run_id"`
+	WorkflowAttempt int                       `json:"workflow_attempt"`
+	Version         int                       `json:"version"`
+	PlanDigest      string                    `json:"plan_digest"`
+	Profile         string                    `json:"profile"`
+	WorkloadProfile string                    `json:"workload_profile"`
+	ExecutionTier   string                    `json:"execution_tier"`
+	BuildContext    testplanning.BuildContext `json:"build_context"`
+	HeadSHA         string                    `json:"head_sha"`
+	UnitID          string                    `json:"unit_id"`
+	Surface         string                    `json:"surface"`
+	Attempt         string                    `json:"attempt"`
+	ElapsedSeconds  float64                   `json:"elapsed_seconds"`
+	ExitCode        int                       `json:"exit_code"`
+	Packages        []string                  `json:"packages"`
+	EnvironmentID   string                    `json:"environment_id"`
+	CountMode       string                    `json:"count_mode"`
+	Run             string                    `json:"run,omitempty"`
+	Skip            string                    `json:"skip,omitempty"`
+	GoTimeout       string                    `json:"go_timeout,omitempty"`
+	Report          Report                    `json:"report"`
 }
 
 type BudgetStatus string
@@ -227,6 +230,15 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 		if evidence.EnvironmentID != unit.EnvironmentID {
 			problems = append(problems, fmt.Sprintf("environment_id %q does not match unit %q", evidence.EnvironmentID, unit.EnvironmentID))
 		}
+		if plan.BuildContext.GOOS != "" {
+			if evidence.BuildContext != plan.BuildContext {
+				problems = append(problems, "effective Go build context does not match the planned context")
+			}
+			if evidence.WorkloadProfile != unit.WorkloadProfile || evidence.ExecutionTier != unit.ExecutionTier {
+				problems = append(problems, "workload profile or execution tier does not match the planned unit")
+			}
+			problems = append(problems, requiredExecutionProblems(unit, evidence.Report)...)
+		}
 		if evidence.Attempt == AttemptPrimary && evidence.CountMode != unit.CountMode {
 			problems = append(problems, fmt.Sprintf("count_mode %q does not match unit %q", evidence.CountMode, unit.CountMode))
 		}
@@ -266,6 +278,43 @@ func ValidateCommandEvidence(evidence CommandEvidence, plan testplanning.RunPlan
 	problems = append(problems, reportTestProblems(evidence.Report)...)
 	if !equalStrings(declared, reportPackages) {
 		problems = append(problems, fmt.Sprintf("declared packages %v do not match report packages %v", declared, reportPackages))
+	}
+	return problems
+}
+
+func requiredExecutionProblems(unit testplanning.ProofUnit, report Report) []string {
+	var problems []string
+	actual := make(map[string]string, len(report.Tests))
+	for _, test := range report.Tests {
+		actual[test.Package+"\x00"+test.Test] = test.Result
+	}
+	for _, selected := range unit.SelectedRoots {
+		if actual[selected.Package+"\x00"+selected.Name] == "" {
+			problems = append(problems, fmt.Sprintf("selected proof %s.%s has no terminal test record", selected.Package, selected.Name))
+		}
+	}
+	for _, pkg := range unit.TestBearingPackages {
+		found := false
+		for _, test := range report.Tests {
+			if test.Package == pkg {
+				found = true
+				break
+			}
+		}
+		if !found {
+			problems = append(problems, fmt.Sprintf("test-bearing package %s has zero test records", pkg))
+		}
+	}
+	for _, required := range unit.RequiredTests {
+		if got := actual[required.Package+"\x00"+required.Name]; got != "pass" {
+			problems = append(problems, fmt.Sprintf("required proof %s.%s = %q, want pass", required.Package, required.Name, got))
+		}
+		for _, child := range required.Children {
+			name := required.Name + "/" + child
+			if got := actual[required.Package+"\x00"+name]; got != "pass" {
+				problems = append(problems, fmt.Sprintf("required proof child %s.%s = %q, want pass", required.Package, name, got))
+			}
+		}
 	}
 	return problems
 }

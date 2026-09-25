@@ -49,7 +49,7 @@ Run tests with an invocation-scoped DSN instead of a persistent shell export:
 
 ```bash
 SWARM_TEST_POSTGRES_DSN='host=127.0.0.1 port=5432 user=swarm_test password=swarm-test dbname=postgres sslmode=disable' \
-  go run ./cmd/swarm-test
+  go run ./cmd/swarm-test --full
 ```
 
 URL DSNs are equally supported:
@@ -100,7 +100,11 @@ single-service owner:
 
 ```bash
 go run ./cmd/swarm-test
+go run ./cmd/swarm-test --full
 ```
+
+The no-argument command runs the bounded local tier. `--full` runs every
+eligible non-soak root under the same single-service owner.
 
 The runner requires an already-running Docker daemon; it does not start Docker
 Desktop or Colima. It owns exactly one disposable container for the child
