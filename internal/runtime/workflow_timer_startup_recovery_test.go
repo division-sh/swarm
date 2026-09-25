@@ -317,7 +317,6 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			db, selected, postgres := backend.open(t)
 			workflowRunID := uuid.NewString()
 			genericRunID := uuid.NewString()
-			workflowEntityID := uuid.NewString()
 			genericEntityID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "1s")
 			ctx := workflowTimerStartupContext(sourceFact)
@@ -384,10 +383,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID)}, runtimepipeline.WorkflowInstance{
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
 				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
-				Fields: map[string]any{
-					"run_id": workflowRunID, "entity_id": workflowEntityID,
-					"flow_path": workflowRunID, "instance_id": workflowRunID,
-				},
+				Fields: map[string]any{},
 				EntityType: "test_entity",
 			}, occurredAt)
 			if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
@@ -568,7 +564,6 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
-			entityID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
 			if postgres {
@@ -628,12 +623,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				WorkflowName:    source.WorkflowName(),
 				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
-				Fields: map[string]any{
-					"run_id":      runID,
-					"entity_id":   entityID,
-					"flow_path":   runID,
-					"instance_id": runID,
-				},
+				Fields: map[string]any{},
 				EntityType: "test_entity",
 			}, time.Now().UTC())
 			if err != nil {
@@ -704,7 +694,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
-			entityID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "3s")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
 			if postgres {
@@ -771,12 +760,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 				WorkflowName:    source.WorkflowName(),
 				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
-				Fields: map[string]any{
-					"run_id":      runID,
-					"entity_id":   entityID,
-					"flow_path":   runID,
-					"instance_id": runID,
-				},
+				Fields: map[string]any{},
 				EntityType: "test_entity",
 			}, occurredAt)
 			if err != nil {

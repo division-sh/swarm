@@ -985,10 +985,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			poisonInstance.InstanceID = "poison"
 			poisonInstance.StorageRef = poisonTarget.FlowInstance
 			poisonInstance.EntityID = poisonEntityID
-			poisonInstance.Fields = map[string]any{
-				"repo_id": "poison-repo", "namespace": "tenant-alpha", "partition_key": "poison",
-				"display_slug": "Poison", "source_record_id": "poison-record",
-			}
+			poisonInstance.Fields = map[string]any{}
 			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(poisonInstance.StorageRef)}, poisonInstance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed poison workflow instance: %v", err)
 			}
