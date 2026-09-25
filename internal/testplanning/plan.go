@@ -45,6 +45,7 @@ type ProofUnit struct {
 	WeightSeconds       float64             `json:"weight_seconds"`
 	SelectedRoots       []TestRoot          `json:"selected_roots,omitempty"`
 	RequiredTests       []RequiredTest      `json:"required_tests,omitempty"`
+	DeferredTests       []DeferredTest      `json:"deferred_tests,omitempty"`
 	TestBearingPackages []string            `json:"test_bearing_packages,omitempty"`
 	RequiredChildren    map[string][]string `json:"required_children,omitempty"`
 }
@@ -295,11 +296,31 @@ func (p RunPlan) Validate() error {
 			}
 			selected := map[string]bool{}
 			for _, root := range unit.SelectedRoots {
-				selected[root.Package+"\x00"+root.Name] = true
+				key := root.Package + "\x00" + root.Name
+				if selected[key] {
+					return fmt.Errorf("unit %s selects duplicate root %s.%s", unit.ID, root.Package, root.Name)
+				}
+				selected[key] = true
 			}
+			classified := map[string]bool{}
 			for _, required := range unit.RequiredTests {
-				if !selected[required.Package+"\x00"+required.Name] {
+				key := required.Package + "\x00" + required.Name
+				if !selected[key] || classified[key] {
 					return fmt.Errorf("unit %s requires unselected root %s.%s", unit.ID, required.Package, required.Name)
+				}
+				classified[key] = true
+			}
+			for _, deferred := range unit.DeferredTests {
+				key := deferred.Package + "\x00" + deferred.Name
+				reason, _ := deferredRootReason(unit, deferred.TestRoot, p.BuildContext)
+				if !selected[key] || classified[key] || reason == "" || deferred.Reason != reason {
+					return fmt.Errorf("unit %s has invalid deferral for %s.%s", unit.ID, deferred.Package, deferred.Name)
+				}
+				classified[key] = true
+			}
+			for key := range selected {
+				if !classified[key] {
+					return fmt.Errorf("unit %s has unclassified selected root %s", unit.ID, strings.ReplaceAll(key, "\x00", "."))
 				}
 			}
 		}

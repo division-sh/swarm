@@ -18,7 +18,7 @@ func TestCatalogExternalProofPartitionsThroughInventory(t *testing.T) {
 	}{
 		{"complete", nil, ""},
 		{"new test omission", func(t *testing.T, root string, _ *testplanning.Policy) {
-			writeCatalogTestFile(t, filepath.Join(root, "internal/executor/new_test.go"), "package executor\nfunc TestNew(t any) {}\n")
+			writeCatalogTestFile(t, filepath.Join(root, "internal/executor/new_test.go"), "package executor\nimport \"testing\"\nfunc TestNew(t *testing.T) {}\n")
 		}, "TestNew matches 0"},
 		{"omission", func(_ *testing.T, _ string, p *testplanning.Policy) {
 			u := p.Units["second"]
@@ -64,7 +64,7 @@ func TestCatalogExternalProofPartitionsThroughInventory(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := writeExternalProofInventory(t, externalProofSpec("examples/external", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"}), "")
-			writeCatalogTestFile(t, filepath.Join(root, "internal/executor/second_test.go"), "package executor\nfunc TestSecond(t any) {}\n")
+			writeCatalogTestFile(t, filepath.Join(root, "internal/executor/second_test.go"), "package executor\nimport \"testing\"\nfunc TestSecond(t *testing.T) {}\n")
 			policy, err := testplanning.LoadPolicy(strings.NewReader(externalProofPolicy("github.com/division-sh/swarm/internal/executor")))
 			if err != nil {
 				t.Fatal(err)

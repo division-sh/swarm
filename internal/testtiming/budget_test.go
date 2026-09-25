@@ -2,6 +2,10 @@ package testtiming
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -76,6 +80,77 @@ func TestSelectedOrdinaryRootCannotDisappearBehindPackagePass(t *testing.T) {
 	unit.SelectedRoots[0].Name = "TestPresent"
 	if problems := requiredExecutionProblems(unit, report); len(problems) != 0 {
 		t.Fatalf("complete ordinary root rejected: %v", problems)
+	}
+}
+
+func TestBoundOrdinaryRootSkipCannotQualifyCompletion(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policyFile, err := os.Open(filepath.Join(root, ".github/test-proof-plan.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer policyFile.Close()
+	policy, err := testplanning.LoadPolicy(policyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelFile, err := os.Open(filepath.Join(root, testplanning.GeneratedWeightModelPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer modelFile.Close()
+	model, err := testplanning.LoadWeightModel(modelFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := testplanning.DiscoverRootInventory(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := make([]string, 0, len(inventory.Packages))
+	for pkg := range inventory.Packages {
+		packages = append(packages, pkg)
+	}
+	sort.Strings(packages)
+	plan, err := testplanning.BuildPlan(policy, model, packages, testplanning.ProfileLocal, "ordinary skip control", "head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofs, err := testplanning.LoadParityProofs(filepath.Join(root, "internal/apiv1/testdata/public_surface_backend_matrix.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testplanning.BindExecution(&plan, inventory, proofs); err != nil {
+		t.Fatal(err)
+	}
+	unit, err := plan.Unit("broad-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := timingTestEvidence(plan, unit.ID, AttemptPrimary, 1)
+	evidence.BuildContext = plan.BuildContext
+	evidence.WorkloadProfile = unit.WorkloadProfile
+	evidence.ExecutionTier = unit.ExecutionTier
+	const skipped = "TestParseTestArgs"
+	found := false
+	for _, proof := range unit.SelectedRoots {
+		result := "pass"
+		if proof.Name == skipped && proof.Package == "github.com/division-sh/swarm/cmd/swarm-test" {
+			result = "skip"
+			found = true
+		}
+		evidence.Report.Tests = append(evidence.Report.Tests, TestTiming{Package: proof.Package, Test: proof.Name, Result: result})
+	}
+	if !found {
+		t.Fatal("broad unit does not select the ordinary root")
+	}
+	evidence.Report.Summary.Tests = len(evidence.Report.Tests)
+	evidence.Report.Summary.SkippedTests = 1
+	if problems := ValidateCommandEvidence(evidence, plan); !strings.Contains(strings.Join(problems, "; "), skipped+" = \"skip\", want pass") {
+		t.Fatalf("bound ordinary SKIP %s accepted: %v", skipped, problems)
 	}
 }
 

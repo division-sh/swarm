@@ -38,6 +38,10 @@ named package families required by the touched surface; CI remains responsible
 for the full-truth push/manual/scheduled runs. Do not habitually force
 `-count=1` for every local iteration because it defeats Go's local test cache.
 The no-argument runner is the bounded local tier, not an exhaustive `./...` run.
+Completion requires a terminal PASS for each selected executable root and its
+declared backend children. Finite profile replacements, opt-in live proofs, and
+subprocess helpers are explicit non-credit deferrals in
+`internal/testplanning/deferrals.go`; an undeclared SKIP fails completion.
 High-risk semantic/runtime migrations still require full non-soak local
 `go run ./cmd/swarm-test --full` when the issue
 gate or reviewer asks for it.

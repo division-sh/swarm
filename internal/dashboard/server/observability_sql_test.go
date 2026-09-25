@@ -326,47 +326,6 @@ func TestObservabilityProjection_EventIdentityDoesNotPromotePayloadEntity(t *tes
 	}
 }
 
-func TestHandler_EventDetailIncludesDeliveryLifecycle(t *testing.T) {
-	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
-	handler := NewHandler(Options{
-		AuthToken: testOperatorAuthToken,
-		Observability: stubObservability{
-			eventDetail: map[string]eventRecord{
-				"evt-1": {
-					ID:      "evt-1",
-					EventID: "evt-1",
-					Type:    "task.completed",
-					DeliveryLifecycle: deliveryLifecycleSummary{
-						Pending:    1,
-						InProgress: 2,
-						Delivered:  3,
-					},
-				},
-			},
-		},
-	})
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/events/evt-1", nil)
-	setOperatorAuth(req)
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("event detail status=%d body=%s", rec.Code, rec.Body.String())
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("unmarshal event detail: %v", err)
-	}
-	lifecycle, ok := payload["delivery_lifecycle"].(map[string]any)
-	if !ok {
-		t.Fatalf("delivery_lifecycle = %#v", payload["delivery_lifecycle"])
-	}
-	if lifecycle["pending"] != float64(1) || lifecycle["in_progress"] != float64(2) || lifecycle["delivered"] != float64(3) {
-		t.Fatalf("delivery_lifecycle = %#v", lifecycle)
-	}
-}
-
 func TestObservabilityProjection_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	reader := NewObservabilityProjection(storetest.AdmitPostgresRuntimeStore(t, db))
