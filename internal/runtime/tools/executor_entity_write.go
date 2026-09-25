@@ -208,12 +208,12 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	}
 	contract, ok := entityruntime.ResolveForActor(source, actor)
 	if !ok {
-		contract, ok = entityruntime.ResolveForFlowInstance(source, flowInstance)
+		contract, ok = entityruntime.ResolveForRuntimeInstance(source, runID, flowInstance)
 	}
 	if !ok {
 		return nil, failures.NewDetail("not_found", "tool-executor", "exec_create_entity.flow_instance", map[string]any{"flow_path": flowInstance})
 	}
-	flowID := entityruntime.ResolveFlowIDForInstance(source, flowInstance)
+	flowID := entityruntime.ResolveFlowIDForRuntimeInstance(source, runID, flowInstance)
 	if contract.FlowID != "" && flowID != "" && contract.FlowID != flowID {
 		return nil, failures.New(failures.ClassAuthorizationDenied, "flow_scope_create_forbidden", "tool-executor", "exec_create_entity.flow_instance", map[string]any{"action": "entity_create", "flow_path": flowInstance, "actor_id": strings.TrimSpace(actor.ID)})
 	}
