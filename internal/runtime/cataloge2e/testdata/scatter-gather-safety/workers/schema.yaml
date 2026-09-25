@@ -2,9 +2,8 @@ name: workers
 mode: template
 instance: item_id
 stages:
-  new:
-    initial: true
   registered:
+    initial: true
     timers:
       - {after: 72h, advances_to: expired}
   complete: {terminal: true}
