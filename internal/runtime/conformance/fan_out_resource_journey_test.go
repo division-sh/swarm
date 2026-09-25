@@ -404,6 +404,20 @@ func TestFanOutPinnedKeylessEmptyAndDuplicateStreamsBothStores(t *testing.T) {
 					t.Fatalf("pin alone issued keyless work: %d err=%v", dormant, err)
 				}
 				for attempt := 0; attempt < test.starts; attempt++ {
+					if attempt == 1 {
+						bundle, _ := semanticview.Bundle(f.source)
+						owner := f.selected.(interface {
+							ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
+						})
+						changed, err := owner.ExecuteDataSourceOperation(f.ctx, durabledata.SourceCommand{
+							Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator",
+							BundleHash: bundle.SourceArtifact.BundleHash(), Declaration: ref,
+							ExpectedHead: durabledata.VersionHead(version), InputFormat: "jsonl", Input: []byte("{\"value\":\"new head\"}\n"),
+						})
+						if err != nil || changed.Candidate.VersionID == version {
+							t.Fatalf("advance head without changing the run pin: version=%s err=%v", changed.Candidate.VersionID, err)
+						}
+					}
 					trigger := f.submit(t, test.trigger, semanticProofRows(1), 75)
 					waitNotifyAllChildrenRuntimeWithin(t, f.runtime, f.runID, 30*time.Second)
 					rows, err := f.db.QueryContext(f.ctx, `SELECT o.ordinal,o.outcome_kind,e.payload_bytes
