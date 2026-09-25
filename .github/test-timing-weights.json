@@ -1,26 +1,26 @@
 {
   "version": 2,
-  "source_run_id": "github-actions-36188905463",
+  "source_run_id": "34305769348",
   "packages": {
     "github.com/division-sh/swarm": 0,
     "github.com/division-sh/swarm/cmd/swarm": 0,
     "github.com/division-sh/swarm/cmd/swarm-openapi-gen": 0,
     "github.com/division-sh/swarm/cmd/swarm-openrpc-gen": 0,
     "github.com/division-sh/swarm/cmd/swarm-provider-trigger-pack-gen": 0,
-    "github.com/division-sh/swarm/cmd/swarm-test": 29.701,
+    "github.com/division-sh/swarm/cmd/swarm-test": 25.201,
     "github.com/division-sh/swarm/cmd/swarm-test-changed": 0.005,
-    "github.com/division-sh/swarm/cmd/swarm-test-timing": 15.841,
+    "github.com/division-sh/swarm/cmd/swarm-test-timing": 0.002,
     "github.com/division-sh/swarm/internal/apiidempotency": 0,
     "github.com/division-sh/swarm/internal/apispec": 2.993,
-    "github.com/division-sh/swarm/internal/apiv1": 129.884,
+    "github.com/division-sh/swarm/internal/apiv1": 99.415,
     "github.com/division-sh/swarm/internal/channelonboarding": 0.173,
     "github.com/division-sh/swarm/internal/cli/argcount": 0.004,
     "github.com/division-sh/swarm/internal/cli/readwindow": 0,
     "github.com/division-sh/swarm/internal/cliapp": 86.528,
     "github.com/division-sh/swarm/internal/config": 0.01,
-    "github.com/division-sh/swarm/internal/dashboard/server": 2.685,
+    "github.com/division-sh/swarm/internal/dashboard/server": 4.212,
     "github.com/division-sh/swarm/internal/durabledata": 0.261,
-    "github.com/division-sh/swarm/internal/events": 2.879,
+    "github.com/division-sh/swarm/internal/events": 2.304,
     "github.com/division-sh/swarm/internal/events/eventtest": 0,
     "github.com/division-sh/swarm/internal/mailbox": 0.016,
     "github.com/division-sh/swarm/internal/operatorchannel": 0.377,
@@ -31,9 +31,9 @@
     "github.com/division-sh/swarm/internal/packruntime": 0,
     "github.com/division-sh/swarm/internal/packs": 1.728,
     "github.com/division-sh/swarm/internal/platform": 0.004,
-    "github.com/division-sh/swarm/internal/providerconnectors": 2.973,
+    "github.com/division-sh/swarm/internal/providerconnectors": 4.367,
     "github.com/division-sh/swarm/internal/providertriggers": 0.781,
-    "github.com/division-sh/swarm/internal/releasee2e": 872.9279999999999,
+    "github.com/division-sh/swarm/internal/releasee2e": 955.271,
     "github.com/division-sh/swarm/internal/runtime": 70.052,
     "github.com/division-sh/swarm/internal/runtime/accprojection": 0.375,
     "github.com/division-sh/swarm/internal/runtime/accumulator": 0,
@@ -45,19 +45,19 @@
     "github.com/division-sh/swarm/internal/runtime/agents": 0.135,
     "github.com/division-sh/swarm/internal/runtime/agenttopology": 0.006,
     "github.com/division-sh/swarm/internal/runtime/authoractivity": 0.019,
-    "github.com/division-sh/swarm/internal/runtime/authoringview": 7.527,
+    "github.com/division-sh/swarm/internal/runtime/authoringview": 7.343,
     "github.com/division-sh/swarm/internal/runtime/authority": 0.007,
-    "github.com/division-sh/swarm/internal/runtime/bootverify": 40.149,
+    "github.com/division-sh/swarm/internal/runtime/bootverify": 34.692,
     "github.com/division-sh/swarm/internal/runtime/budgetspend": 0,
     "github.com/division-sh/swarm/internal/runtime/bus": 49.616,
     "github.com/division-sh/swarm/internal/runtime/bus/bustest": 0,
     "github.com/division-sh/swarm/internal/runtime/canonicaljson": 0.007,
-    "github.com/division-sh/swarm/internal/runtime/cataloge2e": 569.894,
+    "github.com/division-sh/swarm/internal/runtime/cataloge2e": 360.076,
     "github.com/division-sh/swarm/internal/runtime/channelactivation": 0.042,
     "github.com/division-sh/swarm/internal/runtime/computemodule": 0.222,
-    "github.com/division-sh/swarm/internal/runtime/conformance": 678.72,
+    "github.com/division-sh/swarm/internal/runtime/conformance": 80.837,
     "github.com/division-sh/swarm/internal/runtime/containeridentity": 0.003,
-    "github.com/division-sh/swarm/internal/runtime/contracts": 184.577,
+    "github.com/division-sh/swarm/internal/runtime/contracts": 121.435,
     "github.com/division-sh/swarm/internal/runtime/core/activityidentity": 0,
     "github.com/division-sh/swarm/internal/runtime/core/actors": 0,
     "github.com/division-sh/swarm/internal/runtime/core/agentidentity": 0.002,
@@ -67,7 +67,6 @@
     "github.com/division-sh/swarm/internal/runtime/core/eventidentity": 0.003,
     "github.com/division-sh/swarm/internal/runtime/core/eventreceiver": 0.003,
     "github.com/division-sh/swarm/internal/runtime/core/flowidentity": 0.01,
-    "github.com/division-sh/swarm/internal/runtime/core/forkrecipient": 0.047,
     "github.com/division-sh/swarm/internal/runtime/core/handlerselection": 0.003,
     "github.com/division-sh/swarm/internal/runtime/core/identity": 0.004,
     "github.com/division-sh/swarm/internal/runtime/core/identitytest": 0,
@@ -87,20 +86,20 @@
     "github.com/division-sh/swarm/internal/runtime/core/toolidentity": 0.003,
     "github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy": 0,
     "github.com/division-sh/swarm/internal/runtime/core/values": 0.004,
-    "github.com/division-sh/swarm/internal/runtime/core/worklifetime": 4.142,
+    "github.com/division-sh/swarm/internal/runtime/core/worklifetime": 2.209,
     "github.com/division-sh/swarm/internal/runtime/correlation": 0.005,
     "github.com/division-sh/swarm/internal/runtime/credentials": 0.238,
     "github.com/division-sh/swarm/internal/runtime/currentstate": 0.006,
     "github.com/division-sh/swarm/internal/runtime/dataaccess": 0.028,
     "github.com/division-sh/swarm/internal/runtime/deadletters": 0,
-    "github.com/division-sh/swarm/internal/runtime/decisioncard": 14.099,
+    "github.com/division-sh/swarm/internal/runtime/decisioncard": 0.024,
     "github.com/division-sh/swarm/internal/runtime/deliverycontinuation": 2.156,
-    "github.com/division-sh/swarm/internal/runtime/deliverylifecycle": 1.6760000000000002,
+    "github.com/division-sh/swarm/internal/runtime/deliverylifecycle": 0,
     "github.com/division-sh/swarm/internal/runtime/destructivereset": 0.555,
     "github.com/division-sh/swarm/internal/runtime/diaglog": 0,
-    "github.com/division-sh/swarm/internal/runtime/effects": 2.885,
+    "github.com/division-sh/swarm/internal/runtime/effects": 0.747,
     "github.com/division-sh/swarm/internal/runtime/effects/effecttest": 0,
-    "github.com/division-sh/swarm/internal/runtime/engine": 9.356,
+    "github.com/division-sh/swarm/internal/runtime/engine": 15.775,
     "github.com/division-sh/swarm/internal/runtime/entityquery": 0,
     "github.com/division-sh/swarm/internal/runtime/entityruntime": 0.007,
     "github.com/division-sh/swarm/internal/runtime/eventpayload": 0.001,
@@ -119,21 +118,21 @@
     "github.com/division-sh/swarm/internal/runtime/joinruntime": 0.005,
     "github.com/division-sh/swarm/internal/runtime/lifecycleprobe": 0.006,
     "github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest": 0.003,
-    "github.com/division-sh/swarm/internal/runtime/llm": 12.425,
+    "github.com/division-sh/swarm/internal/runtime/llm": 4.549,
     "github.com/division-sh/swarm/internal/runtime/llm/selection": 0.006,
     "github.com/division-sh/swarm/internal/runtime/loopruntime": 0.008,
     "github.com/division-sh/swarm/internal/runtime/managedcredentials": 0.442,
     "github.com/division-sh/swarm/internal/runtime/managedcredentials/model": 0.013,
-    "github.com/division-sh/swarm/internal/runtime/manager": 21.099,
+    "github.com/division-sh/swarm/internal/runtime/manager": 11.657,
     "github.com/division-sh/swarm/internal/runtime/mcp": 1.212,
     "github.com/division-sh/swarm/internal/runtime/mockperformance": 0.004,
     "github.com/division-sh/swarm/internal/runtime/mutationlog": 0.007,
-    "github.com/division-sh/swarm/internal/runtime/pipeline": 98.831,
+    "github.com/division-sh/swarm/internal/runtime/pipeline": 80.099,
     "github.com/division-sh/swarm/internal/runtime/pipelineobligation": 0.006,
     "github.com/division-sh/swarm/internal/runtime/plangeneration": 0.003,
     "github.com/division-sh/swarm/internal/runtime/platformcontext": 0,
-    "github.com/division-sh/swarm/internal/runtime/publicingress": 2.75,
-    "github.com/division-sh/swarm/internal/runtime/pythonmodule": 13.949,
+    "github.com/division-sh/swarm/internal/runtime/publicingress": 1.725,
+    "github.com/division-sh/swarm/internal/runtime/pythonmodule": 12.126,
     "github.com/division-sh/swarm/internal/runtime/pythonmodule/internal/genartifactmanifest": 0,
     "github.com/division-sh/swarm/internal/runtime/registration": 0.192,
     "github.com/division-sh/swarm/internal/runtime/replycontext": 0,
@@ -142,9 +141,8 @@
     "github.com/division-sh/swarm/internal/runtime/runbundle": 0,
     "github.com/division-sh/swarm/internal/runtime/runcontrol": 0.08,
     "github.com/division-sh/swarm/internal/runtime/runfork": 0,
-    "github.com/division-sh/swarm/internal/runtime/runforkadmission": 1.98,
-    "github.com/division-sh/swarm/internal/runtime/runforkexecution": 131.64,
-    "github.com/division-sh/swarm/internal/runtime/runforkreadiness": 2.472,
+    "github.com/division-sh/swarm/internal/runtime/runforkadmission": 3.425,
+    "github.com/division-sh/swarm/internal/runtime/runforkexecution": 37.08,
     "github.com/division-sh/swarm/internal/runtime/runlifecycle": 0.009,
     "github.com/division-sh/swarm/internal/runtime/runquiescence": 0,
     "github.com/division-sh/swarm/internal/runtime/runstalled": 0.007,
@@ -152,15 +150,14 @@
     "github.com/division-sh/swarm/internal/runtime/scenarioderivation": 0.557,
     "github.com/division-sh/swarm/internal/runtime/scenarioexecution": 0.011,
     "github.com/division-sh/swarm/internal/runtime/semanticvalue": 0.014,
-    "github.com/division-sh/swarm/internal/runtime/semanticview": 107.933,
+    "github.com/division-sh/swarm/internal/runtime/semanticview": 26.844,
     "github.com/division-sh/swarm/internal/runtime/semanticviewtest": 0,
     "github.com/division-sh/swarm/internal/runtime/sessions": 0.013,
     "github.com/division-sh/swarm/internal/runtime/sharedjson": 0,
-    "github.com/division-sh/swarm/internal/runtime/startupownership": 3.9459999999999997,
+    "github.com/division-sh/swarm/internal/runtime/startupownership": 0,
     "github.com/division-sh/swarm/internal/runtime/startuprecovery": 0.007,
     "github.com/division-sh/swarm/internal/runtime/testcases": 1.001,
-    "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting": 22.263,
-    "github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest": 0,
+    "github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting": 31.037,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring": 0,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren": 0,
     "github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect": 0,
@@ -173,53 +170,50 @@
     "github.com/division-sh/swarm/internal/runtime/timercancellation": 0.004,
     "github.com/division-sh/swarm/internal/runtime/timerobligation": 0,
     "github.com/division-sh/swarm/internal/runtime/toolgateway": 0.003,
-    "github.com/division-sh/swarm/internal/runtime/tools": 43.66,
+    "github.com/division-sh/swarm/internal/runtime/tools": 29.406,
     "github.com/division-sh/swarm/internal/runtime/triggergeneration": 0.005,
     "github.com/division-sh/swarm/internal/runtime/turnactivity": 0,
-    "github.com/division-sh/swarm/internal/runtime/workflowexpr": 35.603,
+    "github.com/division-sh/swarm/internal/runtime/workflowexpr": 0.023,
     "github.com/division-sh/swarm/internal/runtime/workflowlifecycle": 0.005,
     "github.com/division-sh/swarm/internal/runtime/workflowroute": 0,
     "github.com/division-sh/swarm/internal/runtime/workspace": 0.356,
-    "github.com/division-sh/swarm/internal/serveapp": 2018.177,
+    "github.com/division-sh/swarm/internal/serveapp": 514.979,
     "github.com/division-sh/swarm/internal/servedparity": 0.015,
     "github.com/division-sh/swarm/internal/sourceartifact": 0.223,
-    "github.com/division-sh/swarm/internal/store": 22.36,
+    "github.com/division-sh/swarm/internal/store": 20.963,
     "github.com/division-sh/swarm/internal/store/backendselection": 0.005,
     "github.com/division-sh/swarm/internal/store/construction": 0,
     "github.com/division-sh/swarm/internal/store/devscratch": 0.066,
     "github.com/division-sh/swarm/internal/store/eventfixture": 0,
     "github.com/division-sh/swarm/internal/store/internal/adminpersistence": 0,
-    "github.com/division-sh/swarm/internal/store/internal/apiidempotency": 1.798,
+    "github.com/division-sh/swarm/internal/store/internal/apiidempotency": 0.67,
     "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal": 0.008,
     "github.com/division-sh/swarm/internal/store/internal/backend/activityresult": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence": 0.012,
-    "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity": 1.022,
+    "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity/readadapter": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/delivery": 2.727,
+    "github.com/division-sh/swarm/internal/store/internal/backend/delivery": 0.01,
     "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/effects": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord": 1.152,
+    "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord": 0.014,
     "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/fanoutorigin": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/gateroute": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol": 0.964,
     "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence": 8.21,
-    "github.com/division-sh/swarm/internal/store/internal/backend/postgres": 25.312,
+    "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence": 2.564,
+    "github.com/division-sh/swarm/internal/store/internal/backend/postgres": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/replycontext": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence": 30.287,
-    "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision": 1.583,
+    "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence": 0,
+    "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/runstate": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence": 0,
@@ -227,7 +221,6 @@
     "github.com/division-sh/swarm/internal/store/internal/backend/sqlite": 15.608,
     "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition": 0,
     "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation": 0,
-    "github.com/division-sh/swarm/internal/store/internal/backend/transactiontest": 0.062,
     "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer": 0,
     "github.com/division-sh/swarm/internal/store/internal/budgetspend": 0,
     "github.com/division-sh/swarm/internal/store/internal/durabledata": 0,
@@ -238,9 +231,9 @@
     "github.com/division-sh/swarm/internal/store/internal/routingrules": 0,
     "github.com/division-sh/swarm/internal/store/internal/runbundle": 0.336,
     "github.com/division-sh/swarm/internal/store/internal/runhandoff": 0,
-    "github.com/division-sh/swarm/internal/store/internal/runtimepersistence": 1186.0800000000002,
+    "github.com/division-sh/swarm/internal/store/internal/runtimepersistence": 447.65999999999997,
     "github.com/division-sh/swarm/internal/store/internal/runtimepersistence/internal/genfacade": 0.145,
-    "github.com/division-sh/swarm/internal/store/internal/schemastore": 2.056,
+    "github.com/division-sh/swarm/internal/store/internal/schemastore": 0.619,
     "github.com/division-sh/swarm/internal/store/internal/sourceartifact": 0,
     "github.com/division-sh/swarm/internal/store/internal/startupownership": 2.394,
     "github.com/division-sh/swarm/internal/store/internal/storeerrors": 0,
@@ -248,7 +241,7 @@
     "github.com/division-sh/swarm/internal/store/internal/workflowroute": 0,
     "github.com/division-sh/swarm/internal/store/platformschema": 0,
     "github.com/division-sh/swarm/internal/store/selected": 0.432,
-    "github.com/division-sh/swarm/internal/store/storetest": 1.774,
+    "github.com/division-sh/swarm/internal/store/storetest": 0,
     "github.com/division-sh/swarm/internal/store/testsql": 0,
     "github.com/division-sh/swarm/internal/store/testutil/agentfixture": 0,
     "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture": 0,
@@ -257,9 +250,9 @@
     "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture": 0,
     "github.com/division-sh/swarm/internal/testcatalog": 0.217,
     "github.com/division-sh/swarm/internal/testchanged": 0.01,
-    "github.com/division-sh/swarm/internal/testplanning": 25.562,
-    "github.com/division-sh/swarm/internal/testpostgres": 22.275,
-    "github.com/division-sh/swarm/internal/testtiming": 4.459,
+    "github.com/division-sh/swarm/internal/testplanning": 0.009,
+    "github.com/division-sh/swarm/internal/testpostgres": 22.713,
+    "github.com/division-sh/swarm/internal/testtiming": 0.008,
     "github.com/division-sh/swarm/internal/testutil": 1.2610000000000001,
     "github.com/division-sh/swarm/internal/testutil/packfixture": 0,
     "github.com/division-sh/swarm/internal/testutil/replayconformance": 0,
@@ -267,112 +260,92 @@
     "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture": 0,
     "github.com/division-sh/swarm/internal/testutil/sourceartifactfixture": 0.003,
     "github.com/division-sh/swarm/internal/testutil/telegramapi": 0,
-    "github.com/division-sh/swarm/internal/userfacing": 10.094,
+    "github.com/division-sh/swarm/internal/userfacing": 20.296,
     "github.com/division-sh/swarm/internal/versionmetadata": 0.006,
     "github.com/division-sh/swarm/internal/yamlsource": 0.007,
     "github.com/division-sh/swarm/packs": 0
   },
   "units": {
     "full": {
-      "api-llm-bus-full": {
-        "selection": "13784406496877461204d3a1af61e80a666839de3db83fac5c14bb8e8624501f",
-        "seconds": 164
-      },
       "broad-01": {
-        "selection": "d15bc8ba4456b86549596f241f6ceb7ab14b8d495984a4729ad996ffe8ad1adb",
-        "seconds": 166
-      },
-      "broad-02": {
-        "selection": "02bdbde763ffdc688002efe1b69602064f95619e30706f3e0880b196b760b104",
-        "seconds": 172
-      },
-      "broad-03": {
-        "selection": "da7b4680c6e495bc5440224829f4b4bb4f0c9a29ed44dfcd49288e6a93b896ec",
-        "seconds": 142
-      },
-      "broad-04": {
-        "selection": "14bb60ff353940c99c92a2146362036f1760026a202138a48e86a1ec622f6f85",
+        "selection": "32da1176b96fdd5bfc4e23726aa19f39ab3fce157891e353ad9b4b0507472a40",
         "seconds": 100
       },
+      "broad-02": {
+        "selection": "917a791152fabd875299bb67332706daebaf8950ed604de3e35040bafb565f38",
+        "seconds": 119
+      },
+      "broad-03": {
+        "selection": "e5a87110c1440d1ca360b11a487534173732992c04bc6b23a43ad26dc35373f5",
+        "seconds": 144
+      },
+      "broad-04": {
+        "selection": "662e0efbcf860b2e829caef3f797805831d626cbb7265216771510bcb8081c0e",
+        "seconds": 128
+      },
       "broad-05": {
-        "selection": "eac34ca916619fcd81ae39a1c20226d0fe34ab7242861a2afd81a135c695370c",
-        "seconds": 72
+        "selection": "432a55274544739af7643f173be1193c325bb5c3ffe975e23db1c02b3b0030c0",
+        "seconds": 79
+      },
+      "broad-06": {
+        "selection": "aa3fe5b30b17ff2854f14b677c1bb27cfe77cdc38304ce8869b018064031694f",
+        "seconds": 94
+      },
+      "broad-07": {
+        "selection": "ab138c4150117fcae95bffe812f73efdbd50932741a62ba0124db7a74e14fce9",
+        "seconds": 81
       },
       "catalog-replay-1": {
         "selection": "6c0fc31af9148225f832593ff7ef6ec84e3a4f6b77994e44dfdde749c56b540f",
-        "seconds": 126
+        "seconds": 78
       },
-      "catalog-replay-2-3": {
-        "selection": "504149e2b83873e756a8f9a643b3b3fc2b4f676583a0a3a4200e02820dfda655",
-        "seconds": 182
+      "catalog-replay-2": {
+        "selection": "68b1c08c16e2c69a24db6783707b4e891bd91a625a427e3abd2a1932e47ea359",
+        "seconds": 88
+      },
+      "catalog-replay-3": {
+        "selection": "8efa482635cb554c40b2b92ca29182e3c2705f851086c25de2386cd3da5ea85c",
+        "seconds": 96
       },
       "catalog-required-inventory": {
         "selection": "4aeb6366de5f19b9a1756391064da80b38d0490de13aa3901462b5bc9a213e5b",
-        "seconds": 16
+        "seconds": 12
       },
       "catalog-required-verify": {
         "selection": "51f75ee919f964c9c98499c9101b0edb23c2115d59455b5d409b9852be0519c3",
         "seconds": 108
       },
       "catalog-runtime": {
-        "selection": "764bda74287cae9470110679731a6303f3794d728fd06ce29217a406c52d09b1",
-        "seconds": 130
+        "selection": "58fc9ca2f92b8e6d08cff7b0021f15bc58b908a8becfe758730ca3e7fb61c88a",
+        "seconds": 111
       },
-      "catalog-runtime-fork-readiness": {
-        "selection": "2bb1c81ef4e122fa028d4e96bf133899601595a8a5e7e714204a4a4b02baaf94",
-        "seconds": 128
+      "catalog-runtime-staged": {
+        "selection": "ed4f5ccc5fd85e263ddc1fe6259eb854fb054d917aaf387983e9f87a99cb6bdf",
+        "seconds": 60
       },
-      "catalog-runtime-scatter-safety": {
-        "selection": "75eae930a8146c61b90444bbc7163559ba6d26848fb1a5bb3318df878aa2ead3",
-        "seconds": 98
-      },
-      "conformance-1": {
-        "selection": "f798dfcd8b0f12e7827c792e696f8293bbd357a7164f19546cab57cbd6f6458e",
-        "seconds": 187
-      },
-      "conformance-2": {
-        "selection": "ed2c13b9772a698e17fa618b6452bcb781f044b80ddc511cc100a6a8ec1bd8ee",
-        "seconds": 116
-      },
-      "conformance-2394-core": {
-        "selection": "256e00796291873fdcc5d6b7cd3a9f6e285040cde6b18aab9caf547a32ed01bf",
-        "seconds": 186
-      },
-      "conformance-2394-pressure": {
-        "selection": "a7409441cab7a5b23020a4bd41e367e4006cead04010a114746fd05223bba358",
-        "seconds": 177
-      },
-      "conformance-2394-reporter": {
-        "selection": "4ce6e414f2d6e9616385614a4cb4c7e5bf685453b3390662d7da39d608d5c836",
-        "seconds": 146
-      },
-      "contracts-first": {
-        "selection": "b38c57ae1e9700103933a54515306768a3c425633847b7177d512ac4058c0f3e",
-        "seconds": 114
-      },
-      "contracts-rest": {
-        "selection": "4c32b4313b056853bcea2307bfa8b731f63ac48a54f9f4390b29b93441047f06",
-        "seconds": 108
+      "hitl-llm-full": {
+        "selection": "45c1b7ae6a8afac83da563ad15dadd201c522125dac20a0d3558c9de8a358881",
+        "seconds": 20
       },
       "hitl-releasee2e-burst-1": {
         "selection": "2ece4cd230dd210ea2109b23c3854a52667cd37d020e2e497f11b50623df0df0",
-        "seconds": 110
+        "seconds": 182
       },
       "hitl-releasee2e-burst-2": {
         "selection": "bd8a4cdcdc3b728942248c8533dc1fa8cf5dd615e87cf69efb3a5e524efe6b23",
-        "seconds": 123
+        "seconds": 154
       },
       "hitl-releasee2e-golden": {
-        "selection": "e7aefc5358ca06f6f8f4f95c6ee23aeaa9f6140cf95e569211bc80c34e5c057d",
-        "seconds": 78
+        "selection": "3af28b348236691ae8cb3e8f4882bc98710a3b52df902c04b9514c8ab721703f",
+        "seconds": 132
       },
       "hitl-releasee2e-invocation-1": {
         "selection": "2c77cea086de2305b5b9e2deb50f0c3c1b3fbbd430ea20a9cf845e4783126272",
-        "seconds": 117
+        "seconds": 98
       },
       "hitl-releasee2e-invocation-2": {
         "selection": "11134a05ea22e04349d09f6baa4a7f4b8fa01d7a823fa222a240f2dbc3ac5970",
-        "seconds": 111
+        "seconds": 90
       },
       "hitl-releasee2e-invocation-3": {
         "selection": "4a8edc437eaa03586b416f5e974c262ddc54016730e36ce1bff19c4e5afd44ec",
@@ -384,401 +357,75 @@
       },
       "hitl-releasee2e-invocation-5": {
         "selection": "034f04b9992906316e98f7447ad65b037fe5d707b32568978c680854793aa20b",
-        "seconds": 112
-      },
-      "hitl-releasee2e-invocation-6": {
-        "selection": "c5d1d5fc3b8bedd470339d61fb006a1ff48854067e911cf8a61f2b5064f86471",
-        "seconds": 109
-      },
-      "hitl-releasee2e-journeys": {
-        "selection": "187b7c05f532316fdc137d8b84c4f601ae997f7a957b83b2067f073353fce388",
-        "seconds": 85
-      },
-      "hitl-releasee2e-rest": {
-        "selection": "2d037c160e062e708a88875272f393acd72961c2434fd1d80384f6f4402d7302",
-        "seconds": 86
-      },
-      "runtime-full": {
-        "selection": "175ac5773cda693c40a73f143927d4328f299a399fc6953a6918e6fb403f672f",
-        "seconds": 103
-      },
-      "serveapp-channel": {
-        "selection": "e380705860510780724f7d751b39a4bee3c8d19f3a7e8cc6d0976298f1a95794",
-        "seconds": 148
-      },
-      "serveapp-i-reporter": {
-        "selection": "cca0024cbb8d3517d374ae3d19e39d6774d2d4d24271a448d909667478143980",
-        "seconds": 173
-      },
-      "serveapp-journeys-a-c": {
-        "selection": "d235901899adcc1733d1187bc78db14ceca33e64d3f46076644dccdecec4289d",
-        "seconds": 142
-      },
-      "serveapp-journeys-d-l": {
-        "selection": "e35afdfe8bb9f417a30db34a24fdccf4f69c77cec16edff790fdbf245bc581a3",
-        "seconds": 131
-      },
-      "serveapp-journeys-first": {
-        "selection": "35eab8052a7cd0c78a5f31719d0d087c641a5894dff8042be8329be1254c95f5",
-        "seconds": 158
-      },
-      "serveapp-journeys-m-z": {
-        "selection": "c5f6f1b9521776d81643110aa29f29cd641c8b133ee6ccf3148b1eb6d1ed81c1",
-        "seconds": 162
-      },
-      "serveapp-mailbox": {
-        "selection": "61884d28cd427cf7f8757ddf97110bb9fad4ffbb55c26e0cd33efe654fcad7f8",
-        "seconds": 214
-      },
-      "serveapp-mailbox-p-q": {
-        "selection": "85e0ab92bb2e53c7b7892d2968ce952ad08ffc3dd59f8111691f3315fc84874c",
-        "seconds": 155
-      },
-      "serveapp-other": {
-        "selection": "cf3f4e32ea7472118bedd266fb9d0a889fe518637ec8a0d5832a3ec844216360",
-        "seconds": 129
-      },
-      "serveapp-other-late": {
-        "selection": "7ad167d58cb588264a99e4afb5a18900247a50c405192e167271febdd56f837a",
-        "seconds": 273
-      },
-      "serveapp-publication-text": {
-        "selection": "3275ecff93705170d6f6d6be8590d86c415432594a0c951535f90a9742ad7c25",
-        "seconds": 138
-      },
-      "serveapp-runtime": {
-        "selection": "6313d48b724d037267e762b44f1e74f67584622a62d6de0af1f4b264b45aceda",
-        "seconds": 205
-      },
-      "serveapp-selected": {
-        "selection": "e30f97e826537719137335a5b8e342bf08276967f5df84bedf213fcab4280917",
-        "seconds": 160
-      },
-      "serveapp-selected-rest": {
-        "selection": "ec157d4762f6a06c8862499489e1ef9439bede1b07d381030f7f9ed0d82f2d7b",
-        "seconds": 142
-      },
-      "serveapp-standing": {
-        "selection": "73f6c9d2bfacdd21043a64476f7f217b918ce1acf37f132b8dcfb3f1e8d51c53",
-        "seconds": 122
-      },
-      "serveapp-surfaces": {
-        "selection": "853163293da3b74acfe5c59f5ceac9cd66f97bb23157e6558b96729540757a29",
-        "seconds": 135
-      },
-      "store-admission-full": {
-        "selection": "55121c249bdc70e66d756b289bb8322e9fe3d330b3b6b67e30b00adbb472b5d9",
-        "seconds": 48
-      },
-      "store-runtime-fanout": {
-        "selection": "c74fa3ee968a9b1e9d4a147368cd95404e961db727f2063d5a141cab03743b66",
-        "seconds": 135
-      },
-      "store-runtime-fanout-process": {
-        "selection": "9e9d1c01d3bd33bd83306c450fa7756951e39fd3de6f247b0e91b16d62ede35c",
-        "seconds": 108
-      },
-      "store-runtime-fork-generation": {
-        "selection": "0044b7a99de2eaf41afecdcb6a8383ae84082f5966f8ca3f9768659c263882d2",
-        "seconds": 239
-      },
-      "store-runtime-full-01": {
-        "selection": "f9508727af93b84bda279dd4796123388b23b2eefa7add56016c883c69373c20",
-        "seconds": 133
-      },
-      "store-runtime-full-02": {
-        "selection": "32216fedef03918024f730e87da817e36c12b9b3a51e31dbe54220191089115c",
-        "seconds": 168
-      },
-      "store-runtime-full-03": {
-        "selection": "86fd73d88be519dd4ebbf0d5e63a7743c5e74531c3802492cef59e212e9959ed",
-        "seconds": 126
-      },
-      "store-runtime-full-03-i-l": {
-        "selection": "c8ef64f420b6dbd4e74599db89876deae7a9992d18f4b3dfb1f529012c5f2e46",
-        "seconds": 214
-      },
-      "store-runtime-full-04": {
-        "selection": "c56574f1d1d548b19e3fd384e20d5f35e826a154d74c4f14c71713422b9e31e3",
-        "seconds": 166
-      },
-      "store-runtime-full-05": {
-        "selection": "9ff2a449fad81fb4011a2f3a3c9856f014b5850fa3be3d9a893ec2d2d84b4455",
-        "seconds": 105
-      },
-      "store-runtime-full-06": {
-        "selection": "82cc78ce52b9aff99a25b642310121e122216e2fc402edb14098f52f5aafe78e",
-        "seconds": 147
-      },
-      "store-runtime-full-07-fork": {
-        "selection": "28be3c6de7101618240e2af36f478d7e4cdca10bbf5c19856186ae050fb2b21e",
-        "seconds": 129
-      }
-    },
-    "pr-escalated": {
-      "api-llm-bus-full": {
-        "selection": "13784406496877461204d3a1af61e80a666839de3db83fac5c14bb8e8624501f",
-        "seconds": 169
-      },
-      "broad-01": {
-        "selection": "3bb738e9822ddd1454d612783568a7fb49cfe3c0a1ea93989339ea4d7b38d403",
-        "seconds": 187
-      },
-      "broad-02": {
-        "selection": "3d2d115f8a714cce7603667c170ca569d06cd19f9e5662fe1893af1295ca3aaf",
-        "seconds": 191
-      },
-      "broad-03": {
-        "selection": "f22db4721690567fdf854593b0f3a6259b36063f2870d014a3c72d1caacb771b",
-        "seconds": 138
-      },
-      "broad-04": {
-        "selection": "195af4ddf8414420b43780f8922be9df073dcff3abda59d1e736b84b6affd4f2",
-        "seconds": 79
-      },
-      "broad-05": {
-        "selection": "276f9149de2844a9e82a0407ee8a76581893bc030632e510abdf60d7494dc58f",
-        "seconds": 52
-      },
-      "catalog-replay-1": {
-        "selection": "6c0fc31af9148225f832593ff7ef6ec84e3a4f6b77994e44dfdde749c56b540f",
-        "seconds": 118
-      },
-      "catalog-replay-2-3": {
-        "selection": "504149e2b83873e756a8f9a643b3b3fc2b4f676583a0a3a4200e02820dfda655",
-        "seconds": 187
-      },
-      "catalog-required-inventory": {
-        "selection": "4aeb6366de5f19b9a1756391064da80b38d0490de13aa3901462b5bc9a213e5b",
-        "seconds": 18
-      },
-      "catalog-required-verify": {
-        "selection": "51f75ee919f964c9c98499c9101b0edb23c2115d59455b5d409b9852be0519c3",
-        "seconds": 113
-      },
-      "catalog-runtime": {
-        "selection": "764bda74287cae9470110679731a6303f3794d728fd06ce29217a406c52d09b1",
-        "seconds": 134
-      },
-      "catalog-runtime-fork-readiness": {
-        "selection": "2bb1c81ef4e122fa028d4e96bf133899601595a8a5e7e714204a4a4b02baaf94",
-        "seconds": 141
-      },
-      "catalog-runtime-scatter-safety": {
-        "selection": "75eae930a8146c61b90444bbc7163559ba6d26848fb1a5bb3318df878aa2ead3",
-        "seconds": 117
-      },
-      "conformance-1": {
-        "selection": "f798dfcd8b0f12e7827c792e696f8293bbd357a7164f19546cab57cbd6f6458e",
-        "seconds": 192
-      },
-      "conformance-2": {
-        "selection": "ed2c13b9772a698e17fa618b6452bcb781f044b80ddc511cc100a6a8ec1bd8ee",
-        "seconds": 114
-      },
-      "conformance-2394-core": {
-        "selection": "256e00796291873fdcc5d6b7cd3a9f6e285040cde6b18aab9caf547a32ed01bf",
-        "seconds": 183
-      },
-      "conformance-2394-pressure": {
-        "selection": "a7409441cab7a5b23020a4bd41e367e4006cead04010a114746fd05223bba358",
-        "seconds": 200
-      },
-      "conformance-2394-reporter": {
-        "selection": "4ce6e414f2d6e9616385614a4cb4c7e5bf685453b3390662d7da39d608d5c836",
-        "seconds": 152
-      },
-      "conformance-soak-postgres": {
-        "selection": "fe948d4e005b0b9cfaf608ef4ebab0e7520270319215c18d86d98cbe38bdd859",
-        "seconds": 961
-      },
-      "conformance-soak-sqlite": {
-        "selection": "2fea1e00cf9afa7625880ae9c369e361f836f5d0c140dcdd9350e8d528ed0604",
-        "seconds": 961
-      },
-      "contracts-first": {
-        "selection": "b38c57ae1e9700103933a54515306768a3c425633847b7177d512ac4058c0f3e",
-        "seconds": 139
-      },
-      "contracts-rest": {
-        "selection": "4c32b4313b056853bcea2307bfa8b731f63ac48a54f9f4390b29b93441047f06",
-        "seconds": 98
-      },
-      "hitl-releasee2e-burst-1": {
-        "selection": "2ece4cd230dd210ea2109b23c3854a52667cd37d020e2e497f11b50623df0df0",
-        "seconds": 17
-      },
-      "hitl-releasee2e-burst-2": {
-        "selection": "bd8a4cdcdc3b728942248c8533dc1fa8cf5dd615e87cf69efb3a5e524efe6b23",
-        "seconds": 25
-      },
-      "hitl-releasee2e-golden": {
-        "selection": "e7aefc5358ca06f6f8f4f95c6ee23aeaa9f6140cf95e569211bc80c34e5c057d",
-        "seconds": 81
-      },
-      "hitl-releasee2e-invocation-1": {
-        "selection": "2c77cea086de2305b5b9e2deb50f0c3c1b3fbbd430ea20a9cf845e4783126272",
-        "seconds": 116
-      },
-      "hitl-releasee2e-invocation-2": {
-        "selection": "11134a05ea22e04349d09f6baa4a7f4b8fa01d7a823fa222a240f2dbc3ac5970",
-        "seconds": 81
-      },
-      "hitl-releasee2e-invocation-3": {
-        "selection": "4a8edc437eaa03586b416f5e974c262ddc54016730e36ce1bff19c4e5afd44ec",
-        "seconds": 112
-      },
-      "hitl-releasee2e-invocation-4": {
-        "selection": "ed5fc2276c08eb7cdf28ed065697188d113750db340fb7fb0cf7cb30f493dc9d",
-        "seconds": 103
-      },
-      "hitl-releasee2e-invocation-5": {
-        "selection": "034f04b9992906316e98f7447ad65b037fe5d707b32568978c680854793aa20b",
-        "seconds": 74
-      },
-      "hitl-releasee2e-invocation-6": {
-        "selection": "c5d1d5fc3b8bedd470339d61fb006a1ff48854067e911cf8a61f2b5064f86471",
-        "seconds": 89
-      },
-      "hitl-releasee2e-journeys": {
-        "selection": "187b7c05f532316fdc137d8b84c4f601ae997f7a957b83b2067f073353fce388",
-        "seconds": 61
-      },
-      "hitl-releasee2e-rest": {
-        "selection": "2d037c160e062e708a88875272f393acd72961c2434fd1d80384f6f4402d7302",
-        "seconds": 114
-      },
-      "parity-connected-channel-onboarding-surface": {
-        "selection": "1f000bd2100fc890f25df355319049aa42b1f3a654b31d4ab2029d8877822a9b",
-        "seconds": 38
-      },
-      "parity-destructive-reset-crash": {
-        "selection": "90a2312a6c0a750593f78a8ce06d14cbd9f59a2f5080f331c943be1b6725682e",
-        "seconds": 46
-      },
-      "parity-golden-forced-restart": {
-        "selection": "493d356ac8827e59385e2e2914f6f741f8aae7aba171943942016eb4e614c161",
         "seconds": 73
       },
-      "parity-served-source-artifact": {
-        "selection": "b4ce7615f1e53b04eacd8839966d64ad4a443f91e3867b5269ee5b0f9fe71964",
-        "seconds": 29
+      "hitl-releasee2e-invocation-6": {
+        "selection": "c5d1d5fc3b8bedd470339d61fb006a1ff48854067e911cf8a61f2b5064f86471",
+        "seconds": 86
+      },
+      "hitl-releasee2e-journeys": {
+        "selection": "fdd013d0a22be1080930b055c06992eeaa13c1646a21f2e311f0573d1c45c5bc",
+        "seconds": 109
+      },
+      "hitl-releasee2e-rest": {
+        "selection": "2dbe0049143ffea799c00d573b148cefba46a23a424752e15301ae39a80344ae",
+        "seconds": 49
       },
       "runtime-full": {
         "selection": "175ac5773cda693c40a73f143927d4328f299a399fc6953a6918e6fb403f672f",
-        "seconds": 102
+        "seconds": 93
       },
       "serveapp-channel": {
-        "selection": "e380705860510780724f7d751b39a4bee3c8d19f3a7e8cc6d0976298f1a95794",
-        "seconds": 150
-      },
-      "serveapp-i-reporter": {
-        "selection": "cca0024cbb8d3517d374ae3d19e39d6774d2d4d24271a448d909667478143980",
-        "seconds": 177
-      },
-      "serveapp-journeys-a-c": {
-        "selection": "d235901899adcc1733d1187bc78db14ceca33e64d3f46076644dccdecec4289d",
-        "seconds": 141
-      },
-      "serveapp-journeys-d-l": {
-        "selection": "e35afdfe8bb9f417a30db34a24fdccf4f69c77cec16edff790fdbf245bc581a3",
-        "seconds": 123
-      },
-      "serveapp-journeys-first": {
-        "selection": "35eab8052a7cd0c78a5f31719d0d087c641a5894dff8042be8329be1254c95f5",
-        "seconds": 103
-      },
-      "serveapp-journeys-m-z": {
-        "selection": "c5f6f1b9521776d81643110aa29f29cd641c8b133ee6ccf3148b1eb6d1ed81c1",
-        "seconds": 181
-      },
-      "serveapp-mailbox": {
-        "selection": "61884d28cd427cf7f8757ddf97110bb9fad4ffbb55c26e0cd33efe654fcad7f8",
-        "seconds": 210
-      },
-      "serveapp-mailbox-p-q": {
-        "selection": "85e0ab92bb2e53c7b7892d2968ce952ad08ffc3dd59f8111691f3315fc84874c",
-        "seconds": 125
+        "selection": "94c60ca95d1fb6bd40f4a25cf09e49a30951cdaf1f1da0d3b3da6a7529e24ab4",
+        "seconds": 86
       },
       "serveapp-other": {
-        "selection": "cf3f4e32ea7472118bedd266fb9d0a889fe518637ec8a0d5832a3ec844216360",
-        "seconds": 103
-      },
-      "serveapp-other-late": {
-        "selection": "7ad167d58cb588264a99e4afb5a18900247a50c405192e167271febdd56f837a",
-        "seconds": 269
-      },
-      "serveapp-publication-text": {
-        "selection": "3275ecff93705170d6f6d6be8590d86c415432594a0c951535f90a9742ad7c25",
-        "seconds": 130
+        "selection": "9866338d6295a0beed542acc9bfbeedd77a131a66c863aa7d1f53d06935f9b44",
+        "seconds": 97
       },
       "serveapp-runtime": {
-        "selection": "6313d48b724d037267e762b44f1e74f67584622a62d6de0af1f4b264b45aceda",
-        "seconds": 215
-      },
-      "serveapp-selected": {
-        "selection": "e30f97e826537719137335a5b8e342bf08276967f5df84bedf213fcab4280917",
-        "seconds": 163
-      },
-      "serveapp-selected-rest": {
-        "selection": "ec157d4762f6a06c8862499489e1ef9439bede1b07d381030f7f9ed0d82f2d7b",
-        "seconds": 133
+        "selection": "33b0c4fa4899c773db906bd214c2040c27c3d72c6bec1770d935fb334e6b854f",
+        "seconds": 166
       },
       "serveapp-standing": {
         "selection": "73f6c9d2bfacdd21043a64476f7f217b918ce1acf37f132b8dcfb3f1e8d51c53",
-        "seconds": 108
+        "seconds": 95
       },
       "serveapp-surfaces": {
-        "selection": "853163293da3b74acfe5c59f5ceac9cd66f97bb23157e6558b96729540757a29",
-        "seconds": 143
+        "selection": "30ca714f81d2cfcd884f58fbd818e0e126698d62470e6341835f7b362e672180",
+        "seconds": 113
       },
-      "store-admission-full": {
-        "selection": "55121c249bdc70e66d756b289bb8322e9fe3d330b3b6b67e30b00adbb472b5d9",
-        "seconds": 56
-      },
-      "store-runtime-fanout": {
-        "selection": "c74fa3ee968a9b1e9d4a147368cd95404e961db727f2063d5a141cab03743b66",
-        "seconds": 135
-      },
-      "store-runtime-fanout-process": {
-        "selection": "9e9d1c01d3bd33bd83306c450fa7756951e39fd3de6f247b0e91b16d62ede35c",
-        "seconds": 105
-      },
-      "store-runtime-fork-generation": {
-        "selection": "0044b7a99de2eaf41afecdcb6a8383ae84082f5966f8ca3f9768659c263882d2",
-        "seconds": 152
+      "store-full": {
+        "selection": "90665fcb9c7534c0068698cbcfce4864c8b7d811e78a404c8a39d0663a12a991",
+        "seconds": 39
       },
       "store-runtime-full-01": {
-        "selection": "f9508727af93b84bda279dd4796123388b23b2eefa7add56016c883c69373c20",
-        "seconds": 137
+        "selection": "925971e8de13e16c5790618cba366571b681f3d48115e6528268894175040247",
+        "seconds": 102
       },
       "store-runtime-full-02": {
-        "selection": "32216fedef03918024f730e87da817e36c12b9b3a51e31dbe54220191089115c",
-        "seconds": 164
+        "selection": "bcb5c3dc4b270cee0340fb4479165c23d310bcb88fc1c089287dc58174f32073",
+        "seconds": 97
       },
       "store-runtime-full-03": {
-        "selection": "86fd73d88be519dd4ebbf0d5e63a7743c5e74531c3802492cef59e212e9959ed",
-        "seconds": 128
-      },
-      "store-runtime-full-03-i-l": {
-        "selection": "c8ef64f420b6dbd4e74599db89876deae7a9992d18f4b3dfb1f529012c5f2e46",
-        "seconds": 214
+        "selection": "47451264401f6e0b69249ed97d464a1fd9d93f4c1b41f6cc4d851abd75e1a0a0",
+        "seconds": 77
       },
       "store-runtime-full-04": {
         "selection": "c56574f1d1d548b19e3fd384e20d5f35e826a154d74c4f14c71713422b9e31e3",
-        "seconds": 171
+        "seconds": 114
       },
       "store-runtime-full-05": {
-        "selection": "9ff2a449fad81fb4011a2f3a3c9856f014b5850fa3be3d9a893ec2d2d84b4455",
-        "seconds": 114
+        "selection": "9b9b1cb5be489695027ca05c7173740ca7986ddb4498a998da2e17464e1b723b",
+        "seconds": 86
       },
       "store-runtime-full-06": {
         "selection": "82cc78ce52b9aff99a25b642310121e122216e2fc402edb14098f52f5aafe78e",
-        "seconds": 163
+        "seconds": 76
       },
-      "store-runtime-full-07-fork": {
-        "selection": "28be3c6de7101618240e2af36f478d7e4cdca10bbf5c19856186ae050fb2b21e",
-        "seconds": 128
+      "testpostgres-full": {
+        "selection": "059968541e4ee3f53d166d38195d031ec1fb257d97a6a6fe0b53bf22aabd7837",
+        "seconds": 35
       }
     }
   }
