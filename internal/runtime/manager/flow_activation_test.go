@@ -1697,6 +1697,10 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
+	schema := bundle.FlowSchemas["review"]
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "queued", Initial: true}}}
+	bundle.FlowSchemas["review"] = schema
+	compileFlowActivationFixture(t, bundle)
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.InitialState = "queued"
@@ -3556,6 +3560,7 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 		},
 	}
 	bundle.FlowSchemas["review"] = schema
+	compileFlowActivationFixture(t, bundle)
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
@@ -3566,6 +3571,31 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 	}
 	if got := store.creates[0].CurrentState; got != "queued" {
 		t.Fatalf("created instance current state = %q, want queued", got)
+	}
+}
+
+func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict(t *testing.T) {
+	am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
+	bundle := testFlowBundle(t, "")
+	schema := bundle.FlowSchemas["review"]
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
+		{ID: "queued", Initial: true}, {ID: "other"},
+	}}
+	bundle.FlowSchemas["review"] = schema
+	compileFlowActivationFixture(t, bundle)
+	schema.StageDeclarations.Entries[0].Initial = false
+	schema.StageDeclarations.Entries[1].Initial = true
+	bundle.FlowSchemas["review"] = schema
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+	ctx := testAuthorActivityContext(context.Background())
+	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
+	if err != nil || plan.Instance.CurrentState != "queued" {
+		t.Fatalf("compiled initial plan = %q, %v, want queued", plan.Instance.CurrentState, err)
+	}
+	req.InitialState = "other"
+	if _, err := am.PrepareFlowInstanceActivation(ctx, req); err == nil {
+		t.Fatal("conflicting request initial state became activation authority")
 	}
 }
 

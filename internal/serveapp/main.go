@@ -379,6 +379,30 @@ func materializeServeSourceProjection(artifact *sourceartifact.AdmittedSourceArt
 	return sourceartifact.MaterializeRuntimeProjection(artifact)
 }
 
+func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot, runningSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, bundleHash string) (semanticview.Source, error) {
+	if reader == nil {
+		return nil, fmt.Errorf("budget recovery source artifact reader is required")
+	}
+	record, err := reader.GetSourceArtifact(ctx, bundleHash)
+	if err != nil {
+		return nil, err
+	}
+	if record.BundleHash != bundleHash {
+		return nil, fmt.Errorf("budget source artifact does not match selected bundle_hash %q", bundleHash)
+	}
+	artifact, err := record.Decode()
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, runningSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return semanticview.Wrap(bundle), nil
+}
+
 func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
 	if artifacts == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected source artifact store")
@@ -556,24 +580,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	runtimeDeps.Config = req.Config
 	if req.Stores.sourceReader != nil {
 		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, bundleHash string) (semanticview.Source, error) {
-			record, err := req.Stores.sourceReader.GetSourceArtifact(ctx, bundleHash)
-			if err != nil {
-				return nil, err
-			}
-			if record.BundleHash != bundleHash {
-				return nil, fmt.Errorf("budget source artifact does not match selected bundle_hash %q", bundleHash)
-			}
-			artifact, err := record.Decode()
-			if err != nil {
-				return nil, err
-			}
-			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(req.RepoRoot, artifact, req.Loaded.runningSpecPath, runtimecontracts.WorkflowContractLoadOptions{
-				PlatformPackBases: req.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
-			})
-			if err != nil {
-				return nil, err
-			}
-			return semanticview.Wrap(bundle), nil
+			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.Loaded.runningSpecPath, req.PlatformPackBases, bundleHash)
 		}
 	}
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)

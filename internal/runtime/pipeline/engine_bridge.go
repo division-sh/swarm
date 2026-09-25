@@ -561,10 +561,7 @@ func terminalStateHandlerRejected(pc *PipelineCoordinator, flowID string, state 
 	if !ok || graph.FlowID != flowID {
 		return false, fmt.Errorf("selected flow %q has no exact compiled stage topology", flowID)
 	}
-	if graph.StageCount() == 0 && state.Stage == "pending" {
-		return false, nil
-	}
-	ref, err := graph.ResolveStage(string(state.Stage))
+	ref, err := graph.ResolveStoredStage(string(state.Stage))
 	if err != nil {
 		return false, err
 	}

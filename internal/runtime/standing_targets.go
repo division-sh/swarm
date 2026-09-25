@@ -533,15 +533,13 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 		if !found || graph.FlowID != declaration.FlowPath || !graph.ValidStageCatalog() {
 			return nil, nil, nil, fmt.Errorf("standing target %q has no selected compiled stage topology for flow %q", plan.serviceID, declaration.FlowPath)
 		}
+		initial, err := graph.InitialStoredStage()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("standing target %q initial stage: %w", plan.serviceID, err)
+		}
 		initialState := ""
-		if graph.StageCount() > 0 {
-			initial, err := graph.InitialStageRef()
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("standing target %q initial stage: %w", plan.serviceID, err)
-			}
+		if !initial.IsStatelessPosture() {
 			initialState = initial.ID()
-		} else if graph.HasInitialStage() {
-			return nil, nil, nil, fmt.Errorf("standing target %q stateless flow carries an initial stage", plan.serviceID)
 		}
 		selectedPlans = append(selectedPlans, plan)
 		mutations = append(mutations, runtimepipeline.StandingTargetMutation{

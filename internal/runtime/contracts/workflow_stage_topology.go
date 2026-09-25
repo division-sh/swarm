@@ -16,6 +16,19 @@ type StageRef struct {
 	terminal bool
 }
 
+// StoredStageRef distinguishes an authored lifecycle stage from the pending
+// storage posture of a flow without authored stages.
+type StoredStageRef struct {
+	catalog   *workflowStageCatalog
+	id        string
+	terminal  bool
+	stateless bool
+}
+
+func (r StoredStageRef) ID() string               { return r.id }
+func (r StoredStageRef) IsTerminal() bool         { return r.catalog != nil && r.terminal }
+func (r StoredStageRef) IsStatelessPosture() bool { return r.catalog != nil && r.stateless }
+
 type workflowStageCatalog struct {
 	flowID   string
 	initial  string
@@ -37,7 +50,7 @@ func (t WorkflowStageTopology) ResolveStage(id string) (StageRef, error) {
 }
 
 func (t WorkflowStageTopology) RequireStage(ref StageRef) error {
-	if t.stageCatalog == nil || ref.catalog == nil || ref.catalog != t.stageCatalog {
+	if !t.ValidStageCatalog() || ref.catalog == nil || ref.catalog != t.stageCatalog {
 		return fmt.Errorf("stage reference does not belong to flow %q", t.FlowID)
 	}
 	terminal, ok := t.stageCatalog.terminal[ref.id]
@@ -45,6 +58,33 @@ func (t WorkflowStageTopology) RequireStage(ref StageRef) error {
 		return fmt.Errorf("stage reference disagrees with flow %q", t.FlowID)
 	}
 	return nil
+}
+
+func (t WorkflowStageTopology) ResolveStoredStage(id string) (StoredStageRef, error) {
+	if !t.ValidStageCatalog() {
+		return StoredStageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
+	}
+	if len(t.stageCatalog.terminal) == 0 {
+		if t.stageCatalog.initial != "" || id != "pending" {
+			return StoredStageRef{}, fmt.Errorf("storage state %q is not valid for stateless flow %q", id, t.FlowID)
+		}
+		return StoredStageRef{catalog: t.stageCatalog, id: id, stateless: true}, nil
+	}
+	stage, err := t.ResolveStage(id)
+	if err != nil {
+		return StoredStageRef{}, err
+	}
+	return StoredStageRef{catalog: stage.catalog, id: stage.id, terminal: stage.terminal}, nil
+}
+
+func (t WorkflowStageTopology) InitialStoredStage() (StoredStageRef, error) {
+	if !t.ValidStageCatalog() {
+		return StoredStageRef{}, fmt.Errorf("flow %q has no compiled stage catalog", t.FlowID)
+	}
+	if len(t.stageCatalog.terminal) == 0 {
+		return t.ResolveStoredStage("pending")
+	}
+	return t.ResolveStoredStage(t.stageCatalog.initial)
 }
 
 func (t WorkflowStageTopology) StageCount() int {

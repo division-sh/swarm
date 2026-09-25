@@ -379,7 +379,12 @@ contract_formats:
         source convey no authority. Public stage-name lists are projections,
         not alternative membership or terminal-state owners. No case folding,
         undeclared-stage acceptance, or alternate killed-stage spelling is
-        permitted.
+        permitted. A flow with no authored stages may persist the exact
+        storage posture pending; it is not an authored stage or transition
+        target. The same compiled owner distinguishes this posture from
+        authored membership for initial creation, receiver availability,
+        execution guards, completion and budget recovery. Other stored names
+        in a stateless flow remain malformed.
       lifecycle: >
         Loop cap escape admits the compiled escape carrier, not the suppressed
         ordinary repeat target. A stage timer retains its own timer/stage
@@ -3243,7 +3248,9 @@ state_machine_authority:
     stateless_flows: |
       Staged stateless flows declare stages: []. Legacy stateless flows may
       declare initial_state: null, states: [], and terminal_states: []. For
-      them, _entity.current_state is null.
+      them, _entity.current_state is null. The platform may persist pending
+      as their internal entity-state storage posture, but this does not mint
+      an authored pending stage or change the null author-facing projection.
     stages_are_flat_and_flow_scoped: |
       Stage IDs are scoped to the flow that declares them. Nested/statechart
       hierarchy is not part of this slice. Flow composition owns hierarchy
@@ -17045,7 +17052,8 @@ run_model:
       events remain (pending deliveries = 0). The runtime checks this after each event receipt. Runs with active
       timers remain running until the timers fire or are cancelled. Entity summaries preserve the exact stored
       stage spelling and classify it through the selected run bundle and exact compiled flow topology; undeclared
-      stages or mismatched flow/source evidence are malformed, not terminal or known nonterminal. Completion cannot
+      stages or mismatched flow/source evidence are malformed, except the exact nonterminal pending storage posture
+      of a flow with no authored stages. Completion cannot
       collapse case-distinct stage IDs.'
     failure: 'A run transitions to failed when an unrecoverable platform error occurs (not a handler/agent error —
       those produce dead letters within the run). Examples: database connection loss, contract corruption, boot

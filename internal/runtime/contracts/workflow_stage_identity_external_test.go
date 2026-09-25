@@ -33,4 +33,9 @@ func TestStageReferenceHasNoExternalAuthorityFields(t *testing.T) {
 	if err := other.RequireStage(ready); err == nil {
 		t.Fatal("another selected source accepted a foreign stage reference")
 	}
+	relabelled := graph
+	relabelled.FlowID = "child"
+	if err := relabelled.RequireStage(ready); err == nil {
+		t.Fatal("relabelled topology accepted a reference from its original flow")
+	}
 }
