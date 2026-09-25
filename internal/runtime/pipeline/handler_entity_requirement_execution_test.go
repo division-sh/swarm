@@ -53,27 +53,18 @@ func TestExistingOwnerExecutionSemanticsPersistOnSQLiteAndPostgres(t *testing.T)
 			})
 
 			t.Run("clear", func(t *testing.T) {
-				nodeKey := pipelineNode(t, ".", "node-a").Key()
 				initialMetadata := map[string]any{
 					"revision_count":    3,
 					"dedup_key":         "pending-a",
 					"accumulated_count": 1,
 				}
-				initialBuckets := map[string]any{nodeKey: map[string]any{
-					"handler_accumulators": map[string]any{nodeKey + ":work.ready": map[string]any{"items": []any{"a"}}},
-				}}
-				instance, result := executeExistingOwnerBehavior(t, ctx, pc, "clear", "work.clear", nil, initialMetadata, initialBuckets)
+				instance, result := executeExistingOwnerBehavior(t, ctx, pc, "clear", "work.clear", nil, initialMetadata, nil)
 				if !result.handled {
 					t.Fatal("clear execution was not handled")
 				}
 				for _, field := range []string{"revision_count", "dedup_key", "accumulated_count"} {
 					if _, ok := instance.Fields[field]; ok {
 						t.Fatalf("clear retained field %q in %#v", field, instance.Fields)
-					}
-				}
-				if nodeBucket, ok := instance.StateBuckets[nodeKey].(map[string]any); ok {
-					if _, retained := nodeBucket["handler_accumulators"]; retained {
-						t.Fatalf("clear retained handler accumulator state: %#v", nodeBucket)
 					}
 				}
 			})

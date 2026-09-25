@@ -1,0 +1,10 @@
+work.opened: {}
+work.annotated:
+  review_note: text
+work.assessed:
+  business_brief: text
+work.consume: {}
+work.completed:
+  business_brief: text
+  note_supplied: boolean
+  attempt_count: integer

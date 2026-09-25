@@ -9,16 +9,18 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	privatemutationprotocol "github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 var _ runtimetools.EntityPersistence = (*EntityPostgresOwner)(nil)
@@ -114,7 +116,7 @@ func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtim
 	if s == nil || s.backend == nil {
 		return runtimetools.EntityFieldWriteResult{}, fmt.Errorf("postgres entity persistence store is required")
 	}
-	runID, entityID, segments, valueJSON, err := normalizeToolEntityFieldUpdate(update)
+	runID, entityID, err := normalizeToolEntityIdentity(runtimetools.EntityIdentity{RunID: update.RunID, EntityID: update.EntityID})
 	if err != nil {
 		return runtimetools.EntityFieldWriteResult{}, err
 	}
@@ -127,39 +129,44 @@ func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtim
 	result := privatemutationprotocol.RunPostgres[int](ctx, s.backend, privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (int, error) {
 		var revision int
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := storerunstate.RequirePostgresActiveTx(txctx, tx, runID); err != nil {
+			sourceFact, err := storerunstate.RequirePostgresActiveSourceTx(txctx, tx, runID)
+			if err != nil {
 				return err
 			}
-			pathArray := pq.Array(segments)
-			var oldValue []byte
+			var fieldsRaw []byte
+			var flowInstance, entityType string
 			if err := tx.QueryRowContext(txctx, `
-		SELECT COALESCE(COALESCE(fields, '{}'::jsonb) #> $3::text[], 'null'::jsonb)
+		SELECT fields, flow_instance, entity_type
 		FROM entity_state
 		WHERE run_id = $1::uuid
 		  AND entity_id = $2::uuid
 		FOR UPDATE
-	`, runID, entityID, pathArray).Scan(&oldValue); err != nil {
+	`, runID, entityID).Scan(&fieldsRaw, &flowInstance, &entityType); err != nil {
 				if err == sql.ErrNoRows {
 					return fmt.Errorf("entity not found: %s", entityID)
 				}
 				return fmt.Errorf("load postgres entity field: %w", err)
 			}
+			before, after, fieldsJSON, err := applyToolEntityFieldUpdate(update, sourceFact, flowInstance, entityType, fieldsRaw)
+			if err != nil {
+				return err
+			}
 			if err := tx.QueryRowContext(txctx, `
 		UPDATE entity_state
 		SET
-			fields = jsonb_set(COALESCE(fields, '{}'::jsonb), $2::text[], $3::jsonb, true),
+			fields = $2::jsonb,
 			revision = revision + 1,
 			updated_at = now()
 		WHERE entity_id = $1::uuid
-		  AND run_id = $4::uuid
+		  AND run_id = $3::uuid
 		RETURNING revision
-	`, entityID, pathArray, string(valueJSON), runID).Scan(&revision); err != nil {
+	`, entityID, string(fieldsJSON), runID).Scan(&revision); err != nil {
 				return fmt.Errorf("update postgres entity field: %w", err)
 			}
 			if err := insertPostgresEntityStateDiff(txctx, mutation, tx, entityID, runtimemutationlog.EntityStateProjection{
-				Fields: map[string]any{update.FieldPath: toolNullableJSONBytes(oldValue)},
+				Fields: before,
 			}, runtimemutationlog.EntityStateProjection{
-				Fields: map[string]any{update.FieldPath: json.RawMessage(valueJSON)},
+				Fields: after,
 			}, MutationWriter(update.Writer)); err != nil {
 				return fmt.Errorf("record postgres entity mutation: %w", err)
 			}
@@ -174,7 +181,7 @@ func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimet
 	if s == nil || s.backend == nil {
 		return runtimetools.EntityFieldWriteResult{}, fmt.Errorf("sqlite entity persistence store is required")
 	}
-	runID, entityID, segments, valueJSON, err := normalizeToolEntityFieldUpdate(update)
+	runID, entityID, err := normalizeToolEntityIdentity(runtimetools.EntityIdentity{RunID: update.RunID, EntityID: update.EntityID})
 	if err != nil {
 		return runtimetools.EntityFieldWriteResult{}, err
 	}
@@ -187,33 +194,25 @@ func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimet
 	result := privatemutationprotocol.RunSQLite[int](ctx, s.backend, "sqlite entity field update", privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (int, error) {
 		var revision int
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, runID); err != nil {
+			sourceFact, err := storerunstate.RequireSQLiteActiveSourceTx(txctx, tx, runID)
+			if err != nil {
 				return err
 			}
 			var fieldsRaw any
+			var flowInstance, entityType string
 			if err := tx.QueryRowContext(txctx, `
-			SELECT COALESCE(fields, '{}')
+			SELECT fields, flow_instance, entity_type
 			FROM entity_state
 			WHERE run_id = ? AND entity_id = ?
-		`, runID, entityID).Scan(&fieldsRaw); err != nil {
+		`, runID, entityID).Scan(&fieldsRaw, &flowInstance, &entityType); err != nil {
 				if err == sql.ErrNoRows {
 					return fmt.Errorf("entity not found: %s", entityID)
 				}
 				return fmt.Errorf("load sqlite entity fields: %w", err)
 			}
-			fields, err := DecodeJSONMap(fieldsRaw)
+			before, after, fieldsJSON, err := applyToolEntityFieldUpdate(update, sourceFact, flowInstance, entityType, fieldsRaw)
 			if err != nil {
-				return fmt.Errorf("decode sqlite entity fields: %w", err)
-			}
-			oldValue, _ := toolPathValue(fields, segments)
-			newValue, err := toolDecodeJSONValue(valueJSON)
-			if err != nil {
-				return fmt.Errorf("decode sqlite entity field value: %w", err)
-			}
-			toolSetPath(fields, segments, newValue)
-			fieldsJSON, err := json.Marshal(fields)
-			if err != nil {
-				return fmt.Errorf("marshal sqlite entity fields: %w", err)
+				return err
 			}
 			now := s.now()
 			if _, err := tx.ExecContext(txctx, `
@@ -231,9 +230,9 @@ func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimet
 				return fmt.Errorf("load sqlite entity revision: %w", err)
 			}
 			if err := insertSQLiteEntityStateDiffAttempt(txctx, mutation, tx, runID, entityID, runtimemutationlog.EntityStateProjection{
-				Fields: map[string]any{update.FieldPath: oldValue},
+				Fields: before,
 			}, runtimemutationlog.EntityStateProjection{
-				Fields: map[string]any{update.FieldPath: newValue},
+				Fields: after,
 			}, MutationWriter(update.Writer), now); err != nil {
 				return fmt.Errorf("record sqlite entity mutation: %w", err)
 			}
@@ -269,7 +268,12 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 	result := privatemutationprotocol.RunPostgres[string](ctx, s.backend, privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (string, error) {
 		var storedEntityID string
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := storerunstate.RequirePostgresActiveTx(txctx, tx, rec.RunID); err != nil {
+			sourceFact, err := storerunstate.RequirePostgresActiveSourceTx(txctx, tx, rec.RunID)
+			if err != nil {
+				return err
+			}
+			fields, err = initializeToolEntityRecord(&rec, sourceFact, fields)
+			if err != nil {
 				return err
 			}
 			var storedRunID string
@@ -320,7 +324,12 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 	}
 	result := privatemutationprotocol.RunSQLite[string](ctx, s.backend, "sqlite entity create", privatemutationprotocol.Story, privatemutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *privatemutationprotocol.Attempt) (string, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, rec.RunID); err != nil {
+			sourceFact, err := storerunstate.RequireSQLiteActiveSourceTx(txctx, tx, rec.RunID)
+			if err != nil {
+				return err
+			}
+			fields, err = initializeToolEntityRecord(&rec, sourceFact, fields)
+			if err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `
@@ -629,28 +638,62 @@ func normalizeToolEntityIdentity(identity runtimetools.EntityIdentity) (string, 
 	return runID, entityID, nil
 }
 
-func normalizeToolEntityFieldUpdate(update runtimetools.EntityFieldUpdate) (string, string, []string, json.RawMessage, error) {
-	runID, entityID, err := normalizeToolEntityIdentity(runtimetools.EntityIdentity{RunID: update.RunID, EntityID: update.EntityID})
+func toolEntityMutationContract(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, flowInstance, entityType string) (entityruntime.Contract, error) {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.SourceArtifact == nil {
+		return entityruntime.Contract{}, fmt.Errorf("entity mutation requires its admitted source artifact")
+	}
+	if err := sourceFact.Validate(); err != nil {
+		return entityruntime.Contract{}, err
+	}
+	if bundle.SourceArtifact.BundleHash() != sourceFact.BundleHash() {
+		return entityruntime.Contract{}, fmt.Errorf("entity mutation source does not match active run source")
+	}
+	contract, ok := entityruntime.ResolveForFlowInstance(source, flowInstance)
+	if !ok || contract.EntityType != entityType {
+		return entityruntime.Contract{}, fmt.Errorf("entity mutation contract does not own %s (%s)", flowInstance, entityType)
+	}
+	return contract, nil
+}
+
+func applyToolEntityFieldUpdate(update runtimetools.EntityFieldUpdate, sourceFact runtimecorrelation.SourceArtifactFact, flowInstance, entityType string, fieldsRaw any) (map[string]any, map[string]any, []byte, error) {
+	contract, err := toolEntityMutationContract(update.Source, sourceFact, flowInstance, entityType)
 	if err != nil {
-		return "", "", nil, nil, err
+		return nil, nil, nil, err
 	}
-	segments := append([]string(nil), update.PathSegments...)
-	if len(segments) == 0 {
-		segments = strings.Split(strings.TrimSpace(update.FieldPath), ".")
+	before, err := DecodeJSONMap(fieldsRaw)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("decode current entity fields: %w", err)
 	}
-	clean := segments[:0]
-	for _, segment := range segments {
-		segment = strings.TrimSpace(segment)
-		if segment == "" {
-			return "", "", nil, nil, fmt.Errorf("field path segment is required")
-		}
-		clean = append(clean, segment)
+	after, err := entityruntime.ApplyMutations(contract, before, []entityruntime.Mutation{{Target: "entity." + update.FieldPath, Value: update.Value}})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("apply entity field mutation: %w", err)
 	}
-	valueJSON := json.RawMessage(strings.TrimSpace(string(update.ValueJSON)))
-	if len(valueJSON) == 0 {
-		valueJSON = json.RawMessage("null")
+	encoded, err := canonicaljson.MarshalPreservingNumberKinds(after)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	return runID, entityID, clean, valueJSON, nil
+	beforeField, afterField := map[string]any{}, map[string]any{}
+	if value, present := entityruntime.PathValue(before, update.FieldPath); present {
+		beforeField[update.FieldPath] = value
+	}
+	if value, present := entityruntime.PathValue(after, update.FieldPath); present {
+		afterField[update.FieldPath] = value
+	}
+	return beforeField, afterField, encoded, nil
+}
+
+func initializeToolEntityRecord(rec *runtimetools.EntityCreateRecord, sourceFact runtimecorrelation.SourceArtifactFact, supplied map[string]any) (map[string]any, error) {
+	contract, err := toolEntityMutationContract(rec.Source, sourceFact, rec.FlowInstance, rec.EntityType)
+	if err != nil {
+		return nil, err
+	}
+	fields, err := entityruntime.Initialize(contract, supplied)
+	if err != nil {
+		return nil, err
+	}
+	rec.FieldsJSON, err = canonicaljson.MarshalPreservingNumberKinds(fields)
+	return fields, err
 }
 
 func normalizeToolEntityCreateRecord(rec runtimetools.EntityCreateRecord) (runtimetools.EntityCreateRecord, map[string]any, error) {
@@ -704,22 +747,11 @@ func DecodeJSONMap(raw any) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes(data, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
 		return map[string]any{}, nil
-	}
-	return out, nil
-}
-
-func toolDecodeJSONValue(raw json.RawMessage) (any, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
@@ -731,45 +763,6 @@ func toolTimeString(raw any) (string, error) {
 		return at.Format(time.RFC3339Nano), nil
 	}
 	return "", nil
-}
-
-func toolNullableJSONBytes(raw []byte) any {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" || trimmed == "null" {
-		return nil
-	}
-	return json.RawMessage(append([]byte(nil), raw...))
-}
-
-func toolPathValue(fields map[string]any, segments []string) (any, bool) {
-	var current any = fields
-	for _, segment := range segments {
-		next, ok := current.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		current, ok = next[segment]
-		if !ok {
-			return nil, false
-		}
-	}
-	return current, true
-}
-
-func toolSetPath(fields map[string]any, segments []string, value any) {
-	if len(segments) == 0 {
-		return
-	}
-	current := fields
-	for _, segment := range segments[:len(segments)-1] {
-		next, _ := current[segment].(map[string]any)
-		if next == nil {
-			next = map[string]any{}
-			current[segment] = next
-		}
-		current = next
-	}
-	current[segments[len(segments)-1]] = value
 }
 
 func insertPostgresEntityStateDiff(ctx context.Context, mutation *privatemutationprotocol.Attempt, tx *sql.Tx, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {

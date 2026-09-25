@@ -1,0 +1,17 @@
+name: entity-progressive-presence
+stages:
+  draft:
+    initial: true
+  assess: {}
+  consume: {}
+  done:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - event: work.opened
+        source: external
+      - event: work.assessed
+        source: external
+      - event: work.annotated
+        source: external

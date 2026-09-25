@@ -27,14 +27,14 @@ func TestJSONContainedMutationRequiresActualObjectAndRetainsStateOnError(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = applyContainedOperationToMetadata(metadata, target, "merge", "key", false, 0, patch)
+		result, err := entityruntime.ApplyMutations(contract, metadata, []entityruntime.Mutation{{Operation: "merge", Target: "entity.values", Key: "key", HasKey: true, Value: patch}})
 		_, object := existing.(map[string]any)
 		if !object {
 			if err == nil || !reflect.DeepEqual(metadata, before) {
 				t.Fatalf("invalid destination mutated: %#v %v", metadata, err)
 			}
-		} else if err != nil || !reflect.DeepEqual(metadata["values"].(map[string]any)["key"], map[string]any{"old": float64(8), "new": []any{nil, int64(8)}}) {
-			t.Fatalf("object merge: %#v %v", metadata, err)
+		} else if err != nil || !reflect.DeepEqual(result["values"].(map[string]any)["key"], map[string]any{"old": float64(8), "new": []any{nil, int64(8)}}) {
+			t.Fatalf("object merge: %#v %v", result, err)
 		}
 	}
 	for _, op := range []string{"set", "append", "update"} {
@@ -52,14 +52,15 @@ func TestJSONContainedMutationRequiresActualObjectAndRetainsStateOnError(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := applyContainedOperationToMetadata(metadata, target, op, "key", hasIndex, 0, normalized); err != nil {
+			result, err := entityruntime.ApplyMutations(contract, metadata, []entityruntime.Mutation{{Operation: op, Target: path, Key: "key", HasKey: hasKey, Index: 0, HasIndex: hasIndex, Value: normalized}})
+			if err != nil {
 				t.Fatal(err)
 			}
-			got := metadata["values"].(map[string]any)["key"]
+			got := result["values"].(map[string]any)["key"]
 			if op == "append" {
-				got = metadata["items"].([]any)[1]
+				got = result["items"].([]any)[1]
 			} else if op == "update" {
-				got = metadata["items"].([]any)[0]
+				got = result["items"].([]any)[0]
 			}
 			if !reflect.DeepEqual(got, value) {
 				t.Fatalf("%s changed value: %#v != %#v", op, got, value)

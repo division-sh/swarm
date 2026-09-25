@@ -5004,10 +5004,19 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	clearWave1ExpressionStaticCreateEntity(t, bundle, flowID, nodeID)
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
 	handler.CreateEntity = false
-	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		ID:        "ready",
-		Condition: `entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""`,
-	}}
+	var rule runtimecontracts.HandlerRuleEntry
+	if err := yaml.Unmarshal([]byte(`id: ready
+condition: 'entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""'
+`), &rule); err != nil {
+		t.Fatal(err)
+	}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{rule}
+	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
+	var err error
+	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(owner, eventType, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 	markFlowInputPinSource(t, bundle, "child", "task.assigned", "harness")
 	markFlowInputPinSource(t, bundle, "child", "task.feedback", "harness")
@@ -5178,7 +5187,7 @@ func TestRun_AllowsSparsePresenceChecksWithoutInitializer(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
-	handler.Guard = &runtimecontracts.GuardSpec{Check: "has(entity.kill_reason) || entity.kill_reason == null"}
+	handler.Guard = &runtimecontracts.GuardSpec{Check: "!has(entity.kill_reason)"}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -5329,25 +5338,25 @@ func TestRun_AllowsCreateEntityEmitFieldReadWhenRuleAlsoWritesUnconditionallyAva
 	}
 }
 
-func TestRun_AllowsDeclaredFieldReadWhenSameHandlerAlsoWritesIt(t *testing.T) {
+func TestRun_RejectsReadBeforeAssignmentDespiteLaterWrite(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
 		{
 			TargetField: "base_score",
-			Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+			Value:       runtimecontracts.CELExpression("entity.base_score + 1.0"),
 		},
 		{
 			TargetField: "adjusted_score",
-			Value:       runtimecontracts.CELExpression("entity.base_score + 1"),
+			Value:       runtimecontracts.CELExpression("entity.base_score + 1.0"),
 		},
 	}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
-		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score are not definitely assigned") {
+		t.Fatalf("missing read-before-assignment rejection, got %#v", report.Errors())
 	}
 }
 
@@ -5381,7 +5390,7 @@ func TestRun_RejectsUndeclaredFieldReadEvenWhenSiblingWriteAlsoExists(t *testing
 	}
 }
 
-func TestRun_AllowsTopLevelDataAccumulationExpressionToReadRuleProducedField(t *testing.T) {
+func TestRun_RejectsTopLevelDataReadProvedOnlyByConditionalRule(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
@@ -5401,8 +5410,8 @@ func TestRun_AllowsTopLevelDataAccumulationExpressionToReadRuleProducedField(t *
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
-		t.Fatalf("unexpected expression_field_reference_validation error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.base_score") {
+		t.Fatalf("expected unassigned branch-only read rejection, got %#v", report.Errors())
 	}
 }
 

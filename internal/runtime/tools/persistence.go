@@ -7,6 +7,7 @@ import (
 
 	corestate "github.com/division-sh/swarm/internal/runtime/core/state"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type MailboxItem = corestate.MailboxItem
@@ -73,15 +74,16 @@ type EntityMutationWriter struct {
 }
 
 type EntityFieldUpdate struct {
-	RunID        string
-	EntityID     string
-	FieldPath    string
-	PathSegments []string
-	ValueJSON    json.RawMessage
-	Writer       EntityMutationWriter
+	Source    semanticview.Source
+	RunID     string
+	EntityID  string
+	FieldPath string
+	Value     any
+	Writer    EntityMutationWriter
 }
 
 type EntityCreateRecord struct {
+	Source       semanticview.Source
 	RunID        string
 	EntityID     string
 	FlowInstance string

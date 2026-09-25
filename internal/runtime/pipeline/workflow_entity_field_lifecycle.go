@@ -3,7 +3,6 @@ package pipeline
 import (
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -51,139 +50,8 @@ func WorkflowBuiltinEntityField(field string) bool {
 	return false
 }
 
-func WorkflowEntityFieldsAvailableBeforeCondition(handler runtimecontracts.SystemNodeEventHandler, context WorkflowConditionContext) map[string]struct{} {
-	switch context {
-	case WorkflowConditionContextGuard, WorkflowConditionContextQueryFilter:
-		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleGuard)
-	case WorkflowConditionContextFilter:
-		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleFilter)
-	case WorkflowConditionContextCount:
-		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleCount)
-	case WorkflowConditionContextOnComplete:
-		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleOnComplete)
-	case WorkflowConditionContextRule:
-		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleRule)
-	default:
-		return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleGuard)
-	}
-}
-
-func WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
-	return workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleDataAccumulation)
-}
-
-func WorkflowEntityFieldsAvailableBeforeEmitFields(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
-	available := workflowBuiltinEntityFields()
-	addWriter := func(target string) {
-		if field, ok := workflowEntityFieldNameFromTarget(target); ok {
-			available[field] = struct{}{}
-		}
-	}
-	if handler.Query != nil {
-		addWriter(handler.Query.StoreAs)
-	}
-	if handler.Filter != nil {
-		addWriter(handler.Filter.StoreAs)
-	}
-	if handler.GroupBy != nil {
-		addWriter(handler.GroupBy.StoreAs)
-	}
-	if handler.Reduce != nil {
-		addWriter(handler.Reduce.StoreAs)
-	}
-	if handler.Count != nil {
-		addWriter(handler.Count.StoreAs)
-	}
-	if handler.Compute != nil {
-		addWriter(handler.Compute.StoreAs)
-	}
-	if handler.CreateEntity {
-		for _, write := range handler.DataAccumulation.Writes {
-			addWriter(write.Target())
-		}
-	}
-	return available
-}
-
-func WorkflowEntityReadsPersistedStateBeforeHandlerWrites(phase WorkflowEntityFieldLifecyclePhase) bool {
-	switch phase {
-	case WorkflowEntityFieldLifecycleGuard,
-		WorkflowEntityFieldLifecycleGuardEscalation,
-		WorkflowEntityFieldLifecycleFilter,
-		WorkflowEntityFieldLifecycleCount,
-		WorkflowEntityFieldLifecycleOnComplete,
-		WorkflowEntityFieldLifecycleRule:
-		return true
-	default:
-		return false
-	}
-}
-
 func WorkflowEntityFieldNameFromTarget(target string) (string, bool) {
 	return workflowEntityFieldNameFromTarget(target)
-}
-
-func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNodeEventHandler, phase WorkflowEntityFieldLifecyclePhase) map[string]struct{} {
-	available := workflowBuiltinEntityFields()
-	addWriter := func(target string) {
-		if field, ok := workflowEntityFieldNameFromTarget(target); ok {
-			available[field] = struct{}{}
-		}
-	}
-	addRuleWriters := func(rule runtimecontracts.HandlerRuleEntry) {
-		for _, write := range rule.DataAccumulation.Writes {
-			addWriter(write.Target())
-		}
-		if rule.Compute != nil {
-			addWriter(rule.Compute.StoreAs)
-		}
-	}
-	if handler.Query != nil {
-		addWriter(handler.Query.StoreAs)
-	}
-	if phaseAfter(phase, WorkflowEntityFieldLifecycleFilter) {
-		if handler.Filter != nil {
-			addWriter(handler.Filter.StoreAs)
-		}
-	}
-	if phaseAfter(phase, WorkflowEntityFieldLifecycleGroupBy) {
-		if handler.GroupBy != nil {
-			addWriter(handler.GroupBy.StoreAs)
-		}
-	}
-	if phaseAfter(phase, WorkflowEntityFieldLifecycleReduce) {
-		if handler.Reduce != nil {
-			addWriter(handler.Reduce.StoreAs)
-		}
-	}
-	if phaseAfter(phase, WorkflowEntityFieldLifecycleCount) {
-		if handler.Count != nil {
-			addWriter(handler.Count.StoreAs)
-		}
-	}
-	if phaseAfter(phase, WorkflowEntityFieldLifecycleCompute) {
-		if handler.Compute != nil {
-			addWriter(handler.Compute.StoreAs)
-		}
-	}
-	if phaseAfter(phase, WorkflowEntityFieldLifecycleRule) {
-		for _, rule := range handler.Rules {
-			addRuleWriters(rule)
-		}
-		for _, rule := range handler.OnComplete {
-			addRuleWriters(rule)
-		}
-	}
-	if handler.CreateEntity && phaseAfter(phase, WorkflowEntityFieldLifecycleDataAccumulation) {
-		for _, write := range handler.DataAccumulation.Writes {
-			addWriter(write.Target())
-		}
-	}
-	return available
-}
-
-func workflowBuiltinEntityFields() map[string]struct{} {
-	return map[string]struct{}{}
 }
 
 func workflowEntityFieldNameFromTarget(target string) (string, bool) {
@@ -197,41 +65,4 @@ func workflowEntityFieldNameFromTarget(target string) (string, bool) {
 		return "", false
 	}
 	return field, true
-}
-
-func phaseAfter(current, threshold WorkflowEntityFieldLifecyclePhase) bool {
-	return workflowEntityFieldLifecycleOrder(current) > workflowEntityFieldLifecycleOrder(threshold)
-}
-
-func workflowEntityFieldLifecycleOrder(phase WorkflowEntityFieldLifecyclePhase) int {
-	switch phase {
-	case WorkflowEntityFieldLifecycleGuard:
-		return 1
-	case WorkflowEntityFieldLifecycleGuardEscalation:
-		return 1
-	case WorkflowEntityFieldLifecycleAccumulate:
-		return 2
-	case WorkflowEntityFieldLifecycleFilter:
-		return 3
-	case WorkflowEntityFieldLifecycleGroupBy:
-		return 4
-	case WorkflowEntityFieldLifecycleReduce:
-		return 5
-	case WorkflowEntityFieldLifecycleCount:
-		return 6
-	case WorkflowEntityFieldLifecycleCompute:
-		return 7
-	case WorkflowEntityFieldLifecycleFanOut:
-		return 8
-	case WorkflowEntityFieldLifecycleOnComplete:
-		return 9
-	case WorkflowEntityFieldLifecycleRule:
-		return 10
-	case WorkflowEntityFieldLifecycleDataAccumulation:
-		return 11
-	case WorkflowEntityFieldLifecycleEmitFields:
-		return 12
-	default:
-		return 0
-	}
 }

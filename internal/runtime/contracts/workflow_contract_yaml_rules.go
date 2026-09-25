@@ -714,7 +714,7 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 
 func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 	switch w.Operation {
-	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationDelete, WorkflowDataOperationAppend, WorkflowDataOperationUpdate:
+	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationDelete, WorkflowDataOperationAppend, WorkflowDataOperationUpdate, WorkflowDataOperationClear:
 	default:
 		return fmt.Errorf("unsupported workflow data write op %q", strings.TrimSpace(string(w.Operation)))
 	}
@@ -728,6 +728,10 @@ func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 		return fmt.Errorf("workflow data write op %q target %q must use entity scope", w.Operation, w.TargetRef)
 	}
 	switch w.Operation {
+	case WorkflowDataOperationClear:
+		if !w.Value.IsZero() || !w.Key.IsZero() || !w.Index.IsZero() {
+			return fmt.Errorf("workflow data write op clear must not declare value, key or index")
+		}
 	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationAppend:
 		if w.Value.IsZero() {
 			return fmt.Errorf("workflow data write op %q requires value", w.Operation)

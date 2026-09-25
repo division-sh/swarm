@@ -92,6 +92,17 @@ func wave1ContainedStateOperations(source semanticview.Source) []wave1ContainedS
 				refs := wave1HandlerContainedStateOperations(node, eventType, scope, rule.DataAccumulation.Writes)
 				out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
 			}
+			if handler.Join != nil {
+				for _, outcome := range []struct {
+					scope string
+					rule  runtimecontracts.HandlerRuleEntry
+				}{
+					{"handler.join.on_complete", handler.Join.OnComplete}, {"handler.join.timeout", handler.Join.Timeout.Outcome},
+				} {
+					refs := wave1HandlerContainedStateOperations(node, eventType, outcome.scope, outcome.rule.DataAccumulation.Writes)
+					out = append(out, wave1ContainedStateOperationsWithSource(refs, record.Source.File)...)
+				}
+			}
 		}
 	}
 	return out

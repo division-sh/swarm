@@ -29,7 +29,9 @@ func TestRun_FailsClosedOnInvalidContainedStateOperationValue(t *testing.T) {
 		TargetRef: "entity.verticals",
 		Key:       runtimecontracts.LiteralExpression("north"),
 		Value: runtimecontracts.LiteralExpression(map[string]any{
-			"undeclared": "field",
+			"undeclared":  "field",
+			"status":      "active",
+			"active_jobs": []any{},
 		}),
 	}))
 
