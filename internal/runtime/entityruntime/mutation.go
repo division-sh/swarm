@@ -59,8 +59,8 @@ func ValidateClearTarget(contract Contract, target string) error {
 }
 
 // MutationPlan owns a private ordered candidate and structural conflict history.
-// Validate ends one executed operation list; the same plan can then continue to
-// retain conflicts across later actions and projections in the handler batch.
+// Validate ends one executed operation list; the plan retains conflicts across
+// later writes and projections in the same handler batch.
 type MutationPlan struct {
 	contract Contract
 	draft    map[string]any
@@ -136,25 +136,6 @@ func (p *MutationPlan) Append(op Mutation) error {
 	p.writes = append(p.writes, mutationWrite{path: path, clear: clear})
 	p.draft = next
 	return nil
-}
-
-// CheckAssignmentConflict admits a declared inline-action output before any
-// provider access. It does not assign a value or invent a mutation occurrence.
-func (p *MutationPlan) CheckAssignmentConflict(target string) error {
-	if p.err != nil {
-		return p.err
-	}
-	path, owned, err := EntityWritePath(target)
-	if err != nil {
-		return err
-	}
-	if !owned {
-		return fmt.Errorf("action output %s is not an entity field", target)
-	}
-	if _, err := ResolveFieldPath(p.contract, path); err != nil {
-		return err
-	}
-	return p.checkConflict(path, false)
 }
 
 func (p *MutationPlan) checkConflict(path string, clear bool) error {
