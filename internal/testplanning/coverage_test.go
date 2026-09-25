@@ -26,14 +26,17 @@ func TestGoProofPartitionCensus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			writeProofSource(t, dir, "proof_test.go", `package proof
-func TestMain(m any) {}
-func TestA(t any) {}
-func TestB(t any) {}
-func ExampleProof() {}
-func FuzzProof(f any) {}
+import "testing"
+func TestMain(m *testing.M) {}
+func TestA(t *testing.T) {}
+func TestB(t *testing.T) {}
+func Example() {
+ // Output:
+}
+func FuzzProof(f *testing.F) {}
 func helper() {}
 type receiver struct{}
-func (receiver) TestMethod() {}
+func (receiver) TestMethod(t *testing.T) {}
 `)
 			err := ValidateGoProofPartition(dir, tt.runs)
 			if tt.want == "" && err != nil || tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)) {
@@ -45,11 +48,11 @@ func (receiver) TestMethod() {}
 
 func TestGoProofPartitionNewDeclarationMustBeSelected(t *testing.T) {
 	dir := t.TempDir()
-	writeProofSource(t, dir, "proof_test.go", "package proof\nfunc TestA(t any) {}\n")
+	writeProofSource(t, dir, "proof_test.go", "package proof\nimport \"testing\"\nfunc TestA(t *testing.T) {}\n")
 	if err := ValidateGoProofPartition(dir, []string{"^TestA$"}); err != nil {
 		t.Fatal(err)
 	}
-	writeProofSource(t, dir, "new_test.go", "package proof\nfunc TestNew(t any) {}\n")
+	writeProofSource(t, dir, "new_test.go", "package proof\nimport \"testing\"\nfunc TestNew(t *testing.T) {}\n")
 	if err := ValidateGoProofPartition(dir, []string{"^TestA$"}); err == nil || !strings.Contains(err.Error(), "TestNew matches 0") {
 		t.Fatalf("new proof silently omitted: %v", err)
 	}

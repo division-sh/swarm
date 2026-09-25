@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/doc"
 	"go/parser"
 	"go/token"
 	"io"
@@ -38,6 +39,11 @@ type TestRoot struct {
 type RequiredTest struct {
 	TestRoot
 	Children []string `json:"children,omitempty"`
+}
+
+type DeferredTest struct {
+	TestRoot
+	Reason string `json:"reason"`
 }
 
 type PackageRoots struct {
@@ -113,18 +119,15 @@ func DiscoverRootInventory(ctx context.Context, dir string) (RootInventory, erro
 		files := append(append([]string{}, pkg.TestGoFiles...), pkg.XTestGoFiles...)
 		roots := map[string]bool{}
 		for _, name := range files {
-			file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(pkg.Dir, name), nil, 0)
+			file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(pkg.Dir, name), nil, parser.ParseComments)
 			if err != nil {
 				return RootInventory{}, fmt.Errorf("parse active test file %s: %w", name, err)
 			}
-			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if ok && executableTestRoot(fn) {
-					roots[fn.Name.Name] = true
-				}
+			for _, root := range executableTestRoots(file) {
+				roots[root] = true
 			}
 		}
-		entry := PackageRoots{Package: pkg.ImportPath, HasTestFiles: len(files) > 0}
+		entry := PackageRoots{Package: pkg.ImportPath, HasTestFiles: len(roots) > 0}
 		for name := range roots {
 			entry.Roots = append(entry.Roots, name)
 		}
@@ -145,12 +148,28 @@ func DiscoverRootInventory(ctx context.Context, dir string) (RootInventory, erro
 	return inventory, nil
 }
 
+func executableTestRoots(file *ast.File) []string {
+	var roots []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && executableTestRoot(fn) {
+			roots = append(roots, fn.Name.Name)
+		}
+	}
+	for _, example := range doc.Examples(file) {
+		if example.Output != "" || example.EmptyOutput {
+			roots = append(roots, "Example"+example.Name)
+		}
+	}
+	return roots
+}
+
 func executableTestRoot(fn *ast.FuncDecl) bool {
 	if fn.Recv != nil || fn.Name == nil || fn.Type == nil || fn.Type.TypeParams != nil {
 		return false
 	}
 	name := fn.Name.Name
-	if name == "TestMain" || fn.Type.Results != nil && len(fn.Type.Results.List) != 0 {
+	if fn.Type.Results != nil && len(fn.Type.Results.List) != 0 {
 		return false
 	}
 	for _, prefix := range []string{"Test", "Fuzz"} {
@@ -160,9 +179,6 @@ func executableTestRoot(fn *ast.FuncDecl) bool {
 				return false
 			}
 		}
-	}
-	if strings.HasPrefix(name, "Example") && fn.Type.Params != nil && len(fn.Type.Params.List) == 0 {
-		return true
 	}
 	kind := "T"
 	if strings.HasPrefix(name, "Fuzz") {
@@ -174,7 +190,7 @@ func executableTestRoot(fn *ast.FuncDecl) bool {
 		return false
 	}
 	field := fn.Type.Params.List[0]
-	if len(field.Names) != 1 {
+	if len(field.Names) > 1 {
 		return false
 	}
 	star, ok := field.Type.(*ast.StarExpr)
@@ -182,11 +198,11 @@ func executableTestRoot(fn *ast.FuncDecl) bool {
 		return false
 	}
 	sel, ok := star.X.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != kind {
-		return false
+	if ok {
+		return sel.Sel.Name == kind
 	}
-	ident, ok := sel.X.(*ast.Ident)
-	return ok && ident.Name == "testing"
+	ident, ok := star.X.(*ast.Ident)
+	return ok && ident.Name == kind
 }
 
 type ParityProof struct {
@@ -294,6 +310,9 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 		unit.SelectedRoots = nil
 		unit.TestBearingPackages = nil
 		unit.RequiredTests = nil
+		unit.DeferredTests = nil
+		declaredChildren := unit.RequiredChildren
+		var activeChildren map[string][]string
 		for _, pkg := range unit.Packages {
 			entry, ok := inventory.Packages[pkg]
 			if !ok {
@@ -310,11 +329,39 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 				if !match {
 					continue
 				}
-				unit.SelectedRoots = append(unit.SelectedRoots, TestRoot{Package: pkg, Name: name})
-				if obligation, ok := required[pkg+"\x00"+name]; ok {
-					obligation.Children = append(obligation.Children, unit.RequiredChildren[name]...)
+				root := TestRoot{Package: pkg, Name: name}
+				unit.SelectedRoots = append(unit.SelectedRoots, root)
+				obligation, explicitlyRequired := required[pkg+"\x00"+name]
+				if !explicitlyRequired {
+					obligation.TestRoot = root
+				}
+				reason, profileReplacement := deferredRootReason(*unit, root, inventory.BuildContext)
+				if strings.HasPrefix(unit.ID, "parity-") {
+					proof, ok := parityByName[name]
+					if !ok || proof.Profile != ProfileFull {
+						return fmt.Errorf("supplement %s selects root %s absent from full parity catalog", unit.ID, name)
+					}
+					obligation.Children = append(obligation.Children, proof.Children...)
+					explicitlyRequired = true
+				}
+				if backend, soak := SoakBackend(unit.Run); soak {
+					obligation.Children = append(obligation.Children, backend)
+				}
+				if reason != "" {
+					if explicitlyRequired || len(obligation.Children) != 0 || len(declaredChildren[name]) != 0 && !profileReplacement {
+						return fmt.Errorf("unit %s defers explicitly required proof %s.%s", unit.ID, pkg, name)
+					}
+					unit.DeferredTests = append(unit.DeferredTests, DeferredTest{TestRoot: root, Reason: reason})
+				} else {
+					obligation.Children = append(obligation.Children, declaredChildren[name]...)
 					sort.Strings(obligation.Children)
 					obligation.Children = compactStrings(obligation.Children)
+					if len(declaredChildren[name]) != 0 {
+						if activeChildren == nil {
+							activeChildren = map[string][]string{}
+						}
+						activeChildren[name] = append([]string(nil), declaredChildren[name]...)
+					}
 					unit.RequiredTests = append(unit.RequiredTests, obligation)
 				}
 			}
@@ -322,22 +369,7 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 		if len(unit.SelectedRoots) == 0 && len(unit.TestBearingPackages) > 0 {
 			return fmt.Errorf("unit %s selects no active test roots", unit.ID)
 		}
-		if strings.HasPrefix(unit.ID, "parity-") {
-			for _, root := range unit.SelectedRoots {
-				proof, ok := parityByName[root.Name]
-				if !ok || proof.Profile != ProfileFull {
-					return fmt.Errorf("supplement %s selects root %s absent from full parity catalog", unit.ID, root.Name)
-				}
-				addRequired(root.Package, root.Name, proof.Children...)
-				unit.RequiredTests = append(unit.RequiredTests, required[root.Package+"\x00"+root.Name])
-			}
-		}
-		if backend, soak := SoakBackend(unit.Run); soak {
-			unit.RequiredTests = append(unit.RequiredTests, RequiredTest{
-				TestRoot: TestRoot{Package: SoakPackage, Name: SoakTest}, Children: []string{backend},
-			})
-		}
-		for name := range unit.RequiredChildren {
+		for name := range declaredChildren {
 			found := false
 			for _, root := range unit.SelectedRoots {
 				if root.Name == name {
@@ -349,6 +381,7 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof)
 				return fmt.Errorf("unit %s declares children for unselected root %s", unit.ID, name)
 			}
 		}
+		unit.RequiredChildren = activeChildren
 	}
 	for key, obligation := range required {
 		found := false

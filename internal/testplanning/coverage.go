@@ -2,7 +2,6 @@ package testplanning
 
 import (
 	"fmt"
-	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -51,19 +50,11 @@ func validateGoProofMatchersExcept(dir string, matchers []func(string) bool, exc
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
 			continue
 		}
-		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, entry.Name()), nil, 0)
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, entry.Name()), nil, parser.ParseComments)
 		if err != nil {
 			return err
 		}
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok || function.Recv != nil || function.Name == nil {
-				continue
-			}
-			name := function.Name.Name
-			if name == "TestMain" || (!strings.HasPrefix(name, "Test") && !strings.HasPrefix(name, "Example") && !strings.HasPrefix(name, "Fuzz")) {
-				continue
-			}
+		for _, name := range executableTestRoots(file) {
 			if excluded[name] {
 				continue
 			}
