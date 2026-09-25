@@ -2636,7 +2636,7 @@ entity_contracts:
     - 'A trailing ? marks an optional field edge, not a nullable value. Bare entity roots may remain progressively
       unassigned until a proven write; supplied named records still require every bare member.'
     - 'Explicit initial values apply once at creation and never during reads, reload, retry, replay or fork hydration.
-      Confirmed first materialization by an admitted entity-writing handler or action follows the same creation plan
+      Confirmed first materialization by an admitted entity-writing handler follows the same creation plan
       as explicit create_entity. Creation inputs overlay explicit initial values before complete candidate validation.
       A successfully loaded empty snapshot is existing state, never a creation miss. Null initial values reject.'
   sparse_refinements: |
@@ -7989,7 +7989,7 @@ engine:
     specification: https://github.com/google/cel-spec
     go_implementation: https://github.com/google/cel-go
     context_variables:
-      entity: Current entity state (all declared entity fields at type-valid values + envelope + gates)
+      entity: Current sparse entity fields plus typed envelope and gates. A declared bare field needs definite assignment before value access; optional absence uses has or optional selection. No read-time default is synthesized.
       payload: Current event payload fields
       event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
@@ -9122,7 +9122,7 @@ tool_model:
           name: string (nullable)
           current_state: string
           gates: object — map of gate names to boolean values
-          fields: object — all declared entity fields at type-valid values
+          fields: object — complete stored sparse field map; unassigned declared fields are omitted, not null or defaulted
           accumulator: object — accumulator state
           revision: integer — entity revision number
           entered_state_at: string — ISO 8601, when current_state was entered
