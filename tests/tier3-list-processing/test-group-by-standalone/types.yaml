@@ -2,6 +2,3 @@ types:
   GroupItem:
     name: text
     category: text
-  GroupBucket:
-    category: text
-    count: integer
