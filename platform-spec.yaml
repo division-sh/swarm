@@ -2419,6 +2419,10 @@ rule:
       index, including distinct rule outcomes with the same destination.
       Stage facts intersect every reaching outcome and converge to a fixed
       point. The initial entry contributes independently of loop backedges.
+      Non-transitioning handlers participate in the same-stage fixed point,
+      including clears. Their readers use the compiled nonterminal stage
+      universe when no transition scope is declared; an event's apparent
+      producer order is not assignment evidence.
       Supported stage narrowing uses literal _entity.current_state comparisons and
       boolean composition in the checked expression; event spelling gives
       no stage information. Unknown business predicates remain uncertain.
