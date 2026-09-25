@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -43,22 +42,23 @@ func TestCreateEntityAcknowledgedErrorReturnsCanonicalIDWithoutRetryOnBothStores
 		t.Run(backend, func(t *testing.T) {
 			bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", "accounts:\n  status: text\n")
 			var base runtimetools.EntityPersistence
+			var sourceCtx context.Context
 			query := `SELECT COUNT(*) FROM entity_state WHERE run_id = ? AND entity_id = ?`
 			mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ?`
 			if backend == "sqlite" {
 				selected := newSQLiteRuntimeToolStoreForTest(t)
-				ensureSQLiteEntityToolTestRun(t, selected)
+				sourceCtx = seedEntityToolSourceRun(t, selected, bundle)
 				base = selected
 			} else {
 				selected := newPostgresHumanTaskToolStoreForTest(t)
-				ensureEntityToolTestRun(t, storetest.DatabaseForTest(selected))
+				sourceCtx = seedEntityToolSourceRun(t, selected, bundle)
 				base = selected
 				query = `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 				mutationQuery = `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 			}
 			fault := errors.Join(errors.New("independent post-commit cleanup failed"), errors.New("SQL connection password=private-token"))
 			store := &postCommitFaultCreateStore{EntityPersistence: base, fault: fault}
-			ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID), actor)
+			ctx := runtimetools.WithActor(sourceCtx, actor)
 			bus := &entityToolRuntimeLogBus{}
 			exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 				EntityStore: store, WorkflowSource: semanticview.Wrap(bundle), AllowInternalLegacyEntityTools: true,

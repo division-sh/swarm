@@ -264,7 +264,9 @@ type ExecutionRequest struct {
 	State           StateSnapshot
 	// InitialFieldValues is the exact authored create-entity projection that the
 	// persistence owner records separately from subsequent handler mutations.
-	InitialFieldValues map[string]any
+	InitialFieldValues            map[string]any
+	EntityMaterializationAdmitted bool
+	creating                      bool
 	// ExpectedComputeModuleTraces carries prior deterministic module evidence
 	// for supported replay. Nil means normal execution; a non-nil empty slice
 	// means replay mode with zero expected module executions. When present,

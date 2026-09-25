@@ -12,6 +12,8 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
+const EntityPresenceModel = "sparse-v1"
+
 func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, swarmVersion, platformVersion string, createdAt time.Time) error {
 	if tx == nil {
 		return fmt.Errorf("postgres bootstrap transaction is required")
@@ -33,7 +35,7 @@ func BootstrapFreshPostgres(ctx context.Context, tx *sql.Tx, plans []TableDDL, s
 			return fmt.Errorf("install postgres forward-reference constraint: %w", err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at) VALUES (1, $1, $2, $3)`, swarmVersion, platformVersion, createdAt.UTC()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runtime_store_metadata (id, swarm_version, platform_version, created_at, entity_presence_model) VALUES (1, $1, $2, $3, $4)`, swarmVersion, platformVersion, createdAt.UTC(), EntityPresenceModel); err != nil {
 		return fmt.Errorf("stamp fresh postgres store origin: %w", err)
 	}
 	return nil

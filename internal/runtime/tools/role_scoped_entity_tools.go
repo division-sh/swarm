@@ -121,21 +121,19 @@ func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleS
 
 func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[string]any {
 	fieldProps := make(map[string]any, len(contract.Entity.Fields))
-	requiredFields := make([]string, 0, len(contract.Entity.Fields))
 	for _, field := range entityruntime.FieldNames(contract) {
 		decl, err := entityruntime.FieldDecl(contract, field)
 		if err != nil {
 			continue
 		}
 		fieldProps[field] = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, true, map[string]struct{}{})
-		requiredFields = append(requiredFields, field)
 	}
 	return ObjectSchema(map[string]any{
 		"entity_id":     map[string]any{"type": "string"},
 		"flow_instance": map[string]any{"type": "string"},
 		"entity_type":   map[string]any{"type": "string"},
 		"current_state": map[string]any{"type": "string"},
-		"fields":        ObjectSchema(fieldProps, requiredFields...),
+		"fields":        ObjectSchema(fieldProps),
 	}, "entity_id", "flow_instance", "entity_type", "current_state", "fields")
 }
 
@@ -181,9 +179,6 @@ func roleScopedEntityToolSpecsForActor(source semanticview.Source, actor models.
 		if fieldName == "" {
 			continue
 		}
-		if entityruntime.FieldPathParticipatesInEquality(contract, field) {
-			continue
-		}
 		out["save_"+entityName+"_"+fieldName] = roleScopedEntityToolSpec{
 			Kind:       roleScopedEntityToolSaveField,
 			EntityType: contract.EntityType,
@@ -192,9 +187,6 @@ func roleScopedEntityToolSpecsForActor(source semanticview.Source, actor models.
 		for _, subpath := range roleScopedTopLevelSubpaths(contract, field) {
 			subpathName := roleScopedToolNamePart(subpath)
 			if subpathName == "" {
-				continue
-			}
-			if entityruntime.FieldPathParticipatesInEquality(contract, field+"."+subpath) {
 				continue
 			}
 			out["update_"+entityName+"_"+fieldName+"_"+subpathName] = roleScopedEntityToolSpec{
@@ -433,7 +425,13 @@ func (e *Executor) execRoleScopedEntityTool(ctx context.Context, actor models.Ag
 			return nil, failures.Wrap(failures.ClassInternalFailure, "entity_materialization_failed", "tool-executor", "role_scoped_entity_tool.materialize", map[string]any{"entity_id": entityID}, err)
 		}
 		fields, _ := materialized["fields"].(map[string]any)
-		return fields[spec.Field], nil
+		value, present := fields[spec.Field]
+		if !present {
+			return nil, failures.NewDetail("not_found", "tool-executor", "role_scoped_entity_tool.field", map[string]any{
+				"entity_id": entityID, "field": spec.Field, "reason": "unassigned",
+			})
+		}
+		return value, nil
 	case roleScopedEntityToolSaveField:
 		value, ok := payload["value"]
 		if !ok {

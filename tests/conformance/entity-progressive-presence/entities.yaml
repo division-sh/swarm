@@ -1,0 +1,6 @@
+work:
+  business_brief: text
+  review_note: text?
+  attempt_count:
+    type: integer
+    initial: 0

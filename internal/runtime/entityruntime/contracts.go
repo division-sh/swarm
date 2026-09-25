@@ -31,6 +31,7 @@ type Field struct {
 	LeafKind    string
 	FieldDecl   runtimecontracts.EntityFieldDecl
 	Refinements runtimecontracts.SchemaRefinements
+	IsOptional  bool
 }
 
 type WriteTarget struct {
@@ -312,30 +313,57 @@ func FieldDecl(contract Contract, name string) (runtimecontracts.EntityFieldDecl
 	return field, nil
 }
 
-func Materialize(contract Contract, provided map[string]any) (map[string]any, error) {
-	out := make(map[string]any, len(contract.Entity.Fields))
-	for name, decl := range contract.Entity.Fields {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
+// Initialize applies explicit initial values only at entity creation.
+func InitialValues(contract Contract) (map[string]any, error) {
+	values := map[string]any{}
+	for _, name := range FieldNames(contract) {
+		if initial := contract.Entity.Fields[name].Initial; initial != nil {
+			normalized, err := NormalizeFieldValue(contract, name, initial)
+			if err != nil {
+				return nil, err
+			}
+			values[name] = normalized
 		}
+	}
+	return values, nil
+}
+
+func Initialize(contract Contract, provided map[string]any) (map[string]any, error) {
+	values, err := InitialValues(contract)
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range provided {
+		values[name] = value
+	}
+	return NormalizeState(contract, values)
+}
+
+// NormalizeState validates a complete snapshot without manufacturing missing
+// fields or reapplying creation-time initializers.
+func NormalizeState(contract Contract, provided map[string]any) (map[string]any, error) {
+	out, err := normalizeAssignedFields(contract, provided)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateEntityFieldEqualities("entity", contract.Entity.Fields, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeAssignedFields(contract Contract, provided map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(contract.Entity.Fields))
+	for _, name := range FieldNames(contract) {
+		name = strings.TrimSpace(name)
 		value, ok := provided[name]
 		if !ok {
-			var err error
-			value, err = defaultValue(contract, decl.Type, decl.Initial)
-			if err != nil {
-				return nil, fmt.Errorf("materialize %s: %w", name, err)
-			}
-			value, err = validateValueRefinements(contract, name, decl.Type, decl.Refinements, value)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			var err error
-			value, err = normalizeFieldValue(contract, name, value, true)
-			if err != nil {
-				return nil, err
-			}
+			continue
+		}
+		var err error
+		value, err = NormalizeFieldValue(contract, name, value)
+		if err != nil {
+			return nil, err
 		}
 		out[name] = value
 	}
@@ -348,13 +376,10 @@ func Materialize(contract Contract, provided map[string]any) (map[string]any, er
 			return nil, fmt.Errorf("undeclared field %s", name)
 		}
 	}
-	if err := validateEntityFieldEqualities("entity", contract.Entity.Fields, out); err != nil {
-		return nil, err
-	}
 	return out, nil
 }
 
-func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metadata map[string]any) (map[string]any, error) {
+func NormalizeMetadataForFlow(source semanticview.Source, flowID string, metadata map[string]any) (map[string]any, error) {
 	contract, ok := ResolveForFlow(source, flowID)
 	if !ok {
 		return cloneMap(metadata), nil
@@ -365,7 +390,7 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 			input[name] = cloneValue(value)
 		}
 	}
-	materialized, err := Materialize(contract, input)
+	materialized, err := NormalizeState(contract, input)
 	if err != nil {
 		return nil, err
 	}
@@ -380,24 +405,9 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 }
 
 func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, error) {
-	return normalizeFieldValue(contract, fieldName, value, false)
-}
-
-// FieldPathParticipatesInEquality reports whether an isolated write to path
-// would bypass an equal_to proof owned by the surrounding entity/object.
-func FieldPathParticipatesInEquality(contract Contract, path string) bool {
-	return fieldPathParticipatesInEquality(contract, path)
-}
-
-func normalizeFieldValue(contract Contract, fieldName string, value any, allowEqualityParticipant bool) (any, error) {
 	field, err := ResolveFieldPath(contract, fieldName)
 	if err != nil {
 		return nil, err
-	}
-	if !allowEqualityParticipant {
-		if fieldPathParticipatesInEquality(contract, strings.TrimSpace(field.Path)) {
-			return nil, fieldTypeError(strings.TrimSpace(field.Path), "cannot be written in isolation because it participates in equal_to")
-		}
 	}
 	normalized, err := normalizeValueForType(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), value)
 	if err != nil {
@@ -474,6 +484,7 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 	}
 	currentType := strings.TrimSpace(decl.Type)
 	currentRefinements := decl.Refinements
+	optional := decl.IsOptional
 	for _, segment := range segments[1:] {
 		segment = strings.TrimSpace(segment)
 		if segment == "" {
@@ -489,9 +500,10 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 		}
 		currentType = strings.TrimSpace(field.TypeRef)
 		currentRefinements = field.Refinements
+		optional = field.IsOptional
 	}
 	kind := pathKind(contract, currentType)
-	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl, Refinements: currentRefinements}, nil
+	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl, Refinements: currentRefinements, IsOptional: optional}, nil
 }
 
 func ResolveLeafField(contract Contract, path string) (Field, error) {
@@ -524,78 +536,14 @@ func PathValue(value map[string]any, path string) (any, bool) {
 	return current, true
 }
 
-func defaultValue(contract Contract, typeRef string, explicit any) (any, error) {
-	if explicit != nil {
-		return normalizeValueForType(contract, "", typeRef, explicit)
-	}
-	typeRef = strings.TrimSpace(typeRef)
-	switch {
-	case isMapType(typeRef):
-		return map[string]any{}, nil
-	case isListType(typeRef):
-		return []any{}, nil
-	case isTextType(typeRef):
-		return "", nil
-	case isIntegerType(contract, typeRef):
-		return int64(0), nil
-	case isNumericType(contract, typeRef):
-		return float64(0), nil
-	case isBooleanType(contract, typeRef):
-		return false, nil
-	case isTimestampType(contract, typeRef), isUUIDType(contract, typeRef):
-		return nil, nil
-	case isJSONValueType(contract, typeRef), isJSONObjectType(contract, typeRef):
-		return map[string]any{}, nil
-	case isJSONArrayType(contract, typeRef):
-		return []any{}, nil
-	case isEnumType(contract, typeRef):
-		enumName := typeName(contract, typeRef)
-		enum := contract.Types.Enums[enumName]
-		if err := enum.Validate(enumName); err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(enum.Default), nil
-	case isNamedType(contract, typeRef):
-		resolved, err := resolveStructuralType(contract, typeRef)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[string]any, len(resolved.Fields))
-		for _, field := range resolved.Fields {
-			if field.IsOptional {
-				continue
-			}
-			value, err := defaultValue(contract, field.TypeRef, nil)
-			if err != nil {
-				return nil, err
-			}
-			value, err = validateValueRefinements(contract, field.Name, field.TypeRef, field.Refinements, value)
-			if err != nil {
-				return nil, err
-			}
-			out[field.Name] = value
-		}
-		if err := validateStructuralFieldEqualities(typeName(contract, typeRef), resolved.Fields, out); err != nil {
-			return nil, err
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("unsupported contract type %s", typeRef)
-	}
-}
-
 func normalizeValueForType(contract Contract, fieldName, typeRef string, value any) (any, error) {
 	typeRef = strings.TrimSpace(typeRef)
 	if value == nil {
-		switch {
-		case isTimestampType(contract, typeRef), isUUIDType(contract, typeRef):
-			return nil, nil
-		default:
-			if fieldName == "" {
-				return nil, fmt.Errorf("value for type %s cannot be null", typeRef)
-			}
-			return nil, fmt.Errorf("field %s cannot be null", fieldName)
-		}
+		return nil, fieldTypeError(fieldName, "cannot be null")
+	}
+	raw := reflect.ValueOf(value)
+	if (raw.Kind() == reflect.Map || raw.Kind() == reflect.Slice || raw.Kind() == reflect.Pointer) && raw.IsNil() {
+		return nil, fieldTypeError(fieldName, "cannot be null")
 	}
 	switch {
 	case isMapType(typeRef):
@@ -729,15 +677,7 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 			if field.IsOptional {
 				continue
 			}
-			defaulted, err := defaultValue(contract, field.TypeRef, nil)
-			if err != nil {
-				return nil, err
-			}
-			defaulted, err = validateValueRefinements(contract, joinFieldName(fieldName, field.Name), field.TypeRef, field.Refinements, defaulted)
-			if err != nil {
-				return nil, err
-			}
-			out[field.Name] = defaulted
+			return nil, fieldTypeError(joinFieldName(fieldName, field.Name), "is required in the supplied record")
 		}
 		for key := range object {
 			key = strings.TrimSpace(key)
@@ -838,6 +778,11 @@ func validateEntityFieldEqualities(context string, fields map[string]runtimecont
 		if name == "" || target == "" {
 			continue
 		}
+		_, leftPresent := values[name]
+		_, rightPresent := values[target]
+		if !leftPresent && !rightPresent {
+			continue
+		}
 		if err := validateEqualityValue(context, name, target, values); err != nil {
 			return err
 		}
@@ -881,81 +826,6 @@ func validateEqualityValue(context, name, target string, values map[string]any) 
 		return fieldTypeError(joinFieldName(context, name), "must equal "+joinFieldName(context, target))
 	}
 	return nil
-}
-
-func fieldPathParticipatesInEquality(contract Contract, path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return false
-	}
-	segments := strings.Split(path, ".")
-	if len(segments) == 0 {
-		return false
-	}
-	root := strings.TrimSpace(segments[0])
-	decl, ok := contract.Entity.Fields[root]
-	if !ok {
-		return false
-	}
-	if entityFieldParticipatesInEquality(contract.Entity.Fields, root) {
-		return true
-	}
-	if len(segments) == 1 {
-		return false
-	}
-	currentType := strings.TrimSpace(decl.Type)
-	for _, segment := range segments[1:] {
-		resolved, err := resolveStructuralType(contract, currentType)
-		if err != nil || resolved.Kind != runtimecontracts.CatalogTypeObject {
-			return false
-		}
-		segment = strings.TrimSpace(segment)
-		if structuralFieldParticipatesInEquality(resolved.Fields, segment) {
-			return true
-		}
-		field, ok := resolved.Field(segment)
-		if !ok {
-			return false
-		}
-		currentType = strings.TrimSpace(field.TypeRef)
-	}
-	return false
-}
-
-func entityFieldParticipatesInEquality(fields map[string]runtimecontracts.EntityFieldDecl, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	for fieldName, field := range fields {
-		fieldName = strings.TrimSpace(fieldName)
-		target := strings.TrimSpace(field.Refinements.EqualTo)
-		if fieldName == name && target != "" {
-			return true
-		}
-		if target == name {
-			return true
-		}
-	}
-	return false
-}
-
-func structuralFieldParticipatesInEquality(fields []runtimecontracts.ResolvedCatalogField, name string) bool {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return false
-	}
-	for _, field := range fields {
-		fieldName := strings.TrimSpace(field.Name)
-		target := strings.TrimSpace(field.Refinements.EqualTo)
-		if fieldName == name && target != "" {
-			return true
-		}
-		if target == name {
-			return true
-		}
-	}
-	return false
 }
 
 func resolvedStructuralField(fields []runtimecontracts.ResolvedCatalogField, name string) (runtimecontracts.ResolvedCatalogField, bool) {

@@ -76,9 +76,19 @@ func inspectPostgresCompatibility(ctx context.Context, q schemaQueryer, expected
 	}
 	var origin *RuntimeStoreOrigin
 	drift := retiredPlatformTableDrift(tables)
+	actual, err := loadPostgresSchemaShape(ctx, q, expected)
+	if err != nil {
+		return target, schemaCompatibilityReport{}, err
+	}
+	drift = append(drift, compareSchemaShapes(expected, actual)...)
 	if _, ok := tables[RuntimeStoreMetadataTable]; !ok {
 		drift = append(drift, "non-empty public schema has no runtime_store_metadata origin stamp")
-	} else {
+	} else if len(compareSchemaShapes(
+		schemaShape{Tables: map[string]schemaTableShape{RuntimeStoreMetadataTable: expected.Tables[RuntimeStoreMetadataTable]}},
+		schemaShape{Tables: map[string]schemaTableShape{RuntimeStoreMetadataTable: actual.Tables[RuntimeStoreMetadataTable]}},
+	)) == 0 {
+		// Check the schema before selecting new columns: a predecessor store
+		// must yield typed drift, not abort PostgreSQL's admission transaction.
 		origin, err = readRuntimeStoreOrigin(ctx, q)
 		if err != nil {
 			drift = append(drift, "runtime_store_metadata origin row is malformed: "+err.Error())
@@ -86,11 +96,6 @@ func inspectPostgresCompatibility(ctx context.Context, q schemaQueryer, expected
 			drift = append(drift, "runtime_store_metadata does not contain the required id=1 origin row")
 		}
 	}
-	actual, err := loadPostgresSchemaShape(ctx, q, expected)
-	if err != nil {
-		return target, schemaCompatibilityReport{}, err
-	}
-	drift = append(drift, compareSchemaShapes(expected, actual)...)
 	state := schemaStateCompatible
 	if len(drift) > 0 {
 		state = schemaStateIncompatible

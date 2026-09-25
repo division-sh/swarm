@@ -1,2 +1,2 @@
 core:
-  retry_count: integer
+  retry_count: {type: integer, initial: 0}

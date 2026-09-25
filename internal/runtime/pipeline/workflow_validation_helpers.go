@@ -32,19 +32,12 @@ func workflowEntitySchemaFields(source semanticview.Source, flowID string) map[s
 	return out
 }
 
-func workflowEntitySchemaInitialValues(source semanticview.Source, flowID string) map[string]any {
+func workflowEntitySchemaInitialValues(source semanticview.Source, flowID string) (map[string]any, error) {
 	contract, ok := workflowEntityContract(source, flowID)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("entity creation requires declared contract for flow %q", flowID)
 	}
-	values, err := entityruntime.Materialize(contract, nil)
-	if err != nil {
-		return nil
-	}
-	if len(values) == 0 {
-		return nil
-	}
-	return values
+	return entityruntime.InitialValues(contract)
 }
 
 func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[string]struct{} {
@@ -140,33 +133,15 @@ func workflowEntitySchemaFieldDefinitions(raw any) map[string]runtimecontracts.E
 	return out
 }
 
-func workflowMaterializeEntityFields(source semanticview.Source, flowID string, fields map[string]any) map[string]any {
+func workflowNormalizeEntityFields(source semanticview.Source, flowID string, fields map[string]any) (map[string]any, error) {
 	contract, ok := workflowEntityContract(source, flowID)
 	if !ok {
-		return cloneStringAnyMap(fields)
-	}
-	entityFields := map[string]any{}
-	for name := range contract.Entity.Fields {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
+		if len(fields) == 0 {
+			return map[string]any{}, nil
 		}
-		if value, exists := fields[name]; exists {
-			entityFields[name] = cloneWorkflowSchemaValue(value)
-		}
+		return nil, fmt.Errorf("flow %s has entity fields without a declared contract", flowID)
 	}
-	materialized, err := entityruntime.Materialize(contract, entityFields)
-	if err != nil {
-		return cloneStringAnyMap(fields)
-	}
-	out := cloneStringAnyMap(fields)
-	if out == nil {
-		out = map[string]any{}
-	}
-	for key, value := range materialized {
-		out[key] = value
-	}
-	return out
+	return entityruntime.NormalizeState(contract, fields)
 }
 
 func requireWorkflowEntityType(source semanticview.Source, flowID string) (string, error) {
