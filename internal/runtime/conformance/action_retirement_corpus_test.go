@@ -309,6 +309,24 @@ func actionRetirementCurrentCorpus(t *testing.T, root string) map[string][]byte 
 	return actionRetirementCorpusFiles(t, root, false)
 }
 
+func TestActionRetirementCorpusExcludesGeneratedTestResults(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, "test-results", "plan")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(generated, "proof-plan.json"), []byte(`{"name":"ActionRunner"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "source.md"), []byte("ActionRunner"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	current := actionRetirementCurrentCorpus(t, root)
+	if len(current) != 1 || current["source.md"] == nil {
+		t.Fatalf("generated test results must not enter the source corpus: %v", current)
+	}
+}
+
 func actionRetirementCorpusFiles(t *testing.T, root string, allAuthored bool) map[string][]byte {
 	t.Helper()
 	out := map[string][]byte{}
@@ -317,7 +335,7 @@ func actionRetirementCorpusFiles(t *testing.T, root string, allAuthored bool) ma
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" || entry.Name() == "node_modules" {
+			if entry.Name() == ".git" || entry.Name() == "vendor" || entry.Name() == "node_modules" || entry.Name() == "test-results" {
 				return filepath.SkipDir
 			}
 			return nil
