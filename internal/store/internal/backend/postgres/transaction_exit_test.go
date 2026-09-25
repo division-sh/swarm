@@ -83,6 +83,17 @@ type exitProbeTx struct {
 	probe *exitProbeConnector
 }
 
+// Signal the deadline only after the transaction reaches the tested callback.
+// A wall timer started before admission can expire during CI setup instead.
+type callbackDeadlineContext struct{ context.Context }
+
+func (c callbackDeadlineContext) Err() error { return context.Cause(c.Context) }
+
+func newCallbackDeadlineContext() (context.Context, func()) {
+	ctx, expire := context.WithCancelCause(context.Background())
+	return callbackDeadlineContext{ctx}, func() { expire(context.DeadlineExceeded) }
+}
+
 func (t *exitProbeTx) Commit() error {
 	if t.probe.beforeCommit != nil {
 		t.probe.beforeCommit()
@@ -151,6 +162,22 @@ func TestPostgresTransactionSoleErrorIdentity(t *testing.T) {
 	}
 }
 
+func TestPostgresTransactionExpiredBeforeAdmissionSkipsCallback(t *testing.T) {
+	b, _ := newExitProbe(t)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	for _, run := range []func(context.Context, func(context.Context, *sql.Tx) error) error{b.RunTransaction, b.RunReadTransaction} {
+		called := false
+		err := run(ctx, func(context.Context, *sql.Tx) error {
+			called = true
+			return nil
+		})
+		if err != context.DeadlineExceeded || called {
+			t.Fatalf("pre-admission deadline: err=%v callback=%t, want deadline without callback", err, called)
+		}
+	}
+}
+
 func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 	for _, read := range []bool{false, true} {
 		for _, deadline := range []bool{false, true} {
@@ -163,12 +190,11 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 						release := func() { once.Do(func() { close(p.rollbackRelease) }) }
 						defer release()
 						ctx, cancel := context.WithCancel(context.Background())
-						defer cancel()
 						if deadline {
-							var stop context.CancelFunc
-							ctx, stop = context.WithTimeout(ctx, 50*time.Millisecond)
-							defer stop()
+							cancel()
+							ctx, cancel = newCallbackDeadlineContext()
 						}
+						defer cancel()
 						primary := errors.New("independent callback failure")
 						callbackReturned := make(chan struct{})
 						done := make(chan error, 1)
@@ -182,9 +208,7 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 								if err := tx.QueryRowContext(txctx, "SELECT 1").Scan(&n); err != nil {
 									return err
 								}
-								if !deadline {
-									cancel()
-								}
+								cancel()
 								<-ctx.Done()
 								if read {
 									<-p.rollbackEntered
@@ -400,12 +424,11 @@ func TestRetainedPostgresTransactionExitMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
 			if scenario == "deadline" {
-				var stop context.CancelFunc
-				ctx, stop = context.WithTimeout(ctx, 100*time.Millisecond)
-				defer stop()
+				cancel()
+				ctx, cancel = newCallbackDeadlineContext()
 			}
+			defer cancel()
 			primary := errors.New("independent retained callback")
 			cleanup := errors.New("independent retained cleanup")
 			commit := errors.New("independent retained commit")
@@ -434,6 +457,7 @@ func TestRetainedPostgresTransactionExitMatrix(t *testing.T) {
 							return err
 						}
 					case "deadline":
+						cancel()
 						<-ctx.Done()
 					}
 					if scenario == "panic" {
