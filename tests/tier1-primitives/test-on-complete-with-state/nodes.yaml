@@ -5,7 +5,7 @@ test-node:
   event_handlers:
     item.evaluated:
       on_complete:
-        - condition: "entity.priority == 'high'"
+        - condition: "has(entity.priority) && entity.priority == 'high'"
           emit:
             event: item.expedited
           advances_to: done

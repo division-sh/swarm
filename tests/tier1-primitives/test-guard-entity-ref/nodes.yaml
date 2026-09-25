@@ -6,7 +6,7 @@ test-node:
     check.requested:
       guard:
         id: state_check
-        check: "entity.level >= 3"
+        check: "has(entity.level) && entity.level >= 3"
       advances_to: done
       emit:
         event: check.passed

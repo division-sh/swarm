@@ -6,7 +6,7 @@ test-node:
     check.requested:
       guard:
         id: compound
-        check: "payload.score >= policy.min_score && (entity.priority == 'high' || payload.override == true)"
+        check: "payload.score >= policy.min_score && ((has(entity.priority) && entity.priority == 'high') || payload.override == true)"
       advances_to: done
       emit:
         event: check.passed
