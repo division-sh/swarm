@@ -48,6 +48,6 @@ func (c WorkflowStageClassifier) Terminal(flowTemplate, flowInstance, state stri
 			return false, false
 		}
 	}
-	ref, err := graph.ResolveStage(state)
+	ref, err := graph.ResolveStoredStage(state)
 	return err == nil && ref.IsTerminal(), err == nil
 }

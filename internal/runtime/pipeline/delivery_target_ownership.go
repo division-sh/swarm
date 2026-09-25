@@ -53,16 +53,12 @@ func (a DeliveryTargetAvailability) Validate(source semanticview.Source, flowID 
 		if !ok || graph.FlowID != flowID {
 			return fmt.Errorf("receiver flow %q has no selected compiled stage topology", flowID)
 		}
-		if graph.StageCount() == 0 && a.stage == "pending" {
-			// Stateless persistence has no authored lifecycle stages.
-		} else {
-			stage, err := graph.ResolveStage(a.stage)
-			if err != nil {
-				return fmt.Errorf("receiver stage admission: %w", err)
-			}
-			if stage.IsTerminal() {
-				return &TerminalReceiverError{FlowID: flowID, Stage: stage.ID()}
-			}
+		stage, err := graph.ResolveStoredStage(a.stage)
+		if err != nil {
+			return fmt.Errorf("receiver stage admission: %w", err)
+		}
+		if stage.IsTerminal() {
+			return &TerminalReceiverError{FlowID: flowID, Stage: stage.ID()}
 		}
 	}
 	if a.inactive {

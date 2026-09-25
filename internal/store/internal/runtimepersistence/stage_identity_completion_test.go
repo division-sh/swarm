@@ -138,6 +138,33 @@ func TestSelectedCompletionStageReadersBothStores(t *testing.T) {
 				}
 				t.Fatal("child nonterminal entity omitted by root terminal-name projection")
 			})
+			t.Run("stateless_pending_is_known_nonterminal_storage_posture", func(t *testing.T) {
+				id := seedCompletionBlockerRun(t, f, ctx)
+				set(id, "pending")
+				root := contracts.BuildWorkflowStageTopology(".", "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)
+				child := contracts.BuildWorkflowStageTopology(semanticRunFixtureFlow, "", nil, nil, nil, nil, nil)
+				owner, err := contracts.NewWorkflowStageClassifier(root, map[string]contracts.WorkflowStageTopology{semanticRunFixtureFlow: child})
+				if err != nil {
+					t.Fatal(err)
+				}
+				catalog, err := run.NewCompiledTerminalCatalog(owner)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dialect := entitystore.SummaryDialectSQLite
+				if f.postgres {
+					dialect = entitystore.SummaryDialectPostgres
+				}
+				summary, err := entitystore.ReadRunSummary(ctx, f.db, dialect, id, catalog)
+				if err != nil || summary.Nonterminal != 1 || summary.Malformed != 0 {
+					t.Fatalf("stateless storage posture summary=%#v err=%v", summary, err)
+				}
+				request := requestRunLifecycleCandidateParity(t, f, ctx, id)
+				out, err := f.store.ExecuteCompletionCandidate(ctx, request.Candidate, catalog)
+				if err != nil || out.Outcome != run.OutcomeAwaitMutation {
+					t.Fatalf("stateless pending completion outcome=%#v err=%v", out, err)
+				}
+			})
 		})
 	}
 }

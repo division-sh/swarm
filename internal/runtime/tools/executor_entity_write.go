@@ -265,7 +265,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	if !found || graph.FlowID != stageFlowID || !graph.ValidStageCatalog() {
 		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state", "flow": stageFlowID})
 	}
-	initial, err := graph.InitialStageRef()
+	initial, err := graph.InitialStoredStage()
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.initial_state", map[string]any{"field": "initial_state"}, err)
 	}

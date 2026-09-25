@@ -17,11 +17,7 @@ func (e *Executor) validateSourceStage(flowID, stage string) error {
 	if stage == "" {
 		return nil
 	}
-	// Stateless persistence uses pending without declaring a lifecycle stage.
-	if graph.StageCount() == 0 && stage == "pending" {
-		return nil
-	}
-	if _, err := graph.ResolveStage(stage); err != nil {
+	if _, err := graph.ResolveStoredStage(stage); err != nil {
 		return fmt.Errorf("%w: source stage %q is not declared in flow %s", ErrInvalidTransition, stage, flowID)
 	}
 	return nil

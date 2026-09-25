@@ -223,12 +223,17 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if err != nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s receiver configuration: %w", templateID, err)
 	}
-	initialState := strings.TrimSpace(schema.LoweredInitialState())
-	if initialState == "" {
-		initialState = strings.TrimSpace(req.InitialState)
+	graph, found := semanticview.WorkflowStageTopology(req.ContractBundle, templateID)
+	if !found || graph.FlowID != templateID {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %q activation requires the selected compiled stage topology", templateID)
 	}
-	if initialState == "" {
-		initialState = "pending"
+	initial, err := graph.InitialStoredStage()
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %q activation initial state: %w", templateID, err)
+	}
+	initialState := initial.ID()
+	if requested := strings.TrimSpace(req.InitialState); requested != "" && requested != initialState {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %q activation request initial state %q disagrees with selected compiled state %q", templateID, requested, initialState)
 	}
 	triggerEventID := strings.TrimSpace(req.TriggerEvent.ID())
 	contextRunID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))

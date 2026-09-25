@@ -1202,7 +1202,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 		if currentState == "" && builtin != "state_in_phase" {
 			return true, true, nil
 		}
-		stage, err := graph.ResolveStage(currentState)
+		stage, err := graph.ResolveStoredStage(currentState)
 		if err != nil {
 			return false, true, fmt.Errorf("%w: stage %q is not declared in flow %s", runtimeengine.ErrInvalidConfig, currentState, graph.FlowID)
 		}
@@ -1471,7 +1471,7 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 	if !ok || graph.FlowID != flowID {
 		return false
 	}
-	ref, err := graph.ResolveStage(state)
+	ref, err := graph.ResolveStoredStage(state)
 	return err == nil && ref.IsTerminal()
 }
 
@@ -1572,13 +1572,7 @@ func workflowInitialStateForFlow(source semanticview.Source, flowID string) (str
 	if !found || graph.FlowID != flowID || !graph.ValidStageCatalog() {
 		return "", fmt.Errorf("initial stage requires exact compiled flow %q", flowID)
 	}
-	if graph.StageCount() == 0 {
-		if graph.HasInitialStage() {
-			return "", fmt.Errorf("stateless flow %q carries an initial stage", flowID)
-		}
-		return "pending", nil
-	}
-	ref, err := graph.InitialStageRef()
+	ref, err := graph.InitialStoredStage()
 	if err != nil {
 		return "", err
 	}

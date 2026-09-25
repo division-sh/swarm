@@ -74,3 +74,29 @@ func TestCompiledStageClassifierRequiresExactFlowAndDeclaredStage(t *testing.T) 
 		t.Fatal("contradictory known flow instance was accepted")
 	}
 }
+
+func TestCompiledStageClassifierPreservesStatelessStoragePosture(t *testing.T) {
+	root := BuildWorkflowStageTopology(".", "", nil, nil, nil, nil, nil)
+	staged := BuildWorkflowStageTopology("staged", "ready", []string{"ready", "Ready"}, []string{"Ready"}, nil, nil, nil)
+	classifier, err := NewWorkflowStageClassifier(root, map[string]WorkflowStageTopology{"staged": staged})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal, known := classifier.Terminal("", "", "pending"); terminal || !known {
+		t.Fatalf("stateless pending: terminal=%t known=%t", terminal, known)
+	}
+	for _, state := range []string{"Pending", "unknown", ""} {
+		if _, known := classifier.Terminal("", "", state); known {
+			t.Fatalf("stateless unknown state %q was accepted", state)
+		}
+	}
+	if _, known := classifier.Terminal("staged", "", "pending"); known {
+		t.Fatal("staged flow borrowed stateless pending posture")
+	}
+	if initial, err := root.InitialStoredStage(); err != nil || initial.ID() != "pending" || !initial.IsStatelessPosture() || initial.IsTerminal() {
+		t.Fatalf("stateless initial storage state = %#v, %v", initial, err)
+	}
+	if _, err := root.ResolveStage("pending"); err == nil {
+		t.Fatal("stateless storage posture became an authored stage")
+	}
+}
