@@ -30,7 +30,9 @@ func (o *Owner) LoadPinnedSource(ctx context.Context, runID, bundleHash string, 
 
 // BindPinnedSourceTx validates the exact source in the owning handler
 // transaction, before any fan-out intent or handler effect can commit.
-func (o *Owner) BindPinnedSourceTx(ctx context.Context, tx *sql.Tx, runID, bundleHash string, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID, cardinality int) error {
+// The raw transaction stays in this private adapter rather than becoming an
+// effective method of the selected-store owner.
+func BindPinnedSourceTx(ctx context.Context, o *Owner, tx *sql.Tx, runID, bundleHash string, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID, cardinality int) error {
 	if o == nil || tx == nil {
 		return fmt.Errorf("durable data source transaction owner is required")
 	}

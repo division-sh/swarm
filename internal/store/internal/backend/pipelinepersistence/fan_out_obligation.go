@@ -174,7 +174,7 @@ func bindFanOutSourceTx(
 		if resourceData == nil {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out resource source owner is required")
 		}
-		if err := resourceData.BindPinnedSourceTx(ctx, tx, request.Key.RunID, request.PlanRef.BundleHash, source.Declaration, source.VersionID, request.Cardinality); err != nil {
+		if err := storedurabledata.BindPinnedSourceTx(ctx, resourceData, tx, request.Key.RunID, request.PlanRef.BundleHash, source.Declaration, source.VersionID, request.Cardinality); err != nil {
 			return fanoutobligation.SourceRef{}, err
 		}
 	default:

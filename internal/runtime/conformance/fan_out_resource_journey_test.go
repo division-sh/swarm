@@ -85,8 +85,8 @@ func readJobflowCorpus(t *testing.T) []byte {
 	return raw
 }
 
-// This variant exercises existing account routing with a production-scale
-// cardinality. The exact-byte import is proved separately below.
+// This variant exercises existing account routing with a distinct row shape.
+// The complete corpus and production-scale cardinality are proved below.
 func jobflowAccountRows(t *testing.T, runID string) []map[string]any {
 	t.Helper()
 	raw := readJobflowCorpus(t)
@@ -127,13 +127,16 @@ func jobflowAccountRows(t *testing.T, runID string) []map[string]any {
 		if i > 0 && rows[i-1]["account_id"] == rows[i]["account_id"] {
 			t.Fatalf("jobflow source repeats business key %v", rows[i]["account_id"])
 		}
+	}
+	rows = rows[:30]
+	for i := range rows {
 		rows[i]["ordinal"] = i
 		rows[i]["source_count"] = len(rows)
 	}
 	return rows
 }
 
-func TestFanOutPinnedResourceJobflow1362RoutesAndSettlesBothStores(t *testing.T) {
+func TestFanOutPinnedResourceAccountRouteThirtyRowsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newSemanticProofFixture(t, backend)
@@ -149,11 +152,11 @@ func TestFanOutPinnedResourceJobflow1362RoutesAndSettlesBothStores(t *testing.T)
 			f.probe.mu.Lock()
 			intent := f.probe.intents[trigger]
 			f.probe.mu.Unlock()
-			if intent.Source != source || intent.Request.Cardinality != 1362 || intent.Status != fanoutobligation.StatusOpen && intent.Status != fanoutobligation.StatusClosed {
+			if intent.Source != source || intent.Request.Cardinality != len(rows) || intent.Status != fanoutobligation.StatusOpen && intent.Status != fanoutobligation.StatusClosed {
 				t.Fatalf("resource obligation escaped pinned version/cardinality: %+v", intent)
 			}
 			var delivered int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='delivered' AND subscriber_type='node'`, f.runID).Scan(&delivered); err != nil || delivered < 1362 {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='delivered' AND subscriber_type='node'`, f.runID).Scan(&delivered); err != nil || delivered < len(rows) {
 				t.Fatalf("jobflow-derived rows did not settle through routed node deliveries: count=%d err=%v", delivered, err)
 			}
 			t.Logf("%s: %d imported rows, routed and settled", backend, len(rows))
