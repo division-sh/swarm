@@ -70,6 +70,7 @@ profiles:
       - contracts-rest
       - api-llm-bus-full
       - conformance-1
+      - conformance-heavy-fanout
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
@@ -129,6 +130,7 @@ profiles:
       - contracts-rest
       - api-llm-bus-full
       - conformance-1
+      - conformance-heavy-fanout
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
@@ -188,6 +190,7 @@ profiles:
       - contracts-rest
       - api-llm-bus-full
       - conformance-1
+      - conformance-heavy-fanout
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
@@ -247,6 +250,7 @@ profiles:
       - contracts-rest
       - api-llm-bus-full
       - conformance-1
+      - conformance-heavy-fanout
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
@@ -346,7 +350,9 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
-  # CI34349231066: TestF*/TestH* total 69s; the complement totals 56s.
+  # Keep the production-size fan-out journeys intact under a full-proof budget.
+  # CI36197772222: these two roots took 149s and 106s; the remaining shard
+  # took about 147s, but their combined 402s exceeded the broad 240s budget.
   conformance-1:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
@@ -354,10 +360,17 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
+  conformance-heavy-fanout:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestVolumeFanOut(ExactJobflow1362ImportRouteAndSettleBothStores|ServingCardinalityMixedOutputPartitionEquivalenceBothStores)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
   conformance-2:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^(Test($|[^FHI].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^2].*|2($|[^3].*|3($|[^9].*|9($|[^4].*)))))))))|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^FHIV].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^2].*|2($|[^3].*|3($|[^9].*|9($|[^4].*)))))))))|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

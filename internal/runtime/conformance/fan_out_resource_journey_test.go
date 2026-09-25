@@ -164,7 +164,7 @@ func TestFanOutPinnedResourceAccountRouteThirtyRowsBothStores(t *testing.T) {
 	}
 }
 
-func TestFanOutExactJobflow1362ImportRouteAndSettleBothStores(t *testing.T) {
+func TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			input := readJobflowCorpus(t)

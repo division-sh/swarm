@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestFanOutServingCardinalityMixedOutputPartitionEquivalenceBothStores(t *testing.T) {
+func TestVolumeFanOutServingCardinalityMixedOutputPartitionEquivalenceBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			// The existing reporter test owns N500. These are the missing boundary
