@@ -746,14 +746,14 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     # TestC moves here after full01 exceeded its unchanged command budget.
-    run: '^Test(C.*|[G-H].*|[M-O].*)$'
+    run: '^Test(C.*|[G-H].*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
   store-runtime-full-03-i-l:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: ^Test[I-L].*$
+    run: ^Test[I-O].*$
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
