@@ -1,6 +1,8 @@
 # Mandatory Fan-Out Soak
 
-Authority: [lead ruling 5743323725](https://github.com/division-sh/swarm/issues/2394#issuecomment-5743323725).
+Authority: the [conditional scheduling ruling](https://github.com/division-sh/swarm/issues/2394#issuecomment-5824204797)
+governs placement; the [original soak ruling](https://github.com/division-sh/swarm/issues/2394#issuecomment-5743323725)
+governs workload and evidence.
 
 Nightly and fan-out-affected PR plans include two required units:
 `conformance-soak-sqlite` and `conformance-soak-postgres`. They execute
@@ -38,8 +40,8 @@ job cannot qualify. Passing the unchanged test includes its final drain/readback
 
 The required summary rejects skipped soak jobs whenever the plan contains
 either cell. An empty soak matrix is permitted only when the canonical plan
-omits both cells. Timing aggregation
-and timing-model publication await the mandatory lane. Failed PostgreSQL soak
+omits both cells. When soak cells are planned, timing aggregation and
+timing-model publication await the mandatory lane. Failed PostgreSQL soak
 execution remains a failure; this scheduling change does not repair or waive it.
 
 ## Additive Proof Table
@@ -50,8 +52,8 @@ execution remains a failure; this scheduling change does not repair or waive it.
 | Actual workflow matrix split and shell syntax | `TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax`; executes only matrix projection, never the soak |
 | Required aggregation, exact-head checkout, budgets | `TestMandatorySoakWorkflowRequiredExactHeadAndBudgets` plus existing job-evidence guards |
 | Missing/duplicate/short/skipped/wrong-head/backend receipts fail | `TestMandatorySoakEvidenceRequiresBothFullBackendReceipts`; synthetic evidence, not workload qualification |
-| SQLite full window and final drain on final head | Pending actual CI receipt |
-| PostgreSQL full window and final drain on final head | Pending actual CI receipt; prior failures remain preserved |
+| SQLite full window and final drain on final head | Required actual CI receipt for each qualifying run |
+| PostgreSQL full window and final drain on final head | Required actual CI receipt for each qualifying run; prior failures remain preserved |
 
 No test duration, workload, production owner, lease, or final assertion changes
 are part of this integration. Local focused guard success is not a soak pass.
