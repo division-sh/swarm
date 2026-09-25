@@ -295,10 +295,10 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	serveUnits := []string{
-		"serveapp-channel", "serveapp-runtime", "serveapp-release", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-text",
-		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z", "serveapp-journeys-p",
-		"serveapp-mailbox", "serveapp-mailbox-p-q", "serveapp-mailbox-r-z", "serveapp-mailbox-response", "serveapp-misc-light",
-		"serveapp-selected", "serveapp-selected-geometry", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-i-rest", "serveapp-other-late", "serveapp-standing",
+		"serveapp-channel", "serveapp-runtime", "serveapp-receivers", "serveapp-surfaces", "serveapp-publication-text",
+		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
+		"serveapp-mailbox", "serveapp-mailbox-p-q", "serveapp-mailbox-r-z",
+		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-other-late", "serveapp-standing",
 	}
 	catalogUnits := []string{
 		"catalog-replay-1", "catalog-replay-2", "catalog-replay-3", "catalog-runtime",

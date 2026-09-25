@@ -39,7 +39,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var groups [4][]string
+	var groups [3][]string
 	for _, path := range paths {
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 		if err != nil {
@@ -53,7 +53,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 			name := fn.Name.Name
 			if strings.HasPrefix(name, "TestFanOut") {
 				process := strings.HasPrefix(name, "TestFanOutProcess")
-				if patterns[2].MatchString(name) == process || patterns[3].MatchString(name) != process {
+				if patterns[1].MatchString(name) == process || patterns[2].MatchString(name) != process {
 					t.Errorf("%s must retain its complete process/non-process owner", name)
 				}
 			}
@@ -82,7 +82,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 			t.Logf("%s\t%s", ids[i], name)
 		}
 	}
-	t.Logf("complete disjoint census: %d = %d D-E + %d F + %d fanout + %d process", len(groups[0])+len(groups[1])+len(groups[2])+len(groups[3]), len(groups[0]), len(groups[1]), len(groups[2]), len(groups[3]))
+	t.Logf("complete disjoint census: %d = %d D-F + %d fanout + %d process", len(groups[0])+len(groups[1])+len(groups[2]), len(groups[0]), len(groups[1]), len(groups[2]))
 	// Keep the whole-package census: new roots cannot escape via either partition.
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var runs []string
@@ -100,7 +100,7 @@ func TestRuntimeFanOutPartitionPreservesCompleteRoots(t *testing.T) {
 	}
 }
 
-var runtimeFanOutUnits = []string{"store-runtime-full-02", "store-runtime-full-02-f", "store-runtime-fanout", "store-runtime-fanout-process"}
+var runtimeFanOutUnits = []string{"store-runtime-full-02", "store-runtime-fanout", "store-runtime-fanout-process"}
 
 func validateRuntimeFanOutEnvelopes(policy Policy) error {
 	for _, id := range runtimeFanOutUnits {
