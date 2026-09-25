@@ -638,7 +638,7 @@ func normalizeToolEntityIdentity(identity runtimetools.EntityIdentity) (string, 
 	return runID, entityID, nil
 }
 
-func toolEntityMutationContract(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, flowInstance, entityType string) (entityruntime.Contract, error) {
+func toolEntityMutationContract(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, runID, flowInstance, entityType string) (entityruntime.Contract, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil || bundle.SourceArtifact == nil {
 		return entityruntime.Contract{}, fmt.Errorf("entity mutation requires its admitted source artifact")
@@ -649,7 +649,7 @@ func toolEntityMutationContract(source semanticview.Source, sourceFact runtimeco
 	if bundle.SourceArtifact.BundleHash() != sourceFact.BundleHash() {
 		return entityruntime.Contract{}, fmt.Errorf("entity mutation source does not match active run source")
 	}
-	contract, ok := entityruntime.ResolveForFlowInstance(source, flowInstance)
+	contract, ok := entityruntime.ResolveForRuntimeInstance(source, runID, flowInstance)
 	if !ok || contract.EntityType != entityType {
 		return entityruntime.Contract{}, fmt.Errorf("entity mutation contract does not own %s (%s)", flowInstance, entityType)
 	}
@@ -657,7 +657,7 @@ func toolEntityMutationContract(source semanticview.Source, sourceFact runtimeco
 }
 
 func applyToolEntityFieldUpdate(update runtimetools.EntityFieldUpdate, sourceFact runtimecorrelation.SourceArtifactFact, flowInstance, entityType string, fieldsRaw any) (map[string]any, map[string]any, []byte, error) {
-	contract, err := toolEntityMutationContract(update.Source, sourceFact, flowInstance, entityType)
+	contract, err := toolEntityMutationContract(update.Source, sourceFact, update.RunID, flowInstance, entityType)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -684,7 +684,7 @@ func applyToolEntityFieldUpdate(update runtimetools.EntityFieldUpdate, sourceFac
 }
 
 func initializeToolEntityRecord(rec *runtimetools.EntityCreateRecord, sourceFact runtimecorrelation.SourceArtifactFact, supplied map[string]any) (map[string]any, error) {
-	contract, err := toolEntityMutationContract(rec.Source, sourceFact, rec.FlowInstance, rec.EntityType)
+	contract, err := toolEntityMutationContract(rec.Source, sourceFact, rec.RunID, rec.FlowInstance, rec.EntityType)
 	if err != nil {
 		return nil, err
 	}

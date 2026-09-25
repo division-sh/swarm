@@ -155,11 +155,28 @@ func ResolveForFlowInstance(source semanticview.Source, flowInstance string) (Co
 	return ResolveForFlow(source, ResolveFlowIDForInstance(source, flowInstance))
 }
 
+// ResolveFlowIDForRuntimeInstance binds the root run instance through its
+// admitted source rather than treating an arbitrary UUID as a flow name.
+func ResolveFlowIDForRuntimeInstance(source semanticview.Source, runID, flowInstance string) string {
+	runID = strings.TrimSpace(runID)
+	flowInstance = strings.TrimSpace(flowInstance)
+	if runID != "" && flowInstance == runID {
+		if root, err := semanticview.AdmitRootExecutionCoordinate(source, runID); err == nil {
+			return root.FlowID()
+		}
+	}
+	return ResolveFlowIDForInstance(source, flowInstance)
+}
+
+func ResolveForRuntimeInstance(source semanticview.Source, runID, flowInstance string) (Contract, bool) {
+	return ResolveForFlow(source, ResolveFlowIDForRuntimeInstance(source, runID, flowInstance))
+}
+
 func ResolveForEntityRow(source semanticview.Source, row map[string]any) (Contract, bool) {
 	if len(row) == 0 {
 		return Contract{}, false
 	}
-	return ResolveForFlowInstance(source, strings.TrimSpace(asString(row["flow_instance"])))
+	return ResolveForRuntimeInstance(source, asString(row["run_id"]), asString(row["flow_instance"]))
 }
 
 func ResolveForFlow(source semanticview.Source, flowID string) (Contract, bool) {
