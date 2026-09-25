@@ -40,7 +40,6 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"internal/cliapp/env_guard.go":                                                 1,
 		"internal/cliapp/main_test.go":                                                 1,
 		"internal/dashboard/server/server_test.go":                                     1,
-		"internal/dashboard/server/observability_sql_test.go":                          1,
 		"internal/runtime/destructivereset/contracts.go":                               1,
 		"internal/runtime/destructivereset/coordinator_test.go":                        2,
 		"internal/runtime/manager/runtime_reset_test.go":                               3,
