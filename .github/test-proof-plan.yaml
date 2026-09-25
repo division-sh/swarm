@@ -51,7 +51,6 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-required-smoke
-      - runtime-llm-bus
       - hitl-releasee2e-rest
       - hitl-releasee2e-burst-1
       - hitl-releasee2e-burst-2
@@ -68,11 +67,12 @@ profiles:
       - serveapp-runtime
       - contracts-first
       - contracts-rest
-      - api-full
+      - api-llm-bus-full
       - conformance-1
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
+      - conformance-2394-reporter
       - serveapp-other
       - serveapp-i-reporter
       - serveapp-other-late
@@ -110,7 +110,6 @@ profiles:
       - catalog-runtime
       - catalog-runtime-scatter-safety
       - catalog-runtime-fork-readiness
-      - runtime-llm-bus
       - hitl-releasee2e-rest
       - hitl-releasee2e-burst-1
       - hitl-releasee2e-burst-2
@@ -127,11 +126,12 @@ profiles:
       - serveapp-runtime
       - contracts-first
       - contracts-rest
-      - api-full
+      - api-llm-bus-full
       - conformance-1
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
+      - conformance-2394-reporter
       - serveapp-other
       - serveapp-i-reporter
       - serveapp-other-late
@@ -169,7 +169,6 @@ profiles:
       - catalog-runtime
       - catalog-runtime-scatter-safety
       - catalog-runtime-fork-readiness
-      - runtime-llm-bus
       - hitl-releasee2e-rest
       - hitl-releasee2e-burst-1
       - hitl-releasee2e-burst-2
@@ -186,11 +185,12 @@ profiles:
       - serveapp-runtime
       - contracts-first
       - contracts-rest
-      - api-full
+      - api-llm-bus-full
       - conformance-1
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
+      - conformance-2394-reporter
       - serveapp-other
       - serveapp-i-reporter
       - serveapp-other-late
@@ -228,7 +228,6 @@ profiles:
       - catalog-runtime
       - catalog-runtime-scatter-safety
       - catalog-runtime-fork-readiness
-      - runtime-llm-bus
       - hitl-releasee2e-rest
       - hitl-releasee2e-burst-1
       - hitl-releasee2e-burst-2
@@ -245,11 +244,12 @@ profiles:
       - serveapp-runtime
       - contracts-first
       - contracts-rest
-      - api-full
+      - api-llm-bus-full
       - conformance-1
       - conformance-2
       - conformance-2394-core
       - conformance-2394-pressure
+      - conformance-2394-reporter
       - conformance-soak-sqlite
       - conformance-soak-postgres
       - serveapp-other
@@ -351,7 +351,7 @@ units:
   conformance-2:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
-    run: '^(Test($|[^FHI].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^2].*|2($|[^3].*|3($|[^9].*|9($|[^4].*)))))))))|Example.*|Fuzz.*|TestIssue2394ReporterFiveHundredDelayedCommitsBothStores)$'
+    run: '^(Test($|[^FHI].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^2].*|2($|[^3].*|3($|[^9].*|9($|[^4].*)))))))))|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -369,6 +369,13 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/runtime/conformance
     run: '^TestIssue2394(Pressure.*|SupplementalPressure.*|TwentyTwoIntentPressure.*)$'
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  conformance-2394-reporter:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/conformance
+    run: '^TestIssue2394ReporterFiveHundredDelayedCommitsBothStores$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -394,10 +401,12 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: soak
-  # Run the complete API package once, retaining its backend and negative-case rows.
-  api-full:
+  # Co-schedule complete unfiltered API, LLM, and bus packages once.
+  api-llm-bus-full:
     packages:
       - github.com/division-sh/swarm/internal/apiv1
+      - github.com/division-sh/swarm/internal/runtime/llm
+      - github.com/division-sh/swarm/internal/runtime/bus
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
@@ -462,13 +471,6 @@ units:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
-  runtime-llm-bus:
-    packages:
-      - github.com/division-sh/swarm/internal/runtime/llm
-      - github.com/division-sh/swarm/internal/runtime/bus
-    count_mode: count-1
-    environment_id: ci-postgres-gateway-empty-v1
-    budget_class: broad
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e

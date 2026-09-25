@@ -401,17 +401,17 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 	}
 	assertGoProofPartition(t, filepath.Join(root, "internal", "runtime", "contracts"), contractsPatterns)
-	apiUnit, ok := policy.Units["api-full"]
-	if !ok || !slices.Equal(apiUnit.Packages, []string{"github.com/division-sh/swarm/internal/apiv1"}) || apiUnit.Run != "" || apiUnit.CountMode != "count-1" {
-		t.Fatalf("api-full unit = %#v, want complete uncached API package", apiUnit)
+	apiUnit, ok := policy.Units["api-llm-bus-full"]
+	if !ok || !slices.Equal(apiUnit.Packages, []string{"github.com/division-sh/swarm/internal/apiv1", "github.com/division-sh/swarm/internal/runtime/llm", "github.com/division-sh/swarm/internal/runtime/bus"}) || apiUnit.Run != "" || apiUnit.CountMode != "count-1" {
+		t.Fatalf("api-llm-bus-full unit = %#v, want complete uncached API/LLM/bus packages", apiUnit)
 	}
 	for name, profile := range policy.Profiles {
-		if name != testplanning.ProfileLocal && !slices.Contains(profile.Units, "api-full") {
-			t.Fatalf("profile %s omits api-full", name)
+		if name != testplanning.ProfileLocal && !slices.Contains(profile.Units, "api-llm-bus-full") {
+			t.Fatalf("profile %s omits api-llm-bus-full", name)
 		}
 	}
 	var conformanceUnits []testplanning.ProofUnit
-	for _, id := range []string{"conformance-1", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-soak-sqlite", "conformance-soak-postgres"} {
+	for _, id := range []string{"conformance-1", "conformance-2", "conformance-2394-core", "conformance-2394-pressure", "conformance-2394-reporter", "conformance-soak-sqlite", "conformance-soak-postgres"} {
 		unit, exists := policy.Units[id]
 		if !exists || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/internal/runtime/conformance"}) || unit.Run == "" || unit.CountMode != "count-1" {
 			t.Fatalf("%s must retain its complete uncached conformance partition", id)
