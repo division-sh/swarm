@@ -70,11 +70,13 @@ func ValidateConformanceProofPartition(dir string, units []ProofUnit) error {
 			return pattern.MatchString(name) && !(unit.Skip == SoakRun && name == SoakTest)
 		})
 	}
-	if !backends["sqlite"] || !backends["postgres"] {
-		return fmt.Errorf("mandatory soak requires both sqlite and postgres cells")
+	if len(backends) != 0 && (!backends["sqlite"] || !backends["postgres"]) {
+		return fmt.Errorf("scheduled soak requires both sqlite and postgres cells")
 	}
-	// The validated complete backend pair owns the declaration once, whether
-	// ordinary selectors exclude it structurally or use the sole exact skip.
+	if len(backends) == 0 {
+		return validateGoProofMatchersExcept(dir, matchers, map[string]bool{SoakTest: true})
+	}
+	// The validated complete backend pair owns the declaration once.
 	matchers = append(matchers, func(name string) bool { return name == SoakTest })
 	return validateGoProofMatchers(dir, matchers)
 }

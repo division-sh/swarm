@@ -277,6 +277,7 @@ currently available; there is no replacement action or compatibility alias.
 go build ./cmd/swarm
 golangci-lint run
 go run ./cmd/swarm-test
+go run ./cmd/swarm-test --full # exhaustive non-soak proof
 ```
 
 For faster scoped validation while developing, use the changed-package local

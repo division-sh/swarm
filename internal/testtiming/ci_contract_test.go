@@ -387,6 +387,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		contractsPatterns = append(contractsPatterns, regexp.MustCompile(unit.Run))
 		for name, profile := range policy.Profiles {
+			if name == testplanning.ProfileLocal {
+				continue
+			}
 			if !slices.Contains(profile.Units, id) {
 				t.Fatalf("profile %s omits contracts partition %s", name, id)
 			}
@@ -401,6 +404,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		apiPatterns = append(apiPatterns, regexp.MustCompile(unit.Run))
 		for name, profile := range policy.Profiles {
+			if name == testplanning.ProfileLocal {
+				continue
+			}
 			if !slices.Contains(profile.Units, id) {
 				t.Fatalf("profile %s omits API partition %s", name, id)
 			}
@@ -415,6 +421,9 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		}
 		conformanceUnits = append(conformanceUnits, testplanning.ProofUnit{ID: id, Packages: unit.Packages, Run: unit.Run, Skip: unit.Skip, GoTimeout: unit.GoTimeout, CountMode: unit.CountMode, BudgetClass: unit.BudgetClass})
 		for name, profile := range policy.Profiles {
+			if name == testplanning.ProfileLocal || id == "conformance-soak-sqlite" && name != testplanning.ProfileNightly || id == "conformance-soak-postgres" && name != testplanning.ProfileNightly {
+				continue
+			}
 			if !slices.Contains(profile.Units, id) {
 				t.Fatalf("profile %s omits conformance partition %s", name, id)
 			}

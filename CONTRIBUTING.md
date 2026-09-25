@@ -29,6 +29,7 @@ go build ./cmd/swarm
 go run ./cmd/swarm-test-changed
 go run ./cmd/swarm-test-changed -dry-run
 go run ./cmd/swarm-test
+go run ./cmd/swarm-test --full
 go run ./cmd/swarm-openrpc-gen --check
 ```
 
@@ -36,8 +37,9 @@ Routine PRs can cite scoped local proof from `swarm-test-changed` plus any
 named package families required by the touched surface; CI remains responsible
 for the full-truth push/manual/scheduled runs. Do not habitually force
 `-count=1` for every local iteration because it defeats Go's local test cache.
-High-risk semantic/runtime migrations still require full local
-`go run ./cmd/swarm-test -- -count=1 ./...` when the issue
+The no-argument runner is the bounded local tier, not an exhaustive `./...` run.
+High-risk semantic/runtime migrations still require full non-soak local
+`go run ./cmd/swarm-test --full` when the issue
 gate or reviewer asks for it.
 
 Postgres-backed tests should use the supported host setup in

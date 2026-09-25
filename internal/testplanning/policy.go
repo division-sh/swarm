@@ -14,6 +14,7 @@ import (
 const PolicyVersion = 1
 
 const (
+	ProfileLocal       = "local"
 	ProfilePRCommon    = "pr-common"
 	ProfilePREscalated = "pr-escalated"
 	ProfileFull        = "full"
@@ -44,13 +45,14 @@ type ProfilePolicy struct {
 }
 
 type UnitPolicy struct {
-	Packages      []string `yaml:"packages"`
-	Run           string   `yaml:"run,omitempty"`
-	Skip          string   `yaml:"skip,omitempty"`
-	GoTimeout     string   `yaml:"go_timeout,omitempty"`
-	CountMode     string   `yaml:"count_mode"`
-	EnvironmentID string   `yaml:"environment_id"`
-	BudgetClass   string   `yaml:"budget_class"`
+	Packages         []string            `yaml:"packages"`
+	RequiredChildren map[string][]string `yaml:"required_children,omitempty"`
+	Run              string              `yaml:"run,omitempty"`
+	Skip             string              `yaml:"skip,omitempty"`
+	GoTimeout        string              `yaml:"go_timeout,omitempty"`
+	CountMode        string              `yaml:"count_mode"`
+	EnvironmentID    string              `yaml:"environment_id"`
+	BudgetClass      string              `yaml:"budget_class"`
 }
 
 type ProjectionPolicy struct {
@@ -142,6 +144,16 @@ func (p Policy) Validate() error {
 		if duplicate := duplicateStrings(unit.Packages); duplicate != "" {
 			problems = append(problems, fmt.Sprintf("units.%s.packages duplicates %q", name, duplicate))
 		}
+		for root, children := range unit.RequiredChildren {
+			if strings.TrimSpace(root) == "" || len(children) == 0 || duplicateStrings(children) != "" {
+				problems = append(problems, fmt.Sprintf("units.%s.required_children.%s must name distinct children", name, root))
+			}
+			for _, child := range children {
+				if strings.TrimSpace(child) == "" || strings.HasPrefix(child, "/") {
+					problems = append(problems, fmt.Sprintf("units.%s.required_children.%s has invalid child %q", name, root, child))
+				}
+			}
+		}
 		if !validCountMode(unit.CountMode) {
 			problems = append(problems, fmt.Sprintf("units.%s.count_mode %q is unsupported", name, unit.CountMode))
 		}
@@ -184,6 +196,9 @@ func (p Policy) Validate() error {
 
 func (p Policy) ResolveProfile(event string, changedFiles []string, forced string) (string, string, error) {
 	if forced != "" {
+		if event != "workflow_dispatch" {
+			return "", "", fmt.Errorf("forced profile is only valid for workflow_dispatch, not %s", event)
+		}
 		if _, ok := p.Profiles[forced]; !ok {
 			return "", "", fmt.Errorf("unknown forced profile %q", forced)
 		}

@@ -34,6 +34,9 @@ const (
 type RunCommand struct {
 	Args             []string
 	FallbackDuration time.Duration
+	// ModelOnlyETA prevents completion-tier runs from reading or publishing
+	// argv-only duration history shared with uncertified focused commands.
+	ModelOnlyETA bool
 }
 
 // RunAdmission owns host/account-scoped ordering and capacity for test runs.
@@ -48,14 +51,15 @@ type RunAdmission struct {
 
 // RunLease is the exact active slot possession retained by launched work.
 type RunLease struct {
-	admission *RunAdmission
-	id        string
-	slot      int
-	command   string
-	startedAt time.Time
-	lock      *fileLock
-	inherited bool
-	closed    bool
+	admission    *RunAdmission
+	id           string
+	slot         int
+	command      string
+	modelOnlyETA bool
+	startedAt    time.Time
+	lock         *fileLock
+	inherited    bool
+	closed       bool
 }
 
 type runRegistryDocument struct {
@@ -181,7 +185,7 @@ func (a *RunAdmission) Acquire(ctx context.Context, command RunCommand, capacity
 			ID: id, Sequence: doc.NextSequence, PID: os.Getpid(),
 			Command: append([]string(nil), command.Args...), CommandKey: commandKey,
 			EnqueuedAtUTC:   now.Format(time.RFC3339Nano),
-			ExpectedSeconds: expectedRunSeconds(*doc, commandKey, command.FallbackDuration),
+			ExpectedSeconds: expectedRunSecondsForCommand(*doc, commandKey, command),
 		})
 		return nil
 	})
@@ -242,7 +246,7 @@ func (a *RunAdmission) Acquire(ctx context.Context, command RunCommand, capacity
 						Command: record.Command, CommandKey: record.CommandKey,
 						StartedAtUTC: startedAt.Format(time.RFC3339Nano), ExpectedSeconds: record.ExpectedSeconds,
 					})
-					lease = &RunLease{admission: a, id: id, slot: slot, command: commandKey, startedAt: startedAt, lock: slotLock}
+					lease = &RunLease{admission: a, id: id, slot: slot, command: commandKey, modelOnlyETA: command.ModelOnlyETA, startedAt: startedAt, lock: slotLock}
 					return nil
 				}
 			}
@@ -362,7 +366,7 @@ func (l *RunLease) Complete(ctx context.Context, success bool) error {
 			return fmt.Errorf("active run %s is missing or changed", l.id)
 		}
 		doc.Active = append(doc.Active[:index], doc.Active[index+1:]...)
-		if success {
+		if success && !l.modelOnlyETA {
 			duration := now.Sub(l.startedAt)
 			if duration > 0 {
 				doc.History = append(doc.History, runHistoryRecord{
@@ -779,6 +783,16 @@ func expectedRunSeconds(doc runRegistryDocument, commandKey string, fallback tim
 		return values[middle]
 	}
 	return (values[middle-1] + values[middle]) / 2
+}
+
+func expectedRunSecondsForCommand(doc runRegistryDocument, commandKey string, command RunCommand) float64 {
+	if command.ModelOnlyETA {
+		if command.FallbackDuration > 0 {
+			return command.FallbackDuration.Seconds()
+		}
+		return 0
+	}
+	return expectedRunSeconds(doc, commandKey, command.FallbackDuration)
 }
 
 func boundedRunHistory(history []runHistoryRecord) []runHistoryRecord {

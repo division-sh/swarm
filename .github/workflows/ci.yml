@@ -97,13 +97,18 @@ jobs:
           test "$execution_sha" = "$EVENT_SHA"
           go list ./... > test-results/go-packages.txt
           : > test-results/changed-files.txt
+          : > test-results/changed-status.z
           if [ "$EVENT_NAME" = "pull_request" ]; then
             git diff --name-only "$BASE_SHA" "$PR_HEAD_SHA" > test-results/changed-files.txt
+            git diff --name-status -z --find-renames --find-copies "$BASE_SHA" "$PR_HEAD_SHA" > test-results/changed-status.z
           fi
 
           profile_args=()
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$FORCED_PROFILE" ]; then
             profile_args=(-profile "$FORCED_PROFILE")
+          fi
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            profile_args=(-changed-status test-results/changed-status.z -base-sha "$BASE_SHA")
           fi
           go run ./cmd/swarm-test-timing \
             -plan-ci \
@@ -132,6 +137,7 @@ jobs:
           path: |
             test-results/go-packages.txt
             test-results/changed-files.txt
+            test-results/changed-status.z
             test-results/proof-plan.json
             test-results/proof-matrix.json
             test-results/proof-plan.md
@@ -252,7 +258,6 @@ jobs:
         shell: bash
         env:
           UNIT_ID: ${{ matrix.unit }}
-          SWARM_TEST_PROOF_PROFILE: ${{ needs.ci-plan.outputs.profile }}
           SWARM_TOOL_GATEWAY_URL: ""
           SWARM_TOOL_GATEWAY_CONTAINER_URL: ""
           SWARM_TOOL_GATEWAY_TOKEN: ""
@@ -262,22 +267,12 @@ jobs:
           plan=test-results/plan/proof-plan.json
           go run ./cmd/swarm-test-timing -assert-execution-sha \
             -plan "$plan" -execution-sha "$(git rev-parse HEAD)"
-          unit=$(jq -cer --arg id "$UNIT_ID" '.units[] | select(.id == $id)' "$plan")
-          mapfile -t packages < <(jq -r '.packages[]' <<<"$unit")
-          test_pattern=$(jq -r '.run // empty' <<<"$unit")
-          skip_pattern=$(jq -r '.skip // empty' <<<"$unit")
-          count_mode=$(jq -r '.count_mode' <<<"$unit")
-          count_args=()
-          if [ "$count_mode" = "count-1" ]; then count_args=(-count=1); fi
-          run_args=()
-          if [ -n "$test_pattern" ]; then run_args=(-run "$test_pattern"); fi
-          if [ -n "$skip_pattern" ]; then run_args+=(-skip "$skip_pattern"); fi
           primary_json="test-results/evidence/${UNIT_ID}-primary.json"
           primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
 
           start=$(date +%s)
           set +e
-          go run ./cmd/swarm-test -- "${packages[@]}" "${run_args[@]}" "${count_args[@]}" -json | tee "$primary_json"
+          go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID" | tee "$primary_json"
           status=${PIPESTATUS[0]}
           set -e
           elapsed=$(( $(date +%s) - start ))
@@ -307,6 +302,7 @@ jobs:
   mandatory-soak:
     name: Go proof ${{ matrix.unit }}
     needs: [ci-plan]
+    if: ${{ needs.ci-plan.outputs.soak_matrix != '{"include":[]}' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -340,7 +336,6 @@ jobs:
         shell: bash
         env:
           UNIT_ID: ${{ matrix.unit }}
-          SWARM_TEST_PROOF_PROFILE: ${{ needs.ci-plan.outputs.profile }}
           SWARM_TOOL_GATEWAY_URL: ""
           SWARM_TOOL_GATEWAY_CONTAINER_URL: ""
           SWARM_TOOL_GATEWAY_TOKEN: ""
@@ -354,15 +349,12 @@ jobs:
           test "$(jq -r '.budget_class' <<<"$unit")" = soak
           test "$(jq -r '.count_mode' <<<"$unit")" = count-1
           test -z "$(jq -r '.skip // empty' <<<"$unit")"
-          mapfile -t packages < <(jq -r '.packages[]' <<<"$unit")
-          test_pattern=$(jq -r '.run' <<<"$unit")
-          go_timeout=$(jq -r '.go_timeout' <<<"$unit")
           primary_json="test-results/evidence/${UNIT_ID}-primary.json"
           primary_evidence="test-results/evidence/${UNIT_ID}-primary-evidence.json"
           start=$(date +%s)
           set +e
           timeout --signal=TERM --kill-after=30s 1500s \
-            go run ./cmd/swarm-test -- "${packages[@]}" -run "$test_pattern" -count=1 -timeout "$go_timeout" -json | tee "$primary_json"
+            go run ./cmd/swarm-test --planned "$plan" "$UNIT_ID" | tee "$primary_json"
           status=${PIPESTATUS[0]}
           set -e
           elapsed=$(( $(date +%s) - start ))
@@ -524,14 +516,13 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          if [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi
+          if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.mandatory-soak.result }}" != success ]; then failed=1; fi
           for item in \
             "ci-plan:${{ needs.ci-plan.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
             "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
             "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
             "proof-unit:${{ needs.proof-unit.result }}" \
-            "mandatory-soak:${{ needs.mandatory-soak.result }}" \
             "semantic-smoke:${{ needs.semantic-smoke.result }}" \
             "timing-budget:${{ needs.timing-budget.result }}"
           do

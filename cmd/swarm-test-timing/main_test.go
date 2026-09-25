@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -13,20 +16,26 @@ import (
 
 func TestPlanCIEmitsDigestBoundPlanAndMinimalMatrix(t *testing.T) {
 	dir := t.TempDir()
-	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
+	policyPath, modelPath, packagesPath := productionPlannerInputs(t, dir)
+	changedStatusPath := filepath.Join(dir, "changed-status.z")
+	if err := os.WriteFile(changedStatusPath, []byte("M\x00README.md\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	planPath := filepath.Join(dir, "plan.json")
 	matrixPath := filepath.Join(dir, "matrix.json")
 	markdownPath := filepath.Join(dir, "plan.md")
 	if err := run(config{
-		planCI:          true,
-		proofPolicyPath: policyPath,
-		weightModelPath: modelPath,
-		packagesPath:    packagesPath,
-		planPath:        planPath,
-		matrixPath:      matrixPath,
-		markdownPath:    markdownPath,
-		event:           "pull_request",
-		headSHA:         "abc",
+		planCI:            true,
+		proofPolicyPath:   policyPath,
+		weightModelPath:   modelPath,
+		packagesPath:      packagesPath,
+		changedStatusPath: changedStatusPath,
+		baseSHA:           currentHead(t),
+		planPath:          planPath,
+		matrixPath:        matrixPath,
+		markdownPath:      markdownPath,
+		event:             "pull_request",
+		headSHA:           "abc",
 	}); err != nil {
 		t.Fatalf("run plan: %v", err)
 	}
@@ -48,7 +57,7 @@ func TestPlanCIEmitsDigestBoundPlanAndMinimalMatrix(t *testing.T) {
 
 func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 	dir := t.TempDir()
-	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
+	policyPath, modelPath, packagesPath := productionPlannerInputs(t, dir)
 	planPath := filepath.Join(dir, "plan.json")
 	if err := run(config{planCI: true, proofPolicyPath: policyPath, weightModelPath: modelPath, packagesPath: packagesPath, planPath: planPath, matrixPath: filepath.Join(dir, "matrix.json"), markdownPath: filepath.Join(dir, "plan.md"), event: "push", headSHA: "abc"}); err != nil {
 		t.Fatal(err)
@@ -58,10 +67,37 @@ func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := plan.Units[0]
+	for _, candidate := range plan.Units {
+		if len(candidate.TestBearingPackages) == 1 && len(candidate.SelectedRoots) > 0 && len(candidate.SelectedRoots) < len(unit.SelectedRoots) {
+			unit = candidate
+		}
+	}
 	jsonPath := filepath.Join(dir, "go-test.json")
 	var lines []string
 	for _, pkg := range unit.Packages {
 		lines = append(lines, `{"Action":"pass","Package":"`+pkg+`","Elapsed":1}`)
+	}
+	seen := map[string]bool{}
+	seenTests := map[string]bool{}
+	emitTest := func(pkg, name string) {
+		key := pkg + "\x00" + name
+		if seenTests[key] {
+			return
+		}
+		seenTests[key] = true
+		lines = append(lines, `{"Action":"pass","Package":"`+pkg+`","Test":"`+name+`","Elapsed":1}`)
+	}
+	for _, root := range unit.SelectedRoots {
+		if !seen[root.Package] {
+			seen[root.Package] = true
+			emitTest(root.Package, root.Name)
+		}
+	}
+	for _, required := range unit.RequiredTests {
+		emitTest(required.Package, required.Name)
+		for _, child := range required.Children {
+			emitTest(required.Package, required.Name+"/"+child)
+		}
 	}
 	if err := os.WriteFile(jsonPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -82,10 +118,7 @@ func TestRecordEvidenceBindsPlanIdentity(t *testing.T) {
 func TestAssertExecutionSHARejectsDifferentCheckout(t *testing.T) {
 	dir := t.TempDir()
 	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
-	planPath := filepath.Join(dir, "plan.json")
-	if err := run(config{planCI: true, proofPolicyPath: policyPath, weightModelPath: modelPath, packagesPath: packagesPath, planPath: planPath, matrixPath: filepath.Join(dir, "matrix.json"), markdownPath: filepath.Join(dir, "plan.md"), event: "push", headSHA: "executed-sha"}); err != nil {
-		t.Fatal(err)
-	}
+	planPath := writeSyntheticPlan(t, dir, policyPath, modelPath, packagesPath, "executed-sha")
 	if err := run(config{assertExecution: true, planPath: planPath, executionSHA: "executed-sha"}); err != nil {
 		t.Fatalf("matching checkout: %v", err)
 	}
@@ -97,10 +130,7 @@ func TestAssertExecutionSHARejectsDifferentCheckout(t *testing.T) {
 func TestUpdateWeightModelIsMaterialDiffOnly(t *testing.T) {
 	dir := t.TempDir()
 	policyPath, modelPath, packagesPath := writePlannerFixtures(t, dir)
-	planPath := filepath.Join(dir, "plan.json")
-	if err := run(config{planCI: true, proofPolicyPath: policyPath, weightModelPath: modelPath, packagesPath: packagesPath, planPath: planPath, matrixPath: filepath.Join(dir, "matrix.json"), markdownPath: filepath.Join(dir, "plan.md"), event: "push", headSHA: "abc"}); err != nil {
-		t.Fatal(err)
-	}
+	planPath := writeSyntheticPlan(t, dir, policyPath, modelPath, packagesPath, "abc")
 	plan, err := readPlan(planPath)
 	if err != nil {
 		t.Fatal(err)
@@ -236,6 +266,80 @@ projections: {required-full: {profile: full}}
 		t.Fatal(err)
 	}
 	return policyPath, modelPath, packagesPath
+}
+
+func productionPlannerInputs(t *testing.T, dir string) (string, string, string) {
+	t.Helper()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+	inventory, err := testplanning.DiscoverRootInventory(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages := make([]string, 0, len(inventory.Packages))
+	for pkg := range inventory.Packages {
+		packages = append(packages, pkg)
+	}
+	sort.Strings(packages)
+	packagesPath := filepath.Join(dir, "packages.txt")
+	if err := os.WriteFile(packagesPath, []byte(strings.Join(packages, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(root, ".github/test-proof-plan.yaml"), filepath.Join(root, testplanning.GeneratedWeightModelPath), packagesPath
+}
+
+func currentHead(t *testing.T) string {
+	t.Helper()
+	raw, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func writeSyntheticPlan(t *testing.T, dir, policyPath, modelPath, packagesPath, head string) string {
+	t.Helper()
+	policyFile, err := os.Open(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer policyFile.Close()
+	policy, err := testplanning.LoadPolicy(policyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelFile, err := os.Open(modelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer modelFile.Close()
+	model, err := testplanning.LoadWeightModel(modelFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packages, err := readLines(packagesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := testplanning.BuildPlan(policy, model, packages, testplanning.ProfileFull, "synthetic timing fixture", head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "plan.json")
+	if err := writeJSON(path, plan); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestReadJSONRejectsUnknownPlanFields(t *testing.T) {

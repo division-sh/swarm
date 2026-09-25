@@ -36,6 +36,49 @@ func TestCommandEvidenceRejectsPerformanceConfirmation(t *testing.T) {
 	}
 }
 
+func TestRequiredExecutionRejectsZeroRecordsAndSkippedBackend(t *testing.T) {
+	const pkg = "module/served"
+	unit := testplanning.ProofUnit{
+		TestBearingPackages: []string{pkg},
+		RequiredTests:       []testplanning.RequiredTest{{TestRoot: testplanning.TestRoot{Package: pkg, Name: "TestBoth"}, Children: []string{"sqlite", "postgres"}}},
+	}
+	for _, tc := range []struct {
+		name  string
+		tests []TestTiming
+		want  string
+	}{
+		{"zero records", nil, "zero test records"},
+		{"missing parent", []TestTiming{{Package: pkg, Test: "TestBoth/sqlite", Result: "pass"}, {Package: pkg, Test: "TestBoth/postgres", Result: "pass"}}, "required proof"},
+		{"skipped backend", []TestTiming{{Package: pkg, Test: "TestBoth", Result: "pass"}, {Package: pkg, Test: "TestBoth/sqlite", Result: "pass"}, {Package: pkg, Test: "TestBoth/postgres", Result: "skip"}}, "postgres"},
+		{"missing backend", []TestTiming{{Package: pkg, Test: "TestBoth", Result: "pass"}, {Package: pkg, Test: "TestBoth/sqlite", Result: "pass"}}, "postgres"},
+		{"complete", []TestTiming{{Package: pkg, Test: "TestBoth", Result: "pass"}, {Package: pkg, Test: "TestBoth/sqlite", Result: "pass"}, {Package: pkg, Test: "TestBoth/postgres", Result: "pass"}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := requiredExecutionProblems(unit, Report{Tests: tc.tests})
+			if tc.want == "" && len(problems) != 0 || tc.want != "" && !strings.Contains(strings.Join(problems, "; "), tc.want) {
+				t.Fatalf("problems = %v, want %q", problems, tc.want)
+			}
+		})
+	}
+}
+
+func TestSelectedOrdinaryRootCannotDisappearBehindPackagePass(t *testing.T) {
+	const pkg = "module/ordinary"
+	unit := testplanning.ProofUnit{
+		SelectedRoots:       []testplanning.TestRoot{{Package: pkg, Name: "TestPresent"}, {Package: pkg, Name: "TestMissing"}},
+		TestBearingPackages: []string{pkg},
+	}
+	report := Report{Tests: []TestTiming{{Package: pkg, Test: "TestPresent", Result: "pass"}}}
+	if problems := requiredExecutionProblems(unit, report); !strings.Contains(strings.Join(problems, "; "), "TestMissing has no terminal test record") {
+		t.Fatalf("missing selected root accepted: %v", problems)
+	}
+	unit.SelectedRoots = unit.SelectedRoots[:1]
+	unit.SelectedRoots[0].Name = "TestPresent"
+	if problems := requiredExecutionProblems(unit, report); len(problems) != 0 {
+		t.Fatalf("complete ordinary root rejected: %v", problems)
+	}
+}
+
 func TestEvaluateBudgetRequiresEveryPlanUnitExactlyOnce(t *testing.T) {
 	plan := timingTestPlan(t)
 	policy := timingTestPolicy()
@@ -139,6 +182,7 @@ func timingTestPlan(t *testing.T) testplanning.RunPlan {
 		},
 		SpecialPackages: []string{"module/catalog"},
 		Profiles: map[string]testplanning.ProfilePolicy{
+			testplanning.ProfileLocal:       {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
 			testplanning.ProfilePRCommon:    {CountMode: CountModeCacheDefault, EnvironmentID: "env", Units: []string{"catalog"}},
 			testplanning.ProfilePREscalated: {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},
 			testplanning.ProfileFull:        {CountMode: CountModeOne, EnvironmentID: "env", Units: []string{"catalog"}},

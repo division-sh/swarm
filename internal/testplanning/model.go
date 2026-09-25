@@ -28,8 +28,20 @@ type UnitWeight struct {
 }
 
 func MeasureUnit(unit ProofUnit, seconds float64) UnitWeight {
-	unit.WeightSeconds = 0
-	raw, _ := json.Marshal(unit)
+	// Historical weights describe the executable selector, not completion
+	// obligations or the plan's source-root census.
+	selection := struct {
+		ID            string   `json:"id"`
+		Packages      []string `json:"packages"`
+		Run           string   `json:"run,omitempty"`
+		Skip          string   `json:"skip,omitempty"`
+		GoTimeout     string   `json:"go_timeout,omitempty"`
+		CountMode     string   `json:"count_mode"`
+		EnvironmentID string   `json:"environment_id"`
+		BudgetClass   string   `json:"budget_class"`
+		WeightSeconds float64  `json:"weight_seconds"`
+	}{unit.ID, unit.Packages, unit.Run, unit.Skip, unit.GoTimeout, unit.CountMode, unit.EnvironmentID, unit.BudgetClass, 0}
+	raw, _ := json.Marshal(selection)
 	sum := sha256.Sum256(raw)
 	return UnitWeight{Selection: hex.EncodeToString(sum[:]), Seconds: seconds}
 }
