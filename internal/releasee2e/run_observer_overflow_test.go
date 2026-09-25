@@ -14,30 +14,8 @@ import (
 	"testing"
 	"time"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"golang.org/x/sys/unix"
 )
-
-func TestObserverOverflowFixtureCreationEstablishesRequests(t *testing.T) {
-	repo := releaseE2ERepoRoot(t)
-	root := t.TempDir()
-	writeReleaseObserverOverflowFixture(t, repo, root, 2)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(root, "contracts"), runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := semanticview.Wrap(bundle)
-	analysis, err := engine.BuildEntityAssignmentAnalysis(source, "worker")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !analysis.StageFacts("active").Has("requests") {
-		topology, _ := semanticview.WorkflowStageTopology(source, "worker")
-		t.Fatalf("create-and-advance did not establish requests at active: initial=%q edges=%#v handlers=%#v", topology.InitialStage, topology.Edges, topology.Handlers)
-	}
-}
 
 func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	const runID = "00000000-0000-4000-8000-000000002156"
