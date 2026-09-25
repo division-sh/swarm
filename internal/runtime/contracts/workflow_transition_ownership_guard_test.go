@@ -40,7 +40,7 @@ func TestCompiledTransitionOwnershipGuardRejectsHostileUses(t *testing.T) {
 		"internal/runtime/semanticview", "internal/runtime/bootverify", "internal/runtime/pipeline",
 		"internal/runtime/engine", "internal/runtime/workflowlifecycle", "internal/runtime/gateruntime",
 		"internal/runtime/loopruntime", "internal/runtime/runforkexecution", "internal/runtime/authoringview",
-		"internal/runtime/routingtopology", "internal/cliapp", "internal/apiv1", "internal/serveapp",
+		"internal/runtime/routingtopology", "internal/runtime/manager", "internal/cliapp", "internal/apiv1", "internal/serveapp",
 		"internal/store/internal/backend/runforkpersistence",
 	} {
 		// The same hostile program must be rejected in every audited consumer
@@ -540,7 +540,11 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/contracts.WorkflowStageTopology.HandlerStages::graph metadata":                                                                               1,
 		"internal/runtime/contracts.WorkflowStageTopology.InitialStageRef::graph metadata":                                                                             2,
 		"internal/runtime/contracts.WorkflowStageTopology.HasInitialStage::graph metadata":                                                                             1,
-		"internal/runtime/contracts.WorkflowStageTopology.RequireStage::graph metadata":                                                                                5,
+		"internal/runtime/contracts.WorkflowStageTopology.InitialStoredStage::graph metadata":                                                                          3,
+		"internal/runtime/contracts.WorkflowStageTopology.RequireStage::graph metadata":                                                                                4,
+		"internal/runtime/contracts.WorkflowStageTopology.ResolveStoredStage::graph metadata":                                                                          5,
+		"internal/runtime/manager.AgentManager.prepareFlowInstanceActivation::call internal/runtime/semanticview.WorkflowStageTopology":                                1,
+		"internal/runtime/manager.AgentManager.prepareFlowInstanceActivation::graph metadata":                                                                          1,
 		"internal/runtime/contracts.WorkflowStageTopology.ResolveStage::graph metadata":                                                                                7,
 		"internal/runtime/contracts.WorkflowStageTopology.SameStageCatalog::graph metadata":                                                                            2,
 		"internal/runtime/contracts.WorkflowStageTopology.StageCount::graph metadata":                                                                                  2,

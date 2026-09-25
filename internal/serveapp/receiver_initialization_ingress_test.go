@@ -138,8 +138,14 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 	}
 	before := receiverIngressApplicationSnapshot(t, rt)
 	duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-	if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, receiverIngressApplicationSnapshot(t, rt)) {
-		t.Fatal("duplicate direct input recreated receiver or repeated execution")
+	if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID {
+		t.Fatalf("duplicate direct input changed publication identity: first=%+v duplicate=%+v", seed, duplicate)
+	}
+	after := receiverIngressApplicationSnapshot(t, rt)
+	for table, rows := range before {
+		if !reflect.DeepEqual(rows, after[table]) {
+			t.Fatalf("duplicate direct input changed %s: before=%v after=%v", table, rows, after[table])
+		}
 	}
 }
 
