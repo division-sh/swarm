@@ -96,6 +96,10 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 			for i, artifact := range artifacts {
 				runs[i] = uuid.NewString()
 				sourceartifactfixture.RequireArtifact(t, runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), selected, artifact)
+				entitySource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifact.BundleHash())
+				if err != nil {
+					t.Fatalf("load retained entity source %d: %v", i, err)
+				}
 				fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runs[i], Artifact: artifact, StartedAt: time.Now().UTC()}
 				if backend == "sqlite" {
 					storetest.RequireSQLiteRun(t, ctx, db, fixture)
@@ -113,7 +117,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				createCtx := runtimecorrelation.WithRunID(runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), runs[i])
 				if _, err := selected.CreateEntity(createCtx, runtimetools.EntityCreateRecord{
 					RunID: runs[i], EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: initial,
-					CreatedAt: time.Now().UTC(), Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "stage-recovery-proof", HandlerStep: "create_entity"},
+					Source: entitySource, CreatedAt: time.Now().UTC(), Writer: runtimetools.EntityMutationWriter{Type: "agent", ID: "stage-recovery-proof", HandlerStep: "create_entity"},
 				}); err != nil {
 					t.Fatalf("create retained entity %d: %v", i, err)
 				}
