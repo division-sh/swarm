@@ -20,7 +20,7 @@ func TestJSONAndNumericEntityMaterializationAndReload(t *testing.T) {
 	} {
 		for _, number := range []any{int64(8), float64(8), float64(8.25)} {
 			want := map[string]any{"json": value, "numeric": number}
-			got, err := Materialize(contract, want)
+			got, err := NormalizeState(contract, want)
 			if err != nil || !reflect.DeepEqual(got, want) {
 				t.Fatalf("materialize %T/%T: %#v %v", value, number, got, err)
 			}
@@ -33,7 +33,7 @@ func TestJSONAndNumericEntityMaterializationAndReload(t *testing.T) {
 				if err := canonicaljson.DecodePreservingNumberLexemes(raw, &reloaded); err != nil {
 					t.Fatal(err)
 				}
-				got, err = Materialize(contract, reloaded)
+				got, err = NormalizeState(contract, reloaded)
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("cycle %d %s: %#v %v; want %#v", cycle, raw, got, err, want)
 				}
@@ -42,8 +42,8 @@ func TestJSONAndNumericEntityMaterializationAndReload(t *testing.T) {
 	}
 	for _, number := range []any{int64(8), float64(8)} {
 		contract.Entity.Fields["numeric"] = contracts.EntityFieldDecl{Type: "numeric", Initial: number}
-		got, err := Materialize(contract, nil)
-		if err != nil || !reflect.DeepEqual(got, map[string]any{"numeric": number, "json": map[string]any{}}) {
+		got, err := Initialize(contract, nil)
+		if err != nil || !reflect.DeepEqual(got, map[string]any{"numeric": number}) {
 			t.Fatalf("initial/default: %#v %v", got, err)
 		}
 	}

@@ -125,6 +125,7 @@ type executionFrame struct {
 	loopActivation            *loopruntime.Activation
 	collectionPlan            runtimecontracts.WorkflowHandlerCollectionPlan
 	joinLoopGeneration        attemptgeneration.Generation
+	entityMutations           *entityruntime.MutationPlan
 }
 
 type handlerRuleSource string
@@ -488,12 +489,13 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		postCommitErr    error
 	)
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
-		loaded, err := e.loadState(lockCtx, req)
+		loaded, creating, err := e.loadState(lockCtx, req)
 		if err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "load_state")
 			return err
 		}
 		req.State = loaded
+		req.creating = creating
 		frame, err := e.newExecutionFrame(lockCtx, req)
 		if err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "base_context")
@@ -516,6 +518,11 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		if err := verifyComputeModuleReplayTraceCount(frame); err != nil {
 			result = frame.result
 			SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
+			return err
+		}
+		if err := e.validateEntityMutationList(&frame); err != nil {
+			result = frame.result
+			SetExecutionFailure(&result, err, "runtime.engine", "entity_final_candidate")
 			return err
 		}
 		result = frame.result
@@ -560,22 +567,25 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	return result, postCommitErr
 }
 
-func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSnapshot, error) {
+func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSnapshot, bool, error) {
 	state := req.State
 	if state.EntityID.IsZero() {
 		state.EntityID = req.EntityID
 	}
 	if req.EntityID.IsZero() {
-		return state, nil
+		return state, false, nil
 	}
 	loaded, ok, err := e.deps.StateRepo.LoadState(ctx, req.StateAddress())
 	if err != nil {
-		return StateSnapshot{}, err
+		return StateSnapshot{}, false, err
 	}
 	if ok {
-		return mergeStateSnapshots(state, loaded), nil
+		return mergeStateSnapshots(state, loaded), false, nil
 	}
-	return state, nil
+	if req.Handler.CreateEntity || req.EntityMaterializationAdmitted || req.Preview {
+		return state, req.Handler.CreateEntity || req.EntityMaterializationAdmitted, nil
+	}
+	return StateSnapshot{}, false, fmt.Errorf("existing entity %s has no stored state", req.EntityID)
 }
 
 func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) (executionFrame, error) {
@@ -596,13 +606,29 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	if len(payload) == 0 {
 		payload = map[string]any{}
 	}
-	base, err := BuildBaseContext(ContextBuilderInput{
+	contextInput := ContextBuilderInput{
 		Source:  e.deps.Source,
 		FlowID:  req.ExecutionFlowID.String(),
 		State:   state,
 		Event:   req.Event,
 		Payload: payload,
-	})
+	}
+	var base BaseContext
+	var creationPlan *entityruntime.MutationPlan
+	if req.creating {
+		contract, ok := entityruntime.ResolveForFlow(e.deps.Source, req.ExecutionFlowID.String())
+		if !ok {
+			return executionFrame{}, fmt.Errorf("entity creation requires a declared contract")
+		}
+		creationPlan, err = entityruntime.NewCreationMutationPlan(contract, state.StateCarrier.Fields)
+		if err == nil {
+			state.StateCarrier.Fields = creationPlan.Draft()
+			contextInput.State = state
+			base = baseContextWithAdmittedFields(contextInput, state.StateCarrier.Fields)
+		}
+	} else {
+		base, err = BuildBaseContext(contextInput)
+	}
 	if err != nil {
 		return executionFrame{}, err
 	}
@@ -614,6 +640,7 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	}
 	delivery, deliveryPresent := runtimedelivery.RouteFromContext(ctx)
 	frame := executionFrame{
+		entityMutations:          creationPlan,
 		ctx:                      ctx,
 		deliveryTarget:           runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
 		req:                      req,
@@ -1241,30 +1268,38 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 }
 
 func (e *Executor) stepCompute(frame *executionFrame) error {
-	if frame.rule != nil {
-		spec := frame.rule.Compute
-		if spec == nil || spec.Operation == runtimecontracts.ComputeOpLookup || spec.Operation == runtimecontracts.ComputeOpValidate || spec.Operation == runtimecontracts.ComputeOpModule {
-			return nil
-		}
-		return e.executeComputeSpec(frame, spec)
-	}
-	if frame.req.Handler.Compute != nil {
-		if err := e.executeComputeSpec(frame, frame.req.Handler.Compute); err != nil {
-			return err
-		}
-	}
-	for idx := range frame.req.Handler.Rules {
-		rule := &frame.req.Handler.Rules[idx]
-		if (rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindLookup &&
-			rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindValidate &&
-			rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindModule) || rule.Compute == nil {
-			continue
-		}
-		if err := e.executeComputeSpec(frame, rule.Compute); err != nil {
+	for _, site := range handlerComputations(frame.req.Handler, frame.rule) {
+		if err := e.executeComputeSpec(frame, site.spec); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+type handlerComputation struct {
+	spec      *runtimecontracts.ComputeSpec
+	ruleIndex int
+}
+
+func handlerComputations(handler runtimecontracts.SystemNodeEventHandler, selected *runtimecontracts.HandlerRuleEntry) []handlerComputation {
+	if selected != nil {
+		spec := selected.Compute
+		if spec == nil || spec.Operation == runtimecontracts.ComputeOpLookup || spec.Operation == runtimecontracts.ComputeOpValidate || spec.Operation == runtimecontracts.ComputeOpModule {
+			return nil
+		}
+		return []handlerComputation{{spec: spec, ruleIndex: -1}}
+	}
+	var sites []handlerComputation
+	if handler.Compute != nil {
+		sites = append(sites, handlerComputation{spec: handler.Compute, ruleIndex: -1})
+	}
+	for index := range handler.Rules {
+		rule := &handler.Rules[index]
+		if !handlerRuleSelectable(*rule) && rule.Compute != nil {
+			sites = append(sites, handlerComputation{spec: rule.Compute, ruleIndex: index})
+		}
+	}
+	return sites
 }
 
 func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontracts.ComputeSpec) error {
@@ -2130,6 +2165,7 @@ func frameExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionO
 	if frame.entityType != nil {
 		value := frame.entityType.Clone()
 		options.EntityType = &value
+		options.KnownPresence = EntityAssignmentPresencePaths(entityruntime.ObservedAssignmentFacts(value, frame.state.State.StateCarrier.Fields))
 	}
 	return options
 }
@@ -2294,9 +2330,12 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 		if err != nil {
 			return err
 		}
-		if err := e.writeStepValue(frame, "entity."+binding.TargetField, projected); err != nil {
+		if err := e.appendEntityMutation(frame, entityruntime.Mutation{Target: "entity." + binding.TargetField, Value: projected, ProjectionSource: binding.TargetDecl.MaterializeFrom}); err != nil {
 			return fmt.Errorf("materialize_from %s.%s: %w", binding.SourceNode.Key(), binding.AccumulatorName, err)
 		}
+	}
+	if err := e.validateEntityMutationList(frame); err != nil {
+		return err
 	}
 	frame.projectionApplied = true
 	return nil
@@ -2670,16 +2709,19 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 					delete(bucket.Raw(), handlerAccumulatorBucketKey)
 				}
 			}
-			delete(frame.state.State.StateCarrier.Fields, "accumulated_count")
-			delete(frame.state.State.StateCarrier.Fields, "accumulated_total")
-			delete(frame.state.State.StateCarrier.Fields, "received_items")
+			if err := e.resetNodeEntityProjections(frame); err != nil {
+				return err
+			}
 		case "pending_dedup":
-			delete(frame.state.State.StateCarrier.Fields, "dedup_key")
+			return fmt.Errorf("clear target pending_dedup is retired; use declared entity mutations")
 		default:
 			if err := e.clearStepValue(frame, target); err != nil {
 				return err
 			}
 		}
+	}
+	if err := e.validateEntityMutationList(frame); err != nil {
+		return err
 	}
 	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
@@ -2770,78 +2812,19 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 }
 
 func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersistencePrerequisites {
-	seen := map[string]int{}
-	fields := make([]EmitPersistenceFieldPrerequisite, 0, 4)
-	appendField := func(target string) {
-		field, path, ok := emitPersistenceFieldTarget(target)
-		if !ok {
-			return
-		}
-		prerequisite := EmitPersistenceFieldPrerequisite{Field: field}
-		if expected, ok := lookupParsedPath(frame.state.State.StateCarrier.Fields, path); ok {
-			prerequisite.Expected = expected
-			prerequisite.HasExpected = true
-		}
-		if idx, ok := seen[field]; ok {
-			fields[idx] = prerequisite
-			return
-		}
-		seen[field] = len(fields)
-		fields = append(fields, prerequisite)
+	if frame.entityMutations == nil {
+		return EmitPersistencePrerequisites{}
 	}
-	appendWrite := func(write runtimecontracts.WorkflowDataWrite) {
-		if write.IsContainedOperation() {
-			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.ExecutionFlowID.String())
-			if !ok {
-				return
-			}
-			target, err := entityruntime.ResolveContainedOperationTarget(contract, write.Target(), string(write.Operation), !write.Key.IsZero(), !write.Index.IsZero())
-			if err != nil {
-				return
-			}
-			appendField("entity." + target.RootField)
-			return
+	fields := make([]EmitPersistenceFieldPrerequisite, 0)
+	for _, field := range frame.entityMutations.TouchedRootFields() {
+		value, present := frame.state.State.StateCarrier.Fields[field]
+		presence := EntityFieldAbsent
+		if present {
+			presence = EntityFieldPresent
 		}
-		appendField(write.Target())
-	}
-	if frame.topLevelDataWritesApplied {
-		for _, write := range frame.topLevelDataAccumulation.Writes {
-			appendWrite(write)
-		}
-	}
-	if frame.rule != nil {
-		for _, write := range frame.rule.DataAccumulation.Writes {
-			appendWrite(write)
-		}
-	}
-	if spec := e.selectedCompute(&frame); spec != nil {
-		appendField(spec.StoreAs)
+		fields = append(fields, EmitPersistenceFieldPrerequisite{Field: field, Expected: value, Presence: presence})
 	}
 	return EmitPersistencePrerequisites{Fields: fields}
-}
-
-func emitPersistenceFieldTarget(target string) (string, paths.Path, bool) {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return "", paths.Path{}, false
-	}
-	parsed := paths.Parse(target)
-	if parsed.HasExplicitRoot() {
-		switch parsed.Root {
-		case paths.RootEntity, paths.RootMetadata:
-			parsed = paths.Path{Segments: parsed.Segments}
-		default:
-			return "", paths.Path{}, false
-		}
-	}
-	if len(parsed.Segments) == 0 {
-		return "", paths.Path{}, false
-	}
-	field := strings.Join(parsed.Segments, ".")
-	if strings.TrimSpace(field) == "" {
-		return "", paths.Path{}, false
-	}
-	return field, parsed, true
 }
 
 func decodePayload(raw json.RawMessage) (map[string]any, error) {
@@ -2907,15 +2890,7 @@ func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
 	if out.EnteredStateAt.IsZero() {
 		out.EnteredStateAt = base.EnteredStateAt
 	}
-	if len(out.StateCarrier.Fields) == 0 {
-		out.StateCarrier.Fields = cloneStringAnyMap(base.StateCarrier.Fields)
-	}
-	if len(out.StateCarrier.Gates) == 0 && len(base.StateCarrier.Gates) > 0 {
-		out.StateCarrier.Gates = mapsClone(base.StateCarrier.Gates)
-	}
-	if len(out.StateCarrier.StateBuckets) == 0 {
-		out.StateCarrier.StateBuckets = cloneStateBucketSet(base.StateCarrier.StateBuckets)
-	}
+	// The loaded carrier is a complete snapshot. Empty maps are not patches.
 	return out
 }
 
@@ -2955,31 +2930,12 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	case paths.RootJoin:
 		return fmt.Errorf("join context is read-only")
 	}
-	if frame.state.State.StateCarrier.Fields == nil {
-		frame.state.State.StateCarrier.Fields = map[string]any{}
-	}
-	storagePath := parsed
 	if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
 		return err
 	} else if entityTarget {
-		storagePath = paths.Parse(resolved.Path)
-		if value != nil && len(resolved.Field.Path) != 0 {
-			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.ExecutionFlowID.String())
-			if !ok {
-				return fmt.Errorf("flow %s has no declared entity contract", frame.req.ExecutionFlowID.String())
-			}
-			normalized, normalizeErr := entityruntime.NormalizeFieldValue(contract, resolved.Path, value)
-			if normalizeErr != nil {
-				return normalizeErr
-			}
-			value = normalized
-		}
-	} else if parsed.HasExplicitRoot() {
-		storagePath = paths.Path{Segments: parsed.Segments}
+		return e.appendEntityMutation(frame, entityruntime.Mutation{Target: "entity." + resolved.Path, Value: value})
 	}
-	setParsedValuePath(frame.state.State.StateCarrier.Fields, storagePath, value)
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	return nil
+	return fmt.Errorf("unsupported write target %s; use an entity field or an explicit evaluation-private scope", target)
 }
 
 func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
@@ -2988,15 +2944,8 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 		return nil
 	}
 	parsed := paths.Parse(target)
-	if !parsed.HasExplicitRoot() {
-		if _, resolved, entityTarget, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
-			return err
-		} else if entityTarget {
-			executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
-			return nil
-		}
-		executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(target, "."))
-		return nil
+	if !parsed.HasExplicitRoot() || parsed.Root == paths.RootEntity {
+		return fmt.Errorf("clear.targets entity fields are retired; use data_accumulation op: clear")
 	}
 	switch parsed.Root {
 	case paths.RootComputed:
@@ -3008,18 +2957,10 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 		delete(frame.state.FanOut, strings.Join(parsed.Segments, "."))
 	case paths.RootJoin:
 		return fmt.Errorf("join context is read-only")
-	case paths.RootEntity, paths.RootMetadata:
-		if parsed.Root == paths.RootEntity {
-			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.ExecutionFlowID.String(), target); err != nil {
-				return err
-			} else {
-				executionDeletePath(frame.state.State.StateCarrier.Fields, strings.Split(resolved.Path, "."))
-			}
-			return nil
-		}
-		executionDeletePath(frame.state.State.StateCarrier.Fields, parsed.Segments)
+	case paths.RootMetadata:
+		return fmt.Errorf("clear.targets metadata alias is retired; use data_accumulation op: clear")
 	default:
-		delete(frame.state.State.StateCarrier.Fields, target)
+		return fmt.Errorf("unsupported clear target %s", target)
 	}
 	return nil
 }
@@ -3194,25 +3135,47 @@ func handlerSelectionContext(source handlerRuleSource) (handlerselection.Context
 	}
 }
 
-func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) error {
-	current := e.currentContext(frame)
+func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) (err error) {
+	if len(spec.Writes) == 0 {
+		return nil
+	}
+	before := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	defer func() {
+		if err != nil {
+			frame.state.State.StateCarrier.Fields = before
+		}
+	}()
 	for _, write := range spec.Writes {
+		current := e.currentContext(frame)
+		op := entityruntime.Mutation{Target: write.Target()}
 		if write.IsContainedOperation() {
-			if err := e.applyContainedDataOperation(frame, current, write); err != nil {
-				return fmt.Errorf("data_accumulation target %s: %w", strings.TrimSpace(write.Target()), err)
+			op, err = evaluateContainedMutation(frame, current, write)
+			if err != nil {
+				return err
+			}
+			if err := e.appendEntityMutation(frame, op); err != nil {
+				return err
+			}
+			continue
+		}
+		if write.Operation == runtimecontracts.WorkflowDataOperationClear {
+			op.Operation = entityruntime.MutationClear
+			if err := e.appendEntityMutation(frame, op); err != nil {
+				return err
 			}
 			continue
 		}
 		target := strings.TrimSpace(write.Target())
 		if target == "" {
-			continue
+			return fmt.Errorf("data_accumulation target is required")
 		}
 		switch parsed := paths.Parse(target); parsed.Root {
 		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
 			return fmt.Errorf("data_accumulation target %s: unsupported target scope", target)
 		}
 		if write.Value.HasLiteralValue() {
-			if err := e.writeStepValue(frame, target, write.Value.Literal); err != nil {
+			op.Value = write.Value.Literal
+			if err := e.appendEntityMutation(frame, op); err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}
 			continue
@@ -3222,7 +3185,8 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			if err != nil || !ok {
 				return fmt.Errorf("data_accumulation target %s: reference %s unavailable: %v", target, write.Value.Ref, err)
 			}
-			if err := e.writeStepValue(frame, target, value); err != nil {
+			op.Value = value
+			if err := e.appendEntityMutation(frame, op); err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}
 			continue
@@ -3232,20 +3196,27 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			if err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}
-			if err := e.writeStepValue(frame, target, value); err != nil {
+			op.Value = value
+			if err := e.appendEntityMutation(frame, op); err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}
 			continue
 		}
 		source := strings.TrimSpace(write.Source())
 		if source == "" {
-			continue
+			return fmt.Errorf("data_accumulation source is required for %s", target)
 		}
 		if value, ok := lookupPath(cloneStringAnyMap(current.Payload.Raw()), source); ok {
-			if err := e.writeStepValue(frame, target, value); err != nil {
+			op.Value = value
+			if err := e.appendEntityMutation(frame, op); err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
 			}
+		} else {
+			return fmt.Errorf("data_accumulation target %s: source payload.%s is absent", target, source)
 		}
+	}
+	if err := e.validateEntityMutationList(frame); err != nil {
+		return err
 	}
 	frame.state.State.SetBookkeeping("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type())))
 	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)

@@ -76,10 +76,10 @@ func materializeEntityStateRow(source semanticview.Source, row map[string]any) (
 	projected := projectAgentEntityStateRow(row)
 	contract, ok := entityruntime.ResolveForEntityRow(source, projected)
 	if !ok {
-		return projected, nil
+		return nil, fmt.Errorf("entity read requires its declared flow contract")
 	}
 	fields := entityRowFieldMap(projected)
-	materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
+	materialized, err := entityruntime.NormalizeState(contract, fields)
 	if err != nil {
 		return nil, err
 	}

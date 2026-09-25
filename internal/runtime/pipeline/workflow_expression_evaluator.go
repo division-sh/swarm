@@ -165,7 +165,6 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		}
 	})
 	normalized = normalizeWorkflowExpressionStringLiterals(normalized)
-	normalized = rewriteWorkflowExpressionEntityNullPresenceChecks(normalized)
 	if err := workflowexpr.ValidateEventReferences(normalized); err != nil {
 		return "", workflowExpressionContext{}, err
 	}
@@ -205,10 +204,6 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		return "", workflowExpressionContext{}, err
 	}
 	return normalized, normalizedCtx, nil
-}
-
-func rewriteWorkflowExpressionEntityNullPresenceChecks(expression string) string {
-	return workflowexpr.RewriteEntityNullPresenceChecks(expression)
 }
 
 func rewriteWorkflowExpressionQueryEntityCounts(expression string, ctx workflowExpressionContext) (string, error) {

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -64,34 +65,21 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		return nil, failures.New(failures.ClassAuthorizationDenied, "runtime_materialized_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName})
 	}
 	currentFields := entityRowFieldMap(row)
-	value, err := normalizeEntityFieldValue(schema, field, payload["value"])
+	candidate, err := entityruntime.ApplyMutations(schema.Contract, currentFields, []entityruntime.Mutation{{Target: "entity." + field.Path, Value: payload["value"]}})
 	if err != nil {
+		if errors.Is(err, entityruntime.ErrImmutableMutation) {
+			return nil, failures.Wrap(failures.ClassAuthorizationDenied, "immutable_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName}, err)
+		}
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", map[string]any{"field": fieldName}, err)
 	}
-	if field.FieldDecl.Immutable {
-		materializedCurrent, currentErr := entityruntime.Materialize(schema.Contract, entityruntime.DeclaredValues(schema.Contract, currentFields))
-		if currentErr != nil {
-			return nil, failures.Wrap(failures.ClassInternalFailure, "immutable_field_current_value_unavailable", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName}, currentErr)
-		}
-		if currentValue, exists := entityruntime.PathValue(materializedCurrent, field.Path); exists && !valuesEqual(currentValue, value) {
-			return nil, failures.New(failures.ClassAuthorizationDenied, "immutable_field_write_forbidden", "tool-executor", "exec_save_entity_field.field", map[string]any{"action": "entity_write", "field": fieldName})
-		}
-	}
-	valueJSON, err := json.Marshal(value)
-	if err != nil {
-		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", map[string]any{"field": fieldName}, err)
-	}
-	pathSegments, err := entityJSONPathSegments(field.Path)
-	if err != nil {
-		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_save_entity_field.field", map[string]any{"field": fieldName})
-	}
+	value, _ := entityruntime.PathValue(candidate, field.Path)
 
 	result, err := store.SaveEntityField(ctx, EntityFieldUpdate{
-		RunID:        identity.RunID,
-		EntityID:     identity.EntityID,
-		FieldPath:    field.Path,
-		PathSegments: pathSegments,
-		ValueJSON:    json.RawMessage(valueJSON),
+		RunID:     identity.RunID,
+		EntityID:  identity.EntityID,
+		FieldPath: field.Path,
+		Value:     value,
+		Source:    source,
 		Writer: EntityMutationWriter{
 			Type:        "agent",
 			ID:          strings.TrimSpace(actor.ID),
@@ -284,7 +272,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 			return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
 		}
 	}
-	normalizedFields, err := entityruntime.Materialize(contract, fieldsPayload)
+	normalizedFields, err := entityruntime.Initialize(contract, fieldsPayload)
 	if err != nil {
 		return nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "exec_create_entity.fields", nil, err)
 	}
@@ -294,6 +282,7 @@ func (e *Executor) execCreateEntity(ctx context.Context, actor models.AgentConfi
 	}
 	now := time.Now().UTC()
 	result, err := store.CreateEntity(ctx, EntityCreateRecord{
+		Source:       source,
 		RunID:        runID,
 		EntityID:     entityID,
 		FlowInstance: flowInstance,

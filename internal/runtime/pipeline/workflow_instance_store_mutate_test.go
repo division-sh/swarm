@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -47,6 +49,9 @@ func TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores(t *testin
 		setup := setup
 		t.Run(setup.name, func(t *testing.T) {
 			store, ctx := setup.open(t)
+			source := testRootEntityContractSource("bookkeeping", "test_entity")
+			bundle, _ := semanticview.Bundle(source)
+			bundle.RootEntities["test_entity"].Fields["status"] = runtimecontracts.EntityFieldDecl{Type: "text"}
 			entityID := uuid.NewString()
 			route := testRunScopedWorkflowInstance("bookkeeping/root")
 			instance := materializedWorkflowInstanceForTest(WorkflowInstance{
@@ -78,7 +83,7 @@ func TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores(t *testin
 				if err != nil {
 					return err
 				}
-				return applyEngineStateMutation(current, runtimeengine.StateMutation{StateCarrier: carrier}, nil, nil, "")
+				return applyEngineStateMutation(current, runtimeengine.StateMutation{StateCarrier: carrier}, source, ".")
 			}); err != nil {
 				t.Fatalf("commit workflow engine mutation: %v", err)
 			}

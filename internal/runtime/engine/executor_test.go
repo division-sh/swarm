@@ -508,6 +508,21 @@ func sourceWithPolicy(flowID string, values map[string]any) semanticview.Source 
 	})
 }
 
+func sourceWithPolicyEntity(flowID string, values map[string]any, fields map[string]runtimecontracts.EntityFieldDecl) semanticview.Source {
+	source := sourceWithPolicy(flowID, values)
+	bundle, _ := semanticview.Bundle(source)
+	bundle.RootEntities = runtimecontracts.EntityContractsDocument{"subject": {Fields: fields}}
+	return source
+}
+
+func rootHandlerOrderSource(fields map[string]runtimecontracts.EntityFieldDecl, event runtimecontracts.EventCatalogEntry) semanticview.Source {
+	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: fields}},
+		Events:       map[string]runtimecontracts.EventCatalogEntry{"task.completed": event},
+	})
+	return sourceWithFixtureStages(source, ".", "pending", "pending")
+}
+
 func stubSourceWithRootEntityContract() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -569,7 +584,8 @@ func sourceWithKilledState() semanticview.Source {
 
 type stubStateRepo struct{}
 type recordingStateRepo struct {
-	saves int
+	saves    int
+	snapshot *StateSnapshot
 }
 type stubEntityCollectionReader struct {
 	runID      string
@@ -641,6 +657,9 @@ func (stubStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bo
 }
 func (stubStateRepo) SaveState(context.Context, StateAddress, StateMutation) error { return nil }
 func (r *recordingStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
+	if r.snapshot != nil {
+		return *r.snapshot, true, nil
+	}
 	return StateSnapshot{}, false, nil
 }
 func (r *recordingStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
@@ -1265,9 +1284,23 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 
 func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	shaper := &recordingPayloadShaper{}
+	state := testStateSnapshot("discovered", map[string]any{
+		"composite_score": 0, "dimensions_requested": []any{"build_complexity"},
+	}, nil, nil)
+	source := mustCompileEngineSource(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"composite_score": {Type: "integer"}, "dimensions_requested": {Type: "[text]"},
+		}}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"score.dimension_complete": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{
+				"dimension": {Type: "text"}, "score": {Type: "integer"},
+			}),
+			"vertical.rejected": {},
+		},
+	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "scoring", "discovered", "discovered"),
-		StateRepo:     stubStateRepo{},
+		Source:        sourceWithFixtureStages(source, ".", "discovered", "discovered"),
+		StateRepo:     sparseSnapshotRepo{snapshot: state},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 		PayloadShaper: shaper,
@@ -1277,10 +1310,10 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	}
 	req := ExecutionRequest{
 		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-		Node:     testFlowExecutableNode(t, "scoring", "scoring-node"),
+		Node:     testRootExecutableNode(t, "scoring-node"),
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
-			events.EventType("scoring/score.dimension_complete"),
+			events.EventType("score.dimension_complete"),
 			"",
 			"",
 			[]byte(`{"dimension":"build_complexity","score":80}`),
@@ -1291,13 +1324,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 		),
 
-		State: StateSnapshot{
-			EntityID:     identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
-			CurrentState: "discovered",
-			StateCarrier: NewStateCarrier(map[string]any{
-				"composite_score": 0,
-			}, nil, map[string]map[string]any{}),
-		},
+		State: state,
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
@@ -1310,7 +1337,6 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 			},
 		},
 	}
-	req.State.SetField("dimensions_requested", []any{"build_complexity"})
 	result, err := exec.ExecuteSemanticFixture(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -1354,6 +1380,8 @@ func accumulatorProjectionTestSource(t testing.TB) semanticview.Source {
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"vertical": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"handler_marker": {Type: "text"},
+					"rule_marker":    {Type: "text"},
 					"scores": {
 						Type:            "[DimensionScore]",
 						Initial:         []any{},
@@ -1598,7 +1626,7 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
-				TargetField: "metadata.handler_marker",
+				TargetField: "entity.handler_marker",
 				Value:       runtimecontracts.LiteralExpression("top-level"),
 			}},
 		},
@@ -1607,7 +1635,7 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 			Condition: "else",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetField: "metadata.rule_marker",
+					TargetField: "entity.rule_marker",
 					Value:       runtimecontracts.LiteralExpression("rule"),
 				}},
 			},
@@ -1615,8 +1643,8 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 				Event: "vertical.scored",
 				Fields: map[string]runtimecontracts.ExpressionValue{
 					"scores":         runtimecontracts.RefExpression("entity.scores"),
-					"handler_marker": runtimecontracts.RefExpression("metadata.handler_marker"),
-					"rule_marker":    runtimecontracts.RefExpression("metadata.rule_marker"),
+					"handler_marker": runtimecontracts.RefExpression("entity.handler_marker"),
+					"rule_marker":    runtimecontracts.RefExpression("entity.rule_marker"),
 				},
 			},
 		}},
@@ -1668,7 +1696,7 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 			Condition: "payload.score > 100",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetField: "metadata.rule_marker",
+					TargetField: "entity.rule_marker",
 					Value:       runtimecontracts.LiteralExpression("unexpected"),
 				}},
 			},
@@ -1785,7 +1813,7 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
-				TargetField: "metadata.handler_marker",
+				TargetField: "entity.handler_marker",
 				Value:       runtimecontracts.LiteralExpression("top-level"),
 			}},
 		},
@@ -1796,7 +1824,7 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 			Emit: runtimecontracts.EmitSpec{
 				Event: "vertical.scored",
 				Fields: map[string]runtimecontracts.ExpressionValue{
-					"handler_marker": runtimecontracts.RefExpression("metadata.handler_marker"),
+					"handler_marker": runtimecontracts.RefExpression("entity.handler_marker"),
 					"scores":         runtimecontracts.RefExpression("entity.scores"),
 					"target":         runtimecontracts.CELExpression("target_item"),
 				},
@@ -2364,23 +2392,26 @@ func newEngineTestJoinActivation(node identity.ExecutableNode, handlerEvent stri
 }
 
 func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) {
+	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
+	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
+	storeAccumulator(&state, lifecycleNode, "component.scaffolded", &Accumulator{
+		Items: []map[string]any{{"component_id": "a"}, {"component_id": "b"}},
+	})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "operating"},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"product": {Fields: map[string]runtimecontracts.EntityFieldDecl{"component_count": {Type: "integer"}}},
+		},
+	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "operating", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
+		Source:        sourceWithFixtureStages(source, "operating", "pending", "pending"),
+		StateRepo:     sparseSnapshotRepo{snapshot: state},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
-	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
-	storeAccumulator(&state, lifecycleNode, "component.scaffolded", &Accumulator{
-		Items: []map[string]any{
-			{"component_id": "a"},
-			{"component_id": "b"},
-		},
-	})
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     lifecycleNode,
@@ -2409,7 +2440,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.StateMutation.Fields["component_count"]; got != 2 {
+	if got := result.StateMutation.Fields["component_count"]; got != int64(2) {
 		t.Fatalf("component_count = %#v, want 2", got)
 	}
 }
@@ -3135,9 +3166,13 @@ func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotReso
 type orderedStateRepo struct {
 	order    *[]string
 	mutation StateMutation
+	snapshot *StateSnapshot
 }
 
 func (r *orderedStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
+	if r.snapshot != nil {
+		return *r.snapshot, true, nil
+	}
 	return testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}), true, nil
 }
 
@@ -3527,7 +3562,10 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", nil), "flow-1", "pending", "pending", "done"),
+		Source: sourceWithFixtureStages(sourceWithPolicyEntity(".", nil, map[string]runtimecontracts.EntityFieldDecl{
+			"dedup_key": {Type: "text", IsOptional: true}, "query_rows": {Type: "[ScoredItem]"},
+			"filtered": {Type: "[ScoredItem]"}, "total": {Type: "integer"}, "active_count": {Type: "integer"},
+		}), ".", "pending", "pending", "done"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3541,16 +3579,17 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 			"dedup_key": "dup-1",
 		}, nil, map[string]map[string]any{}),
 	}
-	node := testFlowExecutableNode(t, "flow-1", "node-1")
+	node := testRootExecutableNode(t, "node-1")
 	storeAccumulator(&initial, node, "items.submitted", &Accumulator{
 		Received: map[string]bool{"seed": true},
 		Items:    []map[string]any{{"seed": true}},
 	})
+	repo.snapshot = &initial
 
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     node,
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"score":60,"active":true},{"score":40,"active":true},{"score":60,"active":false}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"category":"test","items":[{"score":60,"active":true,"status":"ready","name":"one","category":"test"},{"score":40,"active":true,"status":"ready","name":"two","category":"test"},{"score":60,"active":false,"status":"ready","name":"three","category":"test"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -3572,9 +3611,10 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 				StoreAs:   "entity.active_count",
 			},
 			Clear: &runtimecontracts.ClearSpec{
-				Targets: []string{"pending_dedup", "accumulator_state"},
+				Targets: []string{"accumulator_state"},
 			},
-			AdvancesTo: "done",
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{Operation: "clear", TargetRef: "entity.dedup_key"}}},
+			AdvancesTo:       "done",
 		},
 		State: initial,
 	})
@@ -3585,10 +3625,10 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	if !ok || len(filtered) != 2 {
 		t.Fatalf("filtered = %#v", repo.mutation.Fields["filtered"])
 	}
-	if got := repo.mutation.Fields["total"]; got != 120 {
+	if got := repo.mutation.Fields["total"]; got != int64(120) {
 		t.Fatalf("total = %#v, want 120", got)
 	}
-	if got := repo.mutation.Fields["active_count"]; got != 1 {
+	if got := repo.mutation.Fields["active_count"]; got != int64(1) {
 		t.Fatalf("active_count = %#v, want 1", got)
 	}
 	if _, ok := repo.mutation.Fields["dedup_key"]; ok {
@@ -3608,7 +3648,9 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", nil), "flow-1", "pending", "pending"),
+		Source: sourceWithFixtureStages(sourceWithPolicyEntity(".", nil, map[string]runtimecontracts.EntityFieldDecl{
+			"grouped": {Type: "map[text]integer"},
+		}), ".", "pending", "pending"),
 		StateRepo:     repo,
 		MutationOwner: stubMutationOwner{state: repo},
 		Locker:        stubLocker{},
@@ -3618,7 +3660,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"items":[{"status":"queued"},{"status":"queued"},{"status":"done"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
@@ -3637,7 +3679,7 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	if !ok {
 		t.Fatalf("grouped = %#v", repo.mutation.Fields["grouped"])
 	}
-	if grouped["queued"] != 2 || grouped["done"] != 1 {
+	if grouped["queued"] != int64(2) || grouped["done"] != int64(1) {
 		t.Fatalf("grouped counts = %#v", grouped)
 	}
 }
@@ -3655,7 +3697,7 @@ func TestExecutorOrdinaryEventPayloadPreservesIntegerForCELArithmetic(t *testing
 		EntityID: "entity-1",
 		Node:     testRootExecutableNode(t, "node-1"),
 		Event: eventtest.RunCreatingRootIngress(
-			"evt-integer", "scores.ready", "", "", json.RawMessage(`{"items":[{"integer":75,"decimal":75.0,"exponent":75e0}]}`),
+			"evt-integer", "scores.ready", "", "", json.RawMessage(`{"threshold":0.0,"items":[{"score":75.0,"category":1,"integer":75,"decimal":75.0,"exponent":75e0}]}`),
 			0, "", "", events.EventEnvelope{}, time.Time{},
 		),
 		Handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
@@ -4090,7 +4132,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     testRootExecutableNode(t, "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"score":5,"items":[{"score":7},{"score":5}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress("evt-2", "digest.requested", "", "", json.RawMessage(`{"score":5,"items":[{"score":7,"active":true,"status":"ready","name":"first","category":"test"},{"score":5,"active":true,"status":"ready","name":"second","category":"test"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Query: &runtimecontracts.QuerySpec{
 				Source:  "payload.items",
@@ -4115,7 +4157,7 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 
 func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", map[string]any{"score": 1}), "flow-1", "pending", "pending"),
+		Source:        sourceWithFixtureStages(sourceWithPolicy(".", map[string]any{"score": 1}), ".", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -4125,7 +4167,7 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 	}
 	_, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"score":5,"items":[{"score":7}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Filter: &runtimecontracts.FilterSpec{
@@ -4143,6 +4185,10 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 
 func TestExecutorEntityCollectionConditionUsesCompiledItemType(t *testing.T) {
 	repo := &orderedStateRepo{order: &[]string{}}
+	stored := testStateSnapshot("pending", map[string]any{
+		"items": []any{map[string]any{"score": 7}, map[string]any{"score": 3}},
+	}, nil, nil)
+	repo.snapshot = &stored
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(entityCollectionExpressionSource(), ".", "pending", "pending"),
 		StateRepo:     repo,
@@ -4939,7 +4985,8 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 }
 
 func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *testing.T) {
-	stateRepo := &recordingStateRepo{}
+	stored := testStateSnapshot("pending", map[string]any{}, nil, nil)
+	stateRepo := &recordingStateRepo{snapshot: &stored}
 	publications := &recordingPublicationCommitter{}
 	shaper := &eventErrPayloadShaper{failEvent: "flow-1/handler.succeeded"}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -4985,9 +5032,12 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 }
 
 func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
+	state := testStateSnapshot("pending", map[string]any{}, nil, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
+		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
+			"final_source": {Type: "text"}, "rule_only": {Type: "text"},
+		}, requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"score": {Type: "integer"}})),
+		StateRepo:     sparseSnapshotRepo{snapshot: state},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
@@ -4996,12 +5046,12 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
-					TargetField: "metadata.final_source",
+					TargetField: "entity.final_source",
 					Value:       runtimecontracts.LiteralExpression("handler"),
 				}},
 			},
@@ -5009,16 +5059,16 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 				Condition: "payload.score > 5",
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 					Writes: []runtimecontracts.WorkflowDataWrite{{
-						TargetField: "metadata.final_source",
+						TargetField: "entity.final_source",
 						Value:       runtimecontracts.LiteralExpression("rule"),
 					}, {
-						TargetField: "metadata.rule_only",
+						TargetField: "entity.rule_only",
 						Value:       runtimecontracts.LiteralExpression("applied"),
 					}},
 				},
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: state,
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5032,9 +5082,12 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 }
 
 func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
+	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
+		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
+			"branch_target": {Type: "text"}, "rule_selected": {Type: "boolean"},
+		}, runtimecontracts.EventCatalogEntry{}),
+		StateRepo:     sparseSnapshotRepo{snapshot: state},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
@@ -5047,7 +5100,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -5067,7 +5120,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 				},
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: state,
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5084,9 +5137,12 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 }
 
 func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
+	state := testStateSnapshot("pending", map[string]any{"branch_target": "prior"}, nil, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
+		Source: rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
+			"branch_target": {Type: "text"},
+		}, runtimecontracts.EventCatalogEntry{}),
+		StateRepo:     sparseSnapshotRepo{snapshot: state},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
@@ -5099,7 +5155,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
+		Node:     testRootExecutableNode(t, "node-1"),
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -5114,7 +5170,7 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 				Emit:      runtimecontracts.EmitSpec{Event: "branch.selected"},
 			}},
 		},
-		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		State: state,
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -5671,8 +5727,13 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 }
 
 func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.T) {
+	source := fanOutEntitySource(t)
+	bundle, _ := semanticview.Bundle(source)
+	for _, name := range []string{"rule_count", "top_count", "top_saw_rule"} {
+		bundle.RootEntities["subject"].Fields[name] = runtimecontracts.EntityFieldDecl{Type: "integer"}
+	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(fanOutEntitySource(t), ".", "pending", "pending"),
+		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5687,13 +5748,13 @@ func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.
 		Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-count-order"), "task.completed", "", "", json.RawMessage(`{"enabled":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetRef: "metadata.top_count", Value: runtimecontracts.CELExpression("fan_out.count")},
-				{TargetRef: "metadata.top_saw_rule", Value: runtimecontracts.CELExpression("entity.rule_count")},
+				{TargetRef: "entity.top_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				{TargetRef: "entity.top_saw_rule", Value: runtimecontracts.CELExpression("entity.rule_count")},
 			}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
 				Condition: "payload.enabled",
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
-					{TargetRef: "metadata.rule_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+					{TargetRef: "entity.rule_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 				}},
 				FanOut: &runtimecontracts.FanOutSpec{
 					ItemsFrom: "entity.items", As: "fan_item", Identity: "fan_item",
@@ -6793,7 +6854,7 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 	if got := analysis["summary"]; got != "ready" {
 		t.Fatalf("analysis.summary = %#v, want ready", got)
 	}
-	if got := analysis["report_count"]; got != 2 {
+	if got := analysis["report_count"]; got != int64(2) {
 		t.Fatalf("analysis.report_count = %#v, want 2", got)
 	}
 }
@@ -7107,9 +7168,17 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 }
 
 func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
+	source := stubSourceWithRootEntityContract()
+	bundle, _ := semanticview.Bundle(source)
+	analysisType := bundle.RootTypes.Types["Analysis"]
+	analysisType.Fields["summary"] = runtimecontracts.TypeFieldSpec{Type: "text", IsOptional: true}
+	bundle.RootTypes.Types["Analysis"] = analysisType
+	stored := testStateSnapshot("pending", map[string]any{
+		"analysis": map[string]any{"summary": "stale", "report_count": 2},
+	}, nil, nil)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSourceWithRootEntityContract(), ".", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
+		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
+		StateRepo:     sparseSnapshotRepo{snapshot: stored},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, nil)
@@ -7122,14 +7191,9 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 		Node:            testRootExecutableNode(t, "node-1"),
 		Event:           eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Clear: &runtimecontracts.ClearSpec{Targets: []string{"entity.analysis.summary"}},
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{Operation: "clear", TargetRef: "entity.analysis.summary"}}},
 		},
-		State: testStateSnapshot("pending", map[string]any{
-			"analysis": map[string]any{
-				"summary":      "stale",
-				"report_count": 2,
-			},
-		}, nil, map[string]map[string]any{}),
+		State: stored,
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -7141,48 +7205,51 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	if _, exists := analysis["summary"]; exists {
 		t.Fatalf("analysis.summary unexpectedly present: %#v", analysis)
 	}
-	if got := analysis["report_count"]; got != 2 {
+	if got := analysis["report_count"]; got != int64(2) {
 		t.Fatalf("analysis.report_count = %#v, want 2", got)
 	}
 }
 
-func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
+func TestExecutor_PrivateResetPreservesBusinessFields(t *testing.T) {
+	source := stubSourceWithRootEntityContract()
+	bundle, _ := semanticview.Bundle(source)
+	for name, field := range map[string]runtimecontracts.EntityFieldDecl{
+		"dedup_key": {Type: "text"}, "accumulated_total": {Type: "integer"}, "received_items": {Type: "[text]"},
+	} {
+		bundle.RootEntities["subject"].Fields[name] = field
+	}
+	node := testRootExecutableNode(t, "node-1")
+	initial := testStateSnapshot("pending", map[string]any{
+		"dedup_key": "dup-1", "accumulated_total": 5, "received_items": []any{"a"},
+	}, nil, map[string]map[string]any{
+		node.Key(): {handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}}},
+	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(stubSourceWithRootEntityContract(), "root", "pending", "pending"),
-		StateRepo:     stubStateRepo{},
+		Source:        sourceWithFixtureStages(source, ".", "pending", "pending"),
+		StateRepo:     sparseSnapshotRepo{snapshot: initial},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	node := testFlowExecutableNode(t, "root", "node-1")
-	initial := testStateSnapshot("pending", map[string]any{
-		"dedup_key":         "dup-1",
-		"accumulated_total": 5,
-		"received_items":    []any{"a"},
-	}, nil, map[string]map[string]any{
-		node.Key(): {
-			handlerAccumulatorBucketKey: map[string]any{"items": []any{"a"}},
-		},
-	})
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     node,
 		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup", "accumulator_state"}},
+			Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}},
 		},
 		State: initial,
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if _, ok := result.StateMutation.Fields["dedup_key"]; ok {
-		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", result.StateMutation.Fields)
+	if got := result.StateMutation.Fields["dedup_key"]; got != "dup-1" {
+		t.Fatalf("private reset changed dedup_key: %#v", result.StateMutation.Fields)
 	}
-	if _, ok := result.StateMutation.Fields["received_items"]; ok {
-		t.Fatalf("expected received_items to be cleared, metadata=%#v", result.StateMutation.Fields)
+	if got := result.StateMutation.Fields["received_items"]; !reflect.DeepEqual(got, []any{"a"}) {
+		t.Fatalf("private reset changed received_items: %#v", result.StateMutation.Fields)
 	}
 	if nodeBucket, ok := result.StateMutation.StateBuckets[node.Key()]; ok {
 		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
@@ -7392,7 +7459,9 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 
 func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", nil), "flow-1", "pending", "pending", "done"),
+		Source: sourceWithFixtureStages(sourceWithPolicyEntity(".", nil, map[string]runtimecontracts.EntityFieldDecl{
+			"grouped": {Type: "map[text][ScoredItem]"},
+		}), ".", "pending", "pending", "done"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -7402,8 +7471,8 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Node:     testRootExecutableNode(t, "node-1"),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"items":[{"name":"a","category":"x","score":1,"status":"active","active":true},{"name":"b","category":"y","score":2,"status":"active","active":true},{"name":"c","category":"x","score":3,"status":"active","active":true}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",
@@ -7433,7 +7502,9 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 
 func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        sourceWithFixtureStages(sourceWithPolicy("flow-1", map[string]any{"category": "policy"}), "flow-1", "pending", "pending", "done"),
+		Source: sourceWithFixtureStages(sourceWithPolicyEntity(".", map[string]any{"category": "policy"}, map[string]runtimecontracts.EntityFieldDecl{
+			"grouped": {Type: "map[text][ScoredItem]"}, "category": {Type: "text"},
+		}), ".", "pending", "pending", "done"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -7443,8 +7514,8 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Node:     testRootExecutableNode(t, "node-1"),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "items.submitted", "", "", json.RawMessage(`{"category":"payload","items":[{"name":"a","category":"x","score":1,"status":"active","active":true},{"name":"b","category":"y","score":2,"status":"active","active":true},{"name":"c","category":"x","score":3,"status":"active","active":true}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			GroupBy: &runtimecontracts.GroupBySpec{
 				ItemsFrom: "payload.items",

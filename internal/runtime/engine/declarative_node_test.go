@@ -61,7 +61,7 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        source,
-		StateRepo:     stubStateRepo{},
+		StateRepo:     sparseSnapshotRepo{snapshot: StateSnapshot{EntityID: "entity-1", CurrentState: "pending"}},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, nil)
@@ -114,7 +114,7 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 				".": runtimecontracts.BuildWorkflowStageTopology(".", "", nil, nil, nil, nil, nil),
 			},
 		}}),
-		StateRepo:     stubStateRepo{},
+		StateRepo:     sparseSnapshotRepo{snapshot: StateSnapshot{EntityID: "entity-1", StateCarrier: NewStateCarrier(nil, map[string]bool{"gate_a": true}, nil)}},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
 	}, nil)

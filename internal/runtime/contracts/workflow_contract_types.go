@@ -928,6 +928,7 @@ const (
 	WorkflowDataOperationDelete WorkflowDataOperation = "delete"
 	WorkflowDataOperationAppend WorkflowDataOperation = "append"
 	WorkflowDataOperationUpdate WorkflowDataOperation = "update"
+	WorkflowDataOperationClear  WorkflowDataOperation = "clear"
 )
 
 type ExpressionValue struct {
@@ -1122,6 +1123,7 @@ type EntityContract struct {
 
 type EntityFieldDecl struct {
 	Type               string            `yaml:"type"`
+	IsOptional         bool              `yaml:"-"`
 	Initial            any               `yaml:"initial"`
 	Indexed            bool              `yaml:"indexed"`
 	Immutable          bool              `yaml:"immutable"`
@@ -1481,10 +1483,13 @@ func (w WorkflowDataWrite) HasLiteralValue() bool {
 }
 
 func (w WorkflowDataWrite) IsContainedOperation() bool {
-	return strings.TrimSpace(string(w.Operation)) != ""
+	return strings.TrimSpace(string(w.Operation)) != "" && w.Operation != WorkflowDataOperationClear
 }
 
 func (w WorkflowDataWrite) SourceExpression() ExpressionValue {
+	if w.Operation == WorkflowDataOperationClear {
+		return ExpressionValue{}
+	}
 	if !w.Value.IsZero() {
 		return w.Value
 	}

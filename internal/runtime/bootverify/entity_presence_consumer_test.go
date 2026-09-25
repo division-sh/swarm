@@ -4,8 +4,11 @@ import (
 	"context"
 	rc "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
@@ -23,7 +26,11 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				case "guard":
 					handler.Guard = &rc.GuardSpec{Check: value + ` == "fallback"`}
 				case "rule":
-					handler.Rules = []rc.HandlerRuleEntry{{ID: "accept", Condition: value + ` == "fallback"`}}
+					var rule rc.HandlerRuleEntry
+					if err := yaml.Unmarshal([]byte("id: accept\ncondition: "+strconv.Quote(value+` == "fallback"`)), &rule); err != nil {
+						t.Fatal(err)
+					}
+					handler.Rules = []rc.HandlerRuleEntry{rule}
 				case "write":
 					handler.DataAccumulation = rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{{TargetField: "captured", Value: rc.CELExpression(value)}}}
 				case "emit":
@@ -38,7 +45,7 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				bundle.Platform.Platform.Name = "presence-proof"
 				bundle.Platform.Platform.Version = "1"
 				entity := bundle.RootEntities["items"]
-				entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem"}
+				entity.Fields["profile"] = rc.EntityFieldDecl{Type: "WorkItem", Initial: map[string]any{"id": "proof", "status": "ready", "tags": []any{}}}
 				entity.Fields["captured"] = rc.EntityFieldDecl{Type: "text"}
 				for name, field := range entity.Fields {
 					field.UnusedReason = "externally populated proof fixture"
@@ -49,6 +56,15 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				tools, _ := semanticview.Bundle(schemaBoundActivityInputSource(value, "text", rc.ToolSchemaString, true))
 				bundle.Tools = tools.Tools
 				bundle.FlowTree.Root.Tools = tools.Tools
+				if consumer == "rule" {
+					owner := bundleExecutableNodeByLocalID(t, bundle, "worker")
+					var err error
+					handler, err = rc.QualifySystemNodeHandlerRuleRefsForEvent(owner, "work.received", handler)
+					if err != nil {
+						t.Fatal(err)
+					}
+					writeFlowHandler(t, bundle, ".", "worker", "work.received", handler)
+				}
 				recompileBootverifySemantics(t, bundle)
 				report := Run(context.Background(), source, Options{})
 				presenceError := false
@@ -86,7 +102,7 @@ func TestStageGateContextPreservesNestedEntityPresence(t *testing.T) {
 			}},
 		}
 		bundle.RootTypes = rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Profile": {Fields: map[string]rc.TypeFieldSpec{"note": {Type: "text", IsOptional: true}}}}}
-		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile"}}}}
+		bundle.RootEntities = rc.EntityContractsDocument{"work": {Fields: map[string]rc.EntityFieldDecl{"profile": {Type: "Profile", Initial: map[string]any{}}}}}
 		compileBootverifySchemasPreservingPlans(bundle)
 		findings := checkStageGateValidation(&checkerContext{source: semanticview.Wrap(bundle)})
 		if safe && len(findings) != 0 {

@@ -41,6 +41,9 @@ func (r Request) Validate() error {
 	if strings.TrimSpace(r.Predicate.Field) == "" {
 		return fmt.Errorf("workflow entity query requires predicate field")
 	}
+	if r.Predicate.Value == nil {
+		return fmt.Errorf("workflow entity query requires a non-null predicate value")
+	}
 	switch strings.TrimSpace(r.Predicate.Op) {
 	case "==", "!=", ">=", "<=", ">", "<":
 		return nil
@@ -50,7 +53,10 @@ func (r Request) Validate() error {
 }
 
 func Matches(row map[string]any, predicate Predicate) bool {
-	left := selectorValue(row, predicate.Field)
+	left, present := selectorValue(row, predicate.Field)
+	if !present || predicate.Value == nil {
+		return false
+	}
 	switch predicate.Op {
 	case "==":
 		return jsonValuesEqual(left, predicate.Value)
@@ -87,13 +93,13 @@ func Matches(row map[string]any, predicate Predicate) bool {
 	}
 }
 
-func selectorValue(row map[string]any, field string) any {
+func selectorValue(row map[string]any, field string) (any, bool) {
 	field = strings.TrimSpace(field)
 	if field == "" {
-		return nil
+		return nil, false
 	}
 	if value, ok := row[field]; ok {
-		return value
+		return value, true
 	}
 	fields, _ := row["fields"].(map[string]any)
 	parsed := paths.Parse(field)
@@ -101,21 +107,21 @@ func selectorValue(row map[string]any, field string) any {
 		parsed = paths.Path{Segments: parsed.Segments}
 	}
 	if len(parsed.Segments) == 0 {
-		return nil
+		return nil, false
 	}
 	current := any(fields)
 	for _, segment := range parsed.Segments {
 		object, ok := current.(map[string]any)
 		if !ok {
-			return nil
+			return nil, false
 		}
 		value, ok := object[strings.TrimSpace(segment)]
 		if !ok {
-			return nil
+			return nil, false
 		}
 		current = value
 	}
-	return current
+	return current, true
 }
 
 func numericValue(value any) (float64, bool) {

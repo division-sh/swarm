@@ -918,11 +918,8 @@ func projectEntityFieldDecl(value yamlsource.Value) (EntityFieldDecl, error) {
 	if err != nil {
 		return EntityFieldDecl{}, err
 	}
-	if parsed.IsOptional {
-		return EntityFieldDecl{}, fmt.Errorf("top-level entity fields do not support typed omission; declare a required field")
-	}
 	return EntityFieldDecl{
-		Type: parsed.Type, Initial: parsed.Initial, Indexed: parsed.Indexed,
+		Type: parsed.Type, IsOptional: parsed.IsOptional, Initial: parsed.Initial, Indexed: parsed.Indexed,
 		Immutable: parsed.Immutable, Description: parsed.Description,
 		Refinements: parsed.Refinements, MaterializeFrom: parsed.MaterializeFrom,
 		Project: parsed.Project, UnusedReason: parsed.UnusedReason,
@@ -1069,6 +1066,9 @@ func decodeWave1FieldValue(value yamlsource.Value, opts wave1FieldNodeOptions) (
 		field.Citation.AllowedClasses = normalizeStrings(field.Citation.AllowedClasses)
 	}
 	if candidate, ok := byName["initial"]; ok {
+		if candidate.Value.Presence() == yamlsource.PresenceNull {
+			return wave1ParsedFieldNode{}, fmt.Errorf("%s initial cannot be null; omit initial for an unassigned field", opts.Context)
+		}
 		if err := candidate.Value.Project(&field.Initial); err != nil {
 			return wave1ParsedFieldNode{}, err
 		}

@@ -437,14 +437,9 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 			0,
 			testPipelineRunID,
 			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+			events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}),
 			time.Time{},
 		),
-		State: WorkflowState{
-			EntityID: "ent-1",
-			Stage:    WorkflowStateID("pending"),
-			Metadata: map[string]any{},
-		},
 	}, false)
 	if err == nil {
 		t.Fatal("executeNodeContractHandler error = nil, want output-schema failure")
@@ -708,7 +703,7 @@ node-a:
 	}
 }
 
-func TestExecuteNodeContractHandlerPreservesCanonicalDefaultWhenWriteSourceIsMissing(t *testing.T) {
+func TestExecuteNodeContractHandlerRejectsMissingWriteSourceBeforeEmit(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -752,11 +747,11 @@ func TestExecuteNodeContractHandlerPreservesCanonicalDefaultWhenWriteSourceIsMis
 			Metadata: map[string]any{},
 		},
 	}, false)
-	if err != nil {
-		t.Fatalf("executeNodeContractHandler: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "business_brief") || !strings.Contains(err.Error(), "absent") {
+		t.Fatalf("executeNodeContractHandler error = %v, want missing source rejection", err)
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("published count = %d, want 1 with the canonical default persisted", got)
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("published count = %d, want 0 after missing source rejection", got)
 	}
 
 	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testRunScopedWorkflowInstance(runID))
@@ -766,11 +761,11 @@ func TestExecuteNodeContractHandlerPreservesCanonicalDefaultWhenWriteSourceIsMis
 	if !ok {
 		t.Fatal("expected seeded workflow instance to remain available")
 	}
-	if got := strings.TrimSpace(instance.CurrentState); got != "mvp_speccing" {
-		t.Fatalf("current_state = %q, want mvp_speccing", got)
+	if got := strings.TrimSpace(instance.CurrentState); got != "researching" {
+		t.Fatalf("current_state = %q, want researching after rejected mutation", got)
 	}
-	if brief, ok := instance.Fields["business_brief"].(map[string]any); !ok || brief["summary"] != "" {
-		t.Fatalf("business brief = %#v, want canonical empty summary", instance.Fields["business_brief"])
+	if _, ok := instance.Fields["business_brief"]; ok {
+		t.Fatalf("missing source created business_brief: %#v", instance.Fields)
 	}
 }
 
@@ -983,7 +978,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	}
 }
 
-func TestExecuteNodeContractHandlerPersistsCanonicalDefaultPresenceCheckDataAccumulationExpression(t *testing.T) {
+func TestExecuteNodeContractHandlerPersistsExplicitAbsenceDecision(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -1010,7 +1005,7 @@ func TestExecuteNodeContractHandlerPersistsCanonicalDefaultPresenceCheckDataAccu
 	_, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("entity.kill_reason == null")},
+				{TargetField: "kill_reason_missing", Value: runtimecontracts.CELExpression("!has(entity.kill_reason)")},
 			},
 		},
 	}, workflowTriggerContext{
@@ -1028,8 +1023,8 @@ func TestExecuteNodeContractHandlerPersistsCanonicalDefaultPresenceCheckDataAccu
 	if !ok {
 		t.Fatal("workflow instance missing after declarative write")
 	}
-	if got := instance.Fields["kill_reason_missing"]; got != false {
-		t.Fatalf("kill_reason_missing = %#v, want false for materialized text default", got)
+	if got := instance.Fields["kill_reason_missing"]; got != true {
+		t.Fatalf("kill_reason_missing = %#v, want true for unassigned field", got)
 	}
 }
 
@@ -1464,7 +1459,7 @@ node-a:
 	seedPipelineEventRecord(t, ctx, db, trigger)
 	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
-		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && entity.kill_reason == ""`},
+		Guard:        &runtimecontracts.GuardSpec{Check: `entity.revision_count == 0 && !has(entity.kill_reason)`},
 		Emit: runtimecontracts.EmitSpec{
 			Event: "entity.created",
 			Fields: map[string]runtimecontracts.ExpressionValue{
@@ -1506,6 +1501,9 @@ node-a:
 	}
 	if got := instance.Fields["revision_count"]; got != int64(0) {
 		t.Fatalf("persisted revision_count = %#v, want 0", got)
+	}
+	if _, present := instance.Fields["kill_reason"]; present {
+		t.Fatalf("creation synthesized an uninitialized field: %#v", instance.Fields)
 	}
 	assertCreatedChildFlowIdentityCoherent(t, db, "validation", entityID, emitted, instance)
 
@@ -1785,7 +1783,7 @@ states: [queued]
 		"validation/entities.yaml": `
 validation_entity:
   revision_count:
-    type: integer
+    type: integer?
     initial: 0
 `,
 		"validation/nodes.yaml": `
@@ -1812,8 +1810,10 @@ node-a:
 	seedPipelineEventRecord(t, ctx, db, trigger)
 	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
-		Clear:        &runtimecontracts.ClearSpec{Targets: []string{"entity.revision_count"}},
-		Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+			{Operation: runtimecontracts.WorkflowDataOperationClear, TargetRef: "entity.revision_count"},
+		}},
+		Emit: runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
 		Event: trigger,
 		State: WorkflowState{},
@@ -2017,8 +2017,8 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 			time.Time{},
 		),
 
-		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"stage": "queued"}},
-	}, false)
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
