@@ -44,6 +44,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -697,6 +698,30 @@ func selectedForkExecutionTestContext(t testing.TB, ctx context.Context, authori
 	return managedexecution.WithAdmission(ctx, admission)
 }
 
+func TestSelectedRunRootEntityContractUsesExactRunCoordinate(t *testing.T) {
+	repoRoot := runForkExecutionRepoRoot(t)
+	loader := admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repoRoot, SourceRoot: filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple"),
+		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(runForkTestContext(t), runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := uuid.NewString()
+	contract, ok := entityruntime.ResolveForRuntimeInstance(loaded.Source, runID, runID)
+	if !ok || contract.EntityType != "test_entity" {
+		t.Fatalf("root contract = %+v, found=%t", contract, ok)
+	}
+	rowContract, ok := entityruntime.ResolveForEntityRow(loaded.Source, map[string]any{"run_id": runID, "flow_instance": runID})
+	if !ok || rowContract.EntityType != contract.EntityType {
+		t.Fatalf("root row contract = %+v, found=%t", rowContract, ok)
+	}
+	if _, ok := entityruntime.ResolveForRuntimeInstance(loaded.Source, runID, uuid.NewString()); ok {
+		t.Fatal("unbound UUID resolved as a root entity contract")
+	}
+}
+
 func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -935,6 +960,15 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("count emitted follow-ups: %v", err)
 	}
 	if emittedFollowUps != 1 || mockFollowUps != 1 {
+		var status, reason string
+		var failure []byte
+		if err := db.QueryRowContext(ctx, `
+			SELECT status, COALESCE(reason_code, ''), COALESCE(failure::text, '')
+			FROM event_deliveries
+			WHERE run_id = $1::uuid AND event_id = $2::uuid AND subscriber_type = 'node'
+		`, result.Materialization.ForkRunID, forkEventID).Scan(&status, &reason, &failure); err == nil {
+			t.Logf("fork node delivery status=%s reason=%s failure=%s", status, reason, failure)
+		}
 		t.Fatalf("fork follow-up events = total:%d mock:%d, want one mock-causal event", emittedFollowUps, mockFollowUps)
 	}
 
@@ -5518,8 +5552,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'selected-execution-test', 'seed', $4),
-			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Selected Execution Entity"'::jsonb, $3::uuid, 'platform', 'selected-execution-test', 'seed', $4)
+			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'selected-execution-test', 'seed', $4)
 	`, sourceRunID, entityID, sourceEventID, at); err != nil {
 		t.Fatalf("seed source mutations: %v", err)
 	}
@@ -5531,7 +5564,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', $3, 'Selected Execution Entity',
-			'pending', '{}'::jsonb, '{"name":"Selected Execution Entity"}'::jsonb, '{}'::jsonb, 1,
+			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
 			$4, $4, $4
 		)
 	`, sourceRunID, entityID, entityType, at); err != nil {
