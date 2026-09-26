@@ -410,7 +410,11 @@ func (s RunCreationOperationSummary) Validate() error {
 		return err
 	}
 	if s.Outcome == "created" {
-		if err := validateCanonicalUUID(s.EventID, "event_id"); err != nil {
+		if s.EventID == "" {
+			if s.PinCount == 0 {
+				return fmt.Errorf("eventless run creation requires selected data pins")
+			}
+		} else if err := validateCanonicalUUID(s.EventID, "event_id"); err != nil {
 			return err
 		}
 		if err := validateCanonicalRunState(s.Status, "run-creation summary status"); err != nil {

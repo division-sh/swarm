@@ -119,14 +119,11 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if err != nil {
 		return runStartResult{}, err
 	}
-	if !params.NewRunCreated {
-		return runStartResult{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": rawRunID})
-	}
 	selector, err := scenarioExecutionSelectorParam(req.Params)
 	if err != nil {
 		return runStartResult{}, err
 	}
-	ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, rawRunID, true, selector)
+	ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, rawRunID, params.NewRunCreated, selector)
 	if err != nil {
 		return runStartResult{}, err
 	}
