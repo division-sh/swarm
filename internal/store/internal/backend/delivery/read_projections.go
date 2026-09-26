@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -699,4 +700,18 @@ func normalizedNonEmptyStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+// UnfinishedRunDeliveryCountTx counts receiver work that cannot satisfy a
+// run's durable completion gate, including routes awaiting pipeline handoff.
+func UnfinishedRunDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	if tx == nil || runID == "" {
+		return 0, fmt.Errorf("run delivery completion requires transaction and run")
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND (status<>'delivered' OR continuation_handoff_at IS NULL)`, runID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count unfinished run deliveries: %w", err)
+	}
+	return count, nil
 }

@@ -289,8 +289,8 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		if fixture.dialect == authoractivityfixture.DialectSQLite {
 			if _, err := fixture.db.ExecContext(ctx, `
 				INSERT INTO run_fork_selected_contract_bindings (
-					binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at
-				) VALUES (?,?,?,?,'selected_contracts',?)`,
+					binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at
+				) VALUES (?,?,?,'event',1,?,'selected_contracts',?)`,
 				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
 			); err != nil {
 				t.Fatalf("seed selected-contract binding: %v", err)
@@ -298,8 +298,8 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		} else {
 			if _, err := fixture.db.ExecContext(ctx, `
 				INSERT INTO run_fork_selected_contract_bindings (
-					binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at
-				) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts',$5)`,
+					binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at
+				) VALUES ($1::uuid,$2::uuid,$3::uuid,'event',1,$4::uuid,'selected_contracts',$5)`,
 				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
 			); err != nil {
 				t.Fatalf("seed selected-contract binding: %v", err)
@@ -319,7 +319,8 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 			Preparation:     selectedPreparationForTest(t, process, sourceRunID, forkRunID, sourceEventID, declarations),
 			Admission: runfork.RunForkSelectedContractExecutionAdmission{
 				Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
-				NonMutating: true, ExecutionSupported: false, ForkRunID: forkRunID, SourceRunID: sourceRunID, ForkEventID: sourceEventID,
+				NonMutating: true, ExecutionSupported: false, ForkRunID: forkRunID, SourceRunID: sourceRunID,
+				ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: sourceEventID}, ForkEventID: sourceEventID,
 				ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
 				AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 				ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",

@@ -320,6 +320,28 @@ func (s *PipelineSQLiteOwner) sqliteResumeIncompatiblePipelineMode(ctx context.C
 	return mode, err == nil, err
 }
 
+// SelectedDeploymentPipelineDrainCountsTx reads publication and pipeline
+// evidence at the fork activation boundary, inside the caller's transaction.
+func SelectedDeploymentPipelineDrainCountsTx(ctx context.Context, tx *sql.Tx, runID string) (missingScope, unfinishedPipeline int, err error) {
+	if tx == nil || runID == "" {
+		return 0, 0, fmt.Errorf("selected deployment pipeline drain requires transaction and run")
+	}
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes o
+		LEFT JOIN committed_replay_scopes s ON s.run_id=o.run_id AND s.event_id=o.event_id
+		WHERE o.run_id=$1 AND o.deployment_feed_id IS NOT NULL AND o.outcome_kind='committed'
+		AND o.event_id IS NOT NULL AND s.event_id IS NULL`, runID).Scan(&missingScope)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read selected deployment event scopes: %w", err)
+	}
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes s
+		LEFT JOIN event_receipts r ON r.event_id=s.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
+		WHERE s.run_id=$1 AND COALESCE(r.outcome,'')<>'success'`, runID).Scan(&unfinishedPipeline)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read selected deployment pipeline outcomes: %w", err)
+	}
+	return missingScope, unfinishedPipeline, nil
+}
+
 func (s *PipelinePostgresOwner) postgresPipelineClaims() *postgresPipelineClaimRegistry {
 	if s == nil || s.backend == nil {
 		return nil

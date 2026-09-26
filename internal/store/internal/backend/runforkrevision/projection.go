@@ -176,6 +176,9 @@ func selectedProjectionQuery(spec projectionSpec, family Family, runID string, r
 					}
 					columns = []string{originColumn, "deployment_feed_id"}
 					values = []any{"deployment", ref.coordinates.DeploymentFeedID}
+				} else if part.kind == "barrier" {
+					columns = []string{"triggering_delivery_id", "flow_path", "declaration_family", "semantic_path"}
+					values = []any{ref.coordinates.TriggeringDeliveryID, ref.coordinates.FlowPath, ref.coordinates.DeclarationFamily, ref.coordinates.SemanticPath}
 				} else {
 					columns = []string{originColumn, "triggering_delivery_id", "flow_path", "declaration_family", "semantic_path"}
 					values = []any{"handler", ref.coordinates.TriggeringDeliveryID, ref.coordinates.FlowPath, ref.coordinates.DeclarationFamily, ref.coordinates.SemanticPath}

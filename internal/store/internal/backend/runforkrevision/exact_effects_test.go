@@ -244,6 +244,9 @@ func TestExactRevisionReferencesAndCanonicalQueries(t *testing.T) {
 			if err != nil || len(args) < 2 || args[0] != runID || !strings.Contains(query, " AND (") {
 				t.Fatalf("query=%s args=%v err=%v", query, args, err)
 			}
+			if family == FamilyFanOutObligations && (strings.Contains(query, "b.origin_kind") || !strings.Contains(query, "i.origin_kind")) {
+				t.Fatalf("fan-out exact projection lost typed intent origin or invented barrier origin: %s", query)
+			}
 			for _, ref := range refs {
 				if strings.Contains(query, ref.key) {
 					t.Fatal("fact coordinate interpolated into SQL")

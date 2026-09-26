@@ -220,6 +220,13 @@ func TestRuntimeLoggerRejectsNullDetailListElements(t *testing.T) {
 	}
 }
 
+func TestCanonicalRuntimeLogDecoderRejectsNestedNullDetailListElements(t *testing.T) {
+	_, err := DecodeCanonicalRuntimeLogPayload([]byte(`{"log_level":"debug","message":"delivered","details":{"component":"eventbus","action":"delivered","nested":{"items":["present",null]}}}`))
+	if err == nil || !strings.Contains(err.Error(), "cannot contain null") {
+		t.Fatalf("DecodeCanonicalRuntimeLogPayload error = %v, want null-list refusal", err)
+	}
+}
+
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

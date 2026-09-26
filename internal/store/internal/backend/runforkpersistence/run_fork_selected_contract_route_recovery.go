@@ -348,29 +348,7 @@ func (s *RunForkPostgresOwner) ListSelectedContractRouteRecoveryRecords(ctx cont
 	if err != nil {
 		return nil, err
 	}
-	out := make([]runtimemanager.SelectedContractRouteRecoveryRecord, 0, len(records))
-	for _, record := range records {
-		out = append(out, runtimemanager.SelectedContractRouteRecoveryRecord{
-			Owner:                        record.Owner,
-			RuntimeRecoveryOwner:         record.RuntimeRecoveryOwner,
-			ForkRunID:                    record.ForkRunID,
-			SourceRunID:                  record.SourceRunID,
-			ForkEventID:                  record.ForkEventID,
-			RouteTopologyOwner:           record.RouteTopologyOwner,
-			DynamicTopologyOwner:         record.DynamicTopologyOwner,
-			RecipientPlanningOwner:       record.RecipientPlanningOwner,
-			FrontierEvidenceFingerprint:  record.FrontierEvidenceFingerprint,
-			RouteTopologyFingerprint:     record.RouteTopologyFingerprint,
-			RecipientPlanningFingerprint: record.RecipientPlanningFingerprint,
-			StaticRouteEventCount:        record.StaticRouteEventCount,
-			DynamicTopologyProofCount:    record.DynamicTopologyProofCount,
-			RecipientPlanEventCount:      record.RecipientPlanEventCount,
-			RouteTopology:                append([]byte(nil), record.RouteTopology...),
-			RecipientPlanning:            append([]byte(nil), record.RecipientPlanning...),
-			CreatedAt:                    record.CreatedAt,
-		})
-	}
-	return out, nil
+	return projectSelectedContractRouteRecoveryRecords(records), nil
 }
 
 func (s *RunForkSQLiteOwner) ListSelectedContractRouteRecoveryRecords(ctx context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
