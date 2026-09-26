@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -80,49 +79,7 @@ func selectedDeploymentResourceFixtureWithDelivery(t *testing.T, backend, route 
 
 func selectedDeploymentResourceFixtureConfigured(t *testing.T, backend, route string, keyed bool, probe runtimelifecycleprobe.Observer, wrapDelivery func(runtimedelivery.Store) runtimedelivery.Store, wrapExecutor func(startupownership.FanOutExecutor) startupownership.FanOutExecutor) *deploymentResourceFixture {
 	t.Helper()
-	root := canonicalrouting.CopyRootOutputSingletonConnect(t)
-	replace := func(name, old, updated string) {
-		t.Helper()
-		path := filepath.Join(root, name)
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Count(string(raw), old) != 1 {
-			t.Fatalf("fixture %s no longer has exact source declaration %q", name, old)
-		}
-		if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, updated, 1)), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	eventsYAML := "root.ready:\n  account_id: text\n  document: json?\n"
-	if keyed {
-		eventsYAML = "root.ready:\n  key: account_id\n  account_id: text\n  document: json?\n"
-	}
-	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(eventsYAML), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	switch route {
-	case "singleton":
-		replace("consumer/nodes.yaml", "    root.ready:\n      create_entity: true\n", "    root.ready: {}\n")
-		if err := os.Remove(filepath.Join(root, "consumer", "entities.yaml")); err != nil {
-			t.Fatal(err)
-		}
-	case "dynamic":
-		replace("consumer/schema.yaml", "mode: singleton\n", "mode: template\ninstance: account_id\n")
-		replace("consumer/schema.yaml", "    events: [root.ready]\n", "    events:\n      - event: root.ready\n        resolution:\n          mode: select-or-create\n")
-		replace("consumer/entities.yaml", "consumer_state:\n  entity_id: text\n", "consumer_state:\n  entity_id: text\n  account_id: text\n")
-	case "root":
-		if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {
-			t.Fatal(err)
-		}
-		replace("schema.yaml", "connect:\n  - event: root.ready\n    from: .\n    to: consumer\n", "")
-		if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte("root-collector:\n  execution_type: system_node\n  subscribes_to: [root.ready]\n  event_handlers:\n    root.ready: {}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	default:
-		t.Fatalf("unknown selected deployment route %q", route)
-	}
+	root := canonicalrouting.CopySelectedDeploymentResource(t, route, keyed)
 	repo := conformanceRepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

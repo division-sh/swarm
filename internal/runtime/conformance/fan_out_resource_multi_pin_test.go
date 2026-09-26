@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -92,22 +92,7 @@ func assertTwoDeploymentPublicEvents(t *testing.T, f *deploymentResourceFixture,
 
 func twoDeploymentFeedSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{})
-	if err := os.Remove(filepath.Join(root, notifyallchildren.ChildFlowID, "agents.yaml")); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(root, notifyallchildren.ChildFlowID, "schema.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := "      - event: account.notify.requested\n        resolution:\n          mode: select\n"
-	if strings.Count(string(raw), old) != 1 {
-		t.Fatal("two-feed fixture lost exact account notification resolution")
-	}
-	if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, strings.Replace(old, "mode: select\n", "mode: select-or-create\n", 1), 1)), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	root := canonicalrouting.CopyTwoDeploymentFeeds(t)
 	repo := conformanceRepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
