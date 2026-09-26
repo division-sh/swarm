@@ -439,16 +439,16 @@ rows:
 
   - id: handler.expression
     ruled: R2
-    paths: "emit.fields.*, activity.input.*, stage_gate.context.*, data_accumulation.writes[].value, data_accumulation.writes[].expression"
-    owners: [ExpressionValue.UnmarshalYAML, decodeEmitFieldValueNode, decodeWorkflowDataWriteValueNode]
+    paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, guard.on_fail.escalate.fields.*, stage_gate.context.*, data_accumulation.writes[].value/key/index; reduce.params is accepted but not executed"
+    owners: [ExpressionValue.UnmarshalYAML, decodeEmitFieldValueNode, decodeWorkflowDataWriteValueNode, LowerEmitSpecFields, validateEmitTemplateCELFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
     information:
       fact: [literal values and references]
       choice: [literal, ref, CEL]
     spelling:
-      canonical_candidate: context_specific_scalar_plus_explicit_ref_or_cel_mapping
-      retired_duplicates: ["{expression: X} versus {cel: X}", "{literal: X} versus literal scalar/sequence/map", "stage-gate scalar rewritten to CEL versus {cel: X}"]
-      distinct_overrides: [literal_vs_ref_vs_cel]
-    f2_bug: "the same scalar is literal in ExpressionValue, CEL in emit/activity input, and rewritten from literal to CEL in gate context"
+      canonical_candidate: "R2: literal YAML by default; one ${...} returns a typed expression value; mixed text interpolates to string; {literal: ...} escapes interpretation"
+      retired_duplicates: ["authored {expression: X}", "authored {cel: X}", "authored {ref: X} and kind metadata", "bare CEL scalar and emit namespace shorthand", "stage-gate literal-to-CEL rewrite", "emit-template CEL-only validation"]
+      distinct_overrides: [typed_exact_interpolation, mixed_text_interpolation, explicit_literal_escape, structural_emit_from]
+    f2_bug: "general/emit/gate scalar decoders, emit lowering and template validation, loop carriage, boot expression checks, and engine/gate evaluators can assign different meaning to one authored value; reduce.params is accepted but ignored by stepReduce"
     corpus: {expression_alias_uses: 0}
 
   - id: handler.data_write
