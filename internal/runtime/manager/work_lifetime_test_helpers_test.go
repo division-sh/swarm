@@ -90,12 +90,6 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	if roles.RouteRestorer == nil {
 		roles.RouteRestorer, _ = candidate.(PersistedFlowInstanceRouteRestorer)
 	}
-	if roles.RouteRetirer == nil {
-		roles.RouteRetirer, _ = candidate.(PublishedFlowInstanceRouteRetirer)
-	}
-	if roles.RouteRemover == nil {
-		roles.RouteRemover, _ = candidate.(FlowInstanceRouteContextRemover)
-	}
 	if roles.FlowTermination == nil {
 		roles.FlowTermination, _ = candidate.(FlowInstanceTerminalMutationOwner)
 	}

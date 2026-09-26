@@ -37,6 +37,8 @@ type FlowReadinessPlan struct {
 	RunID           string `json:"run_id"`
 	InstancePath    string `json:"instance_path"`
 	PlanFingerprint string `json:"plan_fingerprint"`
+	AttemptID       string `json:"activation_attempt_id,omitempty"`
+	PlanRevision    uint64 `json:"plan_revision,omitempty"`
 }
 
 type EphemeralExecution struct {
@@ -105,6 +107,18 @@ func FlowReadinessAdmission(runID, instancePath, planFingerprint string) (Admiss
 		Lifetime: LifetimeDurableManaged,
 	}
 	return admission, admission.Validate()
+}
+
+func (a Admission) WithFlowActivationAttempt(attemptID string, revision uint64) (Admission, error) {
+	if a.Authority.Kind != AuthorityFlowReadinessPlan || a.Authority.Readiness == nil {
+		return Admission{}, errors.New("flow activation attempt requires readiness topology authority")
+	}
+	bound := a
+	readiness := *a.Authority.Readiness
+	readiness.AttemptID = strings.TrimSpace(attemptID)
+	readiness.PlanRevision = revision
+	bound.Authority.Readiness = &readiness
+	return bound, bound.Validate()
 }
 
 func NewEphemeralAdmission(executionID, producer string) (Admission, error) {
@@ -181,6 +195,11 @@ func (a Authority) Validate() error {
 		}
 		if strings.Trim(strings.TrimSpace(a.Readiness.InstancePath), "/") == "" || strings.TrimSpace(a.Readiness.PlanFingerprint) == "" {
 			return errors.New("flow readiness topology authority is incomplete")
+		}
+		if a.Readiness.AttemptID != "" || a.Readiness.PlanRevision != 0 {
+			if _, err := uuid.Parse(a.Readiness.AttemptID); err != nil || a.Readiness.PlanRevision == 0 {
+				return errors.New("flow readiness activation attempt coordinate is invalid")
+			}
 		}
 	case AuthorityEphemeralExecution:
 		if a.Ephemeral == nil || a.Static != nil || a.Readiness != nil {

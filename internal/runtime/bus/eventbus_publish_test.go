@@ -673,7 +673,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	if pc == nil {
 		t.Fatal("expected pipeline coordinator")
 	}
-	if err := eb.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instanceRoute)}); err != nil {
+	if err := eb.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instanceRoute)}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	agentID := "account-agent"
@@ -4487,7 +4487,7 @@ func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("child/grandchild", "inst-1"))}); err != nil {
 		t.Fatalf("AddFlowInstance: %v", err)
 	}
 	runtimebustest.Subscribe(t, eb, "worker-inst-1")

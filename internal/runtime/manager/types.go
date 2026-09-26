@@ -247,8 +247,6 @@ type PersistenceRoles struct {
 	RouteInstaller       FlowInstanceRouteContextInstaller
 	RouteVerifier        FlowInstanceRouteContextVerifier
 	RouteRestorer        PersistedFlowInstanceRouteRestorer
-	RouteRetirer         PublishedFlowInstanceRouteRetirer
-	RouteRemover         FlowInstanceRouteContextRemover
 	FlowTermination      FlowInstanceTerminalMutationOwner
 	CreationPublisher    runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
 	LifecycleCensus      AgentLifecycleCellCensus

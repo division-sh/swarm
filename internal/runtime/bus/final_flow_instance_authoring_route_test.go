@@ -74,7 +74,7 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) Activate(ctx context.Context,
 	if s.bus == nil {
 		return nil
 	}
-	return s.bus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
+	return s.bus.AddFlowInstanceRouteContextFixture(ctx, FlowInstanceRouteMaterializationRequest{
 		Identity: testRunScopedFlowRouteForRun(req.TriggerEvent.RunID(), req.Instance.Route()),
 	})
 }
@@ -181,7 +181,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		AddressFields: map[string]string{"entity.account_id": "acct-42"},
 	}}
 	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
 		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute(finalflowinstanceauthoring.TemplateFlowID, "drift")),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)

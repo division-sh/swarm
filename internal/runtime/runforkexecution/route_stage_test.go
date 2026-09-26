@@ -7,6 +7,9 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/google/uuid"
 )
 
 type selectedFlowRoutePublisherProbe struct {
@@ -20,10 +23,17 @@ func (p *selectedFlowRoutePublisherProbe) StageFlowInstanceRouteContext(context.
 	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: p.ack}, p.stageErr
 }
 
-func (p *selectedFlowRoutePublisherProbe) PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error {
+func (p *selectedFlowRoutePublisherProbe) PublishPersistedFlowInstanceRouteForAttempt(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest, runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error) {
 	p.publishes++
-	return p.nextErr
+	if p.nextErr != nil {
+		return nil, p.nextErr
+	}
+	return selectedFlowRoutePublicationProbe{}, nil
 }
+
+type selectedFlowRoutePublicationProbe struct{}
+
+func (selectedFlowRoutePublicationProbe) Retire() error { return nil }
 
 func (p *selectedFlowRoutePublisherProbe) VerifyFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	p.verifies++
@@ -47,9 +57,22 @@ func TestSelectedForkRouteStageAcknowledgementControlsPublication(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			probe := &selectedFlowRoutePublisherProbe{ack: tc.ack, stageErr: tc.stageErr, nextErr: tc.nextErr}
 			diagnostics := &selectedForkCommitDiagnostics{}
-			var published []runtimeflowidentity.RunScopedFlowInstance
-			err := publishSelectedContractFlowRoute(context.Background(), probe, runtimebus.FlowInstanceRouteMaterializationRequest{}, diagnostics, &published)
-			if probe.stages != 1 || probe.publishes != tc.wantPublish || probe.verifies != tc.wantVerify || len(published) != tc.wantPublish {
+			binding := runtimeprocessbinding.Binding{
+				ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "selected-route-test", ProcessBootID: uuid.NewString(),
+				GenerationGrantID: uuid.NewString(), BundleHash: runForkTestBundleHash,
+				RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
+			}
+			identity, err := runtimeflowidentity.NewRunScopedFlowInstance(uuid.NewString(), runtimeflowidentity.RouteForInstancePath("review/inst-1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), identity.RunID, identity.Route.InstancePath, 1, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var published []selectedFlowActivation
+			err = publishSelectedContractFlowRoute(context.Background(), probe, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}, attempt, diagnostics, &published)
+			if probe.stages != 1 || probe.publishes != tc.wantPublish || probe.verifies != tc.wantVerify || len(published) != 1 {
 				t.Fatalf("stage/publish/verify/cleanup=%d/%d/%d/%d", probe.stages, probe.publishes, probe.verifies, len(published))
 			}
 			if tc.ack {

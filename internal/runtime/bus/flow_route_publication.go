@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -19,8 +18,19 @@ type FlowRoutePublication struct {
 	attemptID string
 }
 
+// FlowRoutePublicationHandle grants retirement of one exact local publication.
+// Only RouteTable mints production handles; consumers cannot retire by identity.
+type FlowRoutePublicationHandle interface {
+	Retire() error
+}
+
 type flowRoutePublicationRecord struct {
 	sequence  uint64
+	attemptID string
+}
+
+type flowRoutePublicationFence struct {
+	identity  runtimeflowidentity.RunScopedFlowInstance
 	attemptID string
 }
 
@@ -43,8 +53,12 @@ func (rt *RouteTable) publishFlowInstanceRouteForAttempt(req FlowInstanceRouteMa
 	defer rt.generationMu.Unlock()
 	rt.mu.RLock()
 	current, published := rt.publications[identity]
+	_, fenced := rt.fencedPublications[flowRoutePublicationFence{identity: identity, attemptID: attempt.ID()}]
 	_, routeExists, ownerErr := rt.matchFlowInstanceRouteOwnerLocked(identity)
 	rt.mu.RUnlock()
+	if fenced {
+		return FlowRoutePublication{}, errors.New("flow route activation attempt is fenced")
+	}
 	if ownerErr != nil {
 		return FlowRoutePublication{}, ownerErr
 	}
@@ -72,49 +86,66 @@ func (p FlowRoutePublication) Retire() error {
 	if p.table == nil || p.sequence == 0 || p.attemptID == "" {
 		return errors.New("flow route publication handle is invalid")
 	}
-	rt := p.table
-	rt.generationMu.Lock()
-	defer rt.generationMu.Unlock()
-	rt.mu.RLock()
-	current, exists := rt.publications[p.identity]
-	rt.mu.RUnlock()
-	if !exists || current.sequence != p.sequence || current.attemptID != p.attemptID {
-		return nil
-	}
-	return rt.removeFlowInstanceRoute(p.identity)
+	return p.table.retireFlowInstanceRouteForAttempt(p.identity, p.attemptID, p.sequence)
 }
 
-func (eb *EventBus) PublishPersistedFlowInstanceRouteForAttempt(ctx context.Context, req FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (FlowRoutePublication, error) {
+func (rt *RouteTable) retireFlowInstanceRouteForAttempt(identity runtimeflowidentity.RunScopedFlowInstance, attemptID string, sequence uint64) error {
+	if rt == nil || attemptID == "" {
+		return errors.New("flow route activation attempt is required")
+	}
+	rt.generationMu.Lock()
+	defer rt.generationMu.Unlock()
+	rt.mu.Lock()
+	if rt.fencedPublications == nil {
+		rt.fencedPublications = make(map[flowRoutePublicationFence]struct{})
+	}
+	rt.fencedPublications[flowRoutePublicationFence{identity: identity, attemptID: attemptID}] = struct{}{}
+	current, exists := rt.publications[identity]
+	rt.mu.Unlock()
+	if !exists || current.attemptID != attemptID || (sequence != 0 && current.sequence != sequence) {
+		return nil
+	}
+	return rt.removeFlowInstanceRoute(identity)
+}
+
+func (eb *EventBus) RetireFlowInstanceRouteForAttempt(attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
 	if eb == nil {
-		return FlowRoutePublication{}, errors.New("event bus is required")
+		return errors.New("event bus is required")
+	}
+	if err := attempt.Validate(); err != nil {
+		return err
+	}
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(attempt.RunID(), runtimeflowidentity.RouteForInstancePath(attempt.InstancePath()))
+	if err != nil {
+		return err
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	return table.retireFlowInstanceRouteForAttempt(identity, attempt.ID(), 0)
+}
+
+func (eb *EventBus) PublishPersistedFlowInstanceRouteForAttempt(ctx context.Context, req FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (FlowRoutePublicationHandle, error) {
+	if eb == nil {
+		return nil, errors.New("event bus is required")
 	}
 	admittedCtx, err := eb.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return FlowRoutePublication{}, err
+		return nil, err
 	}
 	source, ok := runtimecorrelation.SourceArtifactFactFromContext(admittedCtx)
 	if !ok || source.BundleHash() != attempt.ProcessBinding().BundleHash {
-		return FlowRoutePublication{}, errors.New("flow route publication source differs from activation attempt")
+		return nil, errors.New("flow route publication source differs from activation attempt")
 	}
 	runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(admittedCtx)
 	if !ok || runtimeID != attempt.ProcessBinding().RuntimeInstanceID {
-		return FlowRoutePublication{}, errors.New("flow route publication runtime differs from activation attempt")
+		return nil, errors.New("flow route publication runtime differs from activation attempt")
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
 	eb.mu.RUnlock()
 	if table == nil {
-		return FlowRoutePublication{}, errors.New("route table is not initialized")
+		return nil, errors.New("route table is not initialized")
 	}
 	return table.publishFlowInstanceRouteForAttempt(req, attempt)
-}
-
-func (eb *EventBus) RetireFlowInstanceRoutePublication(publication FlowRoutePublication) error {
-	if eb == nil {
-		return errors.New("event bus is required")
-	}
-	if err := publication.Retire(); err != nil {
-		return fmt.Errorf("retire flow route publication: %w", err)
-	}
-	return nil
 }

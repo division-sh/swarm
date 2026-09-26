@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"testing"
 	"time"
 
@@ -61,10 +62,8 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				}, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, unrelatedReadiness, time.Now().UTC()); err != nil {
-					t.Fatal(err)
-				}
-				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedIdentity}); err != nil {
+				markGateRecoveryTopologyReadyFixture(t, selected, unrelatedReadiness, time.Now().UTC())
+				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: unrelatedIdentity}); err != nil {
 					t.Fatal(err)
 				}
 				receiverKey := uuid.NewString()
@@ -89,10 +88,8 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				if _, err := pc.MaterializeInitialEntry(ctx, identity, instance, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := pc.MarkDynamicFlowRuntimeTopologyReady(ctx, readiness, time.Now().UTC()); err != nil {
-					t.Fatal(err)
-				}
-				if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+				markGateRecoveryTopologyReadyFixture(t, selected, readiness, time.Now().UTC())
+				if err := flowroutefixture.Publish(bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
 					t.Fatal(err)
 				}
 				evt, err = events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}))

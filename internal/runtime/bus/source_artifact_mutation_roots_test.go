@@ -526,7 +526,7 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 	routeCtx := runtimepipelinefixture.WithSQLTx(foreignCtx, &sql.Tx{})
 	routeCtx = runtimepipelinefixture.WithPostCommitActions(routeCtx, &postCommit)
 	routeCtx = runtimepipelinefixture.WithRollbackActions(routeCtx, &rollback)
-	if err := bus.AddFlowInstanceRouteContext(routeCtx, req); err == nil ||
+	if err := bus.AddFlowInstanceRouteContextFixture(routeCtx, req); err == nil ||
 		!strings.Contains(err.Error(), "bundle source fact conflicts") {
 		t.Fatalf("foreign route add error = %v, want source conflict", err)
 	}
@@ -537,21 +537,21 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 		)
 	}
 
-	if err := bus.AddFlowInstanceRouteContext(context.Background(), req); err != nil {
+	if err := bus.AddFlowInstanceRouteContextFixture(context.Background(), req); err != nil {
 		t.Fatalf("owner-bound route add: %v", err)
 	}
 	if store.upsertCalls == 0 || !owned.Matches(store.upsertFact) || !bus.HasFlowInstanceRoute(req.Identity) {
 		t.Fatal("owner-bound route add did not persist and publish with the immutable source")
 	}
 	beforeDeletes := store.deleteCalls
-	if err := bus.RemoveFlowInstanceRouteContext(foreignCtx, req.Identity); err == nil ||
+	if err := bus.RemoveFlowInstanceRouteContextFixture(foreignCtx, req.Identity); err == nil ||
 		!strings.Contains(err.Error(), "bundle source fact conflicts") {
 		t.Fatalf("foreign route remove error = %v, want source conflict", err)
 	}
 	if store.deleteCalls != beforeDeletes || !bus.HasFlowInstanceRoute(req.Identity) {
 		t.Fatal("foreign route removal mutated persistence or the local route table")
 	}
-	if err := bus.RemoveFlowInstanceRoute(req.Identity); err != nil {
+	if err := bus.RemoveFlowInstanceRouteFixture(req.Identity); err != nil {
 		t.Fatalf("owner-bound no-context route removal: %v", err)
 	}
 	if store.deleteCalls != beforeDeletes+1 || !owned.Matches(store.deleteFact) || bus.HasFlowInstanceRoute(req.Identity) {

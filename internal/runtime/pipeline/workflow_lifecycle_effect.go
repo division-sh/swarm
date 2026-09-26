@@ -86,7 +86,7 @@ func (o pipelineWorkflowLifecycleOwner) ReconcileInitialEntryTimers(ctx context.
 	if pc == nil || pc.workflowTimers == nil {
 		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
 	}
-	return pc.workflowTimers.reconcileInitialEntryDeclarations(ctx, identity)
+	return pc.workflowTimers.reconcileInitialEntryDeclarations(ctx, identity, nil, nil)
 }
 
 func (o pipelineWorkflowLifecycleOwner) RetireInitialEntryTimerWakeups(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {

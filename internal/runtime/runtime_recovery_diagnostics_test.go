@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -441,6 +442,10 @@ func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Co
 	return errors.New("unexpected readiness timer reconciliation")
 }
 
+func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimersForAttempt(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.DynamicFlowRuntimeReadinessPlan) error {
+	return errors.New("unexpected attempt timer reconciliation")
+}
+
 func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
 	return errors.New("unexpected readiness timer retirement")
 }
@@ -499,12 +504,20 @@ func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessFo
 	return result, nil
 }
 
-func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(
-	context.Context,
-	runtimepipeline.DynamicFlowRuntimeReadinessPlan,
-	time.Time,
-) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
+func (*startupReadinessFinalizationStore) BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("unexpected readiness activation admission")
+}
+
+func (*startupReadinessFinalizationStore) VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return errors.New("unexpected readiness activation verification")
+}
+
+func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.DynamicFlowRuntimeReadinessPlan, time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
 	return runtimepipeline.DynamicFlowRuntimeTopologyReadyResult{}, errors.New("unexpected readiness topology completion")
+}
+
+func (*startupReadinessFinalizationStore) RetireDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return errors.New("unexpected readiness activation retirement")
 }
 
 func (*startupReadinessFinalizationStore) CommitDynamicFlowRuntimeCreationOccurrence(

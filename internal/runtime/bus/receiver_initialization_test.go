@@ -59,7 +59,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 					StorageRef: instance.InstancePath, EntityType: "account_state", CurrentState: "active", Status: "active",
 					Fields: map[string]any{"account_id": "acct-1"},
 				}}
-				if err := bus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route())}); err != nil {
+				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route())}); err != nil {
 					t.Fatal(err)
 				}
 			}

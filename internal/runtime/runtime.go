@@ -1457,8 +1457,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			roles.RouteInstaller = rt.Bus
 			roles.RouteVerifier = rt.Bus
 			roles.RouteRestorer = rt.Bus
-			roles.RouteRetirer = rt.Bus
-			roles.RouteRemover = rt.Bus
 			roles.CreationPublisher = rt.Bus
 			roles.DeliveryRuntime = rt.Bus
 			return roles

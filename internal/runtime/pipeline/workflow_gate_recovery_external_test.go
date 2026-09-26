@@ -92,6 +92,39 @@ type gateRecoveryStoreCase struct {
 	trace       gateRecoveryTraceStore
 }
 
+func markGateRecoveryTopologyReadyFixture(t *testing.T, selected gateRecoveryStoreCase, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, at time.Time) {
+	t.Helper()
+	ctx := testAuthorActivityContext(t, context.Background())
+	current, found, err := selected.persistence.LoadDynamicFlowRuntimeReadiness(ctx, plan.RunID, plan.Identity.Route())
+	if err != nil || !found || !current.Eligible() {
+		t.Fatalf("load exact readiness fixture: found=%v err=%v", found, err)
+	}
+	normalized, err := plan.Normalized()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := canonicaljson.Bytes(normalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := canonicaljson.Bytes(current.Plan)
+	if err != nil || string(got) != string(want) {
+		t.Fatalf("readiness fixture plan changed: got=%s want=%s err=%v", got, want, err)
+	}
+	query := `UPDATE flow_instance_runtime_readiness SET topology_ready_at=? WHERE run_id=? AND instance_path=? AND plan_revision=?`
+	if selected.postgres {
+		query = `UPDATE flow_instance_runtime_readiness SET topology_ready_at=$1 WHERE run_id=$2::uuid AND instance_path=$3 AND plan_revision=$4`
+	}
+	result, err := selected.db.ExecContext(ctx, query, at.UTC(), plan.RunID, plan.Identity.InstancePath, current.PlanRevision)
+	if err != nil {
+		t.Fatalf("mark exact topology fixture: %v", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		t.Fatalf("mark exact topology fixture affected %d rows: %v", rows, err)
+	}
+}
+
 type gateRecoveryTraceStore interface {
 	LoadRunDebugTracePage(context.Context, string, operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error)
 }

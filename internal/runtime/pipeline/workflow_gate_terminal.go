@@ -174,7 +174,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 		if pendingRoute == nil {
 			return nil
 		}
-		retiring := pendingRoute.Identity
+		retiring := *pendingRoute
 		pendingRoute = nil
 		defer func() {
 			if recovered := recover(); recovered != nil {

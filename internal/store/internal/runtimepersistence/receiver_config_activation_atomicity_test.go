@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -30,6 +31,7 @@ type receiverConfigActivationFixture struct {
 	workflows *pipeline.PipelineCoordinator
 	bus       *sqliteFlowActivationBus
 	bundle    *contracts.WorkflowContractBundle
+	grant     startupownership.LiveGenerationGrant
 }
 
 func newReceiverConfigActivationFixture(t *testing.T, backend string) receiverConfigActivationFixture {
@@ -96,8 +98,7 @@ pins:
 		DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
 			AgentRoutes: bus, FlowActivation: agentFixtureFlowActivationCommitter{store: selected},
-			RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus, RouteRetirer: bus,
-		}, ReceiverExecution: eventreceiver.NormalExecution(),
+			RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, selected))
 	admission, err := agenttopology.StaticAdmission(sourceSet.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 	if err != nil {
@@ -106,6 +107,7 @@ pins:
 	if err := am.InstallStartupTopology(grant, admission, sourceSet); err != nil {
 		t.Fatal(err)
 	}
+	admitReceiverConfigFixtureGrant(t, ctx, grant)
 	var db *sql.DB
 	switch store := selected.(type) {
 	case *SQLiteRuntimeStore:
@@ -114,7 +116,29 @@ pins:
 		db = store.backend.ConstructionHandle()
 		db.SetMaxOpenConns(12)
 	}
-	return receiverConfigActivationFixture{ctx: ctx, db: db, store: selected, manager: am, workflows: workflows, bus: bus, bundle: bundle}
+	return receiverConfigActivationFixture{ctx: ctx, db: db, store: selected, manager: am, workflows: workflows, bus: bus, bundle: bundle, grant: grant}
+}
+
+func admitReceiverConfigFixtureGrant(t *testing.T, ctx context.Context, grant startupownership.LiveGenerationGrant) {
+	t.Helper()
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch evidence.State {
+	case startupownership.GrantPrepared:
+		if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		fallthrough
+	case startupownership.GrantProbeSettled:
+		if _, err := grant.AdmitExecution(ctx); err != nil {
+			t.Fatal(err)
+		}
+	case startupownership.GrantAdmitted:
+	default:
+		t.Fatalf("receiver fixture grant is not executable: %s", evidence.State)
+	}
 }
 
 func (f receiverConfigActivationFixture) request(key, instanceID, label string) pipeline.FlowInstanceActivationRequest {

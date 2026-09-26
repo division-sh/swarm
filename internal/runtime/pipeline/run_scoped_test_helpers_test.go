@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -29,6 +30,18 @@ import (
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
+
+func pipelineTestFlowActivationAttempt(t *testing.T, runID, instancePath, bundleHash string) DynamicFlowRuntimeActivationAttempt {
+	t.Helper()
+	attempt, err := NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), runID, instancePath, 1, runtimeprocessbinding.Binding{
+		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "pipeline-projection-test", ProcessBootID: uuid.NewString(),
+		GenerationGrantID: uuid.NewString(), BundleHash: bundleHash, RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return attempt
+}
 
 func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	runner := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}
@@ -229,6 +242,22 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRu
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
 	err := p.store.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
 	return DynamicFlowRuntimeTopologyReadyResult{Acknowledged: err == nil}, err
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return DynamicFlowRuntimeActivationAdmissionResult{}, errors.New("in-memory readiness fixture has no generation grant")
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) VerifyDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error {
+	return errors.New("in-memory readiness fixture has no activation attempt")
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, DynamicFlowRuntimeActivationAttempt, DynamicFlowRuntimeReadinessPlan, time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
+	return DynamicFlowRuntimeTopologyReadyResult{}, errors.New("in-memory readiness fixture has no activation attempt")
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) RetireDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error {
+	return errors.New("in-memory readiness fixture has no activation attempt")
 }
 
 type pipelineTestWorkflowTimerPersistence struct {

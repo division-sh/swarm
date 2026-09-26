@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -2082,7 +2083,7 @@ func newNotifyAllChildrenRuntime(
 			t.Fatalf("ListFlowInstanceRoutes: %v", err)
 		}
 		for _, route := range routes {
-			if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+			if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
 				t.Fatalf("restore flow-instance route %s: %v", route.Route.InstancePath, err)
 			}
 		}

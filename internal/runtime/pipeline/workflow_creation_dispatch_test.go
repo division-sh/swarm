@@ -26,9 +26,10 @@ func TestDynamicFlowCreationDispatchModeValidation(t *testing.T) {
 	}
 	event := eventtest.ChildWithLineage(eventID, events.EventType(plan.CreationEvent.EventType), "flow-instance-activator", "", []byte(`{}`), 1,
 		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, events.EventEnvelope{}, createdAt)
+	attempt := pipelineTestFlowActivationAttempt(t, runID, plan.Identity.InstancePath, plan.BundleHash)
 	for _, mode := range []DynamicFlowRuntimeCreationDispatchMode{DynamicFlowRuntimeCreationDispatchAsync, DynamicFlowRuntimeCreationDispatchStartupRecovery, 255} {
 		err := (DynamicFlowRuntimeCreationOccurrenceRequest{
-			RunID: runID, InstancePath: plan.Identity.InstancePath, Plan: plan, Event: event, OccurredAt: createdAt, DispatchMode: mode,
+			RunID: runID, InstancePath: plan.Identity.InstancePath, Plan: plan, Attempt: attempt, Event: event, OccurredAt: createdAt, DispatchMode: mode,
 		}).Validate()
 		if mode == 255 {
 			if err == nil || !strings.Contains(err.Error(), "unknown dynamic flow creation dispatch mode") {

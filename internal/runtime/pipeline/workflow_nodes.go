@@ -461,8 +461,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(sou
 
 type FlowInstanceRouteOwner interface {
 	HasFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) bool
-	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
-	RetireCommittedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) error
+	RetireCommittedFlowInstanceRoute(WorkflowEngineRouteRetirement) error
 }
 
 func (pc *PipelineCoordinator) hasMaterializedFlowInstanceRoute(source semanticview.Source, runID, flowID, instancePath string) bool {

@@ -1883,8 +1883,8 @@ func TestEventBusPublish_TargetedTemplateInstanceRouteTableNodePersistsSemanticN
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	evt := eventtest.RuntimeControlWithRoutingSource(
 		uuid.NewString(),
@@ -1939,8 +1939,8 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001"))}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	materialized := eb.RouteTable().MaterializedRoutes(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("worker", "w-001")))
 	taskHandler := testFlowNode(t, "worker", "task-handler")
@@ -2014,8 +2014,8 @@ func TestEventBusPublish_NoTargetConcreteRoutedNodePersistsSemanticNodeRoute(t *
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
@@ -2083,8 +2083,8 @@ func TestEventBusPublish_SemanticScopeFlowInstanceResolvesConcreteRoute(t *testi
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.PublishPersistedFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
-		t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("operating", "inst-1"))}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType("operating/opco.product_initialization_requested"))
 	evt := eventtest.RuntimeControlWithRoutingSource(
@@ -2156,8 +2156,8 @@ func TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBefor
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			if err := eb.PublishPersistedFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"))}); err != nil {
-				t.Fatalf("PublishPersistedFlowInstanceRoute: %v", err)
+			if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"))}); err != nil {
+				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
 			concreteEventType := "repo-scaffold/inst-1/" + tc.eventType
 			ch := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(concreteEventType))

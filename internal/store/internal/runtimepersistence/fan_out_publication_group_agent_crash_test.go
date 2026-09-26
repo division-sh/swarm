@@ -199,7 +199,7 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	factory := publicationGroupRealAgentFactory(t, fixture.store, eventBus, source, gate)
 	am := manager.NewAgentManagerWithOptions(eventBus, factory, manager.AgentManagerOptions{
 		SourceArtifactFact: fact, SemanticSource: source, DeliveryStore: selected, ExecutionPosture: executionposture.MockOnly, LLMBackend: llmselection.BackendAnthropic,
-		PersistenceRoles: manager.PersistenceRoles{AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus, RouteRestorer: eventBus, RouteRetirer: eventBus, RouteRemover: eventBus, CreationPublisher: eventBus, DeliveryRuntime: eventBus, LifecycleState: fixture.store.(manager.AgentLifecycleStateReader)},
+		PersistenceRoles: manager.PersistenceRoles{AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus, RouteRestorer: eventBus, CreationPublisher: eventBus, DeliveryRuntime: eventBus, LifecycleState: fixture.store.(manager.AgentLifecycleStateReader)},
 		WorkOwner:        work, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, fixture.store.(manager.ManagerPersistence))
 	t.Cleanup(func() {

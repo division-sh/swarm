@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -31,6 +32,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -38,6 +40,7 @@ import (
 )
 
 type dynamicFlowCreationAtomicityStore interface {
+	flowActivationAttemptTestStore
 	sourceartifactfixture.Writer
 	externalStoreTestDurableEventBusStore
 	runtimepipeline.WorkflowPersistenceOwner
@@ -54,6 +57,7 @@ type dynamicFlowCreationAtomicityStore interface {
 
 type dynamicFlowCreationAtomicityFixture struct {
 	selected dynamicFlowCreationAtomicityStore
+	process  runtimestartupownership.ProcessCapability
 	db       *sql.DB
 	workflow *runtimepipeline.PipelineCoordinator
 	bus      *runtimebus.EventBus
@@ -61,6 +65,7 @@ type dynamicFlowCreationAtomicityFixture struct {
 	runID    string
 	plan     runtimepipeline.DynamicFlowRuntimeReadinessPlan
 	event    events.Event
+	attempt  runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	sqlite   bool
 }
 
@@ -121,6 +126,38 @@ func TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores(
 				t.Fatal("commit creation occurrence succeeded across injected completion-mark failure")
 			}
 			fixture.assertOccurrenceCounts(t, 0)
+		})
+	}
+}
+
+func TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newDynamicFlowCreationAtomicityFixture(t, backend)
+			stale := fixture
+			if err := fixture.selected.RetireDynamicFlowRuntimeActivationAttempt(fixture.ctx, fixture.attempt); err != nil {
+				t.Fatalf("retire predecessor: %v", err)
+			}
+			readiness, found, err := fixture.selected.LoadDynamicFlowRuntimeReadiness(fixture.ctx, fixture.runID, fixture.plan.Identity.Route())
+			if err != nil || !found {
+				t.Fatalf("load successor plan: found=%v err=%v", found, err)
+			}
+			admitted, err := fixture.selected.BeginDynamicFlowRuntimeActivation(fixture.ctx, readiness.Plan, readiness.PlanRevision, fixture.attempt.ProcessBinding())
+			if err != nil || !admitted.Acknowledged || admitted.Attempt.ID() == stale.attempt.ID() {
+				t.Fatalf("admit same-plan successor: result=%+v err=%v", admitted, err)
+			}
+			if ready, err := fixture.workflow.MarkDynamicFlowRuntimeTopologyReadyForAttempt(fixture.ctx, admitted.Attempt, fixture.plan, time.Now().UTC()); err != nil || !ready.Acknowledged {
+				t.Fatalf("complete successor topology: ready=%+v err=%v", ready, err)
+			}
+			if err := stale.commit(); err == nil || !strings.Contains(err.Error(), "no longer current") {
+				t.Fatalf("stale same-plan creation commit: %v", err)
+			}
+			fixture.assertOccurrenceCounts(t, 0)
+			fixture.attempt = admitted.Attempt
+			if err := fixture.commit(); err != nil {
+				t.Fatalf("successor creation commit: %v", err)
+			}
+			fixture.assertOccurrenceCounts(t, 1)
 		})
 	}
 }
@@ -241,13 +278,49 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
 		t.Fatalf("materialize readiness: result=%d err=%v", result, err)
 	}
-	if committed, err := workflow.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, occurredAt.Add(time.Second)); err != nil || !committed.Acknowledged {
+	readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, identity.Route())
+	if err != nil || !found {
+		t.Fatalf("load initial flow readiness: found=%v err=%v", found, err)
+	}
+	acquire := runtimestartupownership.AcquireRequest{OwnerID: "dynamic-creation-atomicity", BootID: uuid.NewString(), RuntimeInstanceID: "11111111-1111-1111-1111-111111111111"}
+	process, err := selected.AcquireProcessCapability(ctx, acquire)
+	if err != nil {
+		t.Fatalf("acquire creation process: %v", err)
+	}
+	t.Cleanup(func() { _ = process.Release(context.Background()) })
+	sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: sourceSet}); err != nil {
+		t.Fatalf("install creation source set: %v", err)
+	}
+	grant, err := process.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{BundleHash: bundleHash, RuntimeInstanceID: acquire.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: sourceSet.Revision})
+	if err != nil {
+		t.Fatalf("issue creation grant: %v", err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle creation probes: %v", err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("admit creation execution: %v", err)
+	}
+	binding, err := grant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.PlanRevision, binding)
+	if err != nil || !admitted.Acknowledged {
+		t.Fatalf("begin creation activation: admitted=%+v err=%v", admitted, err)
+	}
+	if committed, err := workflow.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, admitted.Attempt, plan, occurredAt.Add(time.Second)); err != nil || !committed.Acknowledged {
 		t.Fatalf("mark topology ready: %v", err)
 	}
 	return dynamicFlowCreationAtomicityFixture{
 		selected: selected,
+		process:  process,
 		db:       db, workflow: workflow, bus: eventBus, ctx: ctx,
-		runID: runID, plan: plan, event: event, sqlite: sqlite,
+		runID: runID, plan: plan, event: event, attempt: admitted.Attempt, sqlite: sqlite,
 	}
 }
 
@@ -298,7 +371,7 @@ func dynamicFlowCreationAtomicityEvent(plan runtimepipeline.DynamicFlowRuntimeRe
 
 func (f dynamicFlowCreationAtomicityFixture) commit() error {
 	return f.bus.CommitDynamicFlowRuntimeCreationOccurrence(f.ctx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest{
-		RunID: f.runID, InstancePath: f.plan.Identity.InstancePath, Plan: f.plan,
+		RunID: f.runID, InstancePath: f.plan.Identity.InstancePath, Plan: f.plan, Attempt: f.attempt,
 		Event: f.event, OccurredAt: time.Now().UTC(),
 	})
 }

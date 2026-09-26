@@ -171,6 +171,33 @@ func commitWorkflowTimerReconciliation(
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
+		if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if command.ActivationAttempt != nil {
+				state, err := authorizeCurrentFlowActivationAttemptTx(txctx, tx, postgres, *command.ActivationAttempt)
+				if err != nil {
+					return err
+				}
+				if state != "accepted" && state != "topology_committed" {
+					return fmt.Errorf("workflow timer reconciliation requires active activation attempt")
+				}
+				return nil
+			}
+			query := `SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
+			if !postgres {
+				query = `SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
+			}
+			var present int
+			err := tx.QueryRowContext(txctx, query, command.RunID, command.Route.InstancePath).Scan(&present)
+			if err == nil {
+				return fmt.Errorf("dynamic workflow timer reconciliation requires activation attempt")
+			}
+			if err != sql.ErrNoRows {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
+		}
 		result, err := commitWorkflowEngineLifecycle(txctx, attempt, decisions, genericSchedules, postgres, command.Plan)
 		if err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err

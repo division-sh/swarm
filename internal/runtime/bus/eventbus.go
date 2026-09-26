@@ -27,6 +27,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 // EventInterceptor runs deterministic coordination in the publish path.
@@ -1007,43 +1008,6 @@ func flowInstanceRouteTopologyRecordSets(table *RouteTable, identities []runtime
 	return table.materializedRouteRecordSets(identities)
 }
 
-func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
-	return eb.AddFlowInstanceRouteContext(context.Background(), req)
-}
-
-// PublishPersistedFlowInstanceRoute makes already-persisted route truth
-// process-visible without rewriting storage.
-func (eb *EventBus) PublishPersistedFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
-	if eb == nil {
-		return errors.New("event bus is required")
-	}
-	if _, err := eb.admitSourceArtifactFact(context.Background()); err != nil {
-		return err
-	}
-	eb.mu.RLock()
-	table := eb.routeTable
-	eb.mu.RUnlock()
-	if table == nil {
-		return errors.New("route table is not initialized")
-	}
-	return table.AddFlowInstanceRoute(req.Normalized())
-}
-
-// RetirePublishedFlowInstanceRoute removes process-visible route truth without
-// changing its durable lifecycle.
-func (eb *EventBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if eb == nil {
-		return errors.New("event bus is required")
-	}
-	eb.mu.RLock()
-	table := eb.routeTable
-	eb.mu.RUnlock()
-	if table == nil {
-		return errors.New("route table is not initialized")
-	}
-	return table.RemoveFlowInstanceRoute(identity)
-}
-
 // StageFlowInstanceRouteContext persists the exact derived route set but keeps
 // it process-invisible until its topology owner publishes it.
 func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) (FlowInstanceRouteTopologyResult, error) {
@@ -1084,23 +1048,20 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 	return persister.ReplaceFlowInstanceRouteTopology(ctx, flowInstanceRouteTopologyRecordSets(staged, identities))
 }
 
-func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
-	committed, commitErr := eb.StageFlowInstanceRouteContext(ctx, req)
-	if !committed.Acknowledged {
-		return errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged"))
-	}
-	return errors.Join(commitErr, eb.PublishPersistedFlowInstanceRoute(req))
-}
-
-func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	return eb.RemoveFlowInstanceRouteContext(context.Background(), identity)
-}
-
 // RetireCommittedFlowInstanceRoute applies selected-store commit evidence to
 // process-local routing. Durable route retirement has already committed.
-func (eb *EventBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
+func (eb *EventBus) RetireCommittedFlowInstanceRoute(retirement runtimepipeline.WorkflowEngineRouteRetirement) error {
 	if eb == nil {
 		return errors.New("event bus is required")
+	}
+	if err := retirement.Identity.Validate(); err != nil {
+		return err
+	}
+	if retirement.ActivationAttemptID == "" {
+		return nil
+	}
+	if parsed, err := uuid.Parse(retirement.ActivationAttemptID); err != nil || parsed == uuid.Nil || parsed.String() != retirement.ActivationAttemptID {
+		return errors.New("committed flow route retirement requires canonical activation attempt id")
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
@@ -1108,55 +1069,7 @@ func (eb *EventBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentit
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	return table.removeFlowInstanceRouteForContext(context.Background(), identity)
-}
-
-func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if eb == nil {
-		return errors.New("event bus is required")
-	}
-	var err error
-	ctx, err = eb.admitSourceArtifactFact(ctx)
-	if err != nil {
-		return err
-	}
-	eb.mu.RLock()
-	table := eb.routeTable
-	eb.mu.RUnlock()
-	if table == nil {
-		return errors.New("route table is not initialized")
-	}
-	owner, exists, err := table.flowInstanceRouteRemovalOwner(identity)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		owner = identity.Normalize()
-		if owner.Validate() != nil {
-			return fmt.Errorf("flow-instance route removal requires exact identity")
-		}
-	}
-	persister := eb.durable.FlowRouteTopology
-	if persister == nil {
-		if eb.ephemeral {
-			return table.removeFlowInstanceRouteForContext(ctx, owner)
-		}
-		return errors.New("selected store requires exact flow-instance route-set persistence")
-	}
-	descriptorLister := eb.durable.ActiveFlows
-	if descriptorLister == nil {
-		return errors.New("flow-instance route removal requires active flow-instance descriptors")
-	}
-	staged, identities, err := eb.deriveFlowInstanceRouteRecordTopology(ctx, table, descriptorLister, owner.RunID, nil, owner)
-	if err != nil {
-		return err
-	}
-	sets := flowInstanceRouteTopologyRecordSets(staged, identities)
-	committed, commitErr := persister.ReplaceFlowInstanceRouteTopology(ctx, sets)
-	if !committed.Acknowledged {
-		return errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged"))
-	}
-	return errors.Join(commitErr, table.removeFlowInstanceRouteForContext(context.WithoutCancel(ctx), owner))
+	return table.retireFlowInstanceRouteForAttempt(retirement.Identity, retirement.ActivationAttemptID, 0)
 }
 
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {
@@ -1219,6 +1132,15 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	for _, handle := range eb.internalHandles {
 		handle.deactivate()
 		internalHandles = append(internalHandles, handle)
+	}
+	if eb.routeTable != nil {
+		eb.routeTable.generationMu.RLock()
+		eb.routeTable.mu.RLock()
+		for fence := range eb.routeTable.fencedPublications {
+			routeTable.fencedPublications[fence] = struct{}{}
+		}
+		eb.routeTable.mu.RUnlock()
+		eb.routeTable.generationMu.RUnlock()
 	}
 	eb.channels = make(map[events.EventType]map[subscriberKey]chan *LocalDelivery)
 	eb.agentChans = make(map[agentidentity.Identity]chan *LocalDelivery)

@@ -315,7 +315,8 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 				Module:      &pipelineFixtureWorkflowModule{source: sourceB},
 				Persistence: workflowPersistenceForTest(store),
 			})
-			if err := pcB.ReconcileInitialEntryTimers(liveCtx, testRunScopedWorkflowRoute(liveCtx, route)); err != nil {
+			attempt := pipelineTestFlowActivationAttempt(t, runID, route.InstancePath, bundleHash)
+			if err := pcB.ReconcileInitialEntryTimersForAttempt(liveCtx, testRunScopedWorkflowRoute(liveCtx, route), attempt, readiness); err != nil {
 				t.Fatalf("reconcile first initial timer with live administrative context: %v", err)
 			}
 			active := listWorkflowTimerOwnerActivations(t, store, liveCtx, entityID, true)

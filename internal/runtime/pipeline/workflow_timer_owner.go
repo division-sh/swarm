@@ -181,7 +181,7 @@ func (l *WorkflowTimerLifecycle) ArmInitialEntryTimers(ctx context.Context, iden
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
+func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt *DynamicFlowRuntimeActivationAttempt, admittedPlan *DynamicFlowRuntimeReadinessPlan) error {
 	store := l.store()
 	if store == nil || !store.enabled() {
 		return nil
@@ -218,13 +218,28 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		return err
 	}
 	var readinessMode executionmode.Mode
-	if store.readiness != nil {
+	if attempt != nil {
+		if admittedPlan == nil {
+			return fmt.Errorf("dynamic initial timer reconciliation requires admitted plan")
+		}
+		plan, err := admittedPlan.Normalized()
+		if err != nil {
+			return err
+		}
+		if err := attempt.Validate(); err != nil {
+			return err
+		}
+		if attempt.RunID() != runID || attempt.InstancePath() != route.InstancePath || plan.RunID != runID || plan.Identity.Route() != route || plan.BundleHash != attempt.ProcessBinding().BundleHash {
+			return fmt.Errorf("dynamic initial timer reconciliation differs from admitted activation")
+		}
+		readinessMode = plan.ExecutionMode
+	} else if store.readiness != nil {
 		readiness, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 		if err != nil {
 			return err
 		}
 		if found {
-			readinessMode = readiness.Plan.ExecutionMode
+			return fmt.Errorf("dynamic initial timer reconciliation requires activation attempt for %s", readiness.InstancePath)
 		}
 	}
 	currentState := strings.TrimSpace(instance.CurrentState)
@@ -369,7 +384,7 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			return fmt.Errorf("workflow timer reconciliation owner is required")
 		}
 		committed, err = store.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
-			RunID: runID, Route: route, EntityID: entityID.String(), Plan: plan,
+			RunID: runID, Route: route, EntityID: entityID.String(), Plan: plan, ActivationAttempt: attempt,
 		})
 		if !committed.Committed {
 			return errors.Join(err, errors.New("workflow timer reconciliation returned no acknowledged result"))

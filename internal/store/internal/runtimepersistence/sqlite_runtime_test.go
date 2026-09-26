@@ -486,7 +486,6 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 			RouteInstaller: bus,
 			RouteVerifier:  bus,
 			RouteRestorer:  bus,
-			RouteRetirer:   bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -591,7 +590,6 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			RouteInstaller: bus,
 			RouteVerifier:  bus,
 			RouteRestorer:  bus,
-			RouteRetirer:   bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
@@ -684,7 +682,18 @@ type sqliteFlowActivationBus struct {
 	runtimeLog     []runtimepipeline.RuntimeLogEntry
 	stagedRequests []runtimebus.FlowInstanceRouteMaterializationRequest
 	routeRequests  []runtimebus.FlowInstanceRouteMaterializationRequest
+	routeAttempts  map[runtimeflowidentity.RunScopedFlowInstance]string
+	fencedAttempts map[string]struct{}
 	published      []events.Event
+}
+
+type sqliteFlowActivationPublication struct {
+	bus     *sqliteFlowActivationBus
+	attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt
+}
+
+func (p sqliteFlowActivationPublication) Retire() error {
+	return p.bus.RetireFlowInstanceRouteForAttempt(p.attempt)
 }
 
 type sqliteFlowActivationRoutePreparation struct {
@@ -832,9 +841,70 @@ func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRoute(req runtimeb
 	return nil
 }
 
+func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRouteForAttempt(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error) {
+	if err := attempt.Validate(); err != nil {
+		return nil, err
+	}
+	req = req.Normalized()
+	if req.Identity.RunID != attempt.RunID() || req.Identity.Route.InstancePath != attempt.InstancePath() {
+		return nil, errors.New("flow route publication differs from activation attempt")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, fenced := b.fencedAttempts[attempt.ID()]; fenced {
+		return nil, errors.New("flow route activation attempt is fenced")
+	}
+	if owner := b.routeAttempts[req.Identity]; owner != "" {
+		if owner != attempt.ID() {
+			return nil, errors.New("flow route predecessor remains published")
+		}
+		return sqliteFlowActivationPublication{bus: b, attempt: attempt}, nil
+	}
+	for _, existing := range b.routeRequests {
+		if existing.Identity == req.Identity {
+			return nil, errors.New("flow route exists without an activation attempt owner")
+		}
+	}
+	if b.routeAttempts == nil {
+		b.routeAttempts = make(map[runtimeflowidentity.RunScopedFlowInstance]string)
+	}
+	b.routeAttempts[req.Identity] = attempt.ID()
+	b.routeRequests = append(b.routeRequests, req)
+	return sqliteFlowActivationPublication{bus: b, attempt: attempt}, nil
+}
+
+func (b *sqliteFlowActivationBus) RetireFlowInstanceRouteForAttempt(attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	if err := attempt.Validate(); err != nil {
+		return err
+	}
+	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(attempt.RunID(), runtimeflowidentity.RouteForInstancePath(attempt.InstancePath()))
+	if err != nil {
+		return err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.fencedAttempts == nil {
+		b.fencedAttempts = make(map[string]struct{})
+	}
+	b.fencedAttempts[attempt.ID()] = struct{}{}
+	if b.routeAttempts[identity] != attempt.ID() {
+		return nil
+	}
+	delete(b.routeAttempts, identity)
+	filtered := b.routeRequests[:0]
+	for _, req := range b.routeRequests {
+		if req.Identity != identity {
+			filtered = append(filtered, req)
+		}
+	}
+	b.routeRequests = filtered
+	return nil
+}
+
 func (b *sqliteFlowActivationBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	delete(b.routeAttempts, identity)
 	filtered := b.routeRequests[:0]
 	for _, req := range b.routeRequests {
 		if req.Identity != identity {

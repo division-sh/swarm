@@ -648,6 +648,9 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 	if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 		t.Fatalf("activate first process: %v", err)
 	}
+	if err := first.Shutdown(); err != nil {
+		t.Fatalf("retire first process before reconstruction: %v", err)
+	}
 
 	restartBus := &flowActivationTestBus{routeStore: firstBus.routeStore}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
@@ -702,6 +705,9 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 		if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 			t.Fatalf("activate initial process %s: %v", req.Instance.InstancePath, err)
 		}
+	}
+	if err := first.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err != nil {
+		t.Fatalf("retire initial process before startup reconstruction: %v", err)
 	}
 
 	instances.readinessMu.Lock()

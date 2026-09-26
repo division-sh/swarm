@@ -215,7 +215,8 @@ func (s WorkflowEngineDeliverySuccess) Validate(runID string) error {
 // WorkflowEngineRouteRetirement declares that the exact persisted route must
 // be retired in the same selected-store transaction as terminal workflow state.
 type WorkflowEngineRouteRetirement struct {
-	Identity runtimeflowidentity.RunScopedFlowInstance
+	Identity            runtimeflowidentity.RunScopedFlowInstance
+	ActivationAttemptID string
 }
 
 // WorkflowEnginePostCommitPlan carries semantic work that is legal only after

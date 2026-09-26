@@ -104,7 +104,6 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 					RouteInstaller: bus,
 					RouteVerifier:  bus,
 					RouteRestorer:  bus,
-					RouteRetirer:   bus,
 				},
 				ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected))

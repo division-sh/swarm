@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
@@ -172,6 +173,56 @@ func authorizeCurrentFlowActivationAttemptTx(ctx context.Context, tx *sql.Tx, po
 	return state.String, nil
 }
 
+func (s *PipelinePostgresOwner) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return verifyDynamicFlowRuntimeActivationAttempt(ctx, true, attempt, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (struct{}, error)) mutationprotocol.Result[struct{}] {
+		return mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, fn)
+	})
+}
+
+func (s *PipelineSQLiteOwner) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return verifyDynamicFlowRuntimeActivationAttempt(ctx, false, attempt, func(ctx context.Context, fn func(context.Context, *mutationprotocol.Attempt) (struct{}, error)) mutationprotocol.Result[struct{}] {
+		return mutationprotocol.RunSQLite(ctx, s.backend, "sqlite flow activation verification", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, fn)
+	})
+}
+
+func verifyDynamicFlowRuntimeActivationAttempt(
+	ctx context.Context,
+	postgres bool,
+	actor runtimepipeline.DynamicFlowRuntimeActivationAttempt,
+	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (struct{}, error)) mutationprotocol.Result[struct{}],
+) error {
+	if err := actor.Validate(); err != nil {
+		return err
+	}
+	outcome := run(ctx, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			state, err := authorizeCurrentFlowActivationAttemptTx(txctx, tx, postgres, actor)
+			if err != nil {
+				return err
+			}
+			if state != "accepted" && state != "topology_committed" {
+				return errors.New("flow activation attempt is not admitted for forward progress")
+			}
+			current, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, actor.RunID(), runtimeflowidentity.RouteForInstancePath(actor.InstancePath()), true)
+			if err != nil {
+				return err
+			}
+			if !found || !current.Eligible() || current.PlanRevision != actor.PlanRevision() || current.Plan.BundleHash != actor.ProcessBinding().BundleHash {
+				return errors.New("flow activation attempt lost current instance eligibility")
+			}
+			return nil
+		})
+		return struct{}{}, err
+	})
+	return standalonePipelineMutationError(outcome)
+}
+
 // RetireDynamicFlowRuntimeActivationAttempt records settlement of one exact
 // predecessor. The caller must first settle its process-local resources.
 // Retired grants retain this CAS authority but cannot make forward progress.
@@ -204,14 +255,11 @@ func retireDynamicFlowRuntimeActivationAttempt(
 	}
 	outcome := run(ctx, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', topology_ready_at=CASE WHEN plan_revision=$6 THEN NULL ELSE topology_ready_at END, updated_at=$1 WHERE run_id=$2::uuid AND instance_path=$3 AND activation_attempt_id=$4::uuid AND activation_attempt_grant_id=$5::uuid AND activation_attempt_revision=$6 AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`
+			query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', updated_at=$1 WHERE run_id=$2::uuid AND instance_path=$3 AND activation_attempt_id=$4::uuid AND activation_attempt_grant_id=$5::uuid AND activation_attempt_revision=$6 AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`
 			if !postgres {
-				query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', topology_ready_at=CASE WHEN plan_revision=? THEN NULL ELSE topology_ready_at END, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_revision=? AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`
+				query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_revision=? AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`
 			}
 			args := []any{time.Now().UTC(), attempt.RunID(), attempt.InstancePath(), attempt.ID(), attempt.ProcessBinding().GenerationGrantID, attempt.PlanRevision()}
-			if !postgres {
-				args = append([]any{attempt.PlanRevision()}, args...)
-			}
 			result, err := tx.ExecContext(txctx, query, args...)
 			if err != nil {
 				return err
@@ -221,7 +269,24 @@ func retireDynamicFlowRuntimeActivationAttempt(
 				return err
 			}
 			if rows != 1 {
-				return errors.New("flow activation retirement does not own the current attempt slot")
+				query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2 FOR UPDATE`
+				if !postgres {
+					query = `SELECT activation_attempt_id, activation_attempt_grant_id FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
+				}
+				var currentID, currentGrantID sql.NullString
+				if err := tx.QueryRowContext(txctx, query, attempt.RunID(), attempt.InstancePath()).Scan(&currentID, &currentGrantID); err != nil {
+					return fmt.Errorf("load successor flow activation attempt: %w", err)
+				}
+				if !currentID.Valid || !currentGrantID.Valid || currentID.String == attempt.ID() {
+					return errors.New("flow activation retirement does not own the current attempt slot")
+				}
+				foreign, err := agentpersistence.FlowActivationPredecessorIsFromAnotherProcessTx(txctx, tx, currentGrantID.String, attempt.ProcessBinding())
+				if err != nil {
+					return err
+				}
+				if !foreign {
+					return errors.New("flow activation retirement cannot ignore a same-process successor")
+				}
 			}
 			return nil
 		})

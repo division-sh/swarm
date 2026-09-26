@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -68,7 +69,7 @@ func TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores(t 
 			}
 			identity := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.DeriveRoute(notifyallchildren.ChildFlowID, "current")}
 			req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: identity, ActivationVariables: map[string]string{"account_id": "current"}}
-			if err := eventBus.AddFlowInstanceRouteContext(ctx, req); !errors.Is(err, fault) || wrapped.calls != 1 {
+			if err := flowroutefixture.StageAndPublish(ctx, eventBus, req); !errors.Is(err, fault) || wrapped.calls != 1 {
 				t.Fatalf("acknowledged route add err=%v commits=%d", err, wrapped.calls)
 			}
 			routes, err := selected.ListFlowInstanceRouteRecords(ctx, identity)
@@ -78,20 +79,13 @@ func TestFlowRouteTopologyAcknowledgedFaultCompletesProcessFollowupBothStores(t 
 			if err := eventBus.VerifyFlowInstanceRoute(ctx, identity); err != nil {
 				t.Fatalf("process route differs from committed route: %v", err)
 			}
-			if err := eventBus.RemoveFlowInstanceRouteContext(ctx, identity); !errors.Is(err, fault) || wrapped.calls != 2 {
-				t.Fatalf("acknowledged route retirement err=%v commits=%d", err, wrapped.calls)
-			}
-			routes, err = selected.ListFlowInstanceRouteRecords(ctx, identity)
-			if err != nil || len(routes) != 0 || eventBus.HasFlowInstanceRoute(identity) {
-				t.Fatalf("acknowledged route retirement incomplete: routes=%#v visible=%v err=%v", routes, eventBus.HasFlowInstanceRoute(identity), err)
-			}
 			wrapped.refuse = true
-			if err := eventBus.AddFlowInstanceRouteContext(ctx, req); !errors.Is(err, fault) || wrapped.calls != 2 || eventBus.HasFlowInstanceRoute(identity) {
-				t.Fatalf("unacknowledged add published route: err=%v commits=%d visible=%v", err, wrapped.calls, eventBus.HasFlowInstanceRoute(identity))
+			if err := flowroutefixture.StageAndPublish(ctx, eventBus, req); !errors.Is(err, fault) || wrapped.calls != 1 || !eventBus.HasFlowInstanceRoute(identity) {
+				t.Fatalf("unacknowledged repeat changed existing route: err=%v commits=%d visible=%v", err, wrapped.calls, eventBus.HasFlowInstanceRoute(identity))
 			}
 			routes, err = selected.ListFlowInstanceRouteRecords(ctx, identity)
-			if err != nil || len(routes) != 0 {
-				t.Fatalf("unacknowledged add changed durable routes: %#v err=%v", routes, err)
+			if err != nil || len(routes) == 0 {
+				t.Fatalf("unacknowledged repeat changed durable routes: %#v err=%v", routes, err)
 			}
 		})
 	}

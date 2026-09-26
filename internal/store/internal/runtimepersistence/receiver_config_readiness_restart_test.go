@@ -78,23 +78,35 @@ func TestReceiverConfigReadinessRestartPreservesPendingAutoEmitBothStores(t *tes
 				f.requireCounts(t, 1)
 				f.requireCreationOccurrence(t, plan, 0)
 				if boundary == "numeric_substitution" {
+					binding, err := f.grant.ProcessExecutionBinding()
+					if err != nil {
+						t.Fatal(err)
+					}
+					readiness, found, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, plan.Readiness.RunID, plan.Identity.Route())
+					if err != nil || !found {
+						t.Fatalf("load numeric readiness: found=%v err=%v", found, err)
+					}
+					admitted, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, readiness.Plan, readiness.PlanRevision, binding)
+					if err != nil || !admitted.Acknowledged {
+						t.Fatalf("admit numeric activation: %+v err=%v", admitted, err)
+					}
 					changed := plan.Readiness
 					creation := *changed.CreationEvent
 					creation.Payload = []byte(strings.ReplaceAll(string(creation.Payload), "7.0", "7"))
 					changed.CreationEvent = &creation
-					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReady(f.ctx, changed, req.OccurredAt); err == nil {
+					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReadyForAttempt(f.ctx, admitted.Attempt, changed, req.OccurredAt); err == nil {
 						t.Fatal("topology CAS accepted a substituted numeric kind")
 					}
 					stored, _, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, plan.Readiness.RunID, plan.Identity.Route())
 					if err != nil || !stored.TopologyReadyAt.IsZero() {
 						t.Fatalf("rejected topology CAS mutated readiness: %#v err=%v", stored, err)
 					}
-					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReady(f.ctx, plan.Readiness, req.OccurredAt); err != nil {
+					if _, err := f.workflows.MarkDynamicFlowRuntimeTopologyReadyForAttempt(f.ctx, admitted.Attempt, plan.Readiness, req.OccurredAt); err != nil {
 						t.Fatal(err)
 					}
 					event := eventtest.PersistedChildForProducer(creation.EventID, events.EventType(creation.EventType), eventtest.Producer(events.EventProducerPlatform, "flow-instance-activator"), "", creation.Payload, 0, creation.RunID, creation.ParentEventID,
 						events.EnvelopeForSourceRoute(events.EventEnvelope{EntityID: plan.Identity.EntityID, FlowInstance: plan.Identity.InstancePath}, events.RouteIdentity{FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID}), creation.CreatedAt)
-					if err := publisher.CommitDynamicFlowRuntimeCreationOccurrence(f.ctx, pipeline.DynamicFlowRuntimeCreationOccurrenceRequest{RunID: changed.RunID, InstancePath: plan.Identity.InstancePath, Plan: changed, Event: event, OccurredAt: req.OccurredAt}); err == nil {
+					if err := publisher.CommitDynamicFlowRuntimeCreationOccurrence(f.ctx, pipeline.DynamicFlowRuntimeCreationOccurrenceRequest{RunID: changed.RunID, InstancePath: plan.Identity.InstancePath, Plan: changed, Attempt: admitted.Attempt, Event: event, OccurredAt: req.OccurredAt}); err == nil {
 						t.Fatal("creation commit accepted a substituted numeric kind")
 					}
 					f.requireCreationOccurrence(t, plan, 0)
@@ -182,8 +194,7 @@ func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testi
 		DeliveryStore: f.store, WorkOwner: storeTestWorkOwner(t),
 		PersistenceRoles: manager.PersistenceRoles{
 			AgentRoutes: f.bus, FlowActivation: agentFixtureFlowActivationCommitter{store: f.store},
-			RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, RouteRetirer: f.bus,
-			CreationPublisher: publisher,
+			RouteInstaller: f.bus, RouteVerifier: f.bus, RouteRestorer: f.bus, CreationPublisher: publisher,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}
 	if len(workflowOverride) != 0 {
@@ -197,6 +208,8 @@ func (f receiverConfigActivationFixture) restartedReceiverConfigManager(t *testi
 	if err := f.manager.InstallStartupTopology(grant, admission, sourceSet); err != nil {
 		t.Fatal(err)
 	}
+	admitReceiverConfigFixtureGrant(t, f.ctx, grant)
+	f.grant = grant
 	return f
 }
 
