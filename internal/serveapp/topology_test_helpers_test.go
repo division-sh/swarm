@@ -221,6 +221,7 @@ func registerServeTestEphemeralAgent(t testing.TB, manager *runtimemanager.Agent
 
 func registerServeTestDurableAgent(
 	t testing.TB,
+	callerCtx context.Context,
 	selected storetest.AgentFixtureStore,
 	manager *runtimemanager.AgentManager,
 	cfg runtimeactors.AgentConfig,
@@ -239,7 +240,7 @@ func registerServeTestDurableAgent(
 	if len(cfg.Config) == 0 {
 		cfg.Config = json.RawMessage(`{}`)
 	}
-	ctx := runtimecorrelation.WithRunID(runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
+	ctx := runtimecorrelation.WithRunID(runtimeauthoractivity.WithScope(callerCtx, runtimeauthoractivity.BundleScope(
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		bundleHash,
 	)), identity.RunID)
