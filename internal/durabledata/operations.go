@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/google/uuid"
 )
 
@@ -394,7 +395,8 @@ func (e RunCreationDataEnvelope) Canonical() (RunCreationDataEnvelope, error) {
 
 // RunCreationCommand is the method-neutral durable parent operation consumed
 // by event.publish and run.start. InitialEvent contains canonical semantic
-// publication input, never wrapper or transport fields.
+// publication input, never wrapper or transport fields. Both event fields are
+// absent for deployment-origin, feed-only initiation.
 type RunCreationCommand struct {
 	RunID        string                  `json:"run_id"`
 	Actor        string                  `json:"actor"`
@@ -404,32 +406,97 @@ type RunCreationCommand struct {
 	Data         RunCreationDataEnvelope `json:"data"`
 }
 
+type RunCreationInitiation string
+
+const (
+	RunCreationEventOnly    RunCreationInitiation = "event_only"
+	RunCreationFeedOnly     RunCreationInitiation = "feed_only"
+	RunCreationEventAndFeed RunCreationInitiation = "event_and_feed"
+)
+
+// DeploymentFeed identifies work created from one selected pin, independent of
+// any operator event. RowCount zero is a real, completed feed, not an absent one.
+type DeploymentFeed struct {
+	RunID        string         `json:"run_id"`
+	BundleHash   string         `json:"bundle_hash"`
+	Declaration  DeclarationRef `json:"declaration"`
+	SchemaDigest SchemaDigest   `json:"schema_digest"`
+	VersionID    VersionID      `json:"version_id"`
+	RowCount     uint64         `json:"row_count"`
+}
+
+func (f DeploymentFeed) Validate() error {
+	if parsed, err := uuid.Parse(f.RunID); err != nil || parsed == uuid.Nil || parsed.String() != f.RunID {
+		return fmt.Errorf("deployment feed requires a canonical non-zero run_id")
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(f.BundleHash); err != nil {
+		return err
+	}
+	if err := f.Declaration.Validate(); err != nil {
+		return err
+	}
+	if err := f.SchemaDigest.Validate(); err != nil {
+		return err
+	}
+	if err := f.VersionID.Validate(); err != nil {
+		return err
+	}
+	if f.RowCount > MaxResourceRows {
+		return fmt.Errorf("deployment feed row_count exceeds %d", MaxResourceRows)
+	}
+	return nil
+}
+
+func (c RunCreationCommand) Initiation() (RunCreationInitiation, error) {
+	hasEventID := c.EventID != ""
+	hasEvent := len(c.InitialEvent) != 0
+	if hasEventID != hasEvent {
+		return "", fmt.Errorf("run creation requires event_id and initial_event together")
+	}
+	hasFeed := len(c.Data.Imports)+len(c.Data.Pins) > 0
+	if !hasEventID {
+		if !hasFeed {
+			return "", fmt.Errorf("run creation requires an initial event or data feed")
+		}
+		return RunCreationFeedOnly, nil
+	}
+	if hasFeed {
+		return RunCreationEventAndFeed, nil
+	}
+	return RunCreationEventOnly, nil
+}
+
 func (c RunCreationCommand) RequestHash() (string, []byte, RunCreationCommand, error) {
 	runID, err := uuid.Parse(c.RunID)
 	if err != nil || runID == uuid.Nil || runID.String() != c.RunID {
 		return "", nil, RunCreationCommand{}, fmt.Errorf("run_id must be one canonical non-zero UUID")
 	}
-	eventID, err := uuid.Parse(c.EventID)
-	if err != nil || eventID == uuid.Nil || eventID.String() != c.EventID {
-		return "", nil, RunCreationCommand{}, fmt.Errorf("event_id must be one canonical non-zero UUID")
-	}
-	if strings.TrimSpace(c.Actor) == "" || strings.TrimSpace(c.BundleHash) == "" || len(c.InitialEvent) == 0 {
-		return "", nil, RunCreationCommand{}, fmt.Errorf("run creation requires actor, bundle_hash, and initial_event")
+	if strings.TrimSpace(c.Actor) == "" || strings.TrimSpace(c.BundleHash) == "" {
+		return "", nil, RunCreationCommand{}, fmt.Errorf("run creation requires actor and bundle_hash")
 	}
 	canonicalData, err := c.Data.Canonical()
 	if err != nil {
 		return "", nil, RunCreationCommand{}, err
 	}
-	semantic, err := canonicaljson.Decode(c.InitialEvent)
-	if err != nil {
-		return "", nil, RunCreationCommand{}, fmt.Errorf("initial event semantic request is invalid: %w", err)
-	}
-	canonicalEvent, err := canonicaljson.Encode(semantic)
+	c.Data = canonicalData
+	initiation, err := c.Initiation()
 	if err != nil {
 		return "", nil, RunCreationCommand{}, err
 	}
-	c.Data = canonicalData
-	c.InitialEvent = canonicalEvent
+	if initiation != RunCreationFeedOnly {
+		eventID, parseErr := uuid.Parse(c.EventID)
+		if parseErr != nil || eventID == uuid.Nil || eventID.String() != c.EventID {
+			return "", nil, RunCreationCommand{}, fmt.Errorf("event_id must be one canonical non-zero UUID")
+		}
+		semantic, decodeErr := canonicaljson.Decode(c.InitialEvent)
+		if decodeErr != nil {
+			return "", nil, RunCreationCommand{}, fmt.Errorf("initial event semantic request is invalid: %w", decodeErr)
+		}
+		c.InitialEvent, err = canonicaljson.Encode(semantic)
+		if err != nil {
+			return "", nil, RunCreationCommand{}, err
+		}
+	}
 	raw, err := canonicaljson.Bytes(c)
 	if err != nil {
 		return "", nil, RunCreationCommand{}, err
