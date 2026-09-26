@@ -674,7 +674,7 @@ func newClaudeAttemptProofManagerForGeneration(
 
 func installClaudeAttemptProofManagerTopology(t testing.TB, backend claudeAttemptProofBackend, manager *runtimemanager.AgentManager, eventBus *runtimebus.EventBus, cfg runtimeactors.AgentConfig) {
 	t.Helper()
-	registerServeTestDurableAgent(t, backend.store, manager, cfg, backend.source)
+	registerServeTestDurableAgent(t, backend.context(), backend.store, manager, cfg, backend.source)
 	identity, err := cfg.ConcreteIdentity()
 	if err != nil {
 		t.Fatalf("resolve Claude attempt proof identity: %v", err)

@@ -310,7 +310,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	runID := uuid.NewString()
-	registerServeTestDurableAgent(t, pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
+	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	runID := uuid.NewString()
-	registerServeTestDurableAgent(t, pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
+	registerServeTestDurableAgent(t, runStatusAuthorActivityContext(source), pg, am, runStatusAgentConfig(t, runID, testAgent.id), source)
 	if err := am.Run(managedRuntimeAdmissionContextForTest(t, runStatusAuthorActivityContext(source))); err != nil {
 		t.Fatalf("AgentManager.Run: %v", err)
 	}
