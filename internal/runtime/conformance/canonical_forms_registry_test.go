@@ -285,6 +285,49 @@ func TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses(t *testing.T) {
 	}
 }
 
+func TestCanonicalFormsDecodeSiteCensusExcludesNestedCheckout(t *testing.T) {
+	for _, marker := range []string{"file", "directory"} {
+		t.Run(marker, func(t *testing.T) {
+			root := t.TempDir()
+			local := filepath.Join(root, "internal/runtime/contracts/local.go")
+			foreignDir := filepath.Join(root, "internal/runtime/contracts/foreign")
+			foreign := filepath.Join(foreignDir, "foreign.go")
+			source := `package contracts
+import "gopkg.in/yaml.v3"
+var node *yaml.Node
+func decode(raw []byte) error { return yaml.Unmarshal(raw, new(any)) }
+`
+			writeRegistryMutationFile(t, local, source)
+			writeRegistryMutationFile(t, foreign, source)
+			gitMarker := filepath.Join(foreignDir, ".git")
+			if marker == "file" {
+				if err := os.WriteFile(gitMarker, []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Mkdir(gitMarker, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			actual, err := collectYAMLDecodeSites(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := actual["internal/runtime/contracts/local.go"]; got.NodeSites != 1 || got.DirectDecodeRoots != 1 || len(actual) != 1 {
+				t.Fatalf("decode sites = %#v, want only current-local node and decode", actual)
+			}
+			if err := os.Remove(local); err != nil {
+				t.Fatal(err)
+			}
+			actual, err = collectYAMLDecodeSites(root)
+			if err != nil || len(actual) != 0 {
+				t.Fatalf("foreign-only decode sites received credit: %#v, %v", actual, err)
+			}
+		})
+	}
+	if _, err := collectYAMLDecodeSites(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing census root was accepted")
+	}
+}
+
 func TestCanonicalFormsRegistryRejectsUnregisteredDecodeBypasses(t *testing.T) {
 	root := t.TempDir()
 	writeRegistryMutationFile(t, filepath.Join(root, "internal/runtime/contracts/new.go"), `package contracts
@@ -923,7 +966,7 @@ func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 
 func collectYAMLDecodeSites(root string) (map[string]canonicalDecodeBypassFile, error) {
 	out := make(map[string]canonicalDecodeBypassFile)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

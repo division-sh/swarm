@@ -139,6 +139,90 @@ func TestPackPublishingSurfacesCarryExplicitBaseAndAdmissionOwners(t *testing.T)
 
 func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	bodyEmbeds, err := platformBodyEmbeds(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(bodyEmbeds, ",") != "packs/embed.go" {
+		t.Fatalf("platform pack body embed owners = %v, want [packs/embed.go]", bodyEmbeds)
+	}
+	paths, err := platformPackTeachingFiles(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoRetiredPackConfig(t, path, string(body))
+	}
+	for _, path := range []string{"swarm.example.yaml", "internal/cliapp/unified_config_example.go"} {
+		body, err := os.ReadFile(filepath.Join(repoRoot, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoRetiredPackConfig(t, path, string(body))
+	}
+}
+
+func TestPlatformPackSourceCensusesExcludeNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	localEmbed := filepath.Join(repo, "packs", "embed.go")
+	foreignEmbed := filepath.Join(repo, "packs", "foreign", "embed.go")
+	localTeaching := []string{
+		filepath.Join(repo, ".github", "fixtures", "current.yaml"),
+		filepath.Join(repo, "examples", "current.md"),
+	}
+	foreignTeaching := []string{
+		filepath.Join(repo, ".github", "fixtures", "foreign", "hostile.yaml"),
+		filepath.Join(repo, "examples", "foreign", "hostile.md"),
+	}
+	for _, path := range []string{localEmbed, foreignEmbed} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("package packs\n//go:embed provider-triggers\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range append(append([]string{}, localTeaching...), foreignTeaching...) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("external_dirs: retired\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{filepath.Dir(foreignEmbed), filepath.Dir(foreignTeaching[0]), filepath.Dir(foreignTeaching[1])} {
+		if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	embeds, err := platformBodyEmbeds(repo)
+	if err != nil || len(embeds) != 1 || embeds[0] != "packs/embed.go" {
+		t.Fatalf("body embeds = %v, %v; want current-local owner", embeds, err)
+	}
+	paths, err := platformPackTeachingFiles(repo)
+	if err != nil || len(paths) != len(localTeaching) {
+		t.Fatalf("teaching files = %v, %v; want current-local files", paths, err)
+	}
+	for _, path := range append([]string{localEmbed}, localTeaching...) {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	embeds, err = platformBodyEmbeds(repo)
+	if err != nil || len(embeds) != 0 {
+		t.Fatalf("foreign-only body embed received credit: %v, %v", embeds, err)
+	}
+	paths, err = platformPackTeachingFiles(repo)
+	if err != nil || len(paths) != 0 {
+		t.Fatalf("foreign-only teaching file entered corpus: %v, %v", paths, err)
+	}
+}
+
+func platformBodyEmbeds(repoRoot string) ([]string, error) {
 	var bodyEmbeds []string
 	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -167,14 +251,12 @@ func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testin
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	sort.Strings(bodyEmbeds)
-	if strings.Join(bodyEmbeds, ",") != "packs/embed.go" {
-		t.Fatalf("platform pack body embed owners = %v, want [packs/embed.go]", bodyEmbeds)
-	}
+	return bodyEmbeds, err
+}
 
+func platformPackTeachingFiles(repoRoot string) ([]string, error) {
+	var paths []string
 	for _, root := range []string{".github", "examples"} {
 		err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -195,24 +277,15 @@ func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testin
 					return nil
 				}
 			}
-			body, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			assertNoRetiredPackConfig(t, path, string(body))
+			paths = append(paths, path)
 			return nil
 		})
 		if err != nil {
-			t.Fatalf("scan %s: %v", root, err)
+			return nil, err
 		}
 	}
-	for _, path := range []string{"swarm.example.yaml", "internal/cliapp/unified_config_example.go"} {
-		body, err := os.ReadFile(filepath.Join(repoRoot, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		assertNoRetiredPackConfig(t, path, string(body))
-	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 func pathSet(paths ...string) map[string]struct{} {

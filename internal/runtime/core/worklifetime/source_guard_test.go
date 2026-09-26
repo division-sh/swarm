@@ -138,6 +138,50 @@ func TestProductionWorkLifetimeBoundaries(t *testing.T) {
 func walkProductionWorkLifetimeFiles(t *testing.T, visit func(path, relative string)) {
 	t.Helper()
 	repoRoot := workLifetimeRepositoryRoot(t)
+	if err := walkProductionWorkLifetimeFilesAtRoot(repoRoot, visit); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkLifetimeSourceCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	var locals []string
+	for _, rootName := range []string{"cmd", "internal/runtime", "internal/serveapp", "internal/apiv1", "internal/cliapp"} {
+		root := filepath.Join(repo, rootName)
+		local := filepath.Join(root, "current", "hostile.go")
+		foreign := filepath.Join(root, "foreign")
+		for _, path := range []string{local, filepath.Join(foreign, "hostile.go")} {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("package hostile\nfunc run() { go func() {}() }\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		locals = append(locals, local)
+	}
+	var selected []string
+	if err := walkProductionWorkLifetimeFilesAtRoot(repo, func(path, _ string) { selected = append(selected, path) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != len(locals) {
+		t.Fatalf("selected source = %v, want %d current-local files", selected, len(locals))
+	}
+	for _, path := range locals {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selected = nil
+	if err := walkProductionWorkLifetimeFilesAtRoot(repo, func(path, _ string) { selected = append(selected, path) }); err != nil || len(selected) != 0 {
+		t.Fatalf("foreign-only source received work-lifetime credit: %v, %v", selected, err)
+	}
+}
+
+func walkProductionWorkLifetimeFilesAtRoot(repoRoot string, visit func(path, relative string)) error {
 	for _, rootName := range []string{"cmd", "internal/runtime", "internal/serveapp", "internal/apiv1", "internal/cliapp"} {
 		root := filepath.Join(repoRoot, rootName)
 		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -155,9 +199,10 @@ func walkProductionWorkLifetimeFiles(t *testing.T, visit func(path, relative str
 			visit(path, relative)
 			return nil
 		}); err != nil {
-			t.Fatalf("walk %s: %v", rootName, err)
+			return err
 		}
 	}
+	return nil
 }
 
 func TestAsyncSiteInventoryRejectsUnclassifiedGoroutine(t *testing.T) {

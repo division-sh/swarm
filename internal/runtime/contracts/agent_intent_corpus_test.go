@@ -209,3 +209,40 @@ func corpusMarkdownUnderPrompts(t testing.TB, repo string, roots []string) []str
 	sort.Strings(files)
 	return files
 }
+
+func TestAgentIntentCorpusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	roots := []string{"examples"}
+	local := filepath.Join(repo, "examples", "local")
+	foreign := filepath.Join(repo, "examples", "foreign")
+	for _, dir := range []string{local, foreign} {
+		if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"agents.yaml", filepath.Join("prompts", "intent.md")} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("source"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := corpusFilesNamed(t, repo, roots, "agents.yaml"); len(got) != 1 || got[0] != filepath.Join(local, "agents.yaml") {
+		t.Fatalf("agent declarations = %v, want current-local file", got)
+	}
+	if got := corpusMarkdownUnderPrompts(t, repo, roots); len(got) != 1 || got[0] != filepath.Join(local, "prompts", "intent.md") {
+		t.Fatalf("agent prompts = %v, want current-local file", got)
+	}
+	for _, name := range []string{"agents.yaml", filepath.Join("prompts", "intent.md")} {
+		if err := os.Remove(filepath.Join(local, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := corpusFilesNamed(t, repo, roots, "agents.yaml"); len(got) != 0 {
+		t.Fatalf("foreign-only agent declaration received corpus credit: %v", got)
+	}
+	if got := corpusMarkdownUnderPrompts(t, repo, roots); len(got) != 0 {
+		t.Fatalf("foreign-only agent prompt received corpus credit: %v", got)
+	}
+}

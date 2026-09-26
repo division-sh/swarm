@@ -21,17 +21,56 @@ func TestFullLifecycleFixtureIsFiniteFilesystemFlowTree(t *testing.T) {
 			t.Fatalf("full lifecycle source is missing %s", label)
 		}
 	}
-	if err := checkoutsource.WalkDir(releaseE2ERepoRoot(t), root, func(path string, entry os.DirEntry, walkErr error) error {
+	retired, err := retiredFullLifecycleTopology(releaseE2ERepoRoot(t), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range retired {
+		t.Errorf("full lifecycle source retains retired topology at %s", path)
+	}
+}
+
+func TestFullLifecycleFixtureExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, "full_lifecycle")
+	foreign := filepath.Join(root, "foreign")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	localFile := filepath.Join(root, "package.yaml")
+	for _, path := range []string{localFile, filepath.Join(foreign, "package.yaml")} {
+		if err := os.WriteFile(path, []byte("retired\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	retired, err := retiredFullLifecycleTopology(repo, root)
+	if err != nil || len(retired) != 1 || retired[0] != localFile {
+		t.Fatalf("retired topology = %v, %v; want only current-local file", retired, err)
+	}
+	if err := os.Remove(localFile); err != nil {
+		t.Fatal(err)
+	}
+	retired, err = retiredFullLifecycleTopology(repo, root)
+	if err != nil || len(retired) != 0 {
+		t.Fatalf("foreign-only retired topology was rejected: %v, %v", retired, err)
+	}
+}
+
+func retiredFullLifecycleTopology(repo, root string) ([]string, error) {
+	var retired []string
+	err := checkoutsource.WalkDir(repo, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.Name() == "package.yaml" || entry.IsDir() && entry.Name() == "flows" {
-			t.Fatalf("full lifecycle source retains retired topology at %s", path)
+			retired = append(retired, path)
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
+	return retired, err
 }
 
 func TestFullLifecycleJourneyMatrixIsClosed(t *testing.T) {

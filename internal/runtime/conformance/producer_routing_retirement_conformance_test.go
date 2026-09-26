@@ -380,6 +380,41 @@ func TestProducerRoutingRetirementExcludedDeadOutputs(t *testing.T) {
 
 func TestCheckedYAMLRejectsAllProducerRoutingAuthority(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
+	for _, path := range retiredProducerRoutingFiles(t, repoRoot) {
+		t.Errorf("%s retains retired emit.target or emit.broadcast", path)
+	}
+}
+
+func TestProducerRoutingYAMLCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	local := filepath.Join(repo, "current", "nodes.yaml")
+	foreignDir := filepath.Join(repo, "foreign")
+	for _, path := range []string{local, filepath.Join(foreignDir, "nodes.yaml")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("worker:\n  event_handlers:\n    request:\n      emit: {event: task.done, broadcast: true}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreignDir, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := retiredProducerRoutingFiles(t, repo)
+	if len(got) != 1 || got[0] != local {
+		t.Fatalf("retired YAML = %v, want only current-local %s", got, local)
+	}
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	if got := retiredProducerRoutingFiles(t, repo); len(got) != 0 {
+		t.Fatalf("foreign-only retired YAML entered current corpus: %v", got)
+	}
+}
+
+func retiredProducerRoutingFiles(t *testing.T, repoRoot string) []string {
+	t.Helper()
+	var retired []string
 	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -392,13 +427,14 @@ func TestCheckedYAMLRejectsAllProducerRoutingAuthority(t *testing.T) {
 			return nil
 		}
 		if (entry.Name() == "nodes.yaml" || entry.Name() == "schema.yaml") && hasRetiredProducerRoutingFile(t, path) {
-			t.Errorf("%s retains retired emit.target or emit.broadcast", path)
+			retired = append(retired, path)
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return retired
 }
 
 func TestProducerRoutingRetirementGuardIgnoresNestedLiteralEmitMap(t *testing.T) {

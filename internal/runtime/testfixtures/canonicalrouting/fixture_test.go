@@ -2,6 +2,7 @@ package canonicalrouting
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -227,14 +228,53 @@ func TestCanonicalRoutingExampleInventoryAndTeachingContract(t *testing.T) {
 }
 
 func TestCanonicalRoutingDocumentationRejectsRetiredInstanceIdentitySyntax(t *testing.T) {
-	root := filepath.Join(RepoRoot(t), "examples", "routing")
+	violations, err := retiredRoutingDocumentation(RepoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+}
+
+func TestCanonicalRoutingDocumentationExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	local := filepath.Join(repo, "examples", "routing", "local", "README.md")
+	foreignDir := filepath.Join(repo, "examples", "routing", "foreign")
+	for _, path := range []string{local, filepath.Join(foreignDir, "README.md")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("resolution.instance_key\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreignDir, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	violations, err := retiredRoutingDocumentation(repo)
+	if err != nil || len(violations) != 1 || !strings.Contains(violations[0], local) {
+		t.Fatalf("routing documentation violations = %v, %v; want only current-local file", violations, err)
+	}
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	violations, err = retiredRoutingDocumentation(repo)
+	if err != nil || len(violations) != 0 {
+		t.Fatalf("foreign-only routing documentation was rejected: %v, %v", violations, err)
+	}
+}
+
+func retiredRoutingDocumentation(repo string) ([]string, error) {
+	root := filepath.Join(repo, "examples", "routing")
 	forbidden := []string{
 		"resolution.instance_key",
 		"instance.key.",
 		"mint: uuid",
 		"mint: event_id",
 	}
-	if err := checkoutsource.WalkDir(RepoRoot(t), root, func(path string, entry os.DirEntry, walkErr error) error {
+	var violations []string
+	err := checkoutsource.WalkDir(repo, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -247,13 +287,12 @@ func TestCanonicalRoutingDocumentationRejectsRetiredInstanceIdentitySyntax(t *te
 		}
 		for _, retired := range forbidden {
 			if strings.Contains(string(raw), retired) {
-				t.Fatalf("%s retains retired instance identity syntax %q", path, retired)
+				violations = append(violations, fmt.Sprintf("%s retains retired instance identity syntax %q", path, retired))
 			}
 		}
 		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
+	return violations, err
 }
 
 func TestTemplateInstanceCheckedSchemasUseScalarPolicyFreeGrammar(t *testing.T) {
@@ -379,30 +418,68 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 						}
 					}
 
-					err = checkoutsource.Walk(RepoRoot(t), root, func(path string, info os.FileInfo, err error) error {
-						if err != nil {
-							return err
-						}
-						if info.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
-							return nil
-						}
-						raw, err := os.ReadFile(path)
-						if err != nil {
-							return err
-						}
-						for _, forbidden := range []string{"delivery:", "on_missing:", "on_conflict:", "broadcast:"} {
-							if strings.Contains(string(raw), forbidden) {
-								t.Fatalf("%s teaches retired/transitional field %s", path, forbidden)
-							}
-						}
-						return nil
-					})
+					violations, err := retiredRoutingTeachingFields(RepoRoot(t), root)
 					if err != nil {
 						t.Fatal(err)
+					}
+					for _, violation := range violations {
+						t.Error(violation)
 					}
 				})
 			}
 		})
+}
+
+func TestCanonicalRoutingTeachingYAMLExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, "examples", "routing", "example")
+	local := filepath.Join(root, "local.yaml")
+	foreign := filepath.Join(root, "nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{local, filepath.Join(foreign, "hostile.yaml")} {
+		if err := os.WriteFile(path, []byte("delivery: retired\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	violations, err := retiredRoutingTeachingFields(repo, root)
+	if err != nil || len(violations) != 1 || !strings.Contains(violations[0], local) {
+		t.Fatalf("teaching YAML violations = %v, %v; want only current-local file", violations, err)
+	}
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	violations, err = retiredRoutingTeachingFields(repo, root)
+	if err != nil || len(violations) != 0 {
+		t.Fatalf("foreign-only teaching YAML was rejected: %v, %v", violations, err)
+	}
+}
+
+func retiredRoutingTeachingFields(repo, root string) ([]string, error) {
+	var violations []string
+	err := checkoutsource.Walk(repo, root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || (filepath.Ext(path) != ".yaml" && filepath.Ext(path) != ".yml") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, forbidden := range []string{"delivery:", "on_missing:", "on_conflict:", "broadcast:"} {
+			if strings.Contains(string(raw), forbidden) {
+				violations = append(violations, fmt.Sprintf("%s teaches retired/transitional field %s", path, forbidden))
+			}
+		}
+		return nil
+	})
+	return violations, err
 }
 
 func TestCanonicalRoutingExampleCensusExcludesNestedCheckout(t *testing.T) {

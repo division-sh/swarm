@@ -267,6 +267,51 @@ func TestCatalogExternalProofsFailClosed(t *testing.T) {
 
 func TestCatalogOwnershipHasNoLegacyClassifierOrSimulator(t *testing.T) {
 	root := catalogRepoRoot(t)
+	violations, err := legacyCatalogOwnerViolations(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+}
+
+func TestCatalogOwnershipCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	var localFiles []string
+	for _, relativeRoot := range []string{"internal/cliapp", "internal/runtime/cataloge2e", "internal/runtime/swarmflowtest"} {
+		root := filepath.Join(repo, relativeRoot)
+		local := filepath.Join(root, "current", "hostile.go")
+		foreign := filepath.Join(root, "foreign")
+		for _, path := range []string{local, filepath.Join(foreign, "hostile.go")} {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("package hostile\n// executeCatalogHandlerStep\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		localFiles = append(localFiles, local)
+	}
+	violations, err := legacyCatalogOwnerViolations(repo)
+	if err != nil || len(violations) != len(localFiles) {
+		t.Fatalf("catalog ownership violations = %v, %v; want %d current-local files", violations, err, len(localFiles))
+	}
+	for _, path := range localFiles {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	violations, err = legacyCatalogOwnerViolations(repo)
+	if err != nil || len(violations) != 0 {
+		t.Fatalf("foreign-only catalog owners were rejected: %v, %v", violations, err)
+	}
+}
+
+func legacyCatalogOwnerViolations(root string) ([]string, error) {
 	forbidden := []string{
 		"executeCatalog" + "HandlerStep",
 		"catalogCase" + "ExecutableNow",
@@ -276,12 +321,13 @@ func TestCatalogOwnershipHasNoLegacyClassifierOrSimulator(t *testing.T) {
 		"TestSwarmTestTier3" + "ListProcessing",
 	}
 	legacySelector := regexp.MustCompile(`(?m)\bvar\s+tier[0-9]+[A-Za-z0-9_]*(Fixtures|ExcludedFixtures|RetiredFixtures)\b`)
+	var violations []string
 	for _, relativeRoot := range []string{"internal/cliapp", "internal/runtime/cataloge2e", "internal/runtime/swarmflowtest"} {
 		scanRoot := filepath.Join(root, relativeRoot)
 		if _, err := os.Stat(scanRoot); os.IsNotExist(err) {
 			continue
 		} else if err != nil {
-			t.Fatalf("stat %s: %v", relativeRoot, err)
+			return nil, fmt.Errorf("stat %s: %w", relativeRoot, err)
 		}
 		err := checkoutsource.WalkDir(root, scanRoot, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
@@ -297,18 +343,19 @@ func TestCatalogOwnershipHasNoLegacyClassifierOrSimulator(t *testing.T) {
 			text := string(raw)
 			for _, symbol := range forbidden {
 				if strings.Contains(text, symbol) {
-					t.Errorf("%s restores non-authoritative catalog owner %s", path, symbol)
+					violations = append(violations, fmt.Sprintf("%s restores non-authoritative catalog owner %s", path, symbol))
 				}
 			}
 			if legacySelector.MatchString(text) {
-				t.Errorf("%s restores a per-tier fixture selector", path)
+				violations = append(violations, fmt.Sprintf("%s restores a per-tier fixture selector", path))
 			}
 			return nil
 		})
 		if err != nil {
-			t.Fatalf("scan %s: %v", relativeRoot, err)
+			return nil, fmt.Errorf("scan %s: %w", relativeRoot, err)
 		}
 	}
+	return violations, nil
 }
 
 func TestCatalogRequiredCIProofSelection(t *testing.T) {

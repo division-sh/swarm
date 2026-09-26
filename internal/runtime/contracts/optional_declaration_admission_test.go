@@ -461,6 +461,44 @@ func assertRegistryIdentity[T any](t *testing.T, registry map[string]T, want str
 
 func TestRepositoryContainsNoPresentZeroOptionalDeclarationFiles(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
+	checked, err := scanOptionalDeclarationCorpus(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 {
+		t.Fatal("optional declaration corpus census found no files")
+	}
+}
+
+func TestOptionalDeclarationCorpusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	local := filepath.Join(repo, "current", "agents.yaml")
+	foreignDir := filepath.Join(repo, "foreign")
+	for _, path := range []string{local, filepath.Join(foreignDir, "agents.yaml")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreignDir, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checked, err := scanOptionalDeclarationCorpus(repo)
+	if checked != 1 || err == nil || !strings.Contains(err.Error(), "current/agents.yaml") {
+		t.Fatalf("local corpus checked=%d, error=%v; want current-file rejection", checked, err)
+	}
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	checked, err = scanOptionalDeclarationCorpus(repo)
+	if checked != 0 || err != nil {
+		t.Fatalf("foreign-only corpus checked=%d, error=%v; want empty local census", checked, err)
+	}
+}
+
+func scanOptionalDeclarationCorpus(repoRoot string) (int, error) {
 	roles := make(map[string]optionalDeclarationRoleTestCase)
 	for _, role := range optionalDeclarationRoleTestCases() {
 		roles[role.fileName] = role
@@ -489,10 +527,5 @@ func TestRepositoryContainsNoPresentZeroOptionalDeclarationFiles(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if checked == 0 {
-		t.Fatal("optional declaration corpus census found no files")
-	}
+	return checked, err
 }
