@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimeentity "github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -54,10 +56,12 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	state := initialFanInStreamState(t, source)
+	stateStore := &fanInStreamStateStore{snapshot: state}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 		Source:        source,
-		StateRepo:     fanOutPinRouteStateRepo{},
-		MutationOwner: fanOutPinRouteMutationOwner{},
+		StateRepo:     stateStore,
+		MutationOwner: stateStore,
 		Locker:        fanOutPinRouteLocker{},
 	}, nil)
 	if err != nil {
@@ -69,10 +73,6 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
 	}
 
-	state := runtimeengine.StateSnapshot{
-		CurrentState: "active",
-		StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil),
-	}
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,
@@ -135,7 +135,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 		CurrentState:    "active",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
-		Fields:          map[string]any{"portfolio_id": "portfolio-default"},
+		Fields:          map[string]any{},
 		EntityType:      "portfolio_state",
 	}, enteredAt); err != nil {
 		t.Fatalf("seed fan-in stream singleton: %v", err)
@@ -225,10 +225,12 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	state := initialFanInStreamState(t, source)
+	stateStore := &fanInStreamStateStore{snapshot: state}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 		Source:        source,
-		StateRepo:     fanOutPinRouteStateRepo{},
-		MutationOwner: fanOutPinRouteMutationOwner{},
+		StateRepo:     stateStore,
+		MutationOwner: stateStore,
 		Locker:        fanOutPinRouteLocker{},
 	}, nil)
 	if err != nil {
@@ -240,10 +242,6 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
 	}
 
-	state := runtimeengine.StateSnapshot{
-		CurrentState: "active",
-		StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil),
-	}
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,
@@ -266,6 +264,53 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 2 {
 		t.Fatalf("Q1 accumulator items after distinct event id = %d, want 2", got)
 	}
+}
+
+func initialFanInStreamState(t *testing.T, source semanticview.Source) runtimeengine.StateSnapshot {
+	t.Helper()
+	contract, ok := runtimeentity.ResolveForFlow(source, templatefanin.ReceiverFlowID)
+	if !ok {
+		t.Fatal("fan-in stream receiver entity contract missing")
+	}
+	fields, err := runtimeentity.Initialize(contract, nil)
+	if err != nil {
+		t.Fatalf("initialize fan-in stream receiver: %v", err)
+	}
+	return runtimeengine.StateSnapshot{
+		EntityID:     runtimeidentity.EntityID(fanInStreamSelectedOwner()),
+		CurrentState: "active",
+		StateCarrier: runtimeengine.NewStateCarrier(fields, nil, nil),
+	}
+}
+
+type fanInStreamStateStore struct {
+	snapshot runtimeengine.StateSnapshot
+}
+
+func (s *fanInStreamStateStore) LoadState(_ context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
+	if address.EntityID != s.snapshot.EntityID {
+		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("fan-in stream state owner %s does not match %s", address.EntityID, s.snapshot.EntityID)
+	}
+	return s.snapshot, true, nil
+}
+
+func (s *fanInStreamStateStore) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
+	return fmt.Errorf("fan-in stream state must commit through the mutation owner")
+}
+
+func (s *fanInStreamStateStore) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
+	if mutation.Address.EntityID != s.snapshot.EntityID {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("fan-in stream mutation owner %s does not match %s", mutation.Address.EntityID, s.snapshot.EntityID)
+	}
+	s.snapshot.StateCarrier = mutation.State.StateCarrier
+	if mutation.State.NextState != "" {
+		s.snapshot.CurrentState = mutation.State.NextState
+	}
+	return runtimeengine.CommittedEngineMutation{
+		Committed:       true,
+		EmitIntents:     mutation.EmitIntents,
+		ActivityIntents: mutation.ActivityIntents,
+	}, nil
 }
 
 type fanInStreamMemoryStore struct {

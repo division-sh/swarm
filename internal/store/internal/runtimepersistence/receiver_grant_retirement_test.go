@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -13,18 +14,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	deliveryowner "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -67,16 +72,26 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				base, selected := newAgentFixtureAuthorityStore(t, backend)
 				ctx, cancel := context.WithTimeout(base, 20*time.Second)
 				defer cancel()
+				source := grantReceiverEntitySource(t)
+				bundle, _ := semanticview.Bundle(source)
+				if !selectedFork {
+					fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
+					ctx = correlation.WithSourceArtifactFact(ctx, fact)
+					ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+				}
 				runID, entityID := uuid.NewString(), uuid.NewString()
 				ctx = correlation.WithRunID(ctx, runID)
 				identity := mustTestAgentIdentityForRun(runID, "grant-receiver", "global")
 				var grant startupownership.GenerationGrant
 				if selectedFork {
-					identity, grant = selectedReceiverClaimGrant(t, ctx, selected)
+					identity, grant = selectedReceiverClaimGrant(t, ctx, selected, source)
 					runID = identity.RunID
 					ctx = correlation.WithRunID(ctx, runID)
+					fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+					ctx = correlation.WithSourceArtifactFact(ctx, fact)
+					ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				} else {
-					if err := agentfixture.UpsertStatic(t, ctx, selected, agentFixtureStaticRecord(t, identity)); err != nil {
+					if err := agentfixture.UpsertStaticForSource(t, ctx, selected, agentFixtureStaticRecord(t, identity), mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())); err != nil {
 						t.Fatal(err)
 					}
 					plan := currentAgentFixtureSourceSet(t, ctx, selected)
@@ -107,7 +122,8 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
 				})
 				if _, err := writer.CreateEntity(ctx, tools.EntityCreateRecord{
-					RunID: runID, EntityID: entityID, FlowInstance: identity.FlowInstance(),
+					Source: source,
+					RunID:  runID, EntityID: entityID, FlowInstance: identity.FlowInstance(),
 					EntityType: "receiver", CurrentState: "active", FieldsJSON: []byte(`{}`), CreatedAt: time.Now().UTC(),
 					Writer: tools.EntityMutationWriter{Type: "agent", ID: identity.AgentID(), HandlerStep: "grant_probe_setup"},
 				}); err != nil {
@@ -276,6 +292,19 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 	}
 }
 
+func grantReceiverEntitySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nmode: singleton\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/entities.yaml"), "receiver: {}\n")
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
+	if err != nil {
+		t.Fatalf("load grant receiver source: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func receiverClaimTestDB(t *testing.T, selected agentFixtureFlowStore) *sql.DB {
 	t.Helper()
 	switch store := selected.(type) {
@@ -326,10 +355,19 @@ func commitSelectedReceiverClaimEvent(t *testing.T, ctx context.Context, selecte
 	}
 }
 
-func selectedReceiverClaimGrant(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) (agentidentity.Identity, startupownership.GenerationGrant) {
+func selectedReceiverClaimGrant(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, sources ...semanticview.Source) (agentidentity.Identity, startupownership.GenerationGrant) {
 	t.Helper()
 	_, sqlite := selected.(*SQLiteRuntimeStore)
-	fixture := newSelectedCompletionFixture(t, selected.(selectedCompletionAuthorityStore), receiverClaimTestDB(t, selected), sqlite)
+	var fixture selectedCompletionFixture
+	if len(sources) != 0 {
+		bundle, ok := semanticview.Bundle(sources[0])
+		if !ok || bundle.SourceArtifact == nil {
+			t.Fatal("selected receiver claim source requires admitted declarations")
+		}
+		fixture = newSelectedCompletionFixtureWithProcess(t, selected.(selectedCompletionAuthorityStore), receiverClaimTestDB(t, selected), sqlite, selectedPreparationProcessForTest(t, selected), bundle.SourceArtifact)
+	} else {
+		fixture = newSelectedCompletionFixture(t, selected.(selectedCompletionAuthorityStore), receiverClaimTestDB(t, selected), sqlite)
+	}
 	ctx = correlation.WithRunID(ctx, fixture.forkRun)
 	identity := mustTestAgentIdentityForRun(fixture.forkRun, "grant-receiver", "global")
 	record := agentFixtureStaticRecord(t, identity)

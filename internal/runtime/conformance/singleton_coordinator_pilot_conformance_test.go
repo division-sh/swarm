@@ -126,7 +126,7 @@ func TestSingletonCoordinatorPilotConformance_FailClosedMatrix(t *testing.T) {
 			name:        "wrong value shape",
 			opts:        singletoncoordinatorpilot.Options{WrongValueShape: true},
 			checkID:     "contained_state_operation_compliance",
-			wantMessage: "undeclared",
+			wantMessage: "required in the supplied record",
 		},
 		{
 			name:        "undeclared target",

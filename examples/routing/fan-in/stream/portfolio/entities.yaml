@@ -1,5 +1,6 @@
 portfolio_state:
   reports:
     type: map[text]json
+    initial: {}
   last_revenue:
     type: integer

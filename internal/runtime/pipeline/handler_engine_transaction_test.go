@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -555,6 +556,7 @@ states: [queued]
 subject:
   name: text
 `,
+		"scoring/events.yaml": "custom.emitted:\n  label: text\n",
 		"scoring/nodes.yaml": `
 node-a:
   execution_type: system_node
@@ -580,7 +582,9 @@ node-a:
 				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Minted Entity")},
 			},
 		},
-		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted", Fields: map[string]runtimecontracts.ExpressionValue{
+			"label": runtimecontracts.CELExpression(`has(entity.name) ? entity.name : "missing"`),
+		}},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID(""), Metadata: map[string]any{}},
@@ -596,6 +600,10 @@ node-a:
 	}
 	if got := bus.publishedEvent(0).EntityID(); got == "" {
 		t.Fatal("expected emitted event to carry canonical entity_id")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil || payload["label"] != "Minted Entity" {
+		t.Fatalf("created entity field did not reach emit.fields: payload=%#v err=%v", payload, err)
 	}
 }
 
@@ -2087,18 +2095,20 @@ func declarativeEmitContractTestBundle(t *testing.T, eventType string) *runtimec
 func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: test\nstages:\n  queued: {initial: true}\n",
-		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
-		"events.yaml": "rule.emitted: {}\nhandler.succeeded: {}\n",
+		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
+		"entities.yaml": "test_entity: {}\n",
+		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"events.yaml":   "rule.emitted: {}\nhandler.succeeded: {}\n",
 	})
 }
 
 func rulesEmitTemplateContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: test\nstages:\n  queued: {initial: true}\n",
-		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
-		"events.yaml": "account.scored:\n  account_id: text\n  score: float\naccount.bucketed:\n  account_id: text\n  score: float\n  bucket: text\n",
+		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
+		"entities.yaml": "test_entity: {}\n",
+		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"events.yaml":   "account.scored:\n  account_id: text\n  score: float\naccount.bucketed:\n  account_id: text\n  score: float\n  bucket: text\n",
 	})
 }
 
@@ -2118,9 +2128,10 @@ func declarativeEmitContractTestBundleWithEntry(t *testing.T, eventType string, 
 		},
 	}
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "name: test\nstages:\n  queued: {initial: true}\n",
-		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
-		"events.yaml": eventType + ": {}\n",
+		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
+		"entities.yaml": "test_entity: {}\n",
+		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"events.yaml":   eventType + ": {}\n",
 	})
 	for key, value := range eventsByType {
 		bundle.Events[key] = value
@@ -2146,4 +2157,548 @@ func newDeclarativeEmitContractCoordinatorWithBundle(bundle *runtimecontracts.Wo
 		entityLocks:    map[string]*sync.Mutex{},
 		module:         module,
 	}, bus
+}
+
+func seedHandlerEngineExistingEntity(t *testing.T, pc *PipelineCoordinator, entityID string) context.Context {
+	t.Helper()
+	db, store := openHandlerEntityRequirementStore(t, "sqlite")
+	pc.workflowStore = store
+	configureWorkflowLifecycleForTest(t, pc)
+	ctx := sqliteExactOnceRunContext(t, db)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
+	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: runID, StorageRef: runID, EntityID: entityID,
+		WorkflowName: ".", WorkflowVersion: pc.SemanticSource().WorkflowVersion(),
+		CurrentState: "queued", EntityType: "test_entity", Fields: map[string]any{},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
+func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	entityID := eventtest.UUID("env-ent")
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module:         handlerEngineProjectNodeModule(t),
+	}
+	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress(
+			"",
+			events.EventType("custom.trigger"),
+			"",
+			"",
+			[]byte(`{"entity_id":"payload-ent"}`),
+			0,
+			"",
+			"",
+			events.EventEnvelope{EntityID: entityID},
+			time.Now().UTC(),
+		),
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	if got := bus.publishedEvent(0).EntityID(); got != entityID {
+		t.Fatalf("emitted event entity_id = %q, want %q", got, entityID)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal emitted payload: %v", err)
+	}
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("emitted payload must not carry envelope entity_id: %#v", payload["entity_id"])
+	}
+}
+func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
+		Module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: additiveOnSuccessContractBundle(t)}),
+	})
+	entityID := eventtest.UUID("ent-1")
+	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+		OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
+		Rules: []runtimecontracts.HandlerRuleEntry{
+			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
+		},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 2 {
+		t.Fatalf("bus published count = %d, want 2", got)
+	}
+	if got := []events.EventType{bus.publishes[0].Type(), bus.publishes[1].Type()}; !reflect.DeepEqual(got, []events.EventType{"rule.emitted", "handler.succeeded"}) {
+		t.Fatalf("published order = %#v", got)
+	}
+}
+func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
+		Module: canonicalPreviewWorkflowModuleForTest(&previewWorkflowModule{bundle: rulesEmitTemplateContractBundle(t)}),
+	})
+	entityID := eventtest.UUID("ent-1")
+	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{
+			Event: "account.bucketed",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"account_id": runtimecontracts.CELExpression("payload.account_id"),
+				"score":      runtimecontracts.CELExpression("payload.score"),
+			},
+		},
+		Rules: []runtimecontracts.HandlerRuleEntry{
+			{
+				ID:        "high",
+				Condition: "payload.score >= 80.0",
+				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+					"bucket": runtimecontracts.CELExpression(`"high"`),
+				}},
+			},
+			{
+				ID:        "medium",
+				Condition: "payload.score >= 40.0",
+				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+					"bucket": runtimecontracts.CELExpression(`"medium"`),
+				}},
+			},
+			{
+				ID:        "low",
+				Condition: "else",
+				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+					"bucket": runtimecontracts.CELExpression(`"low"`),
+				}},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress(
+			"",
+			events.EventType("account.scored"),
+			"",
+			"",
+			mustJSON(map[string]any{"account_id": "acct-1", "score": 91}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Time{},
+		),
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	emitted := bus.publishedEvent(0)
+	if got := emitted.Type(); got != events.EventType("account.bucketed") {
+		t.Fatalf("published event = %q, want account.bucketed", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emitted.Payload(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal payload: %v", err)
+	}
+	if got := payload["account_id"]; got != "acct-1" {
+		t.Fatalf("account_id = %#v, want acct-1", got)
+	}
+	if got := payload["bucket"]; got != "high" {
+		t.Fatalf("bucket = %#v, want high", got)
+	}
+	if got := int(payload["score"].(float64)); got != 91 {
+		t.Fatalf("score = %#v, want 91", payload["score"])
+	}
+}
+
+func TestExecuteNodeContractHandler_UsesEmitFieldsAsOnlyBusinessPayloadSource(t *testing.T) {
+	entityID := eventtest.UUID("ent-1")
+	pc, bus := newDeclarativeEmitContractCoordinator(t, "custom.emitted")
+
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{
+			Event: "custom.emitted",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"label": runtimecontracts.CELExpression(`"done"`),
+			},
+		},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress(
+			"",
+			events.EventType("custom.trigger"),
+			"",
+			"",
+			mustJSON(map[string]any{"entity_id": "ent-1", "legacy": "should-not-pass"}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Time{},
+		),
+
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := payload["label"]; got != "done" {
+		t.Fatalf("payload.label = %#v, want done", got)
+	}
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
+	}
+	if _, ok := payload["trigger_event_type"]; ok {
+		t.Fatalf("payload must not carry envelope trigger_event_type: %#v", payload["trigger_event_type"])
+	}
+	if _, ok := payload["current_state"]; ok {
+		t.Fatalf("payload must not carry envelope current_state: %#v", payload["current_state"])
+	}
+	if _, ok := payload["legacy"]; ok {
+		t.Fatalf("legacy trigger payload leaked into emitted payload: %#v", payload["legacy"])
+	}
+	if _, ok := payload["legacy_entity"]; ok {
+		t.Fatalf("entity metadata leaked into emitted payload: %#v", payload["legacy_entity"])
+	}
+	if got := bus.publishedEvent(0).EntityID(); got != entityID {
+		t.Fatalf("emitted event entity_id = %q, want ent-1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type()); got != "custom.emitted" {
+		t.Fatalf("emitted event type = %q, want custom.emitted", got)
+	}
+}
+
+func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t *testing.T) {
+	entityID := eventtest.UUID("ent-1")
+	pc, bus := newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundleWithEntry(t, "guard.failed", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{},
+	}))
+
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{
+			Check:  "payload.score >= 70.0",
+			OnFail: "escalate:guard.failed",
+		},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress(
+			"",
+			events.EventType("custom.trigger"),
+			"",
+			"",
+			mustJSON(map[string]any{"entity_id": "ent-1", "score": 50, "legacy": "should-not-pass"}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Time{},
+		),
+
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
+	}
+	if _, ok := payload["trigger_event_type"]; ok {
+		t.Fatalf("payload must not carry envelope trigger_event_type: %#v", payload["trigger_event_type"])
+	}
+	if _, ok := payload["current_state"]; ok {
+		t.Fatalf("payload must not carry envelope current_state: %#v", payload["current_state"])
+	}
+	if _, ok := payload["score"]; ok {
+		t.Fatalf("guard escalation leaked trigger payload into emitted payload: %#v", payload["score"])
+	}
+	if _, ok := payload["legacy"]; ok {
+		t.Fatalf("guard escalation leaked legacy trigger payload into emitted payload: %#v", payload["legacy"])
+	}
+	if got := bus.publishedEvent(0).EntityID(); got != entityID {
+		t.Fatalf("guard escalation event entity_id = %q, want ent-1", got)
+	}
+	if _, ok := payload["legacy_entity"]; ok {
+		t.Fatalf("guard escalation leaked entity metadata into emitted payload: %#v", payload["legacy_entity"])
+	}
+}
+
+func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadOnly(t *testing.T) {
+	entityID := eventtest.UUID("ent-1")
+	pc, bus := newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundleWithEntry(t, "guard.failed", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"score":  {Type: "number"},
+				"reason": {Type: "string"},
+			},
+			Required: []string{"score", "reason"},
+		},
+	}))
+
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{
+			Check: "payload.score >= 70.0",
+			OnFailSpec: runtimecontracts.GuardFailureSpec{
+				Action: runtimecontracts.GuardFailureActionEscalate,
+				Escalation: runtimecontracts.EmitSpec{
+					Event: "guard.failed",
+					Fields: map[string]runtimecontracts.ExpressionValue{
+						"score":  runtimecontracts.CELExpression("payload.score"),
+						"reason": runtimecontracts.CELExpression(`"score_below_threshold"`),
+					},
+				},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress(
+			"",
+			events.EventType("custom.trigger"),
+			"",
+			"",
+			mustJSON(map[string]any{"entity_id": "ent-1", "score": 50, "legacy": "should-not-pass"}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Time{},
+		),
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := payload["score"]; got != float64(50) {
+		t.Fatalf("guard escalation score payload = %#v, want 50", got)
+	}
+	if got := payload["reason"]; got != "score_below_threshold" {
+		t.Fatalf("guard escalation reason payload = %#v, want score_below_threshold", got)
+	}
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
+	}
+	if _, ok := payload["legacy"]; ok {
+		t.Fatalf("guard escalation leaked unmapped trigger payload: %#v", payload["legacy"])
+	}
+	if _, ok := payload["legacy_entity"]; ok {
+		t.Fatalf("guard escalation leaked entity metadata: %#v", payload["legacy_entity"])
+	}
+}
+
+func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmediateEmitSites(t *testing.T) {
+	entityID := eventtest.UUID("ent-1")
+	tests := []struct {
+		name    string
+		event   events.Event
+		state   WorkflowState
+		handler runtimecontracts.SystemNodeEventHandler
+	}{
+		{
+			name:  "handler top level",
+			event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+			state: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Emit: runtimecontracts.EmitSpec{
+					Event: "custom.emitted",
+					Fields: map[string]runtimecontracts.ExpressionValue{
+						"label": runtimecontracts.CELExpression(`"ok"`),
+						"extra": runtimecontracts.CELExpression(`"bad"`),
+					},
+				},
+			},
+		},
+		{
+			name:  "rules",
+			event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+			state: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				Rules: []runtimecontracts.HandlerRuleEntry{{
+					ID:        "pick",
+					Condition: "true",
+					Emit: runtimecontracts.EmitSpec{
+						Event: "custom.emitted",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"label": runtimecontracts.CELExpression(`"ok"`),
+							"extra": runtimecontracts.CELExpression(`"bad"`),
+						},
+					},
+				}},
+			},
+		},
+		{
+			name:  "on_complete",
+			event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+			state: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+			handler: runtimecontracts.SystemNodeEventHandler{
+				OnComplete: []runtimecontracts.HandlerRuleEntry{{
+					ID:        "complete",
+					Condition: "true",
+					Emit: runtimecontracts.EmitSpec{
+						Event: "custom.emitted",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"label": runtimecontracts.CELExpression(`"ok"`),
+							"extra": runtimecontracts.CELExpression(`"bad"`),
+						},
+					},
+				}},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pc, bus := newDeclarativeEmitContractCoordinator(t, "custom.emitted")
+			_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineNode(t, ".", "node-a"), tc.handler, workflowTriggerContext{
+				Event: tc.event,
+				State: tc.state,
+			}, false)
+			if err == nil {
+				t.Fatal("expected undeclared business payload to fail closed")
+			}
+			if !errors.Is(err, runtimeengine.ErrEmitPayloadContractViolation) {
+				t.Fatalf("error = %v, want %v", err, runtimeengine.ErrEmitPayloadContractViolation)
+			}
+			if got := bus.publishedCount(); got != 0 {
+				t.Fatalf("bus published count = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestExecuteNodeContractHandlerDefersCommittedEmissions(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module:         handlerEngineProjectNodeModule(t),
+	}
+	entityID := eventtest.UUID("ent-1")
+	ctx := seedHandlerEngineExistingEntity(t, pc, entityID)
+
+	result, err := executeNodeContractHandlerWithHandoff(t, pc, ctx, pipelineNode(t, ".", "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false, true)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if !result.Committed || len(result.FollowUp.Emissions) != 1 {
+		t.Fatalf("committed fixture lost deferred follow-up: committed=%t emissions=%d", result.Committed, len(result.FollowUp.Emissions))
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("bus published count = %d, want 0 before deferred dispatch", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T) {
+	entityID := eventtest.UUID("ent-1")
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+		module:         handlerEngineProjectNodeModule(t),
+	}
+
+	_, err := executeNodeContractHandlerWithHandoff(t, pc, seedHandlerEngineExistingEntity(t, pc, entityID), pipelineOnlySourceNode(t, pc.SemanticSource(), "node-a"), runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{
+			Event: "custom.emitted",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"summary.entity_id": runtimecontracts.CELExpression("_entity.id"),
+				"summary.stage":     runtimecontracts.CELExpression("_entity.current_state"),
+				"flags.ready":       runtimecontracts.CELExpression("true"),
+				"label":             runtimecontracts.CELExpression(`"done"`),
+			},
+		},
+	}, workflowTriggerContext{
+		Event: handlerTestRootIngress(
+			"",
+			events.EventType("custom.trigger"),
+			"",
+			"",
+			mustJSON(map[string]any{"entity_id": "ent-1"}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Time{},
+		),
+
+		State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	summary, _ := payload["summary"].(map[string]any)
+	if got := summary["entity_id"]; got != entityID {
+		t.Fatalf("payload.summary.entity_id = %#v, want ent-1", got)
+	}
+	if got := summary["stage"]; got != "queued" {
+		t.Fatalf("payload.summary.stage = %#v, want queued", got)
+	}
+	flags, _ := payload["flags"].(map[string]any)
+	if got := flags["ready"]; got != true {
+		t.Fatalf("payload.flags.ready = %#v, want true", got)
+	}
+	if got := payload["label"]; got != "done" {
+		t.Fatalf("payload.label = %#v, want done", got)
+	}
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
+	}
 }
