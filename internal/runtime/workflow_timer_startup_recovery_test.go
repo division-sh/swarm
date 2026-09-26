@@ -383,7 +383,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimeflowidentity.RunScopedFlowInstance{RunID: workflowRunID, Route: runtimeflowidentity.RouteForInstancePath(workflowRunID)}, runtimepipeline.WorkflowInstance{
 				InstanceID: workflowRunID, StorageRef: workflowRunID,
 				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(), CurrentState: "waiting",
-				Fields: map[string]any{},
+				Fields:     map[string]any{},
 				EntityType: "test_entity",
 			}, occurredAt)
 			if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
@@ -623,8 +623,8 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				WorkflowName:    source.WorkflowName(),
 				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
-				Fields: map[string]any{},
-				EntityType: "test_entity",
+				Fields:          map[string]any{},
+				EntityType:      "test_entity",
 			}, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
@@ -760,8 +760,8 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 				WorkflowName:    source.WorkflowName(),
 				WorkflowVersion: source.WorkflowVersion(),
 				CurrentState:    "waiting",
-				Fields: map[string]any{},
-				EntityType: "test_entity",
+				Fields:          map[string]any{},
+				EntityType:      "test_entity",
 			}, occurredAt)
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
