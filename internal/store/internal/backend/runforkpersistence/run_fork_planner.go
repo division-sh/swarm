@@ -15,6 +15,7 @@ import (
 )
 
 type runForkEventCursor struct {
+	Kind           runfork.RunForkPointKind
 	EventID        string
 	EventName      string
 	SourceEventID  string
@@ -92,6 +93,15 @@ func planRunForkSnapshot(
 		return runfork.RunForkPlan{}, fmt.Errorf("source run_id must be a UUID: %w", err)
 	}
 	at := strings.TrimSpace(req.At)
+	if req.ResolvedPoint != nil {
+		if err := req.ResolvedPoint.Validate(); err != nil {
+			return runfork.RunForkPlan{}, fmt.Errorf("fixed fork point: %w", err)
+		}
+		if at != "" && at != req.ResolvedPoint.Input {
+			return runfork.RunForkPlan{}, fmt.Errorf("fork selector differs from fixed revision point")
+		}
+		at = req.ResolvedPoint.Input
+	}
 
 	plan := runfork.RunForkPlan{SourceRunID: runID}
 	if err := loadRunForkSourceSummary(ctx, tx, &plan); err != nil {
@@ -111,7 +121,13 @@ func planRunForkSnapshot(
 	if resolve == nil {
 		return runfork.RunForkPlan{}, fmt.Errorf("run fork revision point resolver is required")
 	}
-	cursor, err := resolve(ctx, tx, runID, at)
+	var cursor runForkEventCursor
+	var err error
+	if req.ResolvedPoint != nil {
+		cursor, err = resolveFixedRunForkRevisionPoint(ctx, tx, runID, *req.ResolvedPoint, resolve)
+	} else {
+		cursor, err = resolve(ctx, tx, runID, at)
+	}
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
@@ -119,9 +135,25 @@ func planRunForkSnapshot(
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
-	forkEvent, err := runForkPointRevisionEvent(snapshot, cursor)
-	if err != nil {
-		return runfork.RunForkPlan{}, err
+	var forkEvent runForkRevisionEvent
+	if cursor.Kind == runfork.RunForkPointEvent {
+		forkEvent, err = runForkPointRevisionEvent(snapshot, cursor)
+		if err != nil {
+			return runfork.RunForkPlan{}, err
+		}
+	} else if cursor.Kind == runfork.RunForkPointDeploymentRevision {
+		found := false
+		for _, fact := range snapshot.FanOutFacts {
+			if fact.FactKind == "intent" && fact.OriginKind == "deployment" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return runfork.RunForkPlan{}, fmt.Errorf("deployment fork revision %d has no admitted deployment feed", cursor.Revision)
+		}
+	} else {
+		return runfork.RunForkPlan{}, fmt.Errorf("unsupported fork revision point kind %q", cursor.Kind)
 	}
 	historicalEventIDs := make([]string, 0, len(snapshot.Events))
 	for _, historicalEvent := range snapshot.Events {
@@ -137,6 +169,7 @@ func planRunForkSnapshot(
 		return runfork.RunForkPlan{}, err
 	}
 	plan.ForkPoint = runfork.RunForkPoint{
+		Kind:           cursor.Kind,
 		Input:          at,
 		EventID:        cursor.EventID,
 		EventName:      cursor.EventName,
@@ -146,6 +179,12 @@ func planRunForkSnapshot(
 		RoutingSource:  forkEvent.RoutingSource,
 		Timestamp:      cursor.CreatedAt.UTC(),
 		Revision:       cursor.Revision,
+	}
+	if err := plan.ForkPoint.Validate(); err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	if req.ResolvedPoint != nil && plan.ForkPoint != *req.ResolvedPoint {
+		return runfork.RunForkPlan{}, fmt.Errorf("fixed fork point contradicts its historical revision")
 	}
 	plan.EventCountAtFork = len(snapshot.Events)
 
@@ -172,6 +211,9 @@ func planRunForkSnapshot(
 	}
 	plan.FanOutObligations = fanOutObligations
 	plan.FanOutObligationCount = len(fanOutObligations)
+	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
+		return runfork.RunForkPlan{}, fmt.Errorf("fixed-revision fan-out admission: %w", err)
+	}
 	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending, fanOutObligations)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
@@ -183,6 +225,34 @@ func planRunForkSnapshot(
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
 	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady
 	return plan, nil
+}
+
+func resolveFixedRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID string, point runfork.RunForkPoint, resolve runForkRevisionPointResolver) (runForkEventCursor, error) {
+	if err := point.Validate(); err != nil {
+		return runForkEventCursor{}, err
+	}
+	if point.Kind == runfork.RunForkPointEvent {
+		cursor, err := resolve(ctx, tx, runID, point.EventID)
+		if err != nil {
+			return runForkEventCursor{}, err
+		}
+		if cursor.Kind != point.Kind || cursor.Revision != point.Revision {
+			return runForkEventCursor{}, fmt.Errorf("fixed event point is not its first committed revision")
+		}
+		return cursor, nil
+	}
+	var originKind string
+	if err := tx.QueryRowContext(ctx, `SELECT origin_kind FROM runs WHERE run_id=$1`, runID).Scan(&originKind); err != nil {
+		return runForkEventCursor{}, fmt.Errorf("read fixed deployment source origin: %w", err)
+	}
+	if originKind != "deployment" {
+		return runForkEventCursor{}, fmt.Errorf("deployment revision point requires a deployment-origin source run")
+	}
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, runID, point.Revision).Scan(&revision); err != nil {
+		return runForkEventCursor{}, fmt.Errorf("fixed deployment revision is not committed: %w", err)
+	}
+	return runForkEventCursor{Kind: runfork.RunForkPointDeploymentRevision, Revision: revision}, nil
 }
 
 func runForkPointRevisionEvent(snapshot *runForkRevisionSnapshot, cursor runForkEventCursor) (runForkRevisionEvent, error) {

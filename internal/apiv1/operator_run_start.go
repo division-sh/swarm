@@ -10,9 +10,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -119,6 +122,9 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if err != nil {
 		return runStartResult{}, err
 	}
+	if err := admitRunStartDeploymentFeeds(selectedOpts.Source, data); err != nil {
+		return runStartResult{}, err
+	}
 	selector, err := scenarioExecutionSelectorParam(req.Params)
 	if err != nil {
 		return runStartResult{}, err
@@ -161,6 +167,30 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 			"run creation %s", record.Summary.Outcome))
 	}
 	return runStartResult{RunID: record.Summary.RunID, Status: record.Summary.Status, DataBinding: record.Binding}, nil
+}
+
+func admitRunStartDeploymentFeeds(source semanticview.Source, data durabledata.RunCreationDataEnvelope) error {
+	admit := func(ref durabledata.DeclarationRef) error {
+		routingSource, err := events.NewDeploymentFeedRoutingSource(ref.FlowPath)
+		if err == nil {
+			err = runtimepinrouting.AdmitDeploymentFeedDeclaration(source, events.EventType(ref.EventName), routingSource)
+		}
+		if err != nil {
+			return NewInvalidParamsError(map[string]any{"field": "data", "declaration": ref.EventName, "reason": err.Error()})
+		}
+		return nil
+	}
+	for _, item := range data.Imports {
+		if err := admit(item.Declaration); err != nil {
+			return err
+		}
+	}
+	for _, item := range data.Pins {
+		if err := admit(item.Declaration); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func bundleIdentityInputParam(params map[string]any) (bundleIdentityParam, error) {

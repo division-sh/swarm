@@ -213,14 +213,7 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	resourceSource := strings.HasPrefix(strings.TrimSpace(aux.ItemsFrom), "data.")
-	if resourceSource {
-		for _, field := range []string{"as", "identity", "emit", "max_items"} {
-			if hasYAMLMappingKey(node, field) {
-				return fmt.Errorf("fan_out.%s is not allowed with a data source", field)
-			}
-		}
-	} else if err := ValidateFanOutAlias(aux.As); err != nil {
+	if err := ValidateFanOutAlias(aux.As); err != nil {
 		return fmt.Errorf("fan_out.%w", err)
 	}
 	maxItems := 0
@@ -240,18 +233,12 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 		Emit:        aux.Emit,
 	}
 	f.ItemsFrom = strings.TrimSpace(f.ItemsFrom)
-	if resourceSource {
-		if name, _ := f.ResourceEventName(); name == "" {
-			return fmt.Errorf("fan_out.items_from requires an exact event after data.")
-		}
-	} else {
-		f.ItemsPath = paths.Parse(f.ItemsFrom)
-		if _, err := ValidateFanOutItemsSource(*f); err != nil {
-			return err
-		}
-		if err := ValidateFanOutMaxItems(*f); err != nil {
-			return err
-		}
+	f.ItemsPath = paths.Parse(f.ItemsFrom)
+	if _, err := ValidateFanOutItemsSource(*f); err != nil {
+		return err
+	}
+	if err := ValidateFanOutMaxItems(*f); err != nil {
+		return err
 	}
 	return nil
 }

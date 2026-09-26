@@ -44,6 +44,13 @@ func expectPostgresRouteAdmission(mock sqlmock.Sqlmock, active, source bool) {
 	}
 }
 
+func expectEmptyPostgresRouteTopologySnapshot(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(postgresRouteTopologySnapshotSQL).WithArgs(postgresStatementRunID).
+		WillReturnRows(sqlmock.NewRows([]string{"flow_instance", "event_pattern", "subscriber_type", "subscriber_id", "source_flow", "materialized_from", "status", "is_wildcard"}))
+	mock.ExpectQuery(routeTopologySourcesSQL).
+		WillReturnRows(sqlmock.NewRows([]string{"event_pattern", "subscriber_type", "subscriber_id", "source_flow", "rule_id", "created_at"}))
+}
+
 func TestPostgresRouteTopologyStatementsCountOrderAndLifetime(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
 	if err != nil {
@@ -60,6 +67,7 @@ func TestPostgresRouteTopologyStatementsCountOrderAndLifetime(t *testing.T) {
 	// Two invocations in the same transaction must prepare and close anew.
 	for pass := 0; pass < 2; pass++ {
 		expectPostgresRouteAdmission(mock, true, true)
+		expectEmptyPostgresRouteTopologySnapshot(mock)
 		for i, set := range sets {
 			if i == 0 {
 				mock.ExpectPrepare(postgresFlowInstanceRouteInactivateSQL).WillBeClosed()
@@ -86,7 +94,7 @@ func TestPostgresRouteTopologyStatementsCountOrderAndLifetime(t *testing.T) {
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("per invocation: 2 prepares/2 closes; 64 inactivations + 128 unchanged upserts; active/source checks retained")
+	t.Log("per invocation: 2 prepares/2 closes; 64 changed owners + 128 upserts; exact selected-store comparison retained")
 }
 
 func TestPostgresRouteTopologyStatementsAdmissionAndErrors(t *testing.T) {
@@ -107,6 +115,7 @@ func TestPostgresRouteTopologyStatementsAdmissionAndErrors(t *testing.T) {
 			fault, closeFault := errors.New("route statement refused"), errors.New("route statement close refused")
 			want, label := error(nil), ""
 			if stage != "inactive_run" && stage != "missing_source" {
+				expectEmptyPostgresRouteTopologySnapshot(mock)
 				inactive := mock.ExpectPrepare(postgresFlowInstanceRouteInactivateSQL)
 				if stage == "prepare_inactivate" {
 					inactive.WillReturnError(fault)

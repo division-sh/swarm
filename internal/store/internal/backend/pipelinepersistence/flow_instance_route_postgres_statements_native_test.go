@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -81,6 +82,10 @@ func populatePostgresRouteStatementFixture(t testing.TB, db *sql.DB, owners int,
 	if !audit {
 		return sets
 	}
+	triggerOwner := "review/i000"
+	if existing {
+		triggerOwner = "review/i001" // i000 is already exact and must not be rewritten.
+	}
 	for _, query := range []string{
 		`CREATE TABLE route_audit (seq BIGSERIAL, mutation JSONB, handles INTEGER, generic BIGINT, custom BIGINT)`,
 		`CREATE FUNCTION audit_route() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -95,12 +100,12 @@ func populatePostgresRouteStatementFixture(t testing.TB, db *sql.DB, owners int,
 		`CREATE TRIGGER a_audit_route AFTER INSERT OR UPDATE ON routing_rules FOR EACH ROW EXECUTE FUNCTION audit_route()`,
 		// A later upsert must reread the changed wildcard even with a prepared
 		// handle. Auditing includes both source changes and materialized writes.
-		`CREATE FUNCTION change_route_source() RETURNS trigger LANGUAGE plpgsql AS $$
+		fmt.Sprintf(`CREATE FUNCTION change_route_source() RETURNS trigger LANGUAGE plpgsql AS $$
 		 BEGIN
-		 IF NEW.is_materialized AND NEW.status='active' AND NEW.flow_instance='review/i000' AND NEW.event_pattern='work.done' THEN
+		 IF NEW.is_materialized AND NEW.status='active' AND NEW.flow_instance='%s' AND NEW.event_pattern='work.done' THEN
 		 UPDATE routing_rules SET status='inactive' WHERE rule_id='00000000-0000-4000-8000-000000000012';
 		 UPDATE routing_rules SET status='active' WHERE rule_id='00000000-0000-4000-8000-000000000013';
-		 END IF; RETURN NEW; END $$`,
+		 END IF; RETURN NEW; END $$`, triggerOwner),
 		`CREATE TRIGGER b_change_route_source AFTER INSERT OR UPDATE ON routing_rules FOR EACH ROW EXECUTE FUNCTION change_route_source()`,
 	} {
 		if _, err := db.Exec(query); err != nil {
@@ -171,11 +176,21 @@ func TestPostgresRouteTopologyStatementsNativeDifferential(t *testing.T) {
 				if rows := postgresRouteStrings(t, tx, postgresAllRouteRows); !reflect.DeepEqual(rows, wantRows) {
 					t.Fatalf("full rows/keys/timestamps/provenance differ: got=%v want=%v", rows, wantRows)
 				}
-				if audit := postgresRouteStrings(t, tx, `SELECT mutation::text FROM route_audit ORDER BY seq`); !reflect.DeepEqual(audit, wantAudit) {
+				if audit := postgresRouteStrings(t, tx, `SELECT mutation::text FROM route_audit ORDER BY seq`); !existing && !reflect.DeepEqual(audit, wantAudit) {
 					t.Fatalf("ordered mutations differ: got=%v want=%v", audit, wantAudit)
 				}
+				if existing {
+					var redundantWrites int
+					if err := tx.QueryRow(`SELECT COUNT(*) FROM route_audit WHERE mutation->>'op'='UPDATE' AND mutation->'new'->>'flow_instance'='review/i000'`).Scan(&redundantWrites); err != nil || redundantWrites != 0 {
+						t.Fatalf("exact owner was rewritten: count=%d err=%v", redundantWrites, err)
+					}
+				}
 				var source string
-				if err := tx.QueryRow(`SELECT materialized_from::text FROM routing_rules WHERE flow_instance='review/i001' AND event_pattern='work.ready'`).Scan(&source); err != nil || source != "00000000-0000-4000-8000-000000000013" {
+				observedOwner := "review/i001"
+				if existing {
+					observedOwner = "review/i002"
+				}
+				if err := tx.QueryRow(`SELECT materialized_from::text FROM routing_rules WHERE flow_instance=$1 AND event_pattern='work.ready'`, observedOwner).Scan(&source); err != nil || source != "00000000-0000-4000-8000-000000000013" {
 					t.Fatalf("stale source: source=%s err=%v", source, err)
 				}
 				var handles, generic, custom int64
@@ -186,7 +201,7 @@ func TestPostgresRouteTopologyStatementsNativeDifferential(t *testing.T) {
 				if err := tx.QueryRow(`SELECT COUNT(*) FROM pg_prepared_statements`).Scan(&remaining); err != nil || remaining != 0 {
 					t.Fatalf("handles survived invocation: remaining=%d err=%v", remaining, err)
 				}
-				t.Logf("64 owners/128 routes: exact rows and ordered mutations; peak handles=%d generic=%d custom=%d; zero handles on return", handles, generic, custom)
+				t.Logf("64 owners/128 routes: exact rows and fresh triggered provenance; peak handles=%d generic=%d custom=%d; zero handles on return", handles, generic, custom)
 			})
 		}
 	}
@@ -196,6 +211,16 @@ func TestPostgresRouteTopologyStatementsNativeRollbackAndCancel(t *testing.T) {
 	for _, failure := range []string{"insert", "update", "cancel"} {
 		t.Run(failure, func(t *testing.T) {
 			db, sets := postgresRouteStatementFixture(t, 2, failure == "update")
+			if failure == "update" {
+				// The old source is no longer authoritative, so an exact-diff
+				// replacement must execute the hostile UPDATE.
+				if _, err := db.Exec(`UPDATE routing_rules SET status='inactive' WHERE rule_id='00000000-0000-4000-8000-000000000012'`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`UPDATE routing_rules SET status='active' WHERE rule_id='00000000-0000-4000-8000-000000000013'`); err != nil {
+					t.Fatal(err)
+				}
+			}
 			before := postgresRouteStrings(t, db, postgresAllRouteRows)
 			for _, ddl := range []string{
 				`CREATE SEQUENCE route_fault_entered`,

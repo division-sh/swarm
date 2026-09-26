@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -21,7 +22,7 @@ func TestRunLifecycleInsertForkRejectsMissingPersistedBundleBeforeMutation(t *te
 	missingHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 
 	err := runSelectedFixtureMutation(testAuthorActivityContext(), pg, "missing bundle fork", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		return pg.runForkPostgresOwner.InsertRunForkRunTx(txctx, attempt, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
+		return pg.runForkPostgresOwner.InsertRunForkRunTx(txctx, attempt, forkRunID, uuid.NewString(), runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: uuid.NewString()}, 0, time.Now().UTC(),
 			mustStoreTestSourceArtifactFact(missingHash))
 	})
 	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {

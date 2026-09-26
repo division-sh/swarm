@@ -227,8 +227,8 @@ func (e *Executor) execReadResourceData(ctx context.Context, actor models.AgentC
 	if err := json.Unmarshal(item.Schema, &schema); err != nil {
 		return nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s persisted schema is invalid", item.Declaration.Key())
 	}
-	compiled, defects := durabledata.CompileJSONL(item.Declaration, schema, item.BusinessKey, item.Content)
-	if len(defects) != 0 || compiled.VersionID != item.VersionID {
+	compiled, defects := durabledata.CompileStoredJSONL(item.Declaration, schema, item.BusinessKey, item.Content)
+	if len(defects) != 0 || compiled.VersionID != item.VersionID || !bytes.Equal(compiled.CanonicalJSONL, item.Content) {
 		return nil, durabledata.NewDomainError(durabledata.CodeIntegrity, "resource %s persisted payload is contradictory", item.Declaration.Key())
 	}
 	rows := make([]map[string]any, len(compiled.Rows))

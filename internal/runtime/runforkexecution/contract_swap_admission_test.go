@@ -186,6 +186,7 @@ func testContractSwapRouteRecovery(admission runfork.RunForkSelectedContractExec
 		RuntimeRecoveryOwner:         runfork.RunForkSelectedContractRouteRecoveryOwner,
 		ForkRunID:                    admission.ForkRunID,
 		SourceRunID:                  admission.SourceRunID,
+		ForkPoint:                    admission.ForkPoint,
 		ForkEventID:                  admission.ForkEventID,
 		ContractSelection:            admission.ContractSelection,
 		RouteTopologyOwner:           runfork.RunForkSelectedContractRouteTopologyOwner,

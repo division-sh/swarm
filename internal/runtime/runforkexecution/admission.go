@@ -324,7 +324,7 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 	if err := validateSelectedContractRecipientPlanning(req.FrontierAdmission, req.RouteAdmission, req.RouteTopology, *recipientPlanning); err != nil {
 		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
-	if err := req.DeferredWorkAdmission.validate(binding.SourceRunID, binding.ForkEventID, loadedSource.Source); err != nil {
+	if err := req.DeferredWorkAdmission.validate(binding.SourceRunID, binding.ForkPoint, loadedSource.Source); err != nil {
 		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 
@@ -341,6 +341,7 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		ExecutionSupported:         false,
 		ForkRunID:                  binding.ForkRunID,
 		SourceRunID:                binding.SourceRunID,
+		ForkPoint:                  binding.ForkPoint,
 		ForkEventID:                binding.ForkEventID,
 		ContractSelection:          binding.ContractSelection,
 		ContractBindingOwner:       binding.Owner,
@@ -383,16 +384,19 @@ func validateSelectedContractExecutionBinding(forkRunID string, binding runfork.
 	if strings.TrimSpace(binding.ForkRunID) != forkRunID {
 		return fmt.Errorf("selected-contract execution admission binding fork run_id mismatch: got %q want %q", binding.ForkRunID, forkRunID)
 	}
-	for label, value := range map[string]string{
-		"source run_id": binding.SourceRunID,
-		"fork event_id": binding.ForkEventID,
-	} {
+	for label, value := range map[string]string{"source run_id": binding.SourceRunID} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("selected-contract execution admission binding missing %s", label)
 		}
 		if _, err := uuid.Parse(strings.TrimSpace(value)); err != nil {
 			return fmt.Errorf("selected-contract execution admission binding %s must be a UUID: %w", label, err)
 		}
+	}
+	if err := binding.ForkPoint.Validate(); err != nil {
+		return fmt.Errorf("selected-contract execution admission binding fork point: %w", err)
+	}
+	if binding.ForkEventID != binding.ForkPoint.EventID {
+		return errors.New("selected-contract execution admission binding event differs from fork point")
 	}
 	return validateSelectedContractSelection("binding", binding.ContractSelection)
 }

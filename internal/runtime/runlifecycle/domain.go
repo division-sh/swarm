@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -28,6 +29,13 @@ const (
 )
 
 type OriginKind string
+
+type ForkOriginPointKind = forkpoint.Kind
+
+const (
+	ForkOriginPointEvent              ForkOriginPointKind = forkpoint.Event
+	ForkOriginPointDeploymentRevision ForkOriginPointKind = forkpoint.DeploymentRevision
+)
 
 const (
 	OriginEvent               OriginKind = "event"
@@ -51,6 +59,8 @@ type RunOrigin struct {
 	generation    int64
 	sourceRunID   string
 	sourceEventID string
+	forkPointKind ForkOriginPointKind
+	forkRevision  int64
 }
 
 func EventRunOrigin(eventID, eventType string) (RunOrigin, error) {
@@ -85,11 +95,13 @@ func StandingGenerationRunOrigin(serviceID string, generation int64) (RunOrigin,
 	return origin, nil
 }
 
-func ForkMaterializationRunOrigin(sourceRunID, sourceEventID string) (RunOrigin, error) {
+func ForkMaterializationRunOrigin(sourceRunID string, pointKind ForkOriginPointKind, revision int64, sourceEventID string) (RunOrigin, error) {
 	origin := RunOrigin{
 		kind:          OriginForkMaterialization,
 		sourceRunID:   strings.TrimSpace(sourceRunID),
 		sourceEventID: strings.TrimSpace(sourceEventID),
+		forkPointKind: pointKind,
+		forkRevision:  revision,
 	}
 	if err := origin.Validate(); err != nil {
 		return RunOrigin{}, err
@@ -100,7 +112,7 @@ func ForkMaterializationRunOrigin(sourceRunID, sourceEventID string) (RunOrigin,
 func DecodeRunOrigin(
 	kind, eventID, eventType, serviceID string,
 	generation int64,
-	sourceRunID, sourceEventID string,
+	sourceRunID, forkPointKind string, forkRevision int64, sourceEventID string,
 ) (RunOrigin, error) {
 	origin := RunOrigin{
 		kind:          OriginKind(strings.TrimSpace(kind)),
@@ -110,6 +122,8 @@ func DecodeRunOrigin(
 		generation:    generation,
 		sourceRunID:   strings.TrimSpace(sourceRunID),
 		sourceEventID: strings.TrimSpace(sourceEventID),
+		forkPointKind: ForkOriginPointKind(strings.TrimSpace(forkPointKind)),
+		forkRevision:  forkRevision,
 	}
 	if err := origin.Validate(); err != nil {
 		return RunOrigin{}, err
@@ -123,23 +137,26 @@ func (o RunOrigin) Validate() error {
 		if o.eventID == "" || o.eventType == "" {
 			return errors.New("event run origin requires event_id and event_type")
 		}
-		if o.serviceID != "" || o.generation != 0 || o.sourceRunID != "" || o.sourceEventID != "" {
+		if o.serviceID != "" || o.generation != 0 || o.sourceRunID != "" || o.sourceEventID != "" || o.forkPointKind != "" || o.forkRevision != 0 {
 			return errors.New("event run origin forbids standing and fork identity")
 		}
 	case OriginDeployment, OriginScenarioSetup:
-		if o.eventID != "" || o.eventType != "" || o.serviceID != "" || o.generation != 0 || o.sourceRunID != "" || o.sourceEventID != "" {
+		if o.eventID != "" || o.eventType != "" || o.serviceID != "" || o.generation != 0 || o.sourceRunID != "" || o.sourceEventID != "" || o.forkPointKind != "" || o.forkRevision != 0 {
 			return fmt.Errorf("%s run origin forbids event, standing, and fork identity", o.kind)
 		}
 	case OriginStandingGeneration:
 		if o.serviceID == "" || o.generation <= 0 {
 			return errors.New("standing generation run origin requires service_id and positive generation")
 		}
-		if o.eventID != "" || o.eventType != "" || o.sourceRunID != "" || o.sourceEventID != "" {
+		if o.eventID != "" || o.eventType != "" || o.sourceRunID != "" || o.sourceEventID != "" || o.forkPointKind != "" || o.forkRevision != 0 {
 			return errors.New("standing generation run origin forbids event and fork identity")
 		}
 	case OriginForkMaterialization:
-		if o.sourceRunID == "" || o.sourceEventID == "" {
-			return errors.New("fork materialization run origin requires source_run_id and source_event_id")
+		if o.sourceRunID == "" {
+			return errors.New("fork materialization run origin requires source_run_id")
+		}
+		if err := forkpoint.ValidateIdentity(o.forkPointKind, o.forkRevision, o.sourceEventID); err != nil {
+			return fmt.Errorf("fork materialization run origin requires exact fork point: %w", err)
 		}
 		if o.eventID != "" || o.eventType != "" || o.serviceID != "" || o.generation != 0 {
 			return errors.New("fork materialization run origin forbids event and standing identity")
@@ -150,14 +167,16 @@ func (o RunOrigin) Validate() error {
 	return nil
 }
 
-func (o RunOrigin) Kind() OriginKind           { return o.kind }
-func (o RunOrigin) EventID() string            { return o.eventID }
-func (o RunOrigin) EventType() string          { return o.eventType }
-func (o RunOrigin) ServiceID() string          { return o.serviceID }
-func (o RunOrigin) Generation() int64          { return o.generation }
-func (o RunOrigin) SourceRunID() string        { return o.sourceRunID }
-func (o RunOrigin) SourceEventID() string      { return o.sourceEventID }
-func (o RunOrigin) Equal(other RunOrigin) bool { return o == other }
+func (o RunOrigin) Kind() OriginKind                   { return o.kind }
+func (o RunOrigin) EventID() string                    { return o.eventID }
+func (o RunOrigin) EventType() string                  { return o.eventType }
+func (o RunOrigin) ServiceID() string                  { return o.serviceID }
+func (o RunOrigin) Generation() int64                  { return o.generation }
+func (o RunOrigin) SourceRunID() string                { return o.sourceRunID }
+func (o RunOrigin) SourceEventID() string              { return o.sourceEventID }
+func (o RunOrigin) ForkPointKind() ForkOriginPointKind { return o.forkPointKind }
+func (o RunOrigin) ForkRevision() int64                { return o.forkRevision }
+func (o RunOrigin) Equal(other RunOrigin) bool         { return o == other }
 
 func (o RunOrigin) ActivityTriggerType() string {
 	switch o.kind {
@@ -181,18 +200,21 @@ func (o RunOrigin) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	type encodedOrigin struct {
-		Kind          OriginKind `json:"kind"`
-		EventID       string     `json:"event_id,omitempty"`
-		EventType     string     `json:"event_type,omitempty"`
-		ServiceID     string     `json:"service_id,omitempty"`
-		Generation    int64      `json:"generation,omitempty"`
-		SourceRunID   string     `json:"source_run_id,omitempty"`
-		SourceEventID string     `json:"source_event_id,omitempty"`
+		Kind          OriginKind          `json:"kind"`
+		EventID       string              `json:"event_id,omitempty"`
+		EventType     string              `json:"event_type,omitempty"`
+		ServiceID     string              `json:"service_id,omitempty"`
+		Generation    int64               `json:"generation,omitempty"`
+		SourceRunID   string              `json:"source_run_id,omitempty"`
+		SourceEventID string              `json:"source_event_id,omitempty"`
+		ForkPointKind ForkOriginPointKind `json:"fork_point_kind,omitempty"`
+		ForkRevision  int64               `json:"fork_revision,omitempty"`
 	}
 	return json.Marshal(encodedOrigin{
 		Kind: o.kind, EventID: o.eventID, EventType: o.eventType,
 		ServiceID: o.serviceID, Generation: o.generation,
 		SourceRunID: o.sourceRunID, SourceEventID: o.sourceEventID,
+		ForkPointKind: o.forkPointKind, ForkRevision: o.forkRevision,
 	})
 }
 
@@ -201,13 +223,15 @@ func (o *RunOrigin) UnmarshalJSON(raw []byte) error {
 		return errors.New("run origin target is nil")
 	}
 	var encoded struct {
-		Kind          OriginKind `json:"kind"`
-		EventID       string     `json:"event_id"`
-		EventType     string     `json:"event_type"`
-		ServiceID     string     `json:"service_id"`
-		Generation    int64      `json:"generation"`
-		SourceRunID   string     `json:"source_run_id"`
-		SourceEventID string     `json:"source_event_id"`
+		Kind          OriginKind          `json:"kind"`
+		EventID       string              `json:"event_id"`
+		EventType     string              `json:"event_type"`
+		ServiceID     string              `json:"service_id"`
+		Generation    int64               `json:"generation"`
+		SourceRunID   string              `json:"source_run_id"`
+		SourceEventID string              `json:"source_event_id"`
+		ForkPointKind ForkOriginPointKind `json:"fork_point_kind"`
+		ForkRevision  int64               `json:"fork_revision"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -227,6 +251,8 @@ func (o *RunOrigin) UnmarshalJSON(raw []byte) error {
 		encoded.ServiceID,
 		encoded.Generation,
 		encoded.SourceRunID,
+		string(encoded.ForkPointKind),
+		encoded.ForkRevision,
 		encoded.SourceEventID,
 	)
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -555,6 +556,54 @@ func TestConnectSourceEndpointMatchesRejectsRootEventWithChildFlowEvidence(t *te
 	endpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "root", "", "deploy.done", "deploy.done")
 	if connectSourceEndpointMatchesTestSource(endpoint, "deploy.done", mustStaticRoutingSource(t, "child")) {
 		t.Fatal("root endpoint matched child/static FlowID evidence")
+	}
+}
+
+func TestDeploymentFeedSourceMatchesOnlyItsDeclarationOutput(t *testing.T) {
+	flowSource, err := events.NewDeploymentFeedRoutingSource("portfolio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootSource, err := events.NewDeploymentFeedRoutingSource(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flowOutput := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "portfolio", "portfolio", runtimecontracts.FlowModeSingleton, "", "account.registered", "portfolio/account.registered")
+	rootOutput := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "root", "", "account.registered", "account.registered")
+	if !connectSourceEndpointMatchesTestSource(flowOutput, "portfolio/account.registered", flowSource) {
+		t.Fatalf("deployment event did not match flow output: %+v", flowOutput.Readback())
+	}
+	if !connectSourceEndpointMatchesTestSource(rootOutput, "account.registered", rootSource) {
+		t.Fatalf("deployment event did not match root output: %+v", rootOutput.Readback())
+	}
+	for _, tc := range []struct {
+		endpoint  ConnectRoutePlanEndpoint
+		eventType events.EventType
+		source    events.RoutingSource
+	}{
+		{flowOutput, "portfolio/account.registered", rootSource},
+		{rootOutput, "account.registered", flowSource},
+		{flowOutput, "portfolio/other", flowSource},
+	} {
+		if connectSourceEndpointMatchesTestSource(tc.endpoint, tc.eventType, tc.source) {
+			t.Fatalf("deployment source crossed declaration boundary: event=%s source=%+v", tc.eventType, tc.source)
+		}
+	}
+}
+
+func TestDeploymentFeedAdmissionUsesExactImportableDeclaration(t *testing.T) {
+	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
+	routingSource, err := events.NewDeploymentFeedRoutingSource("portfolio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AdmitDeploymentFeedDeclaration(source, "portfolio/account.registered", routingSource); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []events.EventType{"portfolio/portfolio.opened", "portfolio/other", "account.registered"} {
+		if err := AdmitDeploymentFeedDeclaration(source, name, routingSource); err == nil {
+			t.Fatalf("unroutable or wrong-scope deployment event %q was admitted", name)
+		}
 	}
 }
 

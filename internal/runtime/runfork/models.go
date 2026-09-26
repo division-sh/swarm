@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -242,8 +243,9 @@ const (
 )
 
 type RunForkPlanRequest struct {
-	SourceRunID string
-	At          string
+	SourceRunID   string
+	At            string
+	ResolvedPoint *RunForkPoint
 }
 
 type RunForkPlan struct {
@@ -276,10 +278,27 @@ type RunForkPlan struct {
 // fixed fork revision. Claim, lease, pacing, and service timestamps are not
 // historical authority and are reset when this fact is materialized.
 type RunForkFanOutObligation struct {
-	Intent         fanoutobligation.Intent      `json:"intent"`
-	Outcomes       []fanoutobligation.Outcome   `json:"outcomes,omitempty"`
-	PendingReplays []RunForkFanOutPendingReplay `json:"pending_replays,omitempty"`
-	Barrier        *fanoutbarrier.Barrier       `json:"barrier,omitempty"`
+	Intent            fanoutobligation.Intent         `json:"intent"`
+	Outcomes          []fanoutobligation.Outcome      `json:"outcomes,omitempty"`
+	PendingReplays    []RunForkFanOutPendingReplay    `json:"pending_replays,omitempty"`
+	PendingDeployment []RunForkDeploymentPendingEvent `json:"pending_deployment,omitempty"`
+	Barrier           *fanoutbarrier.Barrier          `json:"barrier,omitempty"`
+}
+
+type RunForkDeploymentPendingPhase string
+
+const (
+	RunForkDeploymentPendingPublication RunForkDeploymentPendingPhase = "publication_pending_handoff"
+	RunForkDeploymentPendingReceiver    RunForkDeploymentPendingPhase = "receiver_pending"
+)
+
+// RunForkDeploymentPendingEvent is fixed-revision deployment work, not generic
+// historical agent replay. The selected fork owner must transfer it explicitly.
+type RunForkDeploymentPendingEvent struct {
+	Ordinal           int                           `json:"ordinal"`
+	SourceEventID     string                        `json:"source_event_id"`
+	SourceDeliveryIDs []string                      `json:"source_delivery_ids"`
+	Phase             RunForkDeploymentPendingPhase `json:"phase"`
 }
 
 // RunForkFanOutPendingReplay is a fixed-revision nonterminal ordinal that may
@@ -292,7 +311,14 @@ type RunForkFanOutPendingReplay struct {
 // ValidateFanOutPendingReplayAdmission proves that every nonterminal fan-out
 // ordinal can be reconstructed entirely by the existing historical replay.
 func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
+	seenDeploymentEvents := make(map[string]struct{})
 	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment == nil && len(obligation.PendingDeployment) != 0 {
+			return fmt.Errorf("handler fan-out cannot carry deployment pending work")
+		}
+		if obligation.Intent.Request.Deployment != nil && len(obligation.PendingReplays) != 0 {
+			return fmt.Errorf("deployment feed cannot borrow generic historical replay")
+		}
 		seenOrdinals := make(map[int]struct{}, obligation.Intent.Cursor)
 		for _, outcome := range obligation.Outcomes {
 			if outcome.Ordinal < 0 || outcome.Ordinal >= obligation.Intent.Cursor {
@@ -333,6 +359,78 @@ func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
 			}
 			if deliveries == 0 {
 				return fmt.Errorf("fork fan-out pending event %s has no replayable delivery evidence", eventID)
+			}
+		}
+		for _, candidate := range obligation.PendingDeployment {
+			if candidate.Ordinal < 0 || candidate.Ordinal >= obligation.Intent.Cursor {
+				return fmt.Errorf("fork deployment pending ordinal %d is outside cursor %d", candidate.Ordinal, obligation.Intent.Cursor)
+			}
+			if _, duplicate := seenOrdinals[candidate.Ordinal]; duplicate {
+				return fmt.Errorf("fork deployment ordinal %d has duplicate fixed-revision facts", candidate.Ordinal)
+			}
+			eventUUID, eventErr := uuid.Parse(candidate.SourceEventID)
+			if eventErr != nil || eventUUID == uuid.Nil || eventUUID.String() != candidate.SourceEventID || len(candidate.SourceDeliveryIDs) == 0 ||
+				(candidate.Phase != RunForkDeploymentPendingPublication && candidate.Phase != RunForkDeploymentPendingReceiver) {
+				return fmt.Errorf("fork deployment ordinal %d lacks exact pending event evidence", candidate.Ordinal)
+			}
+			if _, duplicate := seenEvents[candidate.SourceEventID]; duplicate {
+				return fmt.Errorf("fork deployment event %s is bound to multiple ordinals", candidate.SourceEventID)
+			}
+			if _, duplicate := seenDeploymentEvents[candidate.SourceEventID]; duplicate {
+				return fmt.Errorf("fork deployment event %s is bound to multiple feeds", candidate.SourceEventID)
+			}
+			seenOrdinals[candidate.Ordinal] = struct{}{}
+			seenEvents[candidate.SourceEventID] = struct{}{}
+			seenDeploymentEvents[candidate.SourceEventID] = struct{}{}
+			seenDeliveries := make(map[string]struct{}, len(candidate.SourceDeliveryIDs))
+			for _, deliveryID := range candidate.SourceDeliveryIDs {
+				deliveryUUID, err := uuid.Parse(deliveryID)
+				if err != nil || deliveryUUID == uuid.Nil || deliveryUUID.String() != deliveryID {
+					return fmt.Errorf("fork deployment ordinal %d has invalid delivery ID", candidate.Ordinal)
+				}
+				if _, duplicate := seenDeliveries[deliveryID]; duplicate {
+					return fmt.Errorf("fork deployment ordinal %d repeats delivery %s", candidate.Ordinal, deliveryID)
+				}
+				seenDeliveries[deliveryID] = struct{}{}
+				matches := 0
+				for _, pending := range plan.PendingWork {
+					if pending.DeliveryID != deliveryID {
+						continue
+					}
+					matches++
+					if pending.EventID != candidate.SourceEventID || pending.Classification != RunForkPendingClassificationPending ||
+						pending.Status != "pending" || pending.RetryCount != 0 || pending.ActiveSessionID != "" ||
+						pending.StartedAt != nil || pending.DeliveredAt != nil || pending.ReceiptAt != nil ||
+						pending.RoutingSource.Kind() != events.RoutingSourceDeploymentFeed ||
+						(candidate.Phase == RunForkDeploymentPendingPublication) != (pending.ContinuationHandoffAt == nil) {
+						return fmt.Errorf("fork deployment delivery %s contradicts fixed pending phase", deliveryID)
+					}
+				}
+				if matches != 1 {
+					return fmt.Errorf("fork deployment delivery %s has %d fixed facts", deliveryID, matches)
+				}
+			}
+			for _, pending := range plan.PendingWork {
+				if pending.EventID != candidate.SourceEventID || pending.DeliveryID == "" {
+					continue
+				}
+				if _, admitted := seenDeliveries[pending.DeliveryID]; !admitted {
+					return fmt.Errorf("fork deployment event %s omits pending delivery %s", candidate.SourceEventID, pending.DeliveryID)
+				}
+			}
+			pipelineReceipts := 0
+			for _, pending := range plan.PendingWork {
+				if pending.EventID != candidate.SourceEventID || pending.DeliveryID != "" || pending.SubscriberType != "platform" || pending.SubscriberID != "pipeline" {
+					continue
+				}
+				if pending.ReceiptOutcome != "success" || pending.ReceiptAt == nil {
+					return fmt.Errorf("fork deployment event %s has contradictory pipeline receipt", candidate.SourceEventID)
+				}
+				pipelineReceipts++
+			}
+			if (candidate.Phase == RunForkDeploymentPendingPublication && pipelineReceipts != 0) ||
+				(candidate.Phase == RunForkDeploymentPendingReceiver && pipelineReceipts != 1) {
+				return fmt.Errorf("fork deployment event %s has no exact pipeline handoff phase", candidate.SourceEventID)
 			}
 		}
 		if len(seenOrdinals) != obligation.Intent.Cursor {
@@ -379,9 +477,17 @@ func (p RunForkPlan) HistoricalEventIDs(revision int64) ([]string, bool) {
 	return append([]string(nil), p.historicalEventIDs...), true
 }
 
+type RunForkPointKind = forkpoint.Kind
+
+const (
+	RunForkPointEvent              RunForkPointKind = forkpoint.Event
+	RunForkPointDeploymentRevision RunForkPointKind = forkpoint.DeploymentRevision
+)
+
 type RunForkPoint struct {
+	Kind           RunForkPointKind     `json:"kind"`
 	Input          string               `json:"input"`
-	EventID        string               `json:"event_id"`
+	EventID        string               `json:"event_id,omitempty"`
 	EventName      string               `json:"event_name,omitempty"`
 	SourceEventID  string               `json:"source_event_id,omitempty"`
 	ProducedBy     string               `json:"produced_by,omitempty"`
@@ -389,6 +495,21 @@ type RunForkPoint struct {
 	RoutingSource  events.RoutingSource `json:"routing_source"`
 	Timestamp      time.Time            `json:"timestamp"`
 	Revision       int64                `json:"revision"`
+}
+
+func (p RunForkPoint) Validate() error {
+	if err := forkpoint.ValidateIdentity(p.Kind, p.Revision, p.EventID); err != nil {
+		return err
+	}
+	switch p.Kind {
+	case RunForkPointEvent:
+	case RunForkPointDeploymentRevision:
+		if p.Input != "" || p.EventName != "" || p.SourceEventID != "" ||
+			p.ProducedBy != "" || p.ProducedByType != "" || p.RoutingSource != (events.RoutingSource{}) || !p.Timestamp.IsZero() {
+			return fmt.Errorf("deployment revision fork point cannot carry event evidence")
+		}
+	}
+	return nil
 }
 
 const (
@@ -429,6 +550,7 @@ type RunForkPendingWork struct {
 	ActiveSessionID        string                  `json:"active_session_id,omitempty"`
 	CreatedAt              time.Time               `json:"created_at"`
 	StartedAt              *time.Time              `json:"started_at,omitempty"`
+	ContinuationHandoffAt  *time.Time              `json:"continuation_handoff_at,omitempty"`
 	DeliveredAt            *time.Time              `json:"delivered_at,omitempty"`
 	ReceiptOutcome         string                  `json:"receipt_outcome,omitempty"`
 	ReceiptAt              *time.Time              `json:"receipt_at,omitempty"`
@@ -559,7 +681,7 @@ const (
 type RunForkSelectedContractBindingRequest struct {
 	ForkRunID         string
 	SourceRunID       string
-	ForkEventID       string
+	ForkPoint         RunForkPoint
 	ContractSelection RunForkContractSelection
 }
 
@@ -568,7 +690,8 @@ type RunForkSelectedContractBinding struct {
 	BindingID         string                   `json:"binding_id"`
 	ForkRunID         string                   `json:"fork_run_id"`
 	SourceRunID       string                   `json:"source_run_id"`
-	ForkEventID       string                   `json:"fork_event_id"`
+	ForkPoint         RunForkPoint             `json:"fork_point"`
+	ForkEventID       string                   `json:"fork_event_id,omitempty"`
 	ContractSelection RunForkContractSelection `json:"contract_selection"`
 	CreatedAt         time.Time                `json:"created_at"`
 }
@@ -674,6 +797,7 @@ type RunForkSelectedContractExecutionAdmission struct {
 	ExecutionSupported         bool                                       `json:"execution_supported"`
 	ForkRunID                  string                                     `json:"fork_run_id"`
 	SourceRunID                string                                     `json:"source_run_id"`
+	ForkPoint                  RunForkPoint                               `json:"fork_point"`
 	ForkEventID                string                                     `json:"fork_event_id"`
 	ContractSelection          RunForkContractSelection                   `json:"contract_selection"`
 	ContractBindingOwner       string                                     `json:"contract_binding_owner"`
@@ -1064,6 +1188,9 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
+	ForkOperation         *ForkOperationRequest
+	ExecutedEventCount    int
+	DataPins              []durabledata.Pin
 	ExecutionSource       semanticview.Source
 	ForkRunID             string
 	AllowSourceFreeze     bool
@@ -1094,16 +1221,17 @@ type RunForkSelectedContractExecutionLineage struct {
 }
 
 type RunForkSelectedContractBranchDivergence struct {
-	Owner                          string    `json:"owner"`
-	ForkRunID                      string    `json:"fork_run_id"`
-	SourceRunID                    string    `json:"source_run_id"`
-	ForkEventID                    string    `json:"fork_event_id"`
-	Policy                         string    `json:"policy"`
-	SourceRunStatusAtActivation    string    `json:"source_run_status_at_activation"`
-	SourceRunStatusAfterActivation string    `json:"source_run_status_after_activation"`
-	SourceFrozen                   bool      `json:"source_frozen"`
-	SourceAdvancedFacts            []string  `json:"source_advanced_facts,omitempty"`
-	CreatedAt                      time.Time `json:"created_at"`
+	Owner                          string       `json:"owner"`
+	ForkRunID                      string       `json:"fork_run_id"`
+	SourceRunID                    string       `json:"source_run_id"`
+	ForkPoint                      RunForkPoint `json:"fork_point"`
+	ForkEventID                    string       `json:"fork_event_id,omitempty"`
+	Policy                         string       `json:"policy"`
+	SourceRunStatusAtActivation    string       `json:"source_run_status_at_activation"`
+	SourceRunStatusAfterActivation string       `json:"source_run_status_after_activation"`
+	SourceFrozen                   bool         `json:"source_frozen"`
+	SourceAdvancedFacts            []string     `json:"source_advanced_facts,omitempty"`
+	CreatedAt                      time.Time    `json:"created_at"`
 }
 
 const (
@@ -1182,6 +1310,7 @@ const (
 type RunForkSelectedContractRouteRecoveryRequest struct {
 	ForkRunID         string
 	SourceRunID       string
+	ForkPoint         RunForkPoint
 	ForkEventID       string
 	ContractSelection RunForkContractSelection
 	RouteTopology     RunForkSelectedContractRouteTopology
@@ -1193,6 +1322,7 @@ type RunForkSelectedContractRouteRecovery struct {
 	RuntimeRecoveryOwner         string                   `json:"runtime_recovery_owner"`
 	ForkRunID                    string                   `json:"fork_run_id"`
 	SourceRunID                  string                   `json:"source_run_id"`
+	ForkPoint                    RunForkPoint             `json:"fork_point"`
 	ForkEventID                  string                   `json:"fork_event_id"`
 	ContractSelection            RunForkContractSelection `json:"contract_selection"`
 	RouteTopologyOwner           string                   `json:"route_topology_owner"`
@@ -1248,6 +1378,7 @@ type SelectedContractRuntimeExecutionIssueRequest struct {
 	Preparation                SelectedForkPreparationBinding
 	DeclarationPlan            agenttopology.SelectedDeclarationPlan
 	Admission                  RunForkSelectedContractExecutionAdmission
+	RecoveryFromExecutionID    string
 	ContainerPlanFingerprint   string
 	ActorCensusFingerprint     string
 	EffectiveConfigFingerprint string
@@ -1261,6 +1392,7 @@ type SelectedContractRuntimeExecution struct {
 	ExecutionID                     string
 	ForkRunID                       string
 	SourceRunID                     string
+	ForkPoint                       RunForkPoint
 	ForkEventID                     string
 	Generation                      uint64
 	ExecutableCoordinateFingerprint string

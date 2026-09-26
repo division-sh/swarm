@@ -32,6 +32,7 @@ type SelectedForkPreparation struct {
 	ProcessGeneration          uint64                                                 `json:"process_generation"`
 	Coordinates                managedcapabilities.SelectedForkPreparationCoordinates `json:"coordinates"`
 	SourceRunID                string                                                 `json:"source_run_id"`
+	ForkPoint                  RunForkPoint                                           `json:"fork_point"`
 	ForkEventID                string                                                 `json:"fork_event_id"`
 	Actors                     []SelectedForkPreparedActor                            `json:"actors"`
 }
@@ -67,11 +68,17 @@ func (b SelectedForkPreparation) Validate() error {
 	if b.ProcessGeneration == 0 {
 		return fmt.Errorf("selected preparation requires a positive process generation")
 	}
-	for _, id := range []string{b.PreparationID, b.SourceRunID, b.ForkEventID} {
+	for _, id := range []string{b.PreparationID, b.SourceRunID} {
 		parsed, err := uuid.Parse(id)
 		if err != nil || parsed == uuid.Nil || parsed.String() != id {
 			return fmt.Errorf("selected preparation binding requires canonical nonzero coordinates")
 		}
+	}
+	if err := b.ForkPoint.Validate(); err != nil {
+		return fmt.Errorf("selected preparation fork point: %w", err)
+	}
+	if b.ForkEventID != b.ForkPoint.EventID {
+		return fmt.Errorf("selected preparation event differs from fork point")
 	}
 	if err := b.Coordinates.Validate(); err != nil {
 		return err

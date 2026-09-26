@@ -235,6 +235,10 @@ func (r *OutputConsumerResolver) classify(flowID, eventType string, routingSourc
 	if source == nil {
 		return classification
 	}
+	if routingSource.Kind() == events.RoutingSourceDeploymentFeed &&
+		AdmitDeploymentFeedDeclaration(source, events.EventType(eventType), routingSource) != nil {
+		return classification
+	}
 	outputPins := outputPinsForEvent(source, flowID, eventType)
 	r.once.Do(func() { r.graph, r.census = compileConnectGraphWithCensus(source) })
 	graph, census := r.graph, r.census

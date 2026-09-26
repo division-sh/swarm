@@ -9,20 +9,16 @@ import (
 )
 
 type HandlerDeclarativeEmitSite struct {
-	Source         string
-	SiteKey        string
-	RuleID         string
-	RuleRef        runtimeidentity.DeclarationIdentity
-	RuleIndex      int
-	Spec           EmitSpec
-	ItemAlias      string
-	ResourceSource *FanOutResourceSource
+	Source    string
+	SiteKey   string
+	RuleID    string
+	RuleRef   runtimeidentity.DeclarationIdentity
+	RuleIndex int
+	Spec      EmitSpec
+	ItemAlias string
 }
 
 func (s HandlerDeclarativeEmitSite) EventType() string {
-	if s.ResourceSource != nil {
-		return s.ResourceSource.Declaration.EventName
-	}
 	return s.Spec.EventType()
 }
 
@@ -78,7 +74,7 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutC
 		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), timeoutRef, 0, handler.Join.Timeout.Outcome.Emit)
 	}
 	for _, plan := range plans {
-		site := HandlerDeclarativeEmitSite{Spec: cloneEmitSpec(plan.Emit), ItemAlias: plan.ItemAlias, RuleIndex: plan.Site.Index, ResourceSource: plan.ResourceSource}
+		site := HandlerDeclarativeEmitSite{Spec: cloneEmitSpec(plan.Emit), ItemAlias: plan.ItemAlias, RuleIndex: plan.Site.Index}
 		switch plan.Site.Kind {
 		case FanOutSiteHandler:
 			site.Source, site.SiteKey, site.RuleIndex = "handler.fan_out.emit", "handler.fan_out.emit", -1

@@ -63,7 +63,7 @@ func buildServeRuntimeExecution(stores *storeselected.Owner, req selectedAPICapa
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: caps.Observability, AgentIdentities: caps.Agents, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls}),
 		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: caps.TestSetup, Idempotency: idempotency, RunBundleContext: caps.RunBundleContext, RuntimeContexts: caps.RuntimeContexts, SourceArtifact: rt.Bus, Source: req.Source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
-		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: caps.RunForkAvailability, Executor: caps.RunFork, Idempotency: idempotency}),
+		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: caps.RunForkAvailability, Operations: caps.RunForkOperations, Executor: caps.RunFork, Idempotency: idempotency}),
 		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts, SelectedForkControls: caps.SelectedForkControls, SelectedForkStop: caps.SelectedForkProcess}),
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: caps.RuntimeContexts}),
 	)

@@ -18,11 +18,17 @@ type SelectedStopRequest struct {
 }
 
 func (r SelectedStopRequest) Validate() error {
-	for _, id := range []string{r.Transition.RunID, r.Binding.BindingID, r.Binding.ForkRunID, r.Binding.SourceRunID, r.Binding.ForkEventID} {
+	for _, id := range []string{r.Transition.RunID, r.Binding.BindingID, r.Binding.ForkRunID, r.Binding.SourceRunID} {
 		parsed, err := uuid.Parse(id)
 		if err != nil || parsed == uuid.Nil || parsed.String() != id {
 			return fmt.Errorf("selected stop requires canonical nonzero identities")
 		}
+	}
+	if err := r.Binding.ForkPoint.Validate(); err != nil {
+		return fmt.Errorf("selected stop requires an exact fork point: %w", err)
+	}
+	if r.Binding.ForkEventID != r.Binding.ForkPoint.EventID {
+		return fmt.Errorf("selected stop event differs from its fork point")
 	}
 	if r.Transition.RunID != r.Binding.ForkRunID || r.Binding.ForkRunID == r.Binding.SourceRunID ||
 		r.Binding.Owner != runfork.RunForkSelectedContractBindingOwner || r.Binding.CreatedAt.IsZero() {

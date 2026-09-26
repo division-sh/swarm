@@ -35,8 +35,11 @@ func validateSelectedContractRouteRecoveryRecord(record runfork.RunForkSelectedC
 	if strings.TrimSpace(record.RuntimeRecoveryOwner) != runfork.RunForkSelectedContractRouteRecoveryOwner {
 		return fmt.Errorf("selected-contract route recovery requires %s runtime owner; got %q", runfork.RunForkSelectedContractRouteRecoveryOwner, record.RuntimeRecoveryOwner)
 	}
-	if strings.TrimSpace(record.ForkRunID) == "" || strings.TrimSpace(record.SourceRunID) == "" || strings.TrimSpace(record.ForkEventID) == "" {
-		return fmt.Errorf("selected-contract route recovery requires fork/source/event identity")
+	if strings.TrimSpace(record.ForkRunID) == "" || strings.TrimSpace(record.SourceRunID) == "" {
+		return fmt.Errorf("selected-contract route recovery requires fork/source identity")
+	}
+	if err := record.ForkPoint.Validate(); err != nil || record.ForkEventID != record.ForkPoint.EventID {
+		return fmt.Errorf("selected-contract route recovery requires exact typed fork point: %v", err)
 	}
 	if strings.TrimSpace(record.RouteTopologyOwner) != runfork.RunForkSelectedContractRouteTopologyOwner {
 		return fmt.Errorf("selected-contract route recovery requires %s topology; got %q", runfork.RunForkSelectedContractRouteTopologyOwner, record.RouteTopologyOwner)

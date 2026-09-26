@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -21,7 +23,7 @@ import (
 func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 	basePlan := runfork.RunForkPlan{
 		SourceRunID: uuid.NewString(),
-		ForkPoint:   runfork.RunForkPoint{EventID: uuid.NewString()},
+		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), Revision: 1},
 	}
 	for _, tc := range []struct {
 		name       string
@@ -107,6 +109,30 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 	}
 }
 
+func TestSelectedContractDeferredWorkAdmissionBindsDeploymentRevisionWithoutEvent(t *testing.T) {
+	plan := runfork.RunForkPlan{
+		SourceRunID: uuid.NewString(),
+		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 7},
+	}
+	source := selectedDeferredWorkTestSource(nil, nil)
+	admission, err := admitSelectedContractDeferredWork(plan, source)
+	if err != nil {
+		t.Fatalf("admit eventless deployment revision: %v", err)
+	}
+	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, source); err != nil {
+		t.Fatalf("validate exact deployment revision: %v", err)
+	}
+	for _, point := range []runfork.RunForkPoint{
+		{Kind: runfork.RunForkPointDeploymentRevision, Revision: 8},
+		{Kind: runfork.RunForkPointEvent, Revision: 7, EventID: uuid.NewString()},
+		{Kind: runfork.RunForkPointDeploymentRevision, Revision: 7, EventID: uuid.NewString()},
+	} {
+		if err := admission.validate(plan.SourceRunID, point, source); err == nil {
+			t.Fatalf("contradictory point %+v was admitted", point)
+		}
+	}
+}
+
 func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t *testing.T) {
 	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("internal", "runtime", "testdata", "generic-swarm-bundle"))
 	source := semanticview.Wrap(bundle)
@@ -150,6 +176,33 @@ func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t 
 	}
 }
 
+func TestSelectedContractDeferredWorkAdmitsDeploymentHistoryWithoutHandlerPlan(t *testing.T) {
+	declaration := durabledata.DeclarationRef{FlowPath: "portfolio", EventName: "portfolio/account.registered"}
+	version := durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("a", 64))
+	request := fanoutobligation.IntentRequest{
+		Key: fanoutobligation.IntentKey{RunID: uuid.NewString(), DeploymentFeedID: uuid.NewString()},
+		Deployment: &fanoutobligation.DeploymentOrigin{
+			BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), Declaration: declaration,
+			VersionID: version, SchemaDigest: durabledata.SchemaDigest("resource-schema-v1:sha256:" + strings.Repeat("c", 64)),
+		},
+		Source:      fanoutobligation.SourceRef{Kind: fanoutobligation.SourceResourceVersion, Declaration: declaration, VersionID: version},
+		Cardinality: 0,
+	}
+	now := time.Now().UTC()
+	intent := fanoutobligation.Intent{Request: request, Source: request.Source, Status: fanoutobligation.StatusClosed,
+		NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
+	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{Intent: intent}}}
+	source := selectedDeferredWorkTestSource(nil, nil)
+	refs, err := admitSelectedContractFanOutPlans(plan, source)
+	if err != nil || len(refs) != 0 {
+		t.Fatalf("deployment history borrowed handler plan: refs=%v err=%v", refs, err)
+	}
+	plan.FanOutObligations[0].Intent.Request.Deployment.SchemaDigest = "wrong"
+	if _, err := admitSelectedContractFanOutPlans(plan, source); err == nil {
+		t.Fatal("malformed deployment history was admitted")
+	}
+}
+
 func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T) {
 	for _, tc := range []struct {
 		mode runtimecontracts.FlowInputResolutionMode
@@ -175,7 +228,7 @@ func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T)
 func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 	plan := runfork.RunForkPlan{
 		SourceRunID: uuid.NewString(),
-		ForkPoint:   runfork.RunForkPoint{EventID: uuid.NewString()},
+		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: uuid.NewString(), Revision: 1},
 	}
 	admission, err := admitSelectedContractDeferredWork(plan, selectedDeferredWorkTestSource(nil, nil))
 	if err != nil {
@@ -187,7 +240,7 @@ func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 			Timeout:      runtimecontracts.JoinTimeoutSpec{After: "1h"},
 		},
 	}})
-	if err := admission.validate(plan.SourceRunID, plan.ForkPoint.EventID, drifted); err == nil ||
+	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, drifted); err == nil ||
 		!strings.Contains(err.Error(), selectedContractDeferredWorkWorkflowJoinTimeout) {
 		t.Fatalf("source drift error = %v, want workflow join capability rejection", err)
 	}
@@ -240,7 +293,7 @@ func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testi
 	}
 	for function, want := range map[string]int{
 		"admitSelectedContractDeferredWork":              2,
-		"BuildSelectedContractExecutionAdmission":        2,
+		"BuildSelectedContractExecutionAdmission":        3, // initial execution, activation gate, recovered finite feed
 		"buildSelectedContractForkLocalRuntimeContainer": 2,
 	} {
 		if got := counts[function]; got != want {

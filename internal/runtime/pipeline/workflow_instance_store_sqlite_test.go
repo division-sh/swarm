@@ -731,7 +731,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			produced_by_type TEXT NOT NULL CHECK (produced_by_type IN ('node', 'agent', 'platform', 'external')),
 			source_event_id TEXT,
 			created_at TEXT NOT NULL,
-			routing_source_kind TEXT NOT NULL CHECK (routing_source_kind IN ('absent', 'external_ingress', 'root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'platform_control')),
+			routing_source_kind TEXT NOT NULL CHECK (routing_source_kind IN ('absent', 'external_ingress', 'root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'platform_control', 'deployment_feed')),
 			routing_source_authority TEXT,
 			source_route TEXT NOT NULL CHECK (json_valid(source_route)),
 			target_route TEXT NOT NULL CHECK (json_valid(target_route)),
@@ -743,7 +743,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			idempotency_key TEXT,
 			CHECK ((event_class IN ('child', 'replay') AND source_event_id IS NOT NULL AND run_id IS NOT NULL) OR (event_class NOT IN ('child', 'replay') AND source_event_id IS NULL) OR (event_class IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct') AND source_event_id IS NOT NULL AND run_id IS NOT NULL)),
 			CHECK ((event_class = 'operator_injected') OR operator_reference_event_id IS NULL),
-			CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL))
+			CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'deployment_feed') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL))
 		)`,
 		`CREATE TABLE event_receipts (
 			receipt_id TEXT PRIMARY KEY,

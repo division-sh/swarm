@@ -3946,14 +3946,12 @@ handler_specification:
     fan_out:
       field: fan_out
       type: object
-      purpose: For each item in a bounded collection or pinned durable-data version, emit one ordinary event through the normal emit pipeline.
+      purpose: For each item in a bounded declared collection, emit one ordinary event through the normal emit pipeline.
       sub_fields:
         items_from: >-
-          Source at exactly one declared top-level payload.* or entity.* collection field, or data.<event_name>
-          resolving an exact same-flow importable event declaration. Nested collection paths are unsupported and
-          fail closed. A missing event catalog entry, primary entity contract, declared source field or exact
-          durable-data declaration is a hard load error. The data operand never authors a version: the exact run
-          pin supplies it. A pin alone does not trigger fan-out; only an actual handler delivery does.
+          Source at exactly one declared top-level payload.* or entity.* collection field. Nested collection paths
+          are unsupported and fail closed. A missing event catalog entry, primary entity contract, or declared
+          source field is a hard load error. Durable-data versions are not authored fan_out sources.
         as: string — required simple identifier that binds the current item for this row's emit.fields expressions.
           `fan_out.item`, bare `item`, and `fan_out.identity` are not authoring namespaces.
         identity: optional expression over the item alias that declares the stable per-item key. For a statically
@@ -3965,14 +3963,8 @@ handler_specification:
           selects the platform ceiling. The platform ceiling is always enforced even when authors omit max_items.
         emit: string or object — per-item event to emit, optionally with local fields payload construction. During
           fan_out.emit.fields only, the item alias and platform-provided `fan_out.index` are available.
-      resource_source_form: >-
-        For items_from: data.<event_name>, the authored fan_out object contains items_from only. Presence of as,
-        identity, max_items or emit, including explicit null or empty values, is invalid. Each canonical row is
-        published unchanged as the declaration's own event payload; no field-copy projection or alternate emit
-        event exists. The resource declaration's schema validates import, source admission and ordinary publication.
       platform_ceiling:
         max_items: 1000
-        resource_rows: 100000
         overrun: >
           Runtime resolves the immutable source cardinality once per handler activation and checks it before the
           constant-size intent is persisted. If the count exceeds the effective limit, the handler fails closed with
@@ -3986,7 +3978,6 @@ handler_specification:
           - declaration_identity
           - semantic_digest
           - items_from
-          - resource_source_declaration_and_schema_digest
           - collection_type
           - item_type
           - as
@@ -4001,7 +3992,7 @@ handler_specification:
           composition input. Consumers must not independently re-derive item type, omitted scalar identity, effective
           bound, source/write ordering, or emitted payload semantics.
       empty_collection: >
-        An empty collection or pinned resource persists one immediately closed fan-out intent and publishes zero events. Handler
+        An empty collection persists one immediately closed fan-out intent and publishes zero events. Handler
         `advances_to` runs once after that constant-size intent commit, and `fan_out.count` is 0 for same-handler
         data_accumulation.
       collection_iteration: >
@@ -4010,18 +4001,11 @@ handler_specification:
         ordinals; fan_out never sorts or deduplicates the source collection. The pump later publishes each ordinal in
         declared list order through ordinary EventBus publication. Chunk boundaries, retries, bisection, process identity,
         and event_id never own or change iteration order.
-      resource_iteration: >-
-        Pinned resources use their immutable canonical row-key order for both version identity and zero-based
-        activation ordinals. Keyless rows remain a multiset: equal payloads have distinct ordinals and never receive
-        synthetic business keys. The durable-data row ceiling, not the collection ceiling, applies. Serving uses the
-        existing fan-out obligation pump and ordinary EventBus publication, routing and settlement, with no direct
-        delivery or second queue.
       transition_order: Handler `advances_to` fires once after the durable intent is committed, not once per item and not
         after asynchronous issuance or downstream delivery settlement.
       graph_surface: describe --graph renders multiplicity-bearing fan-out edges such as `waiting ->xN line_item.requested`.
       route_authority: >
-        `fan_out.emit` and a compiled resource-row producer are normal emit sites. When they emit a
-        pin-declared output event, routing is owned by the same output pin,
+        When `fan_out.emit` emits a pin-declared output event, routing is owned by the same output pin,
         parent connect / ConnectRoutePlan, and EventBus RoutePlan authority as
         handler-level emit, rule emit, on_complete emit, and accumulate timeout
         emit. The runtime must not route target-less fan_out output through
@@ -4059,17 +4043,8 @@ handler_specification:
         immutable_sources:
           event_payload_field: Exact triggering event_id plus one declared top-level payload field.
           entity_field_revision: Exact source run_id, entity_id, top-level field, and immutable entity_mutations mutation_id.
-          resource_version: >-
-            Exact same-flow declaration, schema digest, version_id and cardinality, admitted against the selected
-            store's bundle declaration, retained immutable version metadata and exact run pin in the handler's
-            transaction. Pin existence alone is insufficient. A new trigger creates a new intent; retry or restart
-            of one delivery resumes its existing intent without duplicate ordinals. A fork pin override conflicting
-            with outstanding source work fails atomically at the selected historical revision; it cannot reinterpret
-            the inherited intent. Before an intent exists, a fork may choose another pin for a later trigger; settled
-            history retains its original source and outcomes. Current v1 storage holds one JSONL blob per version, so a bounded chunk result
-            still incurs O(version) database read and scan cost. This is not an O(chunk) storage guarantee.
           rule: >-
-            Missing, contradictory, pruned, current-state-only, or non-lineage source evidence fails closed. The pump never
+            Missing, contradictory, current-state-only, or non-lineage source evidence fails closed. The pump never
             rereads mutable current entity state or the process-current contract. Same-handler source mutation binds the
             post-write immutable revision. Source/count cycles fail strict load and boot verification.
         evaluation_capsule: >-
@@ -4098,7 +4073,7 @@ handler_specification:
           result; projection remains lazy so it cannot displace an earlier field diagnostic. Non-isolated carriers
           and mixed reference/literal outputs use ordinary per-field evaluation. No projection survives the ordinal.
         semantic_value_projection: >-
-          Event-payload, persisted and fork-projected fan-out capsules, exact entity-revision, and pinned resource-version sources enter deferred emit evaluation only
+          Event-payload, persisted and fork-projected fan-out capsules, and exact entity-revision sources enter deferred emit evaluation only
           through contract_formats.semantic_json.workflow_cel_projection. Eager and deferred evaluation consume the same
           checked owner. No source-specific float64 conversion, numeric-string coercion, private parser, or unchecked CEL
           normalizer may reinterpret persisted values.
@@ -6454,6 +6429,24 @@ engine:
           preserves the original startup failure and independent retirement failures; no detached cleanup is allowed.
         scope: |
           One exact obligation exists per admitted event and complete opaque DeliveryRoute identity. The owner alone constructs obligations, selects eligible work, mints persisted lease-fenced claims, binds execution, schedules retries, records exact outcomes, terminalizes parent-owned work, and decodes snapshots and run summaries. Agent and node consumers cannot reconstruct lifecycle behavior from status strings, retry counters, receipts, timestamps, or raw SQL. Every obligation carries one closed execution authority. Normal authority consists of the exact bundle source, runtime instance, and runtime generation with no selected-execution fields. Selected-contract authority consists of the exact selected execution, fork run, generation, and bundle source and is structurally coupled to the selected execution row. Bundle identity or subscriber identity alone is never execution authority. Every named event/delivery commit returns exact durable handoff proofs. The retained publication owns those exact continuations until it transfers them to one route carrier or the one normal-runtime-generation delivery coordinator. A route carrier must either consume its exact continuation into a fenced attempt or return it to the coordinator before completing. Read-only handoff proof is not transfer authority, and no nonterminal transition may have zero or two process-local continuation owners. Successful canonical platform/pipeline settlement atomically stamps the exact delivery rows' continuation_handoff_at fact using database time in the same transaction as the receipt. Coordinator enumeration consumes only that delivery-owned fact and never interprets receipt SQL. Pipeline settlement returns one closed outcome that reports whether the receipt and delivery handoff committed independently of any later claim, session, or candidate cleanup error. Consumers signal whenever that outcome says the handoff committed and never infer rollback or commit from the auxiliary error alone. A freshly committed row without that handoff remains publication-owned and cannot be discovered or executed by the coordinator; startup recovers the event-level obligation before enumerating delivery continuations. Recovery-enabled startup first admits the exact managed-execution and delivery authorities without executing replay or starting the coordinator. After manager execution loops and completed dynamic agent/flow routes become live, it drives the event-level pipeline scope to explicit exhaustion, then starts the normal coordinator and performs its bounded authority-scoped selected-store scan to explicit exhaustion. Startup synchronizes one further event-driven scan through that same coordinator before runtime readiness; the synchronization returns the exact scan or dispatch failure and cannot manufacture eligibility or wait for a future durable due time. Recovery-disabled startup inventories the exact bundle-source delivery scope and rejects pending, failed, busy, or reclaimable agent or node work before execution-authority activation. It never silently adopts that work. The coordinator receives only an opaque relative wake duration computed from the same selected-store time observation that classified a retry or lease; persisted eligibility and lease timestamps never cross into process scheduling. Canonical post-commit pipeline handoff, committed delivery transfer, carrier return, topology/authentication change, and parent terminalization signal the coordinator only after their owning transition commits. Parent terminalization always queues that signal as a synchronous transaction-owned post-commit finalizer inside the same selected-store mutation, even when no execution authority is registered at queue time; an outer post-commit cleanup error cannot erase it, while rollback cannot emit it. The finalizer runs before the mutation call returns and never escapes as independent process-local work. Each concurrently live normal execution authority owns one opaque runtime-generation signal registration installed only after that generation's coordinator and process-local occurrence are admitted. Duplicate registration for the same exact authority fails closed; distinct bundle/runtime authorities may coexist on one selected store. Release is authority-exact. A committed callback signals the typed authorities registered at callback execution, closing the scan-versus-commit race across generation replacement; released predecessors receive nothing, and every current coordinator rechecks only its own selected-store scope. Reconciliation before any registration commits durable terminal state without a process-local callback; each admitted coordinator's authoritative startup scan discovers its own state. A wake is not eligibility authority: every execution decision is rechecked by the selected store. The cursor is opaque and monotonic; an empty or under-filled page is not exhaustion. Claim and scan results are closed over acquired, deferred, busy, reclaimable, terminal, wrong-authority, absent, invariant-invalid, and explicit exhaustion. Exact continuation dispatch is separately closed over transferred, terminally settled, deferred under one named live agent-route/internal-subscription/carrier-return wake authority, and fatal. A materializing node route executes through its exact compiled receiver and cannot defer behind topology that only its own execution creates. Child publications emitted while an exact node continuation executes are committed by that node mutation's selected-store owner and dispatched only by consuming its exact staged post-commit evidence before the continuation reports transfer or terminal settlement. A successful workflow-node mutation commits its state/lifecycle facts, proposed effects, child publications, and the exact inbound node-delivery success in one selected-store transaction; it also requests run-completion evaluation in that transaction. No runtime caller may settle that successful claim in a later transaction. Any publication or settlement conflict rolls back every mutation fact. The claim heartbeat excludes renewal while the transaction commits, records the exact committed claim without canceling handler context, and stops and joins only after declared post-commit dispatch returns. Missing or mismatched settlement evidence fails closed; mutation-free handled outcomes retain their named delivery-only settlement. Missing publication evidence fails closed; continuation dispatch never re-appends or reconstructs the child publication. A workflow engine revision compare-and-set loss is a typed retryable lifecycle conflict: its complete node mutation rolls back and the exact inbound delivery returns to the durable lifecycle owner for a fresh state read. It is never normalized into a terminal handler failure or repaired by process-local route serialization. When an accepted agent delivery emits the event that terminalizes its own flow instance, lifecycle ownership fences that exact route before returning from terminalization but retains the current durable generation until the accepted route carrier settles. The agent loop then commits the terminal lifecycle transition and removes the route from its finalizer. Terminal authority cannot overtake tool-follow-up effects that belong to the already accepted delivery, and no later carrier can enter behind the fence. Once the exact child's nonempty durable delivery handoff is accepted by the generation coordinator, an unavailable immediate carrier is transferred work rather than a fatal parent failure; no-handoff or pre-transfer failure remains fatal. Generic errors, free-form blockage classification, and fixed dispatch or scan retry intervals are not continuation authority. Corrupt or missing durable facts and fatal dispatch results fail closed. Activating a successor normal authority atomically shortens any exact predecessor open-attempt lease in the same bundle source using selected-store time; the ordinary fenced claim path then reports it reclaimable, and the stale predecessor capability remains unable to settle. Manager, workflow pipeline, public API, CLI, and dashboard code do not poll, enumerate, or manually claim a delivery backlog. Event-targeted event and agent replay remain named producers and transfer their newly committed exact obligations through the same owner. Claims use database time, a random token, monotonic version, and persisted expiry. Every completion requires the current capability; reclaim occurs only after expiry and stale writers cannot mutate the obligation or any coupled outcome/activity/diagnostic fact. An executing agent or node handler renews its exact claim through the owner before, during, and after execution. Renewal atomically extends the obligation and its one open attempt using database time; renewal failure cancels handler execution and forbids settlement through that stale capability. Backlog work is claimed one item at a time immediately before execution so queued local work cannot consume its lease before starting. Agent max_retries=1 means two total attempts; node max_retries=3 means four total attempts. Existing selected stores are unsupported and no migration, fallback, or compatibility interpretation exists. Selected-contract execution installs no normal or process-global continuation coordinator. Retryable selected agent and node failures terminalize under the exact selected execution owner, and activation requires every fork-local agent and node obligation to be terminal. Pending, in-progress, or retry-scheduled selected work blocks activation and is cleaned up by the selected execution failure path. Feature-preserving long-lived selected deferred work requires its own future typed owner and cannot be inferred as a normal-runtime handoff. Parent terminalization is one closed named store operation: it records a typed lifecycle-conflict failure, advances the delivery fence, closes any prior open attempt, commits the exact terminalization attempt/outcome at the new fence, and inserts the matching dead_letters row before the transaction may commit. Every terminal dead-letter delivery therefore has exact `{delivery_id, claim_version}` evidence; terminalization cannot leave lifecycle state visible without that evidence.
+      - name: selected_deployment_feed_continuation
+        owner: existing pipeline-obligation, delivery-lifecycle and selected-execution owners
+        sqlite_owner: selected SQLite store adapters in their existing transactions
+        postgres_owner: selected PostgreSQL store adapters in their existing transactions
+        scope: |
+          Only a deployment-origin fan-out intent with an exact current selected binding, execution generation,
+          grant and feed may issue a row in the selected fork-local container. The selected grant does not admit
+          handler fan-out or normal work. Publication is not receiver settlement: a committed event with no
+          continuation_handoff_at remains event-level work, and pipeline recovery must settle its exact scope
+          before delivery discovery. A stamped, nonterminal route may transfer from a fenced predecessor to one
+          selected successor after exact event, frozen route, receiver and preparation evidence is verified. The
+          original event, ordinal outcome, attempt history and business provenance never change. Candidate scan,
+          claim, renewal, commit, settlement and successor transfer each re-prove their exact authority in their
+          selected-store transaction. A stale or crossed generation cannot write a business effect or receipt.
+          Recovery inventories event-level and delivery work separately to explicit exhaustion; an empty page,
+          cursor completion or emitted wake is not quiescence proof. Settled routes never transfer or re-execute.
+          External attempts retain the existing launched/uncertain/settled policy; this finite feed exception
+          grants no general selected replay capability.
       - name: platform_pipeline_receipt_rows
         owner: internal/runtime/pipelineobligation.Store
         sqlite_owner: internal/store.SQLiteRuntimeStore private pipeline-obligation adapter
@@ -13483,6 +13476,9 @@ durable_data_resources:
     initiation: run.start admits exactly event-only, feed-only, or event-plus-feed creation. Feed-only requires a canonical run_id, an exact selected bundle, and at least one import or pin; it stores a payload-free deployment RunOrigin and no synthetic event, handler, delivery, or scenario_setup origin.
     atomicity: Every selected pin creates one deployment-origin feed intent in the same selected-store transaction as its imports, run row, pins, permanent run-creation receipt, and API completion. The feed intent binds the exact declaration, schema digest, immutable version, cardinality, and run. Retrying the same request consumes the permanent receipt and does not create another run, event, pin, or feed.
     trigger: Pin existence alone never starts processing. The explicit run.start operation creates the feed obligations; issuance uses the existing fan-out pump and normal publication, routing, receiver initialization, settlement, and recovery paths. Authored data.* source events and fake triggering deliveries are not supported.
+    source_admission: Before a run.start with --data or --pin commits imports, a run, pins, feeds, or an API completion, every selected declaration must pass the same exact importable-declaration and compiled output-pin admission consumed by deployment-feed routing. A declared event without that output pin is rejected without domain mutation for feed-only and event-plus-feed starts.
+    row_publication_source: Each row publication carries typed deployment-feed routing source authority at the exact importable declaration scope, not a flow-instance or entity producer. Only that declaration's exact compiled output pin may route it; a source event name, row payload, or coincident flow/entity identity cannot substitute for the pinned declaration and output-pin match.
+    row_iteration: The pinned immutable version supplies canonical row order and zero-based activation ordinals. Keyless equal payloads remain distinct ordinals without synthetic business keys. The durable-data row ceiling, not the authored collection fan_out ceiling, applies. The existing fan-out pump publishes each row through ordinary EventBus routing and settlement; no authored handler delivery, direct-delivery shortcut, or second queue is created.
     empty: A selected zero-row version creates a closed zero-cardinality feed. When all selected feeds and all other work are settled, the deployment run can complete without manufacturing an entity or event; ordinary event-origin completion rules are unchanged.
   declaration_projection:
     owner: workflow_model.compiled_event_schema_projection
@@ -13587,6 +13583,7 @@ platform_tables:
       delete_by_run_lineage:
         - inbound_publication_events
         - run_fork_delivery_event_replays
+        - run_fork_operations
         - run_fork_selected_contract_executions
         - run_fork_selected_contract_branch_divergences
         - run_fork_selected_contract_route_recoveries
@@ -14094,7 +14091,7 @@ platform_tables:
             produced_by_type            TEXT NOT NULL CHECK (produced_by_type IN ('node', 'agent', 'platform', 'external')),
             source_event_id             UUID,
             created_at                  TIMESTAMPTZ NOT NULL,
-            routing_source_kind         TEXT NOT NULL CHECK (routing_source_kind IN ('absent', 'external_ingress', 'root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'platform_control')),
+            routing_source_kind         TEXT NOT NULL CHECK (routing_source_kind IN ('absent', 'external_ingress', 'root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'platform_control', 'deployment_feed')),
             routing_source_authority    TEXT CHECK (routing_source_authority IS NULL OR routing_source_authority = TRIM(routing_source_authority)),
             source_route                JSONB NOT NULL,
             target_route                JSONB NOT NULL,
@@ -14114,7 +14111,7 @@ platform_tables:
             CHECK (event_name <> 'platform.runtime_log' OR produced_by = 'runtime'),
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
             CHECK ((event_name = 'platform.runtime_log' AND scope = 'global') OR (event_name = 'platform.inbound_recorded' AND scope IN ('entity', 'global')) OR (event_name = 'platform.agent_directive' AND scope = 'global') OR event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive')),
-            CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
+            CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'deployment_feed') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
             CHECK ((event_class = 'runtime_control' AND routing_source_kind IN ('root', 'flow_owned_control', 'platform_control')) OR (event_class IN ('runtime_diagnostic', 'diagnostic_direct') AND routing_source_kind = 'absent') OR event_class NOT IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             UNIQUE (event_id, run_id),
             INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
@@ -15053,7 +15050,7 @@ platform_tables:
         split/fail-closed.'
       ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,\n    loop_stage        TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
-      description: Durable selected-contract source binding for fixed-event forks. One row binds a fork run to the selected
+      description: Durable selected-contract source binding for event or deployment-revision forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
         selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
@@ -15063,14 +15060,57 @@ platform_tables:
             binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id      UUID NOT NULL REFERENCES runs(run_id),
             source_run_id    UUID NOT NULL REFERENCES runs(run_id),
-            fork_event_id    UUID NOT NULL REFERENCES events(event_id),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_revision   BIGINT NOT NULL CHECK (fork_revision > 0),
+            fork_event_id    UUID REFERENCES events(event_id),
             mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),
             bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
-            INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_event_id)
+            INDEX idx_run_fork_selected_contract_bindings_source (source_run_id, fork_point_kind, fork_revision),
+            INDEX idx_run_fork_selected_contract_bindings_event (source_run_id, fork_event_id) WHERE fork_event_id IS NOT NULL
         );
+    run_fork_operations:
+      description: >-
+        Permanent selected run.fork request-to-child authority. The authenticated
+        actor and nonempty idempotency key identify a replayable operation; its
+        exact transport request and canonical selected semantic request hashes
+        are distinct validated facts. Materialization binds the operation to
+        one child and selected binding in the same transaction. Activation
+        records its immutable public result in the activation transaction. A
+        transport response cache is never this operation's authority. Keyless
+        operations have distinct invocation IDs and no replay promise.
+      ddl: |
+        CREATE TABLE run_fork_operations (
+            operation_id UUID PRIMARY KEY,
+            actor TEXT NOT NULL,
+            idempotency_key TEXT,
+            transport_hash TEXT NOT NULL,
+            semantic_hash TEXT NOT NULL,
+            request_json JSONB NOT NULL,
+            source_run_id UUID NOT NULL REFERENCES runs(run_id),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
+            fork_event_id UUID REFERENCES events(event_id),
+            fork_run_id UUID NOT NULL REFERENCES runs(run_id),
+            selected_binding_id UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
+            state TEXT NOT NULL CHECK (state IN ('materialized', 'activated', 'failed', 'uncertain')),
+            result_json JSONB,
+            failure_json JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (NULLIF(TRIM(actor), '') IS NOT NULL),
+            CHECK (idempotency_key IS NULL OR NULLIF(TRIM(idempotency_key), '') IS NOT NULL),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
+            CHECK ((state = 'activated' AND result_json IS NOT NULL AND failure_json IS NULL) OR (state = 'materialized' AND result_json IS NULL AND failure_json IS NULL) OR (state IN ('failed', 'uncertain') AND result_json IS NULL AND failure_json IS NOT NULL)),
+            UNIQUE (fork_run_id),
+            UNIQUE (selected_binding_id)
+        );
+        CREATE UNIQUE INDEX idx_run_fork_operations_actor_key
+            ON run_fork_operations (actor, idempotency_key)
+            WHERE idempotency_key IS NOT NULL;
     run_fork_selected_contract_runtime_executions:
       description: >-
         Durable selected-fork runtime-container authority. One non-closed current generation may
@@ -15086,7 +15126,9 @@ platform_tables:
             fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
             binding_id                     UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
-            fork_event_id                  UUID NOT NULL REFERENCES events(event_id),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
+            fork_event_id                  UUID REFERENCES events(event_id),
             generation                     BIGINT NOT NULL CHECK (generation > 0),
             executable_coordinate_fingerprint TEXT NOT NULL,
             admission_fingerprint          TEXT NOT NULL,
@@ -15107,6 +15149,7 @@ platform_tables:
             updated_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             terminal_at                     TIMESTAMPTZ,
             CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id, generation),
             UNIQUE (fork_run_id, generation),
             UNIQUE (fork_run_id, executable_coordinate_fingerprint, generation),
@@ -15157,7 +15200,9 @@ platform_tables:
             recovery_id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             fork_run_id                    UUID NOT NULL REFERENCES runs(run_id),
             source_run_id                  UUID NOT NULL REFERENCES runs(run_id),
-            fork_event_id                  UUID NOT NULL REFERENCES events(event_id),
+            fork_point_kind                TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision')),
+            fork_revision                  BIGINT NOT NULL CHECK (fork_revision > 0),
+            fork_event_id                  UUID REFERENCES events(event_id),
             owner                          TEXT NOT NULL,
             runtime_recovery_owner         TEXT NOT NULL,
             mode                           TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),
@@ -15175,8 +15220,9 @@ platform_tables:
             recipient_planning             JSONB NOT NULL,
             created_at                     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),
             UNIQUE (fork_run_id),
-            INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_event_id),
+            INDEX idx_run_fork_selected_contract_route_recoveries_source (source_run_id, fork_point_kind, fork_revision),
             INDEX idx_run_fork_selected_contract_route_recoveries_owner (owner, runtime_recovery_owner)
         );
     event_deliveries:
@@ -16542,12 +16588,13 @@ platform_tables:
       ddl: "CREATE TABLE run_scenario_execution_profiles (\n    run_id                  UUID PRIMARY KEY REFERENCES runs(run_id) ON DELETE CASCADE,\n    profile_id              TEXT NOT NULL CHECK (NULLIF(TRIM(profile_id), '') IS NOT NULL),\n    profile_digest          TEXT NOT NULL CHECK (profile_digest ~ '^sha256:[0-9a-f]{64}$'),\n    effective_source_digest TEXT NOT NULL CHECK (effective_source_digest ~ '^sha256:[0-9a-f]{64}$'),\n    profile_bytes           BYTEA NOT NULL,\n    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_run_scenario_profiles_profile (profile_id, profile_digest),\n    INDEX idx_run_scenario_profiles_source (effective_source_digest)\n);"
     runs:
       description: 'Platform run registry. A run is a top-level execution context with one immutable, explicitly
-        discriminated origin: event, scenario setup, standing generation, or fork materialization. Every event,
+        discriminated origin: event, deployment, scenario setup, standing generation, or fork materialization. Every event,
         delivery, session, and turn belongs to exactly one run. run_id is the primary correlation key for
         observability, debugging, and fork/replay. Nullable origin payload columns never imply a kind and readers never
         infer origin from event history. Standing origins are additionally validated against the exact
         standing_service_generations relation. Fork-materialized runs link back to their parent through the origin-owned
-        forked_from_run_id and forked_from_event_id pair.'
+        forked_from_run_id, forked_from_point_kind, and positive forked_from_revision coordinates. Event forks also
+        retain forked_from_event_id; deployment-revision forks have no event ID and never invent one.'
       ddl: |-
         CREATE TABLE runs (
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -16561,6 +16608,8 @@ platform_tables:
             completion_due_at TIMESTAMPTZ,
             completion_revision BIGINT NOT NULL DEFAULT 0 CHECK (completion_revision >= 0),
             forked_from_run_id UUID REFERENCES runs(run_id),
+            forked_from_point_kind TEXT CHECK (forked_from_point_kind IN ('event', 'deployment_revision')),
+            forked_from_revision BIGINT CHECK (forked_from_revision > 0),
             forked_from_event_id UUID,
             continued_as_run_id UUID REFERENCES runs(run_id),
             entity_count      INTEGER NOT NULL DEFAULT 0,
@@ -16568,7 +16617,7 @@ platform_tables:
             failure           JSONB,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ended_at          TIMESTAMPTZ,
-            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL)),
+            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_point_kind IS NULL AND forked_from_revision IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_point_kind IN ('event', 'deployment_revision') AND forked_from_revision > 0 AND ((forked_from_point_kind = 'event' AND forked_from_event_id IS NOT NULL) OR (forked_from_point_kind = 'deployment_revision' AND forked_from_event_id IS NULL)))),
             CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),
             CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),
             CHECK (completion_due_at IS NULL OR completion_revision > 0),
@@ -16577,6 +16626,7 @@ platform_tables:
             INDEX idx_runs_completion_candidates (bundle_hash, completion_due_at, run_id) WHERE completion_due_at IS NOT NULL,
             INDEX idx_runs_standing_origin (origin_service_id, origin_generation) WHERE origin_kind = 'standing_generation',
             INDEX idx_runs_fork (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL,
+            INDEX idx_runs_fork_point (forked_from_run_id, forked_from_point_kind, forked_from_revision) WHERE forked_from_run_id IS NOT NULL,
             UNIQUE INDEX idx_runs_continued_as (continued_as_run_id) WHERE continued_as_run_id IS NOT NULL,
             INDEX idx_runs_bundle_hash (bundle_hash) WHERE bundle_hash IS NOT NULL,
             INDEX idx_runs_bundle_delete_planning (bundle_hash, status) WHERE bundle_hash IS NOT NULL
@@ -16846,18 +16896,24 @@ platform_tables:
         on the hot path. Given LLM calls at 1-30 seconds per agent turn, the overhead is negligible.'
     fan_out_intents:
       description: >-
-        Constant-size durable fan-out issuance owner. The structured primary key binds one triggering delivery to one
-        bundle-qualified authored fan-out element. Source identity is immutable, the cursor is contiguous, and claim
-        generation fences every advancing writer. Process-local wakeups are advisory only.
+        One constant-size durable fan-out issuance owner for disjoint handler and deployment origins. A handler binds
+        one triggering delivery to one bundle-qualified authored fan-out element; a deployment feed binds one run-local
+        feed ID to one exact pinned resource version. Neither origin invents the other's identity. Source identity is
+        immutable, the cursor is contiguous, and claim generation fences every advancing writer. Process-local wakeups
+        are advisory only.
       ddl: |
         CREATE TABLE fan_out_intents (
+            intent_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             run_id                    UUID NOT NULL REFERENCES runs(run_id),
-            triggering_delivery_id    UUID NOT NULL REFERENCES event_deliveries(delivery_id),
-            flow_path                 TEXT NOT NULL,
-            declaration_family        TEXT NOT NULL,
-            semantic_path             TEXT NOT NULL,
+            origin_kind               TEXT NOT NULL DEFAULT 'handler' CHECK (origin_kind IN ('handler', 'deployment')),
+            deployment_feed_id        UUID,
+            deployment_schema_digest  TEXT,
+            triggering_delivery_id    UUID REFERENCES event_deliveries(delivery_id),
+            flow_path                 TEXT,
+            declaration_family        TEXT,
+            semantic_path             TEXT,
             bundle_hash               TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
-            semantic_digest           TEXT NOT NULL,
+            semantic_digest           TEXT,
             source_kind               TEXT NOT NULL CHECK (source_kind IN ('event_payload_field', 'entity_field_revision', 'resource_version')),
             source_event_id           UUID REFERENCES events(event_id),
             source_run_id             UUID REFERENCES runs(run_id),
@@ -16871,7 +16927,7 @@ platform_tables:
             cursor                    BIGINT NOT NULL DEFAULT 0 CHECK (cursor >= 0 AND cursor <= cardinality),
             status                    TEXT NOT NULL CHECK (status IN ('open', 'closed', 'canceled', 'blocked')),
             next_chunk_size           BIGINT NOT NULL CHECK (next_chunk_size >= 1 AND next_chunk_size <= 32),
-            capsule                   JSONB NOT NULL,
+            capsule                   JSONB,
             claim_owner               TEXT,
             claim_generation          BIGINT NOT NULL DEFAULT 0 CHECK (claim_generation >= 0),
             lease_expires_at          TIMESTAMPTZ,
@@ -16882,7 +16938,9 @@ platform_tables:
             created_at                TIMESTAMPTZ NOT NULL,
             updated_at                TIMESTAMPTZ NOT NULL,
 
-            PRIMARY KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
+            UNIQUE (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
+            UNIQUE (run_id, deployment_feed_id),
+            CHECK ((origin_kind = 'handler' AND deployment_feed_id IS NULL AND deployment_schema_digest IS NULL AND triggering_delivery_id IS NOT NULL AND flow_path IS NOT NULL AND declaration_family IS NOT NULL AND semantic_path IS NOT NULL AND semantic_digest IS NOT NULL AND capsule IS NOT NULL AND source_kind IN ('event_payload_field', 'entity_field_revision')) OR (origin_kind = 'deployment' AND deployment_feed_id IS NOT NULL AND deployment_schema_digest IS NOT NULL AND triggering_delivery_id IS NULL AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL AND semantic_digest IS NULL AND capsule IS NULL AND source_kind = 'resource_version')),
             CHECK ((status = 'open' AND cursor < cardinality AND blocked_reason IS NULL) OR (status = 'closed' AND cursor = cardinality AND blocked_reason IS NULL AND claim_owner IS NULL) OR (status = 'blocked' AND cursor < cardinality AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL) OR (status = 'canceled' AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL)),
             CHECK ((claim_owner IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND claim_generation > 0 AND lease_expires_at IS NOT NULL)),
             CHECK ((retry_ready_at IS NULL AND retry_failure IS NULL) OR (retry_ready_at IS NOT NULL AND retry_failure IS NOT NULL AND status = 'open' AND claim_owner IS NULL)),
@@ -16892,16 +16950,18 @@ platform_tables:
         );
     fan_out_outcomes:
       description: >-
-        Immutable per-ordinal terminal issuance evidence. Committed events and deterministic semantic rejections advance
-        the same contiguous cursor. Cancellation is represented compactly by the intent's canceled status and remaining
-        cursor range, without inventing per-item outcomes or event identities.
+        Immutable per-ordinal terminal issuance evidence for either exact handler key or exact deployment feed key.
+        Committed events and deterministic semantic rejections advance the same contiguous cursor. Cancellation is
+        represented compactly by the intent's canceled status and remaining cursor range, without invented outcomes.
       ddl: |
         CREATE TABLE fan_out_outcomes (
+            outcome_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             run_id                    UUID NOT NULL,
-            triggering_delivery_id    UUID NOT NULL,
-            flow_path                 TEXT NOT NULL,
-            declaration_family        TEXT NOT NULL,
-            semantic_path             TEXT NOT NULL,
+            deployment_feed_id        UUID,
+            triggering_delivery_id    UUID,
+            flow_path                 TEXT,
+            declaration_family        TEXT,
+            semantic_path             TEXT,
             ordinal                   BIGINT NOT NULL CHECK (ordinal >= 0),
             outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected')),
             event_id                  UUID REFERENCES events(event_id),
@@ -16909,8 +16969,11 @@ platform_tables:
             inherited_disposition     TEXT CHECK (inherited_disposition IN ('succeeded', 'dead_lettered', 'no_route')),
             failure                   JSONB,
             created_at                TIMESTAMPTZ NOT NULL,
-            PRIMARY KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, ordinal),
+            UNIQUE (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path, ordinal),
+            UNIQUE (run_id, deployment_feed_id, ordinal),
+            CHECK ((deployment_feed_id IS NULL AND triggering_delivery_id IS NOT NULL AND flow_path IS NOT NULL AND declaration_family IS NOT NULL AND semantic_path IS NOT NULL) OR (deployment_feed_id IS NOT NULL AND triggering_delivery_id IS NULL AND flow_path IS NULL AND declaration_family IS NULL AND semantic_path IS NULL)),
             FOREIGN KEY (run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path) REFERENCES fan_out_intents(run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path),
+            FOREIGN KEY (run_id, deployment_feed_id) REFERENCES fan_out_intents(run_id, deployment_feed_id),
             CHECK ((outcome_kind = 'committed') = ((event_id IS NOT NULL) <> (source_event_id IS NOT NULL))),
             CHECK ((source_event_id IS NULL AND inherited_disposition IS NULL) OR (source_event_id IS NOT NULL AND inherited_disposition IS NOT NULL)),
             CHECK ((outcome_kind = 'semantic_rejected') = (failure IS NOT NULL)),
@@ -17171,7 +17234,9 @@ run_model:
         \ AND source_event_id IS NULL\n  UNION ALL\n  SELECT e.*, t.depth + 1 FROM events e JOIN tree t\
         \ ON e.source_event_id = t.event_id\n) SELECT * FROM tree ORDER BY depth, created_at;"
       entity_in_run: 'SELECT * FROM events WHERE run_id = :run_id AND entity_id = :entity_id ORDER BY created_at'
-    fork_lineage: 'Forked runs link to their parent via runs.forked_from_run_id and runs.forked_from_event_id.
+    fork_lineage: 'Forked runs link to their parent via runs.forked_from_run_id, forked_from_point_kind,
+      and positive forked_from_revision. Event forks additionally retain forked_from_event_id;
+      deployment-revision forks have no source event ID.
       A source frozen by a freeze-style fork links forward through the source-owned runs.continued_as_run_id;
       only the atomic source-freeze owner may write that pointer. This provides bidirectional cross-run lineage.
       The event tree within the forked run starts fresh (new event_ids, new source_event_id chains) — it does not
@@ -17179,9 +17244,11 @@ run_model:
   lifecycle:
     creation: >
       Every run is constructed with exactly one immutable typed origin and persists its discriminator and complete
-      payload atomically with the run: event {event_id,event_type}; scenario_setup with no payload;
+      payload atomically with the run: event {event_id,event_type}; deployment with no fabricated
+      event and exact pinned declaration/version evidence in its durable feed records; scenario_setup with no payload;
       standing_generation {service_id,generation} backed by the exact standing_service_generations relation; or
-      fork_materialization {source_run_id,source_event_id}. Later events and lifecycle transitions preserve the
+      fork_materialization {source_run_id,fork_point_kind,fork_revision,source_event_id only for event forks}.
+      Later events and lifecycle transitions preserve the
       origin unchanged. Readers decode only these persisted facts and never infer origin from event history.
       Public run forking is governed by multi_bundle_persistence.api_surface.run_fork and the intended CLI command
       `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]`.
@@ -17338,6 +17405,29 @@ run_model:
       Planning that guards one of these mutations executes inside the same source/fork-locked transaction. A generic
       repository, backend switch, ambient transaction detection, compatibility path, or backend-owned semantic
       state machine is forbidden.
+    deployment_feed_fork_operation: >
+      A keyed public run.fork request is permanently identified by authenticated actor, method and idempotency key.
+      The selected fork owner binds its canonical request hash, selected source revision and target, ordered pin
+      overrides, child run, binding and feed in the materialization transaction. An exact retry consumes this
+      operation before mutable source lookup; a conflicting request refuses, including after API-cache expiry.
+      Materialized/in-progress is not success. Activation commits one reconstructible result with the fork status,
+      exact pins and durable execution count in the same transaction. Failed or uncertain operations retain truthful
+      typed results and their necessary child evidence. A new unkeyed request is a distinct invocation, not an
+      implicit retry. Cache and cleanup diagnostics cannot overwrite an acknowledged committed result.
+    selected_deployment_feed_execution: >
+      A selected fork with an exact child-live deployment feed may execute that finite feed through the existing
+      fan-out obligation pump and its selected fork-local EventBus. The selected grant binds the fork binding,
+      execution ID, generation, fence, lease, bundle and exact feed; it cannot authorize handler-origin fan-out or
+      normal execution. A changed pin retires only the inherited unissued suffix and creates a new child-live feed
+      at ordinal zero. Committed old-version events, attempts, deliveries and outcomes remain historical old-version
+      facts; pending old work retains its original payload and route. Event-level obligations without a committed
+      continuation handoff reconcile before their delivery rows can transfer. A successor fences the predecessor,
+      persists the exact transition and exhaustively transfers only unfinished executable authority under the
+      admitted receiver plan. Stale claims cannot settle. Feed, event, delivery and external-effect inventories must
+      all be terminal before quiescence and activation. A crash in the admitted finite feed phase resumes that same
+      selected operation and exact child, never rematerializes or republishes committed ordinals. Fully settled
+      effects are not invoked again; unsupported replay remains a typed failure or uncertainty. After activation,
+      restart restores selected control/readback and the durable result, not a normal runtime executor.
     source_and_fork_projection_identity: >
       Historical event revisions retain exact payload bytes and the complete persisted schema binding:
       bundle hash, flow ID, event key, schema digest and schema class. Revision capture, snapshot restoration
@@ -26027,7 +26117,7 @@ cli_specification:
         --platform-spec: 'Retired (#1574); fail with exit 2 and a teaching error naming the embedded platform spec and the paths.platform_spec_path config escape.'
       modes:
         foreground_local_start:
-          invocation: swarm run start [directory] --event <name> --payload <file> [--config <path>] [--backend <profile>] [--data <name=file.jsonl>] [--pin <name@selector>]
+          invocation: swarm run start [directory] [--event <name> --payload <file>] [--config <path>] [--backend <profile>] [--data <name=file.jsonl>] [--pin <name@selector>]
           behavior: >
             Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, begin
             authoritative run.get status/interrupt handling, and attempt optional bounded run.subscribe_trace observation.
@@ -26039,11 +26129,11 @@ cli_specification:
             local and connected starts, and fail closed with `--reattach`.
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
         foreground_connected_start:
-          invocation: swarm run start --connect <url> --event <name> --payload <file>
-          behavior: 'Use an existing API server, call health.check, call run.start, begin authoritative run.get status/interrupt handling, attempt optional bounded run.subscribe_trace observation, and render until terminal.'
+          invocation: swarm run start --connect <url> [--event <name> --payload <file>] [--data <name=file.jsonl>] [--pin <name@selector>]
+          behavior: 'Use an existing API server, call health.check, call run.start with an event, one or more explicit data feeds, or both, begin authoritative run.get status/interrupt handling, attempt optional bounded run.subscribe_trace observation, and render until terminal.'
           ctrl_c: 'First Ctrl-C calls run.stop against the connected server and exits 130; it MUST NOT stop the server.'
         connected_no_follow:
-          invocation: swarm run start --connect <url> --event <name> --payload <file> --no-follow
+          invocation: swarm run start --connect <url> [--event <name> --payload <file>] [--data <name=file.jsonl>] [--pin <name@selector>] --no-follow
           behavior: 'Call health.check and run.start, print run_id plus follow/inspect guidance, exit 0, and do not open /v1/ws.'
           validation: '`--no-follow` requires `--connect` and is mutually exclusive with `--reattach`.'
         reattach_active:
@@ -26997,7 +27087,7 @@ cli_specification:
       - success output renders only server-owned EventPublishResult event_id, run_id, operator_reference_event_id when present, new_run_created, and typed persisted delivery rows; it never labels operator reference provenance as causal source_event_id
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, publish rejection errors, auth/HTTP/RPC failures, and malformed EventPublishResult values fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, or agent.replay usage
-      relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
+      relation_to_run_start: '`run.start` owns explicit run initiation, including eventless deployment feeds; `event.publish` owns ordinary event publication and may create an event-origin run. Neither method is a wrapper for the other.'
     conversations_list:
       command: swarm conversation list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
       group: observe_debug
@@ -28572,6 +28662,14 @@ api_specification:
           properties:
             kind:
               type: string
+              const: deployment
+        - type: object
+          additionalProperties: false
+          required:
+          - kind
+          properties:
+            kind:
+              type: string
               const: scenario_setup
         - type: object
           additionalProperties: false
@@ -28593,6 +28691,8 @@ api_specification:
           required:
           - kind
           - source_run_id
+          - fork_point_kind
+          - fork_revision
           - source_event_id
           properties:
             kind:
@@ -28600,8 +28700,33 @@ api_specification:
               const: fork_materialization
             source_run_id:
               $ref: '#/components/schemas/OpaqueId'
+            fork_point_kind:
+              type: string
+              const: event
+            fork_revision:
+              type: integer
+              minimum: 1
             source_event_id:
               $ref: '#/components/schemas/OpaqueId'
+        - type: object
+          additionalProperties: false
+          required:
+          - kind
+          - source_run_id
+          - fork_point_kind
+          - fork_revision
+          properties:
+            kind:
+              type: string
+              const: fork_materialization
+            source_run_id:
+              $ref: '#/components/schemas/OpaqueId'
+            fork_point_kind:
+              type: string
+              const: deployment_revision
+            fork_revision:
+              type: integer
+              minimum: 1
       RunHeader:
         type: object
         additionalProperties: false
@@ -29536,46 +29661,53 @@ api_specification:
             items:
               $ref: '#/components/schemas/EventReplayDelivery'
       RunForkResult:
-        type: object
         description: Reports both the activated fork and the actual source lifecycle outcome. source_frozen is true exactly when source_run_status is forked; otherwise the source-advanced branch preserved the reported source status.
-        additionalProperties: false
-        required:
-        - owner
-        - source_run_id
-        - source_run_status
-        - source_frozen
-        - fork_run_id
-        - fork_event_id
-        - fork_run_status
-        - bundle_hash
-        - executed_event_count
-        - data_pins
-        properties:
-          owner:
-            type: string
-            description: Canonical runtime/store owner that executed the selected-contract fork.
-          source_run_id:
-            $ref: '#/components/schemas/OpaqueId'
-          source_run_status:
-            $ref: '#/components/schemas/RunStatus'
-          source_frozen:
-            type: boolean
-            description: True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.
-          fork_run_id:
-            $ref: '#/components/schemas/OpaqueId'
-          fork_event_id:
-            $ref: '#/components/schemas/OpaqueId'
-          fork_run_status:
-            $ref: '#/components/schemas/RunStatus'
-          bundle_hash:
-            $ref: '#/components/schemas/BundleHash'
-          executed_event_count:
-            type: integer
-            minimum: 0
-          data_pins:
-            type: array
-            items:
-              $ref: '#/components/schemas/ResourcePin'
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_event_id, fork_run_status, bundle_hash, executed_event_count, data_pins]
+          properties:
+            owner:
+              type: string
+              description: Canonical runtime/store owner that executed the selected-contract fork.
+            source_run_id: {$ref: '#/components/schemas/OpaqueId'}
+            source_run_status: {$ref: '#/components/schemas/RunStatus'}
+            source_frozen:
+              type: boolean
+              description: True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.
+            fork_run_id: {$ref: '#/components/schemas/OpaqueId'}
+            fork_point_kind: {type: string, const: event}
+            fork_revision: {type: integer, minimum: 1}
+            fork_event_id:
+              $ref: '#/components/schemas/OpaqueId'
+              description: Exact source event selected as this fork point.
+            fork_run_status: {$ref: '#/components/schemas/RunStatus'}
+            bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+            executed_event_count: {type: integer, minimum: 0}
+            data_pins:
+              type: array
+              items: {$ref: '#/components/schemas/ResourcePin'}
+        - type: object
+          additionalProperties: false
+          required: [owner, source_run_id, source_run_status, source_frozen, fork_run_id, fork_point_kind, fork_revision, fork_run_status, bundle_hash, executed_event_count, data_pins]
+          properties:
+            owner:
+              type: string
+              description: Canonical runtime/store owner that executed the selected-contract fork.
+            source_run_id: {$ref: '#/components/schemas/OpaqueId'}
+            source_run_status: {$ref: '#/components/schemas/RunStatus'}
+            source_frozen:
+              type: boolean
+              description: True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.
+            fork_run_id: {$ref: '#/components/schemas/OpaqueId'}
+            fork_point_kind: {type: string, const: deployment_revision}
+            fork_revision: {type: integer, minimum: 1}
+            fork_run_status: {$ref: '#/components/schemas/RunStatus'}
+            bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+            executed_event_count: {type: integer, minimum: 0}
+            data_pins:
+              type: array
+              items: {$ref: '#/components/schemas/ResourcePin'}
       AgentReplayResult:
         type: object
         additionalProperties: false
@@ -33990,8 +34122,7 @@ api_specification:
         \ for the event record, selected delivery manifest, and committed replay scope; it MUST NOT wait for system-node\
         \ handler completion, dynamic auto_emit_on_create side effects, agent processing, downstream event delivery, or downstream\
         \ receipts. Delivery statuses in the response are a persisted snapshot and may remain pending. Post-commit runtime\
-        \ dispatch/recovery owns downstream completion. This is the canonical primitive; run.start remains only\nas a deprecated wrapper\
-        \ for older callers.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event\
+        \ dispatch/recovery owns downstream completion. `run.start` separately owns explicit event-only, feed-only,\n or combined run initiation; eventless deployment feeds do not pass through event.publish.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event\
         \ name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves\
         \ flow-scoped references through the loaded contract catalog before declaration validation, payload validation,\
         \ EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped\
@@ -37815,7 +37946,18 @@ managed_agent_capability_surface:
       resource_settlement: The existing preparation/context owner retains the exact original-source projection, selected-source projection, workspace projection and catalog lease through disposition and any retained-control handoff. Retirement first joins selected execution, then releases workspace, catalog and source resources before finishing process possession. Each successful resource release settles once; an error or panic leaves that resource and all not-yet-settled resources attached to the same owner for an explicit cleanup/retirement retry. Cleanup errors are propagated and panics remain visible, but neither means the resource settled. No cleanup-complete entry removal or successful process/store join is allowed until every release succeeds. A failed release fences further use without retiring source/selected siblings; successful retry removes the exact remaining resources without reopening execution. No detached cleanup, retry registry or generic cleanup framework is introduced.
       retained_context_lifetime: After successful execution closure and activation of an active fork, the selected execution owner explicitly transfers its exact bound context and retained projection resources from synchronous orchestration to process-owned controls. Request completion settles the orchestration lease, not the selected occurrence or retained process ownership. Terminal or failed operations release their own resources after settlement. The selected owner registers preparation before loading and publishes materialization and its exact binding under the same admission boundary consumed by stop and retirement. Reset and process shutdown retire this owner, reject further preparation, cancel accepted operations, join their disposition and retained contexts, and only then permit process join and store release. A retired owner is terminal; fresh process composition, or fresh same-process composition under the retained-source reset supervisor after exact predecessor join, must construct a new owner rather than reopening it or adopting old tokens. The selected-store RunFork boundary owns reset-successor construction, and the process supervisor retains all unjoined candidate responsibility through convergence and final store release.
       selected_stop_commit: The named selected-fork stop operation consumes an exact durable binding and current process possession. Both selected stores reprove those facts in the terminal transaction, serialize against execution claim through the run lock, reject unsettled running execution, and consume the existing run-lifecycle terminalization owner. A prepared but unclaimed execution is terminally closed with cancellation evidence and a new fence in the same transaction, so a late claim cannot execute it. An admitted stop use remains process-owned while selected execution settles and joins; that stop owns terminal disposition, and execution failure cleanup must not separately discard its fork. A conflicting binding, stale process or failed terminal mutation changes no run, delivery, control or author-activity state. Terminal repeats retain the existing run-control refusal. This operation grants no ordinary ingress, historical replay, deferred execution or loaded-runtime authority.
-      startup_reconciliation: Before public readiness or selected preparation/control admission, both fresh process composition and a staged same-process reset successor inspect every selected binding through their exact selected owner. Reset reconciliation completes before the supervisor publishes the normal and selected consumer set; it cannot reuse the retired predecessor's reconciliation flag. The named per-binding transaction checks current process possession, exact target/run/binding, strict persisted preparation and fingerprint, and recorded predecessor ancestry; a different UUID or expired wall-clock lease is not proof of abandonment. Interrupted predecessor execution is fenced, its existing effect attempts are settled by the effect owner, its active run is failed through the run-lifecycle owner, and its execution is closed atomically. Unlaunched effects become terminal failures; launched or response-observed effects remain outcome-uncertain. Recovery never redispatches a turn, adopts an old grant, or calls a normal Manager. Normal effect sweeps cannot settle selected execution. Cancellation, invalid evidence and any failed mutation roll back the entire per-binding transaction. Completed terminal recovery repeats preserve its failure, fence and outcome evidence. Successful quiesced/closed execution permits only non-executable control/read reconstruction; a never-executed staged binding still requires the existing fresh staged admission and preserves all historical non-agent and deferred-work refusals. Missing artifacts, conflicting preparation or unregistered current-process execution fail boot closed. Recovery does not reconstruct lost API responses, which remain a separate completion contract.
+      selected_stop_fork_point: Selected stop validates the exact closed fork-point kind, positive revision and event-ID correspondence in its durable binding. An event point requires its canonical event ID; a deployment revision has no event ID. Terminal repeat refusal and control/readback-only recovery apply to both kinds.
+      startup_reconciliation: Before public readiness or selected preparation/control admission, both fresh process composition and a staged same-process reset successor inspect every selected binding through their exact selected owner. Reset reconciliation completes before the supervisor publishes the normal and selected consumer set; it cannot reuse the retired predecessor's reconciliation flag. The named per-binding transaction checks current process possession, exact target/run/binding, strict persisted preparation and fingerprint, and recorded predecessor ancestry; a different UUID or expired wall-clock lease is not proof of abandonment. Interrupted predecessor execution is fenced, its existing effect attempts are settled by the effect owner, its active run is failed through the run-lifecycle owner, and its execution is closed atomically. Unlaunched effects become terminal failures; launched or response-observed effects remain outcome-uncertain. Outside the exact selected_deployment_feed_recovery exception, recovery never redispatches a turn, adopts an old grant, or calls a normal Manager. Normal effect sweeps cannot settle selected execution. Cancellation, invalid evidence and any failed mutation roll back the entire per-binding transaction. Completed terminal recovery repeats preserve its failure, fence and outcome evidence. Successful quiesced/closed execution permits only non-executable control/read reconstruction; a never-executed staged binding still requires the existing fresh staged admission and preserves all historical non-agent and deferred-work refusals. Missing artifacts, conflicting preparation or unregistered current-process execution fail boot closed. Recovery reconstructs an exact keyed run.fork result only from the permanent fork-operation record after activation; the expiring API cache is not result authority.
+      selected_deployment_feed_recovery: >
+        An interrupted selected execution may resume only a durably admitted finite deployment-feed phase under
+        the same child and permanent fork operation. The process supervisor owns the rebuilt selected container;
+        boot and staged reset fence and join predecessor authority before public readiness. Exact event-level
+        publication scopes reconcile before receiver handoffs; pending receiver claims and effects are classified
+        and fenced by their existing owners before a successor may execute. A quiesced execution with proven zero
+        feed, event, delivery and effect backlog may complete activation once in the activation transaction.
+        Contradictory or absent evidence fails closed. An activated and closed fork recovers control/readback and
+        its permanent result only, never a normal runtime or a second selected executor. General historical
+        timers, handler barriers and unsafe external-effect replay remain unsupported.
       materialization: Before any fork-domain write, the named selected-store transaction rechecks current process possession and generation, original successful probe surfaces, the effective selected source fingerprint, fixed admitted plan including its historical event certificate, and the complete selected actor/configuration census from sealed readiness. An explicitly empty census is valid only when that projection contains no static or admitted concrete template actor, not merely when the initial frontier has no agent recipient. Caller-authored empty evidence cannot skip an admitted actor. Runtime materialization and the sealed validator consume the same canonical census while preserving initial dispatch independently.
       binding: A successful receipt remains preparation evidence. Binding is single-consumption and verifies unchanged process, exact selected source and fixed admitted plan, configuration, catalog and prospective actor plan against actual materialized actor identities, configurations and prompts. The existing selected runtime execution row persists the immutable typed preparation binding and its canonical fingerprint; no second registry or durable configuration-secret copy exists. Missing or mismatched evidence fails closed; a receipt cannot be promoted into a provider-turn authority or silently reissued for another target.
       grant_consumption: Execution issuance, claiming and selected generation authority consume the exact preparation fingerprint. Grant issuance and every later authority use re-read the original integrity-checked surfaces and compare their preparation, process, prospective actor, source, plan, configuration and catalog coordinates. Probe settlement accepts exactly the declared sorted receipt IDs, without trimming, deduplication or inference. A missing, narrowed, corrupt or crossed receipt cannot retain executable authority. Selected execution authority is never accepted as startup-probe authority, including by fresh-store DDL. Old stores and receipt relabeling are unsupported.

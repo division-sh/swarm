@@ -510,7 +510,8 @@ func (r Record) decodeEnvelope() (decodedRecordEnvelope, error) {
 	}
 	// External ingress keeps its stored routing source but has no envelope source.
 	routingSourceRoute := source
-	if r.RoutingSourceKind == events.RoutingSourceExternalIngress.StorageCode() {
+	if r.RoutingSourceKind == events.RoutingSourceExternalIngress.StorageCode() ||
+		r.RoutingSourceKind == events.RoutingSourceDeploymentFeed.StorageCode() {
 		source = events.RouteIdentity{}
 	}
 	target, err := unmarshalRoute("target_route", r.TargetRoute)

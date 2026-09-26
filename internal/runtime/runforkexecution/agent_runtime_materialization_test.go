@@ -37,7 +37,6 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -449,10 +448,6 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
 	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
-		Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: forkRunID, Source: sourceFact,
-		Artifact: bundle.SourceArtifact,
-	})
 	identity := selectedContractTestRootAgentIdentity(t, "fork-agent")
 	declaration, err := identity.Plan()
 	if err != nil {
@@ -503,7 +498,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 			},
 		},
 	}
-	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, forkRunID, agents)
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, agents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)

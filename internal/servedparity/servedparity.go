@@ -28,6 +28,7 @@ const (
 	ScenarioEventReplayLiveAgentLifecycle            = "event_replay_live_agent_lifecycle"
 	ScenarioAgentReplayLiveAgentLifecycle            = "agent_replay_live_agent_lifecycle"
 	ScenarioRunStopControlLifecycle                  = "run_stop_control_lifecycle"
+	ScenarioRunStartDeploymentFeedLifecycle          = "run_start_deployment_feed_lifecycle"
 	ScenarioRunPauseControlLifecycle                 = "run_pause_control_lifecycle"
 	ScenarioRunContinueControlLifecycle              = "run_continue_control_lifecycle"
 	ScenarioRunForkLifecycle                         = "run_fork_lifecycle"
@@ -88,6 +89,7 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioEventReplayLiveAgentLifecycle, "event.replay", "TestServedParityHarnessLiveAgentEventReplayLifecycle"),
 		servedControlScenario(ScenarioAgentReplayLiveAgentLifecycle, "agent.replay", "TestServedParityHarnessLiveAgentEventReplayLifecycle"),
 		servedControlScenario(ScenarioRunStopControlLifecycle, "run.stop", "TestServedParityHarnessRunControlLifecycle"),
+		servedControlScenario(ScenarioRunStartDeploymentFeedLifecycle, "run.start", "TestServedParityHarnessRunStartDeploymentFeedLifecycle"),
 		servedControlScenario(ScenarioRunPauseControlLifecycle, "run.pause", "TestServedParityHarnessRunControlLifecycle"),
 		servedControlScenario(ScenarioRunContinueControlLifecycle, "run.continue", "TestServedParityHarnessRunControlLifecycle"),
 		servedControlScenario(ScenarioRunForkLifecycle, "run.fork", "TestServedParityHarnessRunForkLifecycle"),

@@ -26,16 +26,12 @@ type AuthoredEmitSite struct {
 	RuleID         string
 	RuleRef        runtimeidentity.DeclarationIdentity
 	Spec           runtimecontracts.EmitSpec
-	ResourceSource *runtimecontracts.FanOutResourceSource
 	Handler        runtimecontracts.SystemNodeEventHandler
 }
 
 func (s AuthoredEmitSite) FlowPathIdentity() string { return s.Node.FlowPath() }
 func (s AuthoredEmitSite) NodeID() string           { return s.Node.NodeID() }
 func (s AuthoredEmitSite) EventType() string {
-	if s.ResourceSource != nil {
-		return s.ResourceSource.Declaration.EventName
-	}
 	return s.Spec.EventType()
 }
 
@@ -83,11 +79,11 @@ type authoredEmitSiteBuilder struct {
 }
 
 func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSourceKind, scopeKey, flowPath string, node runtimeidentity.ExecutableNode, handlerEvent string, handler runtimecontracts.SystemNodeEventHandler) {
-	add := func(site, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, spec runtimecontracts.EmitSpec, resource *runtimecontracts.FanOutResourceSource) {
-		if spec.Empty() && resource == nil {
+	add := func(site, siteKey, ruleID string, ruleRef runtimeidentity.DeclarationIdentity, spec runtimecontracts.EmitSpec) {
+		if spec.Empty() {
 			return
 		}
-		if b.bundle != nil && resource == nil {
+		if b.bundle != nil {
 			if lowered, err := b.bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
 				Node:             node,
 				TriggerEventType: handlerEvent,
@@ -114,16 +110,15 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 			RuleID:         strings.TrimSpace(ruleID),
 			RuleRef:        ruleRef,
 			Spec:           spec,
-			ResourceSource: resource,
 			Handler:        handler,
 		})
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, b.source.FanOutPlansForHandler(node, handlerEvent)) {
-		add(site.Source, site.SiteKey, site.RuleID, site.RuleRef, site.Spec, site.ResourceSource)
+		add(site.Source, site.SiteKey, site.RuleID, site.RuleRef, site.Spec)
 	}
 	if handler.Guard != nil {
 		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
-			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, runtimeidentity.DeclarationIdentity{}, emitSpec, nil)
+			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, runtimeidentity.DeclarationIdentity{}, emitSpec)
 		}
 	}
 }

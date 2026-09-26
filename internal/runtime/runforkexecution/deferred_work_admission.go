@@ -28,7 +28,7 @@ const (
 type selectedContractDeferredWorkAdmission struct {
 	owner           string
 	sourceRunID     string
-	forkEventID     string
+	forkPoint       runfork.RunForkPoint
 	workflowName    string
 	workflowVersion string
 	fanOutPlanRefs  []runtimecontracts.FanOutPlanRef
@@ -36,9 +36,8 @@ type selectedContractDeferredWorkAdmission struct {
 
 func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semanticview.Source) (selectedContractDeferredWorkAdmission, error) {
 	sourceRunID := strings.TrimSpace(plan.SourceRunID)
-	forkEventID := strings.TrimSpace(plan.ForkPoint.EventID)
-	if !validSelectedContractDeferredWorkCoordinates(sourceRunID, forkEventID) {
-		return selectedContractDeferredWorkAdmission{}, fmt.Errorf("selected-contract deferred-work admission requires exact source run and fork event coordinates")
+	if !validSelectedContractDeferredWorkCoordinates(sourceRunID, plan.ForkPoint) {
+		return selectedContractDeferredWorkAdmission{}, fmt.Errorf("selected-contract deferred-work admission requires exact source run and typed fork point")
 	}
 	if source == nil {
 		return selectedContractDeferredWorkAdmission{}, fmt.Errorf("selected-contract deferred-work admission requires selected semantic source")
@@ -67,20 +66,19 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 	return selectedContractDeferredWorkAdmission{
 		owner:           runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
 		sourceRunID:     sourceRunID,
-		forkEventID:     forkEventID,
+		forkPoint:       plan.ForkPoint,
 		workflowName:    workflowName,
 		workflowVersion: workflowVersion,
 		fanOutPlanRefs:  fanOutPlanRefs,
 	}, nil
 }
 
-func (a selectedContractDeferredWorkAdmission) validate(sourceRunID, forkEventID string, source semanticview.Source) error {
+func (a selectedContractDeferredWorkAdmission) validate(sourceRunID string, point runfork.RunForkPoint, source semanticview.Source) error {
 	if a.owner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
 		return fmt.Errorf("selected-contract execution requires %s", runfork.RunForkSelectedContractDeferredWorkAdmissionOwner)
 	}
 	sourceRunID = strings.TrimSpace(sourceRunID)
-	forkEventID = strings.TrimSpace(forkEventID)
-	if a.sourceRunID != sourceRunID || a.forkEventID != forkEventID || !validSelectedContractDeferredWorkCoordinates(sourceRunID, forkEventID) {
+	if a.sourceRunID != sourceRunID || !sameSelectedForkPointIdentity(a.forkPoint, point) || !validSelectedContractDeferredWorkCoordinates(sourceRunID, point) {
 		return fmt.Errorf("selected-contract deferred-work admission coordinates do not match selected source")
 	}
 	if source == nil {
@@ -120,6 +118,15 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 	refs := make([]runtimecontracts.FanOutPlanRef, 0, len(plan.FanOutObligations))
 	seen := make(map[runtimecontracts.FanOutElementRef]struct{}, len(plan.FanOutObligations))
 	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment != nil {
+			if err := obligation.Intent.Validate(); err != nil {
+				return nil, fmt.Errorf("selected contract deployment feed history: %w", err)
+			}
+			if obligation.Barrier != nil {
+				return nil, fmt.Errorf("deployment feed cannot carry a handler fan-out barrier")
+			}
+			continue
+		}
 		sourceRef := obligation.Intent.Request.PlanRef
 		selectedRef, ok := compiled[sourceRef.ElementRef]
 		if !ok {
@@ -263,12 +270,13 @@ func selectedContractFlowInputResolutionRequiresDynamicFlowOwner(mode runtimecon
 	}
 }
 
-func validSelectedContractDeferredWorkCoordinates(sourceRunID, forkEventID string) bool {
+func validSelectedContractDeferredWorkCoordinates(sourceRunID string, point runfork.RunForkPoint) bool {
 	if _, err := uuid.Parse(strings.TrimSpace(sourceRunID)); err != nil {
 		return false
 	}
-	if _, err := uuid.Parse(strings.TrimSpace(forkEventID)); err != nil {
-		return false
-	}
-	return true
+	return point.Validate() == nil
+}
+
+func sameSelectedForkPointIdentity(left, right runfork.RunForkPoint) bool {
+	return left.Kind == right.Kind && left.Revision == right.Revision && left.EventID == right.EventID
 }

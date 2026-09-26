@@ -448,20 +448,22 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 		t.Fatalf("run rows after unloaded bundle = %d, want 0", got)
 	}
 
-	executor := &recordingRunForkExecutor{result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
+	operations := newRecordingRunForkOperations()
+	executor := &recordingRunForkExecutor{operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runStartTestBundleHash)}},
+			RunForkOperations:   operations,
 			RunFork:             executor,
-			Idempotency:         newMutatingProbeIdempotencyStore(),
 			RuntimeContexts:     fixture.manager,
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-unloaded-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-unloaded-context"}}`,
 		runForkTestSourceRunID,
+		runForkTestEventID,
 		runtimeContextTestBundleHashC,
 	))
 	if forkResp.Error != nil {
@@ -508,20 +510,22 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 		t.Fatalf("event rows for deactivated existing run = %d, want 0", got)
 	}
 
-	executor := &recordingRunForkExecutor{result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
+	operations := newRecordingRunForkOperations()
+	executor := &recordingRunForkExecutor{operations: operations, result: RunForkExecutionResult{SourceRunStatus: "completed", SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointEvent), ForkRevision: 1, ForkEventID: runForkTestEventID, ForkRunStatus: "running"}}
 	forkHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runStartTestBundleHash)}},
+			RunForkOperations:   operations,
 			RunFork:             executor,
-			Idempotency:         newMutatingProbeIdempotencyStore(),
 			RuntimeContexts:     fixture.manager,
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-deactivated-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-deactivated-context"}}`,
 		runForkTestSourceRunID,
+		runForkTestEventID,
 		runtimeContextTestBundleHashB,
 	))
 	if forkResp.Error != nil {
@@ -577,13 +581,17 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		t.Fatal("runtime control called singleton ingress in multi-context mode")
 	}
 
+	operations := newRecordingRunForkOperations()
 	executor := &recordingRunForkExecutor{
+		operations: operations,
 		result: RunForkExecutionResult{
 			Owner:              "runtime.run_fork.selected_contract_execution",
 			SourceRunID:        runForkTestSourceRunID,
 			SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
 			SourceFrozen:       true,
 			ForkRunID:          runForkTestForkRunID,
+			ForkPointKind:      string(runfork.RunForkPointEvent),
+			ForkRevision:       1,
 			ForkEventID:        runForkTestEventID,
 			ForkRunStatus:      "running",
 			ExecutedEventCount: 1,
@@ -594,14 +602,15 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runStartTestBundleHash)}},
+			RunForkOperations:   operations,
 			RunFork:             executor,
-			Idempotency:         newMutatingProbeIdempotencyStore(),
 			RuntimeContexts:     fixture.manager,
 		}),
 	})
 	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-context"}}`,
+		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-context"}}`,
 		runForkTestSourceRunID,
+		runForkTestEventID,
 		runtimeContextTestBundleHashB,
 	))
 	if forkResp.Error != nil {

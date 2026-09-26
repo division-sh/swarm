@@ -45,6 +45,14 @@ func publicationIdentity(flowID, declaredEvent string, kind events.RoutingSource
 	var scope eventidentity.PublicationScope
 	flow, instance := route.FlowID, route.FlowInstance
 	switch kind {
+	case events.RoutingSourceDeploymentFeed:
+		if route.FlowID != flowID || route.FlowInstance != "" || route.EntityID != "" {
+			return "", fmt.Errorf("deployment publication requires its exact declaration scope")
+		}
+		if flowID == "." {
+			return events.EventType(declaration.Local()), nil
+		}
+		return events.EventType(flowID + "/" + declaration.Local()), nil
 	case events.RoutingSourceRoot:
 		scope, flow = eventidentity.PublicationRoot, "."
 	case events.RoutingSourceStaticFlow:

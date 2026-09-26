@@ -3,10 +3,14 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -16,11 +20,10 @@ import (
 func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
 		ctx := context.Background()
-		catalog, scanRef, scoreRef := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
+		source, catalog, scanRef, scoreRef, _ := deploymentRunStartTestSource(t)
 		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
@@ -182,7 +185,183 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("multi-pin run created %d initial events", got)
 			}
 		})
+		t.Run("one invalid pin rejects the whole run", func(t *testing.T) {
+			runID := uuid.NewString()
+			data := map[string]any{
+				"imports": []any{},
+				"pins": []any{
+					map[string]any{"declaration": dataRunDeclaration(scanRef), "version_id": versions[scanRef.Key()]},
+					map[string]any{"declaration": dataRunDeclaration(scoreRef), "version_id": "resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+				},
+			}
+			body := deploymentRunStartBody(runID, uuid.NewString(), data)
+			response := rpcCall(t, handler, body)
+			if response.Error == nil {
+				t.Fatalf("invalid second pin admitted: %#v", response)
+			}
+			for _, table := range []string{"runs", "events", "resource_version_pins", "fan_out_intents"} {
+				if got := dataRunCount(t, fixture, table, "run_id", runID); got != 0 {
+					t.Fatalf("invalid second pin left %d %s rows", got, table)
+				}
+			}
+			receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
+			if err != nil || receipt.Summary.Outcome != "data_rejected" || receipt.Summary.PinCount != 0 ||
+				receipt.Summary.Rejection.Code != durabledata.RunCreationRejectionVersionMissing {
+				t.Fatalf("invalid second pin receipt = %#v, %v", receipt, err)
+			}
+			replay := rpcCall(t, handler, body)
+			if replay.Error == nil || !reflect.DeepEqual(replay.Error, response.Error) ||
+				dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", runID) != 1 {
+				t.Fatalf("invalid second pin replay changed the permanent rejection: first=%#v replay=%#v", response, replay)
+			}
+		})
+		t.Run("event plus feed admits exact output pin", func(t *testing.T) {
+			runID := uuid.NewString()
+			data := map[string]any{"imports": []any{}, "pins": []any{
+				map[string]any{"declaration": dataRunDeclaration(scoreRef), "version_id": versions[scoreRef.Key()]},
+			}}
+			response := rpcCall(t, handler, dataRunStartBody(runID, uuid.NewString(), data))
+			if response.Error != nil || asMap(t, asMap(t, response.Result)["data_binding"])["pin_count"] != float64(1) {
+				t.Fatalf("event-plus-feed run.start = %#v", response)
+			}
+			if got := dataRunCount(t, fixture, "resource_version_pins", "run_id", runID); got != 1 {
+				t.Fatalf("event-plus-feed pins = %d, want 1", got)
+			}
+			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+				t.Fatalf("event-plus-feed intents = %d, want 1", got)
+			}
+		})
 	})
+}
+
+func TestRunStartRejectsDeclaredFeedWithoutOutputPinBeforeMutation(t *testing.T) {
+	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
+		ctx := context.Background()
+		source, catalog, _, _, openedRef := deploymentRunStartTestSource(t)
+		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
+			t.Fatal(err)
+		}
+		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
+			t.Fatal(err)
+		}
+		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		assertRejected := func(name string, eventBacked bool, data map[string]any, sourceID string) {
+			t.Helper()
+			t.Run(name, func(t *testing.T) {
+				runID, key := uuid.NewString(), uuid.NewString()
+				before, err := fixture.primary.ShowDataResource(ctx, runStartTestBundleHash, openedRef)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body := deploymentRunStartBody(runID, key, data)
+				if eventBacked {
+					body = dataRunStartBody(runID, key, data)
+				}
+				response := rpcCall(t, handler, body)
+				if response.Error == nil || response.Error.Code != -32602 {
+					t.Fatalf("unroutable declaration response = %#v", response)
+				}
+				details := asMap(t, asMap(t, response.Error.Data)["details"])
+				if !strings.Contains(fmt.Sprint(details["reason"]), "no exact declared output pin") {
+					t.Fatalf("rejection did not come from compiled output-pin admission: %#v", response.Error)
+				}
+				for _, table := range []string{"runs", "events", "resource_version_pins", "fan_out_intents", "resource_run_creation_operations"} {
+					if got := dataRunCount(t, fixture, table, "run_id", runID); got != 0 {
+						t.Fatalf("failed admission mutated %s: %d rows", table, got)
+					}
+				}
+				var apiCompletions int
+				if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_idempotency WHERE resource_id=$1`, runID).Scan(&apiCompletions); err != nil || apiCompletions != 0 {
+					t.Fatalf("failed admission stored %d API completions: %v", apiCompletions, err)
+				}
+				if sourceID != "" && dataRunCount(t, fixture, "resource_source_invocations", "source_invocation_id", sourceID) != 0 {
+					t.Fatal("failed admission committed source import")
+				}
+				after, err := fixture.primary.ShowDataResource(ctx, runStartTestBundleHash, openedRef)
+				if err != nil || !reflect.DeepEqual(before.Head, after.Head) || len(before.Versions) != len(after.Versions) {
+					t.Fatalf("failed admission changed resource: before=%#v after=%#v err=%v", before, after, err)
+				}
+			})
+		}
+		for _, eventBacked := range []bool{false, true} {
+			mode := "feed-only"
+			if eventBacked {
+				mode = "event-plus-feed"
+			}
+			sourceID := uuid.NewString()
+			data := map[string]any{"imports": []any{
+				dataRunFusedImport(sourceID, openedRef, durabledata.AbsentHead(), []byte("{\"topic\":\"probe\"}\n")),
+			}, "pins": []any{}}
+			assertRejected(mode+" import", eventBacked, data, sourceID)
+		}
+		imported, err := fixture.primary.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+			Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: runStartTestBundleHash,
+			Declaration: openedRef, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"topic\":\"pinned\"}\n"),
+		})
+		if err != nil || imported.Outcome != "accepted" {
+			t.Fatalf("prepare non-output-pinned resource: %#v, %v", imported, err)
+		}
+		for _, eventBacked := range []bool{false, true} {
+			mode := "feed-only"
+			if eventBacked {
+				mode = "event-plus-feed"
+			}
+			data := map[string]any{"imports": []any{}, "pins": []any{
+				map[string]any{"declaration": dataRunDeclaration(openedRef), "version_id": imported.Candidate.VersionID},
+			}}
+			assertRejected(mode+" pin", eventBacked, data, "")
+		}
+	})
+}
+
+func deploymentRunStartTestSource(t *testing.T) (semanticview.Source, durabledata.Catalog, durabledata.DeclarationRef, durabledata.DeclarationRef, durabledata.DeclarationRef) {
+	t.Helper()
+	bundle := runStartTestBundle("scan.requested")
+	events := map[string]runtimecontracts.EventCatalogEntry{
+		"scan.requested": {Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}}, Required: []string{"topic"},
+		}},
+		"score.observed": {BusinessKeyField: "label", Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{"label": {Type: "text"}}, Required: []string{"label"},
+		}},
+		"portfolio.opened": {Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}}, Required: []string{"topic"},
+		}},
+	}
+	bundle.Events = events
+	bundle.FlowTree.Root.Paths.FlowPath = "."
+	bundle.FlowTree.Root.Path = "."
+	bundle.FlowTree.Root.Events = events
+	bundle.RootSchema.Pins.Outputs.EventPins = []runtimecontracts.FlowOutputEventPin{
+		{Event: "scan.requested"}, {Event: "score.observed"},
+	}
+	bundle.FlowTree.Root.Schema = *bundle.RootSchema
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile deployment run.start source: %v", err)
+	}
+	refs := make([]durabledata.DeclarationRef, 0, 3)
+	catalog := durabledata.Catalog{BundleHash: runStartTestBundleHash}
+	for _, name := range []string{"scan.requested", "score.observed", "portfolio.opened"} {
+		ref, err := durabledata.ParseDeclarationRef(".", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaration, ok := bundle.DurableDataDeclarationByRef(ref)
+		if !ok {
+			t.Fatalf("compiled deployment declaration %s missing", name)
+		}
+		catalog.Declarations = append(catalog.Declarations, durabledata.Declaration{
+			Name: declaration.Name, Ref: declaration.Ref, OwnerFlowID: declaration.OwnerFlowID,
+			BusinessKey: declaration.BusinessKey, SchemaDigest: declaration.SchemaDigest,
+			CanonicalSchema: declaration.CanonicalSchema,
+		})
+		refs = append(refs, ref)
+	}
+	return semanticview.Wrap(bundle), catalog, refs[0], refs[1], refs[2]
 }
 
 func deploymentRunStartBody(runID, key string, data map[string]any) string {

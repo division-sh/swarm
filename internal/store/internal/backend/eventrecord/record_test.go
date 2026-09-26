@@ -39,10 +39,10 @@ func TestRecordEqualDistinguishesNestedMapKeys(t *testing.T) {
 	}
 }
 
-func TestRecordValidateRejectsPersistedPayloadNull(t *testing.T) {
+func TestRecordValidateRejectsPersistedTopLevelPayloadNull(t *testing.T) {
 	record := validRecord(t)
-	record.Payload = []byte(`{"nested":{"value":null}}`)
-	if err := record.Validate(); err == nil || !strings.Contains(err.Error(), "cannot contain null") {
+	record.Payload = []byte(`{"value":null}`)
+	if err := record.Validate(); err == nil || !strings.Contains(err.Error(), "cannot contain top-level null") {
 		t.Fatalf("Validate error = %v, want persisted payload null rejection", err)
 	}
 }

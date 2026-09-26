@@ -10,6 +10,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
@@ -566,21 +567,21 @@ func (m postgresRunLifecycleMutation) Create(
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
-			forked_from_run_id, forked_from_event_id,
+			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			started_at
 		)
 		VALUES (
 			$1::uuid, 'running', $2, $3,
 			NULLIF($4, '')::uuid, NULLIF($5, ''),
 			NULLIF($6, '')::uuid, NULLIF($7, 0),
-			NULLIF($8, '')::uuid, NULLIF($9, '')::uuid,
-			$10
+			NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, 0), NULLIF($11, '')::uuid,
+			$12
 		)
 		ON CONFLICT (run_id) DO NOTHING
 		RETURNING TRUE
 	`, request.RunID, bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
-		origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC()).Scan(&inserted)
+		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC()).Scan(&inserted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m.classifyCreateExisting(ctx, request)
 	}
@@ -617,20 +618,20 @@ func (m sqliteRunLifecycleMutation) Create(
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type,
 			origin_service_id, origin_generation,
-			forked_from_run_id, forked_from_event_id,
+			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			started_at
 		)
 		VALUES (
 			?, 'running', ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			NULLIF(?, ''), NULLIF(?, 0),
-			NULLIF(?, ''), NULLIF(?, ''),
+			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
 			?
 		)
 		ON CONFLICT (run_id) DO NOTHING
 	`, request.RunID, bundleHash, origin.Kind(),
 		origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
-		origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC())
+		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), request.StartedAt.UTC())
 	if err != nil {
 		return "", fmt.Errorf("create SQLite run lifecycle: %w", err)
 	}
@@ -650,7 +651,8 @@ func (m sqliteRunLifecycleMutation) Create(
 func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	ctx context.Context,
 	attempt *mutationprotocol.Attempt,
-	forkRunID, sourceRunID, forkEventID string,
+	forkRunID, sourceRunID string,
+	point runfork.RunForkPoint,
 	entityCount int,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
@@ -664,18 +666,18 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 			return err
 		}
 		bundleHash := identity.BundleHash()
-		origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
+		origin, err := point.MaterializationRunOrigin(sourceRunID)
 		if err != nil {
 			return err
 		}
 		startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
 		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
+			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			entity_count, event_count, started_at, bundle_hash
 		)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6, 0, $7, $8)
-	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.SourceEventID(),
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, $8, 0, $9, $10)
+	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 			entityCount, startedAt.UTC(), bundleHash); err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
@@ -697,7 +699,8 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 	ctx context.Context,
 	attempt *mutationprotocol.Attempt,
-	forkRunID, sourceRunID, forkEventID string,
+	forkRunID, sourceRunID string,
+	point runfork.RunForkPoint,
 	entityCount int,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
@@ -711,18 +714,18 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 			return err
 		}
 		bundleHash := identity.BundleHash()
-		origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
+		origin, err := point.MaterializationRunOrigin(sourceRunID)
 		if err != nil {
 			return err
 		}
 		startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
 		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
+			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
 			entity_count, event_count, started_at, bundle_hash
 		)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.SourceEventID(),
+		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 0, ?, ?)
+	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 			entityCount, startedAt.UTC(), bundleHash); err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}

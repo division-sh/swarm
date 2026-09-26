@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -185,13 +187,22 @@ func (c Capsule) Validate() error {
 
 type IntentKey struct {
 	RunID                string                            `json:"run_id"`
-	TriggeringDeliveryID string                            `json:"triggering_delivery_id"`
-	ElementRef           runtimecontracts.FanOutElementRef `json:"element_ref"`
+	TriggeringDeliveryID string                            `json:"triggering_delivery_id,omitempty"`
+	DeploymentFeedID     string                            `json:"deployment_feed_id,omitempty"`
+	ElementRef           runtimecontracts.FanOutElementRef `json:"element_ref,omitempty"`
 }
 
 func (k IntentKey) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(k.RunID)); err != nil {
 		return errors.New("fan-out intent requires canonical run identity")
+	}
+	if k.DeploymentFeedID != "" {
+		runID, runErr := uuid.Parse(k.RunID)
+		id, err := uuid.Parse(k.DeploymentFeedID)
+		if runErr != nil || runID == uuid.Nil || runID.String() != k.RunID || err != nil || id == uuid.Nil || id.String() != k.DeploymentFeedID || k.TriggeringDeliveryID != "" || k.ElementRef != (runtimecontracts.FanOutElementRef{}) {
+			return errors.New("deployment feed key requires only an exact feed identity")
+		}
+		return nil
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(k.TriggeringDeliveryID)); err != nil {
 		return errors.New("fan-out intent requires canonical triggering delivery identity")
@@ -203,21 +214,88 @@ func (k IntentKey) Validate() error {
 }
 
 func (k IntentKey) String() string {
+	if k.DeploymentFeedID != "" {
+		return strings.Join([]string{k.RunID, "deployment", k.DeploymentFeedID}, "|")
+	}
 	identity, _ := k.ElementRef.DeclarationIdentity()
 	return strings.Join([]string{strings.TrimSpace(k.RunID), strings.TrimSpace(k.TriggeringDeliveryID), identity.Key()}, "|")
 }
 
+type OriginKind string
+
+const (
+	OriginHandler    OriginKind = "handler"
+	OriginDeployment OriginKind = "deployment"
+)
+
+// DeploymentOrigin is a run-local, version-pinned item source. It is not a
+// handler invocation and must not borrow a delivery, authored plan, or capsule.
+type DeploymentOrigin struct {
+	BundleHash   string                     `json:"bundle_hash"`
+	Declaration  durabledata.DeclarationRef `json:"declaration"`
+	VersionID    durabledata.VersionID      `json:"version_id"`
+	SchemaDigest durabledata.SchemaDigest   `json:"schema_digest"`
+}
+
+func (o DeploymentOrigin) Validate() error {
+	if string(o.VersionID) != strings.TrimSpace(string(o.VersionID)) || string(o.SchemaDigest) != strings.TrimSpace(string(o.SchemaDigest)) {
+		return errors.New("deployment version and schema digest must be exact canonical values")
+	}
+	if err := bundleidentity.ValidateCanonicalHash(o.BundleHash); err != nil {
+		return err
+	}
+	if err := o.Declaration.Validate(); err != nil {
+		return err
+	}
+	if err := o.VersionID.Validate(); err != nil {
+		return err
+	}
+	return o.SchemaDigest.Validate()
+}
+
 type IntentRequest struct {
 	Key         IntentKey                      `json:"key"`
-	PlanRef     runtimecontracts.FanOutPlanRef `json:"plan_ref"`
+	PlanRef     runtimecontracts.FanOutPlanRef `json:"plan_ref,omitempty"`
+	Deployment  *DeploymentOrigin              `json:"deployment,omitempty"`
 	Source      SourceRef                      `json:"source"`
 	Cardinality int                            `json:"cardinality"`
-	Capsule     Capsule                        `json:"capsule"`
+	Capsule     Capsule                        `json:"capsule,omitempty"`
+}
+
+func (r IntentRequest) OriginKind() OriginKind {
+	if r.Deployment != nil {
+		return OriginDeployment
+	}
+	return OriginHandler
 }
 
 func (r IntentRequest) Validate() error {
 	if err := r.Key.Validate(); err != nil {
 		return err
+	}
+	if r.Deployment != nil {
+		if r.Key.DeploymentFeedID == "" || r.PlanRef != (runtimecontracts.FanOutPlanRef{}) || !reflect.DeepEqual(r.Capsule, Capsule{}) {
+			return errors.New("deployment feed cannot carry handler plan or capsule")
+		}
+		if err := r.Deployment.Validate(); err != nil {
+			return err
+		}
+		if err := r.Source.Validate(false); err != nil {
+			return err
+		}
+		if r.Source.Kind != SourceResourceVersion || r.Source.Declaration != r.Deployment.Declaration || r.Source.VersionID != r.Deployment.VersionID {
+			return errors.New("deployment source disagrees with pinned declaration and version")
+		}
+		if r.Cardinality < 0 || r.Cardinality > durabledata.MaxResourceRows {
+			return errors.New("deployment feed cardinality is outside durable-data bounds")
+		}
+		return nil
+	}
+	if r.Key.DeploymentFeedID != "" {
+		return errors.New("handler fan-out cannot carry deployment feed identity")
+	}
+	if r.Source.Kind == SourceResourceVersion {
+		return errors.New("resource versions require deployment feed origin")
 	}
 	if r.Key.ElementRef != r.PlanRef.ElementRef || strings.TrimSpace(r.PlanRef.BundleHash) == "" || strings.TrimSpace(r.PlanRef.SemanticDigest) == "" {
 		return errors.New("fan-out intent plan identity is incomplete or contradictory")
@@ -538,7 +616,8 @@ type RunSummary struct {
 }
 
 type FanOutSemanticRejectionSample struct {
-	TriggeringDeliveryID string                   `json:"triggering_delivery_id"`
+	TriggeringDeliveryID string                   `json:"triggering_delivery_id,omitempty"`
+	DeploymentFeedID     string                   `json:"deployment_feed_id,omitempty"`
 	FlowPath             string                   `json:"flow_path"`
 	Family               string                   `json:"family"`
 	SemanticPath         string                   `json:"semantic_path"`
@@ -547,13 +626,7 @@ type FanOutSemanticRejectionSample struct {
 }
 
 func (s FanOutSemanticRejectionSample) Validate() error {
-	if s.Family != "fan_out" {
-		return errors.New("fan-out semantic rejection sample requires fan_out declaration family")
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(s.TriggeringDeliveryID)); err != nil {
-		return errors.New("fan-out semantic rejection sample requires triggering delivery identity")
-	}
-	if _, err := (runtimecontracts.FanOutElementRef{FlowPath: s.FlowPath, Family: s.Family, SemanticPath: s.SemanticPath}).DeclarationIdentity(); err != nil {
+	if err := validateFanOutSummaryOrigin(s.TriggeringDeliveryID, s.DeploymentFeedID, s.FlowPath, s.Family, s.SemanticPath); err != nil {
 		return err
 	}
 	if s.Ordinal < 0 {
@@ -567,7 +640,8 @@ func (s FanOutSemanticRejectionSample) Validate() error {
 }
 
 type BlockedIntentDiagnosis struct {
-	TriggeringDeliveryID string                   `json:"triggering_delivery_id"`
+	TriggeringDeliveryID string                   `json:"triggering_delivery_id,omitempty"`
+	DeploymentFeedID     string                   `json:"deployment_feed_id,omitempty"`
 	FlowPath             string                   `json:"flow_path"`
 	Family               string                   `json:"family"`
 	SemanticPath         string                   `json:"semantic_path"`
@@ -577,16 +651,31 @@ type BlockedIntentDiagnosis struct {
 }
 
 func (d BlockedIntentDiagnosis) Validate() error {
-	if _, err := uuid.Parse(strings.TrimSpace(d.TriggeringDeliveryID)); err != nil {
-		return errors.New("blocked fan-out diagnosis requires triggering delivery identity")
-	}
-	if _, err := (runtimecontracts.FanOutElementRef{FlowPath: d.FlowPath, Family: d.Family, SemanticPath: d.SemanticPath}).DeclarationIdentity(); err != nil {
+	if err := validateFanOutSummaryOrigin(d.TriggeringDeliveryID, d.DeploymentFeedID, d.FlowPath, d.Family, d.SemanticPath); err != nil {
 		return err
 	}
 	if d.Cursor < 0 || d.Owed <= 0 {
 		return errors.New("blocked fan-out diagnosis requires nonnegative cursor and positive owed count")
 	}
 	return runtimefailures.ValidateEnvelope(d.Failure)
+}
+
+func validateFanOutSummaryOrigin(deliveryID, feedID, flowPath, family, semanticPath string) error {
+	if feedID != "" {
+		id, err := uuid.Parse(feedID)
+		if err != nil || id == uuid.Nil || id.String() != feedID || deliveryID != "" || flowPath != "" || family != "" || semanticPath != "" {
+			return errors.New("deployment fan-out summary requires only exact feed identity")
+		}
+		return nil
+	}
+	if family != "fan_out" {
+		return errors.New("handler fan-out summary requires fan_out declaration family")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(deliveryID)); err != nil {
+		return errors.New("handler fan-out summary requires triggering delivery identity")
+	}
+	_, err := (runtimecontracts.FanOutElementRef{FlowPath: flowPath, Family: family, SemanticPath: semanticPath}).DeclarationIdentity()
+	return err
 }
 
 func (s RunSummary) Validate() error {

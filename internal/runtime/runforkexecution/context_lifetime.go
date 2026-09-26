@@ -131,9 +131,16 @@ func (o SelectedContractExecutionOwner) bindStagedPreparation(op *selectedContra
 	contexts := o.ports.contexts
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
+	return contexts.bindStagedPreparationLocked(op, binding)
+}
+
+func (contexts *selectedForkContexts) bindStagedPreparationLocked(op *selectedContractOperation, binding runfork.RunForkSelectedContractBinding) error {
 	entry := contexts.entries[op]
 	if contexts.retired || entry == nil || entry.retiring {
 		return worklifetime.ErrRetired
+	}
+	if entry.binding.BindingID != "" {
+		return errors.New("selected preparation already has a binding")
 	}
 	for _, other := range contexts.entries {
 		if other != entry && other.binding.ForkRunID == binding.ForkRunID {

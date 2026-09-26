@@ -106,7 +106,8 @@ const postgresFlowInstanceRouteUpsertSQL = `
 			SELECT (
 			SELECT rule_id
 			FROM routing_rules
-			WHERE event_pattern = $1
+			WHERE run_id IS NULL
+			  AND event_pattern = $1
 			  AND subscriber_type = $2
 			  AND subscriber_id = $3
 			  AND COALESCE(source_flow, '') = $6
@@ -227,7 +228,8 @@ func upsertSQLiteFlowInstanceRoute(
 const sqliteFlowInstanceRouteSourceSQL = `
 				SELECT rule_id
 				FROM routing_rules
-				WHERE event_pattern = ?
+				WHERE run_id IS NULL
+				  AND event_pattern = ?
 				  AND subscriber_type = ?
 				  AND subscriber_id = ?
 				  AND COALESCE(source_flow, '') = ?
@@ -510,6 +512,12 @@ func replaceFlowInstanceRouteTopologyTx(
 	// This transaction changes only routes. The active-run lock (or SQLite
 	// writer snapshot) remains held while all of that run's owners are replaced.
 	admittedRuns := make(map[string]bool)
+	type observedRoutes struct {
+		generation int
+		snapshot   routeTopologySnapshot
+	}
+	snapshots := make(map[string]observedRoutes)
+	generation := 0
 	for _, set := range normalized {
 		if !admittedRuns[set.Identity.RunID] {
 			var err error
@@ -523,6 +531,31 @@ func replaceFlowInstanceRouteTopologyTx(
 			}
 			admittedRuns[set.Identity.RunID] = true
 		}
+		observed, loaded := snapshots[set.Identity.RunID]
+		if !loaded {
+			observed.snapshot, err = loadRouteTopologySnapshot(ctx, tx, postgres, set.Identity.RunID)
+			if err != nil {
+				return nil, err
+			}
+			observed.generation = generation
+			snapshots[set.Identity.RunID] = observed
+		}
+		exact := observed.snapshot.exactOwner(set)
+		if exact && observed.generation != generation {
+			// A preceding write can change wildcard provenance or another
+			// owner's rows through a trigger. Stale evidence may cause a
+			// redundant write, but must never authorize skipping one.
+			observed.snapshot, err = loadRouteTopologySnapshot(ctx, tx, postgres, set.Identity.RunID)
+			if err != nil {
+				return nil, err
+			}
+			observed.generation = generation
+			snapshots[set.Identity.RunID] = observed
+			exact = observed.snapshot.exactOwner(set)
+		}
+		if exact {
+			continue
+		}
 		if postgres {
 			if _, err := postgresExec.ExecContext(ctx, postgresFlowInstanceRouteInactivateSQL, set.Identity.RunID, set.Identity.Route.InstancePath); err != nil {
 				return nil, fmt.Errorf("inactivate postgres flow-instance route owner %s: %w", set.Identity.Key(), err)
@@ -532,6 +565,7 @@ func replaceFlowInstanceRouteTopologyTx(
 					return nil, err
 				}
 			}
+			generation++
 			continue
 		}
 		if _, err := sqliteExec.ExecContext(ctx, sqliteFlowInstanceRouteInactivateSQL, set.Identity.RunID, set.Identity.Route.InstancePath); err != nil {
@@ -542,6 +576,7 @@ func replaceFlowInstanceRouteTopologyTx(
 				return nil, err
 			}
 		}
+		generation++
 	}
 	return normalized, nil
 }

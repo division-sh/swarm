@@ -179,8 +179,29 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration",
 		"TestCanonicalFormsRegistryPinsHandlerActionRetirement",
 	}
-	// #2300 adds two census/ratchet roots without moving existing proof units.
-	want := []int{124, 14, 5, 1}
+	// #2300 adds two census/ratchet roots, and #2281 adds eighteen general roots
+	// for operator-driven feeds, selected fork cuts, and receiver recovery.
+	deploymentFeedRoots := []string{
+		"TestDeploymentResourceRunStartEmptyVersionDoesNotInventReceiverBothStores",
+		"TestDeploymentResourceRunStartPinDocumentRowsBothStores",
+		"TestDeploymentSourceChangedPinPublicForkAndLostResponse",
+		"TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation",
+		"TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable",
+		"TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores",
+		"TestDeploymentSourceFixedTPublishedBeforePipelineChangedPinBothStores",
+		"TestDeploymentSourceKeylessEqualRowsPreserveMultiplicityBothStores",
+		"TestDeploymentSourceQuiescedBeforeActivationCrashBothStores",
+		"TestDeploymentSourceSelectedControlOnlyRepeatedStopBothStores",
+		"TestDeploymentSourceSelectedForkBeforeFirstRow",
+		"TestDeploymentSourceSelectedForkConcurrentFirstMaterialization",
+		"TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores",
+		"TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothStores",
+		"TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores",
+		"TestSelectedDeploymentExternalEffectRecoveryBothStores",
+		"TestSelectedExternalEffectFixtureControlBothStores",
+		"TestServedParityHarnessRunStartDeploymentFeedLifecycle",
+	}
+	want := []int{142, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -198,6 +219,11 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 			t.Fatalf("general conformance partition omitted reviewed #2307 root %s", name)
 		}
 	}
+	for _, name := range deploymentFeedRoots {
+		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
+			t.Fatalf("general conformance partition omitted reviewed #2281 root %s", name)
+		}
+	}
 	const generatedResultsProof = "TestActionRetirementCorpusExcludesGeneratedTestResults"
 	if i := sort.SearchStrings(groups[0], generatedResultsProof); i == len(groups[0]) || groups[0][i] != generatedResultsProof {
 		t.Fatalf("general conformance partition omitted generated-results guard %s", generatedResultsProof)
@@ -211,7 +237,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:144 =124 general +14 core +5 pressure +1 reporter")
+	t.Log("complete disjoint census:162 =142 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

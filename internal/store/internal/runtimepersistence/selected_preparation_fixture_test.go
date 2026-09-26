@@ -59,7 +59,7 @@ func selectedPreparationForTest(t testing.TB, capability startupownership.Proces
 		SelectedForkPreparation: runfork.SelectedForkPreparation{
 			DeclarationPlanFingerprint: declarations.Revision,
 			PreparationID:              uuid.NewString(), ProcessGeneration: evidence.AuthorityGeneration,
-			SourceRunID: sourceRun, ForkEventID: eventID,
+			SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID}, ForkEventID: eventID,
 			Coordinates: managedcapabilities.SelectedForkPreparationCoordinates{
 				ProcessAuthorityID: evidence.AuthorityID, ProcessOwnerID: evidence.OwnerID, ProcessBootID: evidence.BootID,
 				BundleHash: declarations.BundleHash, SourceFingerprint: strings.Repeat("a", 64), AdmittedPlanFingerprint: strings.Repeat("b", 64),

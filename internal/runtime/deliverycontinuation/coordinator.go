@@ -46,7 +46,7 @@ type synchronizationRequest struct {
 	result chan error
 }
 
-// Coordinator is the one normal-runtime-generation owner for executable
+// Coordinator is the one execution-generation owner for executable
 // delivery continuations. It is a bounded selected-store projection, not a
 // durable queue or a second eligibility clock.
 type Coordinator struct {
@@ -76,14 +76,40 @@ func New(
 	dispatcher Dispatcher,
 	report ErrorReporter,
 ) (*Coordinator, error) {
+	if authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime {
+		return nil, errors.New("normal delivery continuation coordinator requires normal execution authority")
+	}
+	return newCoordinator(store, restarts, authority, workOwner, dispatcher, report)
+}
+
+// NewSelected reuses the durable continuation owner for one selected fork
+// generation. Selected work has no normal standing-restart classification.
+func NewSelected(
+	store runtimedelivery.Store,
+	authority runtimedelivery.ExecutionAuthority,
+	workOwner worklifetime.Occurrence,
+	dispatcher Dispatcher,
+	report ErrorReporter,
+) (*Coordinator, error) {
+	if authority.Kind() != runtimedelivery.ExecutionAuthoritySelectedContractFork {
+		return nil, errors.New("selected delivery continuation coordinator requires selected execution authority")
+	}
+	return newCoordinator(store, nil, authority, workOwner, dispatcher, report)
+}
+
+func newCoordinator(
+	store runtimedelivery.Store,
+	restarts runtimepipeline.StandingRestartDispositionReader,
+	authority runtimedelivery.ExecutionAuthority,
+	workOwner worklifetime.Occurrence,
+	dispatcher Dispatcher,
+	report ErrorReporter,
+) (*Coordinator, error) {
 	if store == nil {
 		return nil, errors.New("delivery continuation selected store is required")
 	}
-	if restarts == nil {
+	if authority.Kind() == runtimedelivery.ExecutionAuthorityNormalRuntime && restarts == nil {
 		return nil, errors.New("delivery continuation standing restart reader is required")
-	}
-	if authority.Kind() != runtimedelivery.ExecutionAuthorityNormalRuntime {
-		return nil, errors.New("normal delivery continuation coordinator requires normal execution authority")
 	}
 	if err := authority.Validate(); err != nil {
 		return nil, err
@@ -537,7 +563,7 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 			if err := c.scanStopError(ctx); err != nil {
 				return 0, false, err
 			}
-			if item.Snapshot.RunID != "" && item.Disposition != runtimedelivery.ClaimAbsent && item.Disposition != runtimedelivery.ClaimInvariantInvalid {
+			if c.restarts != nil && item.Snapshot.RunID != "" && item.Disposition != runtimedelivery.ClaimAbsent && item.Disposition != runtimedelivery.ClaimInvariantInvalid {
 				disposition, err := c.restarts.StandingRunRestartDisposition(context.WithoutCancel(ctx), item.Snapshot.RunID)
 				if err != nil {
 					return 0, false, fmt.Errorf("classify delivery continuation %s standing disposition: %w", item.DeliveryID, err)

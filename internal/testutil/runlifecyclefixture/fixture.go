@@ -75,7 +75,8 @@ func CreateSQLiteScenarioSchema(ctx context.Context, db *sql.DB) error {
 			run_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'running', bundle_hash TEXT NOT NULL,
 			origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT,
 			origin_service_id TEXT, origin_generation INTEGER,
-			forked_from_run_id TEXT, forked_from_event_id TEXT,
+			forked_from_run_id TEXT, forked_from_point_kind TEXT,
+			forked_from_revision INTEGER, forked_from_event_id TEXT,
 			started_at TIMESTAMP, ended_at TIMESTAMP, failure TEXT,
 			continued_as_run_id TEXT, event_count INTEGER NOT NULL DEFAULT 0
 		)`,
@@ -970,7 +971,8 @@ func (m sqlMutation) load(
 		SELECT status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
-		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_event_id, '')
+		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
+		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id, '')
 		FROM runs
 		WHERE run_id = ?
 	`
@@ -979,15 +981,16 @@ func (m sqlMutation) load(
 			SELECT status, bundle_hash, origin_kind,
 			       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 			       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
-			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_event_id::text, '')
+			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
+			       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id::text, '')
 			FROM runs
 			WHERE run_id = $1::uuid
 			FOR UPDATE
 		`
 	}
 	var statusRaw, bundleHash, originKind string
-	var eventID, eventType, serviceID, sourceRunID, sourceEventID string
-	var generation int64
+	var eventID, eventType, serviceID, sourceRunID, forkPointKind, sourceEventID string
+	var generation, forkRevision int64
 	if err := m.tx.QueryRowContext(ctx, query, runID).Scan(
 		&statusRaw,
 		&bundleHash,
@@ -997,6 +1000,8 @@ func (m sqlMutation) load(
 		&serviceID,
 		&generation,
 		&sourceRunID,
+		&forkPointKind,
+		&forkRevision,
 		&sourceEventID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1022,7 +1027,7 @@ func (m sqlMutation) load(
 		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err
 	}
 	origin, err := runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
+		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err

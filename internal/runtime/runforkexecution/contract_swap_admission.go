@@ -128,6 +128,7 @@ func validateContractSwapRouteRecovery(admission runfork.RunForkSelectedContract
 	}
 	if strings.TrimSpace(recovery.ForkRunID) != strings.TrimSpace(admission.ForkRunID) ||
 		strings.TrimSpace(recovery.SourceRunID) != strings.TrimSpace(admission.SourceRunID) ||
+		!sameSelectedForkPointIdentity(recovery.ForkPoint, admission.ForkPoint) ||
 		strings.TrimSpace(recovery.ForkEventID) != strings.TrimSpace(admission.ForkEventID) {
 		return fmt.Errorf("contract-swap boot/resume admission route recovery identity does not match selected execution admission")
 	}

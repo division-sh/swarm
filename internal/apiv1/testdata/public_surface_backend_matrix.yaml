@@ -165,6 +165,7 @@ store_parity:
       capabilities:
         - {claim_id: source_artifact, risk_dimensions: [selected_construction, served_lifecycle, writer_ownership]}
     - {id: served-event-publish, kind: go_test, name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], capabilities: [{claim_id: event_delivery, risk_dimensions: [served_lifecycle, writer_ownership]}]}
+    - {id: served-run-start-deployment-feed, kind: go_test, name: TestServedParityHarnessRunStartDeploymentFeedLifecycle, path: internal/runtime/conformance/deployment_run_start_servedparity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], capabilities: [{claim_id: resource_data, risk_dimensions: [real_v1_handler, served_lifecycle]}]}
     - {id: served-event-replay, kind: go_test, name: TestServedParityHarnessLiveAgentEventReplayLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], required_children: [default_sqlite, explicit_postgres], capabilities: [{claim_id: event_delivery, risk_dimensions: [served_lifecycle, writer_ownership]}]}
     - {id: event-bus-roles, kind: go_test, name: TestEventBusDurableDependenciesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: event_delivery, risk_dimensions: [writer_ownership]}]}
     - {id: author-activity-parity, kind: go_test, name: TestAuthorActivityRollbackReusesSequenceOnBothStores, path: internal/store/internal/runtimepersistence/author_activity_adapter_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], required_children: [sqlite, postgres], capabilities: [{claim_id: author_activity, risk_dimensions: [writer_ownership]}]}
@@ -290,11 +291,11 @@ store_parity:
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [real_v1_handler, served_lifecycle]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_ids: [resource-data-surface]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_ids: [resource-data-surface, served-run-start-deployment-feed]}
       required_ports: [data, dataAccess]
       runtime_deps: [ToolEntityStore, DataAccessStore]
       platform_tables: [resource_bundle_declarations, resource_declarations, resource_head_history, resource_heads, resource_prune_invocations, resource_prune_pin_evidence, resource_run_creation_child_evaluations, resource_run_creation_child_reservations, resource_run_creation_operations, resource_source_invocations, resource_version_pins, resource_version_provenance, resource_versions, bundle_static_data]
-      public_methods: [data.check, data.import, data.prune, data.show]
+      public_methods: [data.check, data.import, data.prune, data.show, run.start]
     - id: source_artifact
       semantic_owners: [internal/sourceartifact.AdmittedSourceArtifact, internal/store/selected source artifact writer and reader, internal/runtime/startuprecovery]
       selected_purposes: [runtime]
@@ -323,7 +324,7 @@ store_parity:
       runtime_deps: [EventStore, EventBusDurable, EventPayloadAdmissionBinder, DeliveryStore]
       nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, PreparedEvents, TargetFailureRecorder, RunOrigins, StandingRestarts]}
       platform_tables: [events, event_deliveries, event_delivery_handler_rule_selections, event_delivery_attempts, committed_replay_scopes, run_fork_delivery_event_replays, event_receipts]
-      public_methods: [event.publish, event.replay, event.get, event.list, agent.replay, run.start]
+      public_methods: [event.publish, event.replay, event.get, event.list, agent.replay]
     - id: author_activity
       semantic_owners: [internal/store author activity]
       selected_purposes: [runtime]
@@ -403,8 +404,8 @@ store_parity:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle], proof_ids: [served-selected-contract-fork]}
         - {role: risk_proof, risk_dimensions: [selected_construction], proof_ids: [served-selected-reset-construction]}
       optional_products: [runFork]
-      nested_roles: {product_run_fork: [planner, availability, activation, executionOwner, construction]}
-      platform_tables: [run_fork_selected_contract_bindings, run_fork_selected_contract_branch_divergences, run_fork_selected_contract_executions, run_fork_selected_contract_route_recoveries, run_fork_selected_contract_runtime_executions]
+      nested_roles: {product_run_fork: [planner, availability, operations, activation, executionOwner, construction]}
+      platform_tables: [run_fork_operations, run_fork_selected_contract_bindings, run_fork_selected_contract_branch_divergences, run_fork_selected_contract_executions, run_fork_selected_contract_route_recoveries, run_fork_selected_contract_runtime_executions]
       public_methods: [run.fork]
     - id: workflow_runtime
       semantic_owners: [internal/runtime/pipeline workflow persistence]
@@ -417,7 +418,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runs, entities, testSetup]
       runtime_deps: [WorkflowPersistence, PipelineObligations]
-      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner, runtimeengine.ResourceSourceReader]}
+      nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutSummaryOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowEntityCollectionPersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
       platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
       public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.fan_out.list, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation
@@ -601,18 +602,19 @@ mutating_api_parity_ledger:
       SQLite and explicit Postgres, including source-delivery lineage,
       idempotency replay, delivered replay delivery, and generic settlement.
   - method: run.start
-    classification: covered_transitively
+    classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
-    covered_by_method: event.publish
-    covered_by_scenario: event_publish_dynamic_auto_emit_lifecycle
+    scenario: run_start_deployment_feed_lifecycle
+    spec_ref: platform-spec.yaml#durable_data_resources.deployment_origin
     proof_refs:
-      - kind: go_test
-        name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
+      - {kind: go_test, name: TestServedParityHarnessRunStartDeploymentFeedLifecycle}
     notes: >
-      Deprecated wrapper over event.publish. The wrapper delegates to the
-      canonical event-publication owner, and served dual-backend parity is
-      covered transitively by the event.publish servedparity scenario rather
-      than by a dedicated wrapper scenario.
+      run.start independently admits eventless deployment feeds. The real CLI
+      invokes /v1/rpc run.start with --data and --pin on both selected stores;
+      the proof checks distinct run/feed attempts, exact receiver publication,
+      settlement, public readback, and canonical run quiescence. Event-backed
+      run.start still consumes the ordinary event-publication owner, but that
+      overlap cannot make the eventless method an event.publish wrapper.
   - method: run.stop
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

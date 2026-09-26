@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+const testForkOriginEventID = "7c850b38-af09-42c2-b24e-3db8010ab6a9"
+
 func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 	event, err := EventRunOrigin("event-1", "scan.requested")
 	if err != nil {
@@ -14,7 +16,11 @@ func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fork, err := ForkMaterializationRunOrigin("run-parent", "event-parent")
+	fork, err := ForkMaterializationRunOrigin("run-parent", ForkOriginPointEvent, 3, testForkOriginEventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deploymentFork, err := ForkMaterializationRunOrigin("run-parent", ForkOriginPointDeploymentRevision, 4, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,6 +30,7 @@ func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 		ScenarioSetupRunOrigin(),
 		standing,
 		fork,
+		deploymentFork,
 	} {
 		raw, err := json.Marshal(origin)
 		if err != nil {
@@ -48,6 +55,8 @@ func TestRunOriginRejectsEveryPartialAndMixedShape(t *testing.T) {
 		serviceID     string
 		generation    int64
 		sourceRunID   string
+		forkPointKind string
+		forkRevision  int64
 		sourceEventID string
 	}{
 		{name: "unknown_kind", kind: "unknown"},
@@ -56,13 +65,16 @@ func TestRunOriginRejectsEveryPartialAndMixedShape(t *testing.T) {
 		{name: "event_with_standing", kind: string(OriginEvent), eventID: "event-1", eventType: "scan.requested", serviceID: "service-1", generation: 1},
 		{name: "scenario_with_event", kind: string(OriginScenarioSetup), eventID: "event-1", eventType: "scan.requested"},
 		{name: "deployment_with_event", kind: string(OriginDeployment), eventID: "event-1", eventType: "scan.requested"},
-		{name: "deployment_with_fork", kind: string(OriginDeployment), sourceRunID: "run-1", sourceEventID: "event-1"},
+		{name: "deployment_with_fork", kind: string(OriginDeployment), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointDeploymentRevision), forkRevision: 1},
 		{name: "standing_missing_service", kind: string(OriginStandingGeneration), generation: 1},
 		{name: "standing_nonpositive_generation", kind: string(OriginStandingGeneration), serviceID: "service-1"},
 		{name: "standing_with_fork", kind: string(OriginStandingGeneration), serviceID: "service-1", generation: 1, sourceRunID: "run-1", sourceEventID: "event-1"},
-		{name: "fork_missing_run", kind: string(OriginForkMaterialization), sourceEventID: "event-1"},
+		{name: "fork_missing_run", kind: string(OriginForkMaterialization), forkPointKind: string(ForkOriginPointEvent), forkRevision: 1, sourceEventID: testForkOriginEventID},
 		{name: "fork_missing_event", kind: string(OriginForkMaterialization), sourceRunID: "run-1"},
-		{name: "fork_with_event", kind: string(OriginForkMaterialization), eventID: "event-1", eventType: "scan.requested", sourceRunID: "run-1", sourceEventID: "event-2"},
+		{name: "fork_missing_revision", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointDeploymentRevision)},
+		{name: "fork_deployment_with_event", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointDeploymentRevision), forkRevision: 2, sourceEventID: testForkOriginEventID},
+		{name: "fork_event_without_event", kind: string(OriginForkMaterialization), sourceRunID: "run-1", forkPointKind: string(ForkOriginPointEvent), forkRevision: 2},
+		{name: "fork_with_event", kind: string(OriginForkMaterialization), eventID: "event-1", eventType: "scan.requested", sourceRunID: "run-1", forkPointKind: string(ForkOriginPointEvent), forkRevision: 2, sourceEventID: testForkOriginEventID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := DecodeRunOrigin(
@@ -72,6 +84,8 @@ func TestRunOriginRejectsEveryPartialAndMixedShape(t *testing.T) {
 				tc.serviceID,
 				tc.generation,
 				tc.sourceRunID,
+				tc.forkPointKind,
+				tc.forkRevision,
 				tc.sourceEventID,
 			); err == nil {
 				t.Fatal("invalid run origin was accepted")

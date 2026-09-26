@@ -41,6 +41,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		ReasonCode                string                           `json:"reason_code"`
 		Failure                   *runtimefailures.Envelope        `json:"failure"`
 		StartedAt                 *time.Time                       `json:"started_at"`
+		ContinuationHandoffAt     *time.Time                       `json:"continuation_handoff_at"`
 		SettledAt                 *time.Time                       `json:"settled_at"`
 		CreatedAt                 time.Time                        `json:"created_at"`
 		UpdatedAt                 time.Time                        `json:"updated_at"`
@@ -119,6 +120,9 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	}
 	if fact.StartedAt != nil {
 		snapshot.StartedAt = fact.StartedAt.UTC()
+	}
+	if fact.ContinuationHandoffAt != nil {
+		snapshot.ContinuationHandoffAt = fact.ContinuationHandoffAt.UTC()
 	}
 	if fact.SettledAt != nil {
 		snapshot.SettledAt = fact.SettledAt.UTC()

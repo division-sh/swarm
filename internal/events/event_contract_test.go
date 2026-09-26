@@ -9,6 +9,44 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestDeploymentFeedRoutingSourceRequiresExactEventClassAndProducer(t *testing.T) {
+	source, err := NewDeploymentFeedRoutingSource("portfolio")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootRun := uuid.NewString()
+	facts := EventFacts{
+		ID: uuid.NewString(), Type: "portfolio/account.registered",
+		Producer: ProducerClaim{Type: EventProducerExternal, ID: "deployment-feed"},
+		Payload:  []byte(`{"account_id":"one","document":{"optional":null}}`),
+		Envelope: EventEnvelope{Scope: EventScopeGlobal}, RoutingSource: source,
+		CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live,
+	}
+	root, err := NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: facts, RunID: rootRun})
+	if err != nil || ValidatePersistentEvent(root) != nil {
+		t.Fatalf("deployment root event rejected: event=%+v error=%v", root, err)
+	}
+	lineage, err := NewSelectedForkLineage(uuid.NewString(), rootRun, root.ID(), "selection:test", "", executionmode.Live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts.ID = uuid.NewString()
+	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "selected-fork"}
+	replay, err := NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: facts, Lineage: lineage})
+	if err != nil || ValidatePersistentEvent(replay) != nil {
+		t.Fatalf("selected deployment replay rejected: event=%+v error=%v", replay, err)
+	}
+	facts.Producer = ProducerClaim{Type: EventProducerExternal, ID: "other"}
+	if hostile, err := NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: facts, RunID: rootRun}); err == nil && ValidateEventContract(hostile) == nil {
+		t.Fatal("unowned deployment root ingress was admitted")
+	}
+	facts.RoutingSource = NoRoutingSource()
+	facts.Producer = ProducerClaim{Type: EventProducerExternal, ID: "deployment-feed"}
+	if hostile, err := NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: facts, RunID: rootRun}); err == nil && ValidateEventContract(hostile) == nil {
+		t.Fatal("deployment producer without typed source was admitted")
+	}
+}
+
 func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.T) {
 	runID := uuid.NewString()
 	base := EventFacts{ID: uuid.NewString(), Type: "work.started", Producer: ProducerClaim{Type: EventProducerExternal, ID: "gateway"}, Payload: []byte(`{}`), CreatedAt: time.Now().UTC(), ExecutionMode: executionmode.Live}

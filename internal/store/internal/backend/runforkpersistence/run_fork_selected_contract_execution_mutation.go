@@ -86,6 +86,7 @@ func prepareRunForkSelectedContractRouteResolution(
 	record, err := normalizeRunForkSelectedContractRouteRecovery(runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       plan.SourceRunID,
+		ForkPoint:         plan.ForkPoint,
 		ForkEventID:       plan.ForkPoint.EventID,
 		ContractSelection: selection,
 		RouteTopology:     topology,
@@ -975,7 +976,13 @@ func runForkReplayResumeAdmissionWithSourceAdvancedConversationHistory(admission
 func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(ctx context.Context, tx *sql.Tx, forkRunID string, allowedSourceEventIDs []string, source semanticview.Source) error {
 	allowedEvents := uniqueNonEmptyStrings(allowedSourceEventIDs)
 	if len(allowedEvents) == 0 {
-		return ensureRunForkActivationNoForkReplayState(ctx, tx, postgresDeliveryAdapter, forkRunID)
+		feed, err := selectedDeploymentFeedPresentTx(ctx, tx, forkRunID)
+		if err != nil {
+			return fmt.Errorf("check selected deployment feed: %w", err)
+		}
+		if !feed {
+			return ensureRunForkActivationNoForkReplayState(ctx, tx, postgresDeliveryAdapter, forkRunID)
+		}
 	}
 
 	// Materialization preflights empty fork-local replay state. At activation
@@ -1068,6 +1075,12 @@ func (s *RunForkPostgresOwner) ensureRunForkSelectedContractExecutionForkState(c
 			   AND x.fork_run_id = $1::uuid
 			   AND x.source_event_id = ANY($2::uuid[])
 			WHERE e.run_id = $1::uuid
+			UNION
+			SELECT e.event_id FROM events e
+			JOIN fan_out_outcomes o ON o.event_id=e.event_id AND o.run_id=e.run_id
+			JOIN fan_out_intents i ON i.run_id=o.run_id AND i.deployment_feed_id=o.deployment_feed_id
+			WHERE e.run_id=$1::uuid AND i.origin_kind='deployment' AND o.outcome_kind='committed'
+			  AND e.event_class='root_ingress' AND e.produced_by_type='external' AND e.produced_by='deployment-feed'
 			UNION
 			SELECT e.event_id
 			FROM events e

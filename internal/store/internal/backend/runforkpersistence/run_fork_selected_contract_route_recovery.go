@@ -82,9 +82,9 @@ type runForkSelectedContractRouteRecoveryExecer interface {
 }
 
 func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runForkSelectedContractRouteRecoveryExecer, record runfork.RunForkSelectedContractRouteRecovery) error {
-	if _, err := execer.ExecContext(ctx, `
+	result, err := execer.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_route_recoveries (
-			fork_run_id, source_run_id, fork_event_id,
+			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id,
 			owner, runtime_recovery_owner,
 			mode, bundle_hash,
 			route_topology_owner, dynamic_topology_owner, recipient_planning_owner,
@@ -93,16 +93,19 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 			route_topology, recipient_planning, created_at
 		)
 		VALUES (
-			$1, $2, $3,
-			$4, $5,
-			$6, NULLIF($7, ''),
-			$8, NULLIF($9, ''), $10,
-			$11, $12, $13,
-			$14, $15, $16,
-			$17, $18, $19
+			$1, $2, $3, $4, $5,
+			$6, $7,
+			$8, NULLIF($9, ''),
+			$10, NULLIF($11, ''), $12,
+			$13, $14, $15,
+			$16, $17, $18,
+			$19, $20, $21
 		)
 		ON CONFLICT (fork_run_id) DO UPDATE
 		SET owner = EXCLUDED.owner,
+		    fork_point_kind = EXCLUDED.fork_point_kind,
+		    fork_revision = EXCLUDED.fork_revision,
+		    fork_event_id = EXCLUDED.fork_event_id,
 		    runtime_recovery_owner = EXCLUDED.runtime_recovery_owner,
 		    mode = EXCLUDED.mode,
 		    bundle_hash = EXCLUDED.bundle_hash,
@@ -118,14 +121,27 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 		    route_topology = EXCLUDED.route_topology,
 		    recipient_planning = EXCLUDED.recipient_planning,
 		    created_at = EXCLUDED.created_at
-	`, record.ForkRunID, record.SourceRunID, record.ForkEventID,
+		WHERE run_fork_selected_contract_route_recoveries.source_run_id = EXCLUDED.source_run_id
+		  AND run_fork_selected_contract_route_recoveries.fork_point_kind = EXCLUDED.fork_point_kind
+		  AND run_fork_selected_contract_route_recoveries.fork_revision = EXCLUDED.fork_revision
+		  AND (run_fork_selected_contract_route_recoveries.fork_event_id = EXCLUDED.fork_event_id
+		       OR (run_fork_selected_contract_route_recoveries.fork_event_id IS NULL AND EXCLUDED.fork_event_id IS NULL))
+	`, record.ForkRunID, record.SourceRunID, record.ForkPoint.Kind, record.ForkPoint.Revision, nullableForkEventID(record.ForkPoint),
 		record.Owner, record.RuntimeRecoveryOwner,
 		record.ContractSelection.Mode, record.ContractSelection.BundleHash,
 		record.RouteTopologyOwner, record.DynamicTopologyOwner, record.RecipientPlanningOwner,
 		record.FrontierEvidenceFingerprint, record.RouteTopologyFingerprint, record.RecipientPlanningFingerprint,
 		record.StaticRouteEventCount, record.DynamicTopologyProofCount, record.RecipientPlanEventCount,
-		string(record.RouteTopology), string(record.RecipientPlanning), record.CreatedAt); err != nil {
+		string(record.RouteTopology), string(record.RecipientPlanning), record.CreatedAt)
+	if err != nil {
 		return fmt.Errorf("record selected-contract route recovery: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count selected-contract route recovery write: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("selected-contract route recovery contradicts the fork's fixed source or point")
 	}
 	return nil
 }
@@ -161,6 +177,7 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 	if actual.Owner != expected.Owner ||
 		actual.RuntimeRecoveryOwner != expected.RuntimeRecoveryOwner ||
 		actual.SourceRunID != expected.SourceRunID ||
+		actual.ForkPoint != expected.ForkPoint ||
 		actual.ForkEventID != expected.ForkEventID ||
 		actual.RouteTopologyOwner != expected.RouteTopologyOwner ||
 		actual.DynamicTopologyOwner != expected.DynamicTopologyOwner ||
@@ -369,7 +386,7 @@ func projectSelectedContractRouteRecoveryRecords(records []runfork.RunForkSelect
 	for _, record := range records {
 		out = append(out, runtimemanager.SelectedContractRouteRecoveryRecord{
 			Owner: record.Owner, RuntimeRecoveryOwner: record.RuntimeRecoveryOwner,
-			ForkRunID: record.ForkRunID, SourceRunID: record.SourceRunID, ForkEventID: record.ForkEventID,
+			ForkRunID: record.ForkRunID, SourceRunID: record.SourceRunID, ForkPoint: record.ForkPoint, ForkEventID: record.ForkEventID,
 			RouteTopologyOwner: record.RouteTopologyOwner, DynamicTopologyOwner: record.DynamicTopologyOwner,
 			RecipientPlanningOwner:       record.RecipientPlanningOwner,
 			FrontierEvidenceFingerprint:  record.FrontierEvidenceFingerprint,
@@ -400,12 +417,11 @@ func normalizeRunForkSelectedContractRouteRecovery(req runfork.RunForkSelectedCo
 	if _, err := uuid.Parse(sourceRunID); err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery source run_id must be a UUID: %w", err)
 	}
-	forkEventID := strings.TrimSpace(req.ForkEventID)
-	if forkEventID == "" {
-		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires fork event_id")
+	if err := req.ForkPoint.Validate(); err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery fork point: %w", err)
 	}
-	if _, err := uuid.Parse(forkEventID); err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery fork event_id must be a UUID: %w", err)
+	if req.ForkEventID != req.ForkPoint.EventID {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery event differs from fork point")
 	}
 	selection, err := normalizeRunForkSelectedContractSelection(req.ContractSelection)
 	if err != nil {
@@ -459,7 +475,8 @@ func normalizeRunForkSelectedContractRouteRecovery(req runfork.RunForkSelectedCo
 		RuntimeRecoveryOwner:         runfork.RunForkSelectedContractRouteRecoveryOwner,
 		ForkRunID:                    forkRunID,
 		SourceRunID:                  sourceRunID,
-		ForkEventID:                  forkEventID,
+		ForkPoint:                    runfork.RunForkPoint{Kind: req.ForkPoint.Kind, Revision: req.ForkPoint.Revision, EventID: req.ForkPoint.EventID},
+		ForkEventID:                  req.ForkPoint.EventID,
 		ContractSelection:            selection,
 		RouteTopologyOwner:           topology.Owner,
 		DynamicTopologyOwner:         topology.DynamicTopologyOwner,
@@ -533,6 +550,8 @@ func runForkSelectedContractRouteRecoverySelect() string {
 			runtime_recovery_owner,
 			fork_run_id,
 			source_run_id,
+			fork_point_kind,
+			fork_revision,
 			fork_event_id,
 			mode,
 			COALESCE(bundle_hash, ''),
@@ -568,12 +587,17 @@ func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRe
 	var selection runfork.RunForkContractSelection
 	var routeTopology, recipientPlanning []byte
 	var createdAt any
+	var pointKind string
+	var forkRevision int64
+	var forkEventID sql.NullString
 	err := row.Scan(
 		&record.Owner,
 		&record.RuntimeRecoveryOwner,
 		&record.ForkRunID,
 		&record.SourceRunID,
-		&record.ForkEventID,
+		&pointKind,
+		&forkRevision,
+		&forkEventID,
 		&selection.Mode,
 		&selection.BundleHash,
 		&record.RouteTopologyOwner,
@@ -592,6 +616,11 @@ func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRe
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
+	record.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointKind(pointKind), Revision: forkRevision, EventID: forkEventID.String}
+	if err := record.ForkPoint.Validate(); err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("decode selected-contract route recovery fork point: %w", err)
+	}
+	record.ForkEventID = record.ForkPoint.EventID
 	record.ContractSelection = selection
 	record.RouteTopology = append(json.RawMessage(nil), routeTopology...)
 	record.RecipientPlanning = append(json.RawMessage(nil), recipientPlanning...)

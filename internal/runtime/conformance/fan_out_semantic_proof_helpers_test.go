@@ -60,15 +60,6 @@ func TestFanOutSemanticProofFixtureAdmitsExactProducerSites(t *testing.T) {
 	}
 }
 
-func TestFanOutResourceCrossFlowFixtureCompiles(t *testing.T) {
-	source := semanticProofSourceWithCrossFlow(t, true)
-	node := identitytest.FlowNode(t, notifyallchildren.OwnerFlowID, "portfolio-coordinator")
-	plans := source.FanOutPlansForHandler(node, semanticProofResourceEvent)
-	if len(plans) != 1 || plans[0].ResourceSource == nil || plans[0].EmittedEventType() != "portfolio/account.registered" {
-		t.Fatalf("cross-flow resource source plan = %+v", plans)
-	}
-}
-
 // Extend a copy of the existing admitted numeric fixture, not its shared files.
 func semanticProofSource(t *testing.T) semanticview.Source {
 	return semanticProofSourceWithCrossFlow(t, false)
@@ -95,47 +86,21 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 		}
 		return strings.Replace(raw, old, next, 1)
 	}
-	eventsToAdd := []string{semanticProofPayloadEvent, semanticProofEntityEvent, semanticProofResourceEvent, semanticProofJobflowEvent, semanticProofKeylessEvent, semanticProofRuleDataEvent, semanticProofCompleteDataEvent, semanticProofOverwriteEvent}
+	eventsToAdd := []string{semanticProofPayloadEvent, semanticProofEntityEvent, semanticProofOverwriteEvent}
 	modify("schema.yaml", func(raw string) string {
 		var added strings.Builder
 		for _, name := range eventsToAdd {
 			fmt.Fprintf(&added, "      - event: %s\n        source: external\n", name)
 		}
 		raw = replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
-		return replace(raw, "      - account.registered\n", "      - account.registered\n      - company.lead\n      - company.keyless\n")
+		return raw
 	})
 	modify("events.yaml", func(raw string) string {
 		raw = replace(raw, "  eligible: boolean\n", "  eligible: boolean\n  ordinal: integer\n  source_count: integer\n  snapshot_threshold: integer\n")
 		for _, name := range eventsToAdd {
 			raw += fmt.Sprintf("%s:\n  portfolio_id: text\n  account_ids: \"[NumericAccount]\"\n  threshold: integer\n", name)
 		}
-		raw += `company.lead:
-  key: slug
-  slug: text
-  name: text
-  domain: text
-  funds: "[text]"
-  sources: "[text]"
-  tvl: number?
-  category: text
-  has_token: boolean
-  note: text
-  on_w3c: boolean
-  ats: JobflowATS?
-  eng_roles: integer
-  fit_titles: "[text]"
-  gem_score: number
-company.keyless:
-  value: text
-`
 		return raw
-	})
-	modify("types.yaml", func(raw string) string {
-		return raw + `  JobflowATS:
-    provider: text
-    ats_slug: text
-    titles: "[text]"
-`
 	})
 	modify("nodes.yaml", func(raw string) string {
 		var subscriptions strings.Builder
@@ -180,35 +145,6 @@ company.keyless:
 `, producer.event, producer.site, producer.source)
 		}
 		raw += fmt.Sprintf(`    %s:
-      fan_out:
-        items_from: data.portfolio/account.registered
-`, semanticProofResourceEvent)
-		raw += fmt.Sprintf(`    %s:
-      fan_out:
-        items_from: data.portfolio/company.lead
-`, semanticProofJobflowEvent)
-		raw += fmt.Sprintf(`    %s:
-      fan_out:
-        items_from: data.portfolio/company.keyless
-`, semanticProofKeylessEvent)
-		raw += fmt.Sprintf(`    %s:
-      rules:
-        - id: unselected
-          condition: payload.threshold < 0
-          fan_out:
-            items_from: data.portfolio/company.lead
-        - id: selected
-          condition: else
-          fan_out:
-            items_from: data.portfolio/company.keyless
-`, semanticProofRuleDataEvent)
-		raw += fmt.Sprintf(`    %s:
-      on_complete:
-        - id: complete
-          fan_out:
-            items_from: data.portfolio/company.keyless
-`, semanticProofCompleteDataEvent)
-		raw += fmt.Sprintf(`    %s:
       data_accumulation:
         writes:
           - source_field: account_ids
@@ -216,19 +152,7 @@ company.keyless:
           - source_field: threshold
             target_field: threshold
 `, semanticProofOverwriteEvent)
-		return `jobflow-lead-observer:
-  execution_type: system_node
-  subscribes_to:
-    - company.lead
-  event_handlers:
-    company.lead: {}
-jobflow-keyless-observer:
-  execution_type: system_node
-  subscribes_to:
-    - company.keyless
-  event_handlers:
-    company.keyless: {}
-` + raw
+		return raw
 	})
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(canonicalrouting.RepoRoot(t), root, contracts.DefaultPlatformSpecFile(canonicalrouting.RepoRoot(t)))
 	if err != nil {

@@ -530,7 +530,8 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
 			LifecycleDiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{
 				Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
-				SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID, ForkEventID: req.Admission.ForkEventID,
+				SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID,
+				ForkPoint: req.Admission.ForkPoint, ForkEventID: req.Admission.ForkPoint.EventID,
 			},
 			ExecutionPosture:   req.AgentRuntime.Options.ExecutionPosture,
 			BaseContext:        context.WithoutCancel(ctx),
@@ -567,7 +568,8 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	builder.options.BaseContext = context.WithoutCancel(ctx)
 	builder.options.LifecycleDiagnosticOrigin = runtimemanager.LifecycleDiagnosticOrigin{
 		Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
-		SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID, ForkEventID: req.Admission.ForkEventID,
+		SelectedFork: authority.SelectedFork, SourceRunID: req.Admission.SourceRunID,
+		ForkPoint: req.Admission.ForkPoint, ForkEventID: req.Admission.ForkPoint.EventID,
 	}
 	builder.options.DeliveryStore = ports.busDurable.DeliveryLifecycle
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, builder.factory, builder.options, ports.manager)
@@ -727,7 +729,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.WorkOwner == nil {
 		return selectedContractAgentRuntimeFactory{}, errors.New("selected-fork gateway requires work occurrence")
 	}
-	gatewayWork, err := managerOptions.WorkOwner.Begin(context.Background())
+	gatewayWork, err := managerOptions.WorkOwner.BeginStanding(context.Background())
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, err
 	}

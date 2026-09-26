@@ -6,95 +6,29 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/durabledata"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
-func TestResourceFanOutCompilesOneExactEventForEveryProducerSite(t *testing.T) {
-	resource := func() *FanOutSpec { return &FanOutSpec{ItemsFrom: "data.score.available"} }
-	handler := SystemNodeEventHandler{
-		FanOut:     resource(),
-		Rules:      []HandlerRuleEntry{{Condition: "payload.ready", FanOut: resource()}},
-		OnComplete: []HandlerRuleEntry{{Condition: "else", FanOut: resource()}},
-	}
+func TestRetiredDataFanOutSourceRejectedAtDecodeAndCompilation(t *testing.T) {
 	bundle := fanOutPlanRegistryTestBundle(t, SystemNodeEventHandler{})
-	ref, err := durabledata.ParseDeclarationRef(".", "score.available")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle.dataDeclarations[ref.Key()] = DurableDataDeclaration{
-		Name: ref.EventName, Ref: ref, SchemaDigest: durabledata.SchemaDigestFor([]byte(`{"type":"object"}`)),
-	}
 	node := identitytest.RootNode(t, "dispatcher")
-	if err := bundle.CompileFanOutHandlerPlans(node, "batch.ready", handler); err != nil {
-		t.Fatal(err)
-	}
-	plans := bundle.FanOutPlansForHandler(node, "batch.ready")
-	if len(plans) != 3 {
-		t.Fatalf("resource plans = %d, want handler/rule/on_complete", len(plans))
-	}
-	for _, plan := range plans {
-		if plan.ResourceSource == nil || plan.ResourceSource.Declaration != ref || plan.EmittedEventType() != ref.EventName || !plan.Emit.Empty() {
-			t.Fatalf("resource plan lost exact declaration or invented emit: %#v", plan)
-		}
-	}
-	if got := HandlerEmitEvents(handler, plans); len(got) != 1 || got[0] != ref.EventName {
-		t.Fatalf("compiled producer census = %#v", got)
-	}
-	sites := HandlerDeclarativeEmitSites(handler, plans)
-	if len(sites) != 3 {
-		t.Fatalf("compiled producer sites = %d, want 3", len(sites))
-	}
-	for _, site := range sites {
-		if site.EventType() != ref.EventName || site.ResourceSource == nil || !site.Spec.Empty() {
-			t.Fatalf("resource producer site used authored emit template: %#v", site)
-		}
-	}
-}
-
-func TestResourceFanOutRejectsCollectionOnlyFieldsEvenWhenEmpty(t *testing.T) {
-	for _, extra := range []string{"as: ''", "identity: null", "emit: null", "max_items: null"} {
-		t.Run(extra, func(t *testing.T) {
-			var spec FanOutSpec
-			err := yaml.Unmarshal([]byte("items_from: data.score.available\n"+extra+"\n"), &spec)
-			if err == nil || !strings.Contains(err.Error(), "not allowed with a data source") {
-				t.Fatalf("resource mixed authoring error = %v", err)
+	for _, source := range []string{"data.score.available", "data."} {
+		t.Run(source, func(t *testing.T) {
+			for _, suffix := range []string{"", "as: row\n"} {
+				var spec FanOutSpec
+				err := yaml.Unmarshal([]byte("items_from: "+source+"\n"+suffix), &spec)
+				if err == nil {
+					t.Fatalf("retired source %q with %q decoded", source, suffix)
+				}
+			}
+			_, err := bundle.ResolveFanOutEffectiveSemantics(node, "batch.ready", FanOutSpec{ItemsFrom: source, As: "row"})
+			if err == nil || !strings.Contains(err.Error(), "payload.* or entity.*") {
+				t.Fatalf("retired source compile error = %v", err)
 			}
 		})
-	}
-}
-
-func TestResourceFanOutRequiresExactSameFlowImportableEvent(t *testing.T) {
-	bundle := fanOutPlanRegistryTestBundle(t, SystemNodeEventHandler{})
-	other, err := durabledata.ParseDeclarationRef("child", "score.available")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle.dataDeclarations[other.Key()] = DurableDataDeclaration{
-		Name: other.EventName, Ref: other, SchemaDigest: durabledata.SchemaDigestFor([]byte(`{"type":"object"}`)),
-	}
-	node := identitytest.RootNode(t, "dispatcher")
-	for _, test := range []struct {
-		name, source string
-	}{
-		{"sibling-flow", "data.score.available"},
-		{"unknown", "data.score.missing"},
-		{"malformed", "data."},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := bundle.ResolveFanOutEffectiveSemantics(node, "batch.ready", FanOutSpec{ItemsFrom: test.source})
-			if err == nil {
-				t.Fatalf("resource source %q borrowed a declaration outside the exact owning flow", test.source)
-			}
-		})
-	}
-	// A catalog event alone is not an importable resource declaration.
-	bundle.dataDeclarations = nil
-	if _, err := bundle.ResolveFanOutEffectiveSemantics(node, "batch.ready", FanOutSpec{ItemsFrom: "data.batch.ready"}); err == nil {
-		t.Fatal("ordinary catalog event was treated as an importable resource")
 	}
 }
 
