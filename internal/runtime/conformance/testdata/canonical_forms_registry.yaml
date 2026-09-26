@@ -747,41 +747,50 @@ decoder_exclusions:
 
 decode_bypasses:
   # Counts are production source lines containing yaml.Node selectors outside internal/yamlsource.
-  # Pack/config roots count direct yaml.Unmarshal and yaml.NewDecoder calls in those paths.
-  # Each migration PR must lower the ceiling with the per-file ledger; increases fail review.
+  # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
+  # The canonical owner's root is classified but excluded from the off-owner ceiling.
+  # CI compares each PR to the accepted base ledger, not just these initial ceilings.
   node_site_ceiling: 290
-  pack_config_decode_ceiling: 6
+  off_owner_direct_decode_ceiling: 30
   files:
-    internal/cliapp/test_command.go: {family: excluded_scenario_tooling, node_sites: 11, pack_config_decode_roots: 0}
-    internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 18, pack_config_decode_roots: 0}
-    internal/config/config.go: {family: excluded_deployment_config, node_sites: 3, pack_config_decode_roots: 2}
-    internal/packs/channel.go: {family: closure_pack_platform, node_sites: 3, pack_config_decode_roots: 1}
-    internal/packartifact/inventory.go: {family: closure_pack_platform, node_sites: 0, pack_config_decode_roots: 1}
-    internal/packartifact/project.go: {family: closure_pack_platform, node_sites: 0, pack_config_decode_roots: 1}
-    internal/packmodel/envelope.go: {family: closure_pack_platform, node_sites: 0, pack_config_decode_roots: 1}
-    internal/runtime/agentintent/model.go: {family: wave_5_agent_tool_policy, node_sites: 1, pack_config_decode_roots: 0}
-    internal/runtime/contracts/durable_data.go: {family: wave_5_agent_tool_policy, node_sites: 1, pack_config_decode_roots: 0}
-    internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
-    internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 6, pack_config_decode_roots: 0}
-    internal/runtime/contracts/receiver_initialization.go: {family: wave_4_node_handler, node_sites: 6, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_action_retirement.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_activity.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_agent_writes.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_join.go: {family: wave_4_node_handler, node_sites: 10, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 6, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_policy_sheet.go: {family: wave_5_agent_tool_policy, node_sites: 25, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_stages.go: {family: wave_4_node_handler, node_sites: 9, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 6, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 10, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_flow.go: {family: mixed_wave_4_wave_5, node_sites: 27, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_handlers.go: {family: wave_4_node_handler, node_sites: 37, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 20, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 24, pack_config_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 28, pack_config_decode_roots: 0}
-    internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 12, pack_config_decode_roots: 0}
-    internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, pack_config_decode_roots: 0}
-    internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, pack_config_decode_roots: 0}
-    internal/testtiming/budget.go: {family: excluded_test_tooling, node_sites: 4, pack_config_decode_roots: 0}
+    internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
+    internal/cliapp/test_command.go: {family: excluded_scenario_tooling, node_sites: 11, direct_decode_roots: 3}
+    internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 18, direct_decode_roots: 2}
+    internal/config/config.go: {family: excluded_deployment_config, node_sites: 3, direct_decode_roots: 2}
+    internal/packs/channel.go: {family: closure_pack_platform, node_sites: 3, direct_decode_roots: 1}
+    internal/packartifact/inventory.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
+    internal/packartifact/project.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
+    internal/packmodel/envelope.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
+    internal/providerconnectors/catalog_types.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
+    internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 2}
+    internal/runtime/agentintent/model.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
+    internal/runtime/contracts/durable_data.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
+    internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
+    internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 6, direct_decode_roots: 0}
+    internal/runtime/contracts/receiver_initialization.go: {family: wave_4_node_handler, node_sites: 6, direct_decode_roots: 0}
+    internal/runtime/contracts/tool_input_schema_value.go: {family: wave_5_agent_tool_policy, node_sites: 0, direct_decode_roots: 1}
+    internal/runtime/contracts/workflow_contract_action_retirement.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_activity.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_agent_writes.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_join.go: {family: wave_4_node_handler, node_sites: 10, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 6, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_policy_sheet.go: {family: wave_5_agent_tool_policy, node_sites: 25, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_stages.go: {family: wave_4_node_handler, node_sites: 9, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 6, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 10, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_flow.go: {family: mixed_wave_4_wave_5, node_sites: 27, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_handlers.go: {family: wave_4_node_handler, node_sites: 37, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 20, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 24, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 28, direct_decode_roots: 0}
+    internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 12, direct_decode_roots: 0}
+    internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
+    internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, direct_decode_roots: 4}
+    internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, direct_decode_roots: 5}
+    internal/testplanning/execution.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
+    internal/testplanning/policy.go: {family: excluded_test_tooling, node_sites: 0, direct_decode_roots: 1}
+    internal/testtiming/budget.go: {family: excluded_test_tooling, node_sites: 4, direct_decode_roots: 2}
+    internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
   completeness: "all 91 remaining production custom unmarshallers classified as 86 bundle-reachable row owners, 3 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"

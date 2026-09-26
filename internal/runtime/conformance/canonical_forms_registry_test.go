@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -40,11 +41,13 @@ var canonicalDecoderExclusionClassifications = map[string]struct{}{
 }
 
 var canonicalDecodeBypassFamilies = map[string]struct{}{
+	"canonical_owner":                {},
 	"wave_4_node_handler":            {},
 	"wave_5_agent_tool_policy":       {},
 	"mixed_wave_4_wave_5":            {},
 	"mixed_existing_typed_admission": {},
 	"closure_pack_platform":          {},
+	"other_production_projection":    {},
 	"excluded_deployment_config":     {},
 	"excluded_scenario_tooling":      {},
 	"excluded_test_fixture":          {},
@@ -75,22 +78,22 @@ type canonicalFormsInventory struct {
 }
 
 type canonicalDecodeBypassInventory struct {
-	NodeSiteCeiling   int                                  `yaml:"node_site_ceiling"`
-	PackConfigCeiling int                                  `yaml:"pack_config_decode_ceiling"`
-	Files             map[string]canonicalDecodeBypassFile `yaml:"files"`
+	NodeSiteCeiling     int                                  `yaml:"node_site_ceiling"`
+	DirectDecodeCeiling int                                  `yaml:"off_owner_direct_decode_ceiling"`
+	Files               map[string]canonicalDecodeBypassFile `yaml:"files"`
 }
 
 type canonicalDecodeBypassFile struct {
-	Family         string `yaml:"family"`
-	NodeSites      int    `yaml:"node_sites"`
-	PackConfigRoot int    `yaml:"pack_config_decode_roots"`
+	Family            string `yaml:"family"`
+	NodeSites         int    `yaml:"node_sites"`
+	DirectDecodeRoots int    `yaml:"direct_decode_roots"`
 }
 
 const (
 	initialCustomUnmarshalCeiling  = 91
 	initialReachableDecoderCeiling = 86
 	initialOffOwnerNodeSiteCeiling = 290
-	initialPackConfigDecodeCeiling = 6
+	initialDirectDecodeCeiling     = 30
 )
 
 type canonicalFormsRow struct {
@@ -266,12 +269,18 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 func TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	record := loadCanonicalFormsRegistry(t, root)
-	actual, err := collectOffOwnerDecodeBypasses(root)
+	actual, err := collectYAMLDecodeSites(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateOffOwnerDecodeBypasses(record.DecodeBypasses, actual); err != nil {
+	if err := validateYAMLDecodeSites(record.DecodeBypasses, actual); err != nil {
 		t.Fatal(err)
+	}
+	if baseSHA := os.Getenv("SWARM_CANONICAL_FORMS_BASE_SHA"); baseSHA != "" {
+		base := loadCanonicalFormsRegistryAtRevision(t, root, baseSHA)
+		if err := validateDecodeCensusMonotone(base, record); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -285,24 +294,24 @@ var raw *source.Node
 import "gopkg.in/yaml.v3"
 func decode(raw []byte) error { return yaml.Unmarshal(raw, new(any)) }
 `)
-	actual, err := collectOffOwnerDecodeBypasses(root)
+	actual, err := collectYAMLDecodeSites(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateOffOwnerDecodeBypasses(canonicalDecodeBypassInventory{Files: map[string]canonicalDecodeBypassFile{}}, actual); err == nil || !strings.Contains(err.Error(), "internal/runtime/contracts/new.go") || !strings.Contains(err.Error(), "internal/packs/new.go") {
+	if err := validateYAMLDecodeSites(canonicalDecodeBypassInventory{Files: map[string]canonicalDecodeBypassFile{}}, actual); err == nil || !strings.Contains(err.Error(), "internal/runtime/contracts/new.go") || !strings.Contains(err.Error(), "internal/packs/new.go") {
 		t.Fatalf("unregistered bypass error = %v", err)
 	}
 	path := "internal/runtime/contracts/new.go"
 	packPath := "internal/packs/new.go"
 	baseline := canonicalDecodeBypassInventory{
-		NodeSiteCeiling:   1,
-		PackConfigCeiling: 1,
+		NodeSiteCeiling:     1,
+		DirectDecodeCeiling: 1,
 		Files: map[string]canonicalDecodeBypassFile{
 			path:     {Family: "wave_4_node_handler", NodeSites: 1},
-			packPath: {Family: "closure_pack_platform", PackConfigRoot: 1},
+			packPath: {Family: "closure_pack_platform", DirectDecodeRoots: 1},
 		},
 	}
-	if err := validateOffOwnerDecodeBypasses(baseline, actual); err != nil {
+	if err := validateYAMLDecodeSites(baseline, actual); err != nil {
 		t.Fatalf("classified bypass validation: %v", err)
 	}
 	writeRegistryMutationFile(t, filepath.Join(root, path), `package contracts
@@ -310,30 +319,96 @@ import source "gopkg.in/yaml.v3"
 var first *source.Node
 var second *source.Node
 `)
-	actual, err = collectOffOwnerDecodeBypasses(root)
+	actual, err = collectYAMLDecodeSites(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateOffOwnerDecodeBypasses(baseline, actual); err == nil || !strings.Contains(err.Error(), "recorded node/root=1/0, actual=2/0") {
+	if err := validateYAMLDecodeSites(baseline, actual); err == nil || !strings.Contains(err.Error(), "recorded node/root=1/0, actual=2/0") {
 		t.Fatalf("increased existing-file bypass error = %v", err)
 	}
 	writeRegistryMutationFile(t, filepath.Join(root, "internal/yamlsource/source.go"), `package yamlsource
 import "gopkg.in/yaml.v3"
 var owner *yaml.Node
+func decode(raw []byte) error { return yaml.Unmarshal(raw, new(any)) }
 `)
 	writeRegistryMutationFile(t, filepath.Join(root, "internal/runtime/contracts/new_test.go"), `package contracts
 import "gopkg.in/yaml.v3"
 var fixture *yaml.Node
 `)
-	actual, err = collectOffOwnerDecodeBypasses(root)
+	actual, err = collectYAMLDecodeSites(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := actual["internal/yamlsource/source.go"]; exists {
-		t.Fatal("canonical owner was included in off-owner bypass inventory")
+	if owner := actual["internal/yamlsource/source.go"]; owner.NodeSites != 0 || owner.DirectDecodeRoots != 1 {
+		t.Fatalf("canonical owner classification = %#v, want one direct root and zero off-owner node sites", owner)
 	}
 	if _, exists := actual["internal/runtime/contracts/new_test.go"]; exists {
 		t.Fatal("test-only fixture was included in production bypass inventory")
+	}
+	for _, path := range []string{
+		"internal/cliapp/unified_config.go",
+		"internal/providertriggers/providertriggers.go",
+		"internal/providerconnectors/catalog_types.go",
+		"internal/newingress/probe.go",
+	} {
+		t.Run(path, func(t *testing.T) {
+			mutationRoot := t.TempDir()
+			writeRegistryMutationFile(t, filepath.Join(mutationRoot, path), `package probe
+import source "gopkg.in/yaml.v3"
+func decode(raw []byte) error { return source.Unmarshal(raw, new(any)) }
+`)
+			got, err := collectYAMLDecodeSites(mutationRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got[path].DirectDecodeRoots != 1 {
+				t.Fatalf("unclassified direct root in %s was not discovered: %#v", path, got[path])
+			}
+			if err := validateYAMLDecodeSites(canonicalDecodeBypassInventory{Files: map[string]canonicalDecodeBypassFile{}}, got); err == nil || !strings.Contains(err.Error(), path) {
+				t.Fatalf("unclassified direct root %s was not rejected: %v", path, err)
+			}
+		})
+	}
+	baselineCensus := canonicalDecodeBypassInventory{
+		NodeSiteCeiling: 2, DirectDecodeCeiling: 1,
+		Files: map[string]canonicalDecodeBypassFile{
+			"internal/runtime/contracts/a.go": {Family: "wave_4_node_handler", NodeSites: 2, DirectDecodeRoots: 1},
+		},
+	}
+	reducedCensus := canonicalDecodeBypassInventory{
+		NodeSiteCeiling: 1, DirectDecodeCeiling: 0,
+		Files: map[string]canonicalDecodeBypassFile{
+			"internal/runtime/contracts/a.go": {Family: "wave_4_node_handler", NodeSites: 1},
+		},
+	}
+	if err := validateDecodeBypassMonotone(baselineCensus, reducedCensus); err != nil {
+		t.Fatalf("accepted reduction rejected: %v", err)
+	}
+	if err := validateDecodeBypassMonotone(reducedCensus, baselineCensus); err == nil || !strings.Contains(err.Error(), "budget rose") {
+		t.Fatalf("restored lower budget accepted: %v", err)
+	}
+	sameTotalOtherFamily := canonicalDecodeBypassInventory{
+		NodeSiteCeiling: 2, DirectDecodeCeiling: 1,
+		Files: map[string]canonicalDecodeBypassFile{
+			"internal/runtime/contracts/b.go": {Family: "wave_5_agent_tool_policy", NodeSites: 2, DirectDecodeRoots: 1},
+		},
+	}
+	if err := validateDecodeBypassMonotone(baselineCensus, sameTotalOtherFamily); err == nil || !strings.Contains(err.Error(), "contracts/b.go") {
+		t.Fatalf("same-total cross-family reintroduction accepted: %v", err)
+	}
+	baselineDecoders := canonicalFormsRegistry{
+		Inventory:       canonicalFormsInventory{CustomUnmarshalTotal: 2, CustomUnmarshalReachable: 2},
+		DecoderCoverage: map[string]map[string][]string{"a.go": {"handler.container": {"A", "B"}}},
+	}
+	reducedDecoders := canonicalFormsRegistry{
+		Inventory:       canonicalFormsInventory{CustomUnmarshalTotal: 1, CustomUnmarshalReachable: 1},
+		DecoderCoverage: map[string]map[string][]string{"a.go": {"handler.container": {"A"}}},
+	}
+	if err := validateDecodeCensusMonotone(baselineDecoders, reducedDecoders); err != nil {
+		t.Fatalf("accepted decoder reduction rejected: %v", err)
+	}
+	if err := validateDecodeCensusMonotone(reducedDecoders, baselineDecoders); err == nil || !strings.Contains(err.Error(), "budget rose") {
+		t.Fatalf("restored decoder budget accepted: %v", err)
 	}
 }
 
@@ -685,6 +760,113 @@ func loadCanonicalFormsRegistry(t testing.TB, root string) canonicalFormsRegistr
 	return record
 }
 
+func loadCanonicalFormsRegistryAtRevision(t testing.TB, root, revision string) canonicalFormsRegistry {
+	t.Helper()
+	if matched, _ := regexp.MatchString(`^[0-9a-f]{40}$`, revision); !matched {
+		t.Fatalf("invalid accepted-base SHA %q", revision)
+	}
+	command := exec.Command("git", "show", revision+":"+canonicalFormsRegistryPath)
+	command.Dir = root
+	raw, err := command.Output()
+	if err != nil {
+		t.Fatalf("read accepted-base canonical forms registry: %v", err)
+	}
+	var record canonicalFormsRegistry
+	if err := yaml.Unmarshal(raw, &record); err != nil {
+		t.Fatalf("decode accepted-base canonical forms registry: %v", err)
+	}
+	return record
+}
+
+func validateDecodeCensusMonotone(base, current canonicalFormsRegistry) error {
+	if current.Inventory.CustomUnmarshalTotal > base.Inventory.CustomUnmarshalTotal || current.Inventory.CustomUnmarshalReachable > base.Inventory.CustomUnmarshalReachable {
+		return fmt.Errorf("custom decoder budget rose from total/reachable %d/%d to %d/%d", base.Inventory.CustomUnmarshalTotal, base.Inventory.CustomUnmarshalReachable, current.Inventory.CustomUnmarshalTotal, current.Inventory.CustomUnmarshalReachable)
+	}
+	baseAll := canonicalDecoderIDs(base.DecoderCoverage, base.DecoderRetired, base.DecoderExclusions)
+	for identity := range canonicalDecoderIDs(current.DecoderCoverage, current.DecoderRetired, current.DecoderExclusions) {
+		if _, ok := baseAll[identity]; !ok {
+			return fmt.Errorf("new custom decoder %s is outside the accepted-base census", identity)
+		}
+	}
+	baseReachable := canonicalDecoderIDs(base.DecoderCoverage)
+	for identity := range canonicalDecoderIDs(current.DecoderCoverage) {
+		if _, ok := baseReachable[identity]; !ok {
+			return fmt.Errorf("custom decoder %s became reachable after the accepted base", identity)
+		}
+	}
+	baseExcluded := canonicalDecoderIDs(base.DecoderExclusions)
+	for identity := range canonicalDecoderIDs(current.DecoderExclusions) {
+		if _, ok := baseExcluded[identity]; !ok {
+			return fmt.Errorf("custom decoder %s became excluded after the accepted base", identity)
+		}
+	}
+	// The setup PR introduces this ledger; every later PR compares to its accepted base.
+	if base.DecodeBypasses.Files == nil {
+		return nil
+	}
+	return validateDecodeBypassMonotone(base.DecodeBypasses, current.DecodeBypasses)
+}
+
+func canonicalDecoderIDs(groups ...map[string]map[string][]string) map[string]struct{} {
+	identities := make(map[string]struct{})
+	for _, group := range groups {
+		for file, mappings := range group {
+			for _, receiverTypes := range mappings {
+				for _, receiverType := range receiverTypes {
+					identities[canonicalDecoderIdentity(file, receiverType)] = struct{}{}
+				}
+			}
+		}
+	}
+	return identities
+}
+
+func validateDecodeBypassMonotone(base, current canonicalDecodeBypassInventory) error {
+	if current.NodeSiteCeiling > base.NodeSiteCeiling || current.DirectDecodeCeiling > base.DirectDecodeCeiling {
+		return fmt.Errorf("decode budget rose from node/root %d/%d to %d/%d", base.NodeSiteCeiling, base.DirectDecodeCeiling, current.NodeSiteCeiling, current.DirectDecodeCeiling)
+	}
+	baseFamilies := make(map[string]canonicalDecodeBypassFile)
+	currentFamilies := make(map[string]canonicalDecodeBypassFile)
+	for _, entry := range base.Files {
+		if entry.Family == "canonical_owner" {
+			continue
+		}
+		total := baseFamilies[entry.Family]
+		total.NodeSites += entry.NodeSites
+		total.DirectDecodeRoots += entry.DirectDecodeRoots
+		baseFamilies[entry.Family] = total
+	}
+	paths := make([]string, 0, len(current.Files))
+	for path := range current.Files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		entry := current.Files[path]
+		if entry.Family == "canonical_owner" {
+			continue
+		}
+		prior := base.Files[path]
+		if entry.NodeSites > prior.NodeSites || entry.DirectDecodeRoots > prior.DirectDecodeRoots {
+			return fmt.Errorf("decode site %s rose from node/root %d/%d to %d/%d", path, prior.NodeSites, prior.DirectDecodeRoots, entry.NodeSites, entry.DirectDecodeRoots)
+		}
+		if prior.Family != entry.Family && (entry.NodeSites != 0 || entry.DirectDecodeRoots != 0) {
+			return fmt.Errorf("decode site %s moved from family %q to %q", path, prior.Family, entry.Family)
+		}
+		total := currentFamilies[entry.Family]
+		total.NodeSites += entry.NodeSites
+		total.DirectDecodeRoots += entry.DirectDecodeRoots
+		currentFamilies[entry.Family] = total
+	}
+	for family, total := range currentFamilies {
+		prior := baseFamilies[family]
+		if total.NodeSites > prior.NodeSites || total.DirectDecodeRoots > prior.DirectDecodeRoots {
+			return fmt.Errorf("decode family %s rose from node/root %d/%d to %d/%d", family, prior.NodeSites, prior.DirectDecodeRoots, total.NodeSites, total.DirectDecodeRoots)
+		}
+	}
+	return nil
+}
+
 func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 	out := make(map[string]string)
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -738,7 +920,7 @@ func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 	return out, nil
 }
 
-func collectOffOwnerDecodeBypasses(root string) (map[string]canonicalDecodeBypassFile, error) {
+func collectYAMLDecodeSites(root string) (map[string]canonicalDecodeBypassFile, error) {
 	out := make(map[string]canonicalDecodeBypassFile)
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -760,9 +942,7 @@ func collectOffOwnerDecodeBypasses(root string) (map[string]canonicalDecodeBypas
 			return err
 		}
 		relative = filepath.ToSlash(relative)
-		if strings.HasPrefix(relative, "internal/yamlsource/") {
-			return nil
-		}
+		owner := strings.HasPrefix(relative, "internal/yamlsource/")
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -794,7 +974,7 @@ func collectOffOwnerDecodeBypasses(root string) (map[string]canonicalDecodeBypas
 			return nil
 		}
 		lines := make(map[int]struct{})
-		packConfigRoots := 0
+		directDecodeRoots := 0
 		ast.Inspect(parsed, func(node ast.Node) bool {
 			switch value := node.(type) {
 			case *ast.SelectorExpr:
@@ -802,12 +982,12 @@ func collectOffOwnerDecodeBypasses(root string) (map[string]canonicalDecodeBypas
 				if !ok || value.Sel.Name != "Node" {
 					break
 				}
-				if _, ok := aliases[identifier.Name]; ok {
+				if _, ok := aliases[identifier.Name]; ok && !owner {
 					lines[files.Position(value.Pos()).Line] = struct{}{}
 				}
 			case *ast.CallExpr:
 				selector, ok := value.Fun.(*ast.SelectorExpr)
-				if !ok || (selector.Sel.Name != "Unmarshal" && selector.Sel.Name != "NewDecoder") || !isPackConfigDecodePath(relative) {
+				if !ok || (selector.Sel.Name != "Unmarshal" && selector.Sel.Name != "NewDecoder") {
 					break
 				}
 				identifier, ok := selector.X.(*ast.Ident)
@@ -815,51 +995,48 @@ func collectOffOwnerDecodeBypasses(root string) (map[string]canonicalDecodeBypas
 					break
 				}
 				if _, ok := aliases[identifier.Name]; ok {
-					packConfigRoots++
+					directDecodeRoots++
 				}
 			}
 			return true
 		})
-		if len(lines) != 0 || packConfigRoots != 0 {
-			out[relative] = canonicalDecodeBypassFile{NodeSites: len(lines), PackConfigRoot: packConfigRoots}
+		if len(lines) != 0 || directDecodeRoots != 0 {
+			out[relative] = canonicalDecodeBypassFile{NodeSites: len(lines), DirectDecodeRoots: directDecodeRoots}
 		}
 		return nil
 	})
 	return out, err
 }
 
-func isPackConfigDecodePath(relative string) bool {
-	for _, prefix := range []string{"internal/config/", "internal/packs/", "internal/packartifact/", "internal/packmodel/"} {
-		if strings.HasPrefix(relative, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func validateOffOwnerDecodeBypasses(record canonicalDecodeBypassInventory, actual map[string]canonicalDecodeBypassFile) error {
+func validateYAMLDecodeSites(record canonicalDecodeBypassInventory, actual map[string]canonicalDecodeBypassFile) error {
 	if record.Files == nil {
-		return fmt.Errorf("off-owner decode bypass inventory is missing")
+		return fmt.Errorf("YAML decode-site inventory is missing")
 	}
-	if record.NodeSiteCeiling < 0 || record.PackConfigCeiling < 0 || record.NodeSiteCeiling > initialOffOwnerNodeSiteCeiling || record.PackConfigCeiling > initialPackConfigDecodeCeiling {
-		return fmt.Errorf("off-owner decode ceilings exceed initial census: node=%d pack/config=%d", record.NodeSiteCeiling, record.PackConfigCeiling)
+	if record.NodeSiteCeiling < 0 || record.DirectDecodeCeiling < 0 || record.NodeSiteCeiling > initialOffOwnerNodeSiteCeiling || record.DirectDecodeCeiling > initialDirectDecodeCeiling {
+		return fmt.Errorf("off-owner decode ceilings exceed initial census: node=%d direct=%d", record.NodeSiteCeiling, record.DirectDecodeCeiling)
 	}
 	var missing, unclassified, mismatched []string
-	var nodeSites, packConfigRoots int
+	var nodeSites, directDecodeRoots int
 	for path, expected := range record.Files {
 		if _, known := canonicalDecodeBypassFamilies[expected.Family]; !known {
 			return fmt.Errorf("off-owner decode bypass %s has unknown migration family %q", path, expected.Family)
 		}
-		if expected.NodeSites < 0 || expected.PackConfigRoot < 0 {
+		owner := strings.HasPrefix(path, "internal/yamlsource/")
+		if (expected.Family == "canonical_owner") != owner || owner && expected.NodeSites != 0 {
+			return fmt.Errorf("YAML decode-site %s has invalid canonical-owner classification", path)
+		}
+		if expected.NodeSites < 0 || expected.DirectDecodeRoots < 0 {
 			return fmt.Errorf("off-owner decode bypass %s has negative count", path)
 		}
 		nodeSites += expected.NodeSites
-		packConfigRoots += expected.PackConfigRoot
+		if !owner {
+			directDecodeRoots += expected.DirectDecodeRoots
+		}
 		got, exists := actual[path]
 		if !exists {
 			missing = append(missing, path)
-		} else if expected.NodeSites != got.NodeSites || expected.PackConfigRoot != got.PackConfigRoot {
-			mismatched = append(mismatched, fmt.Sprintf("%s: recorded node/root=%d/%d, actual=%d/%d", path, expected.NodeSites, expected.PackConfigRoot, got.NodeSites, got.PackConfigRoot))
+		} else if expected.NodeSites != got.NodeSites || expected.DirectDecodeRoots != got.DirectDecodeRoots {
+			mismatched = append(mismatched, fmt.Sprintf("%s: recorded node/root=%d/%d, actual=%d/%d", path, expected.NodeSites, expected.DirectDecodeRoots, got.NodeSites, got.DirectDecodeRoots))
 		}
 	}
 	for path := range actual {
@@ -870,8 +1047,8 @@ func validateOffOwnerDecodeBypasses(record canonicalDecodeBypassInventory, actua
 	sort.Strings(missing)
 	sort.Strings(unclassified)
 	sort.Strings(mismatched)
-	if nodeSites != record.NodeSiteCeiling || packConfigRoots != record.PackConfigCeiling || len(missing) != 0 || len(unclassified) != 0 || len(mismatched) != 0 {
-		return fmt.Errorf("off-owner decode bypass drift: recorded node/root=%d/%d, ceiling=%d/%d; missing=%v; unclassified=%v; mismatched=%v", nodeSites, packConfigRoots, record.NodeSiteCeiling, record.PackConfigCeiling, missing, unclassified, mismatched)
+	if nodeSites != record.NodeSiteCeiling || directDecodeRoots != record.DirectDecodeCeiling || len(missing) != 0 || len(unclassified) != 0 || len(mismatched) != 0 {
+		return fmt.Errorf("off-owner decode bypass drift: recorded node/root=%d/%d, ceiling=%d/%d; missing=%v; unclassified=%v; mismatched=%v", nodeSites, directDecodeRoots, record.NodeSiteCeiling, record.DirectDecodeCeiling, missing, unclassified, mismatched)
 	}
 	return nil
 }
