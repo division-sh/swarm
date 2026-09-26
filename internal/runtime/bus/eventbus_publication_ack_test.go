@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -24,6 +25,53 @@ type publicationAcknowledgementProbeStore struct {
 	err          error
 	cancel       context.CancelFunc
 	commits      int
+}
+
+type deploymentRunStartProbeStore struct {
+	InMemoryEventStore
+	calls int
+	got   durabledata.RunCreationCommand
+}
+
+func (s *deploymentRunStartProbeStore) CommitDeploymentRunCreation(_ context.Context, command durabledata.RunCreationCommand, _ apiidempotency.Request) (durabledata.RunCreationOperationRecord, error) {
+	s.calls++
+	s.got = command
+	return durabledata.RunCreationOperationRecord{Summary: durabledata.RunCreationOperationSummary{RunID: command.RunID}}, nil
+}
+
+func TestDeploymentRunStartForwardsOnlyExactEventlessFeed(t *testing.T) {
+	store := &deploymentRunStartProbeStore{}
+	bus, err := newScopedTestEventBus(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := durabledata.RunCreationCommand{
+		RunID: uuid.NewString(), Actor: "operator", BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
+		Data: durabledata.RunCreationDataEnvelope{Pins: []durabledata.ExplicitPin{{
+			Declaration: ref, VersionID: durabledata.VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		}}},
+	}
+	request := apiidempotency.Request{Method: "run.start"}
+	ctx := testAuthorActivityContext(context.Background())
+	got, err := bus.StartDeploymentRunAcknowledged(ctx, command, request)
+	if err != nil || got.Summary.RunID != command.RunID || store.calls != 1 || store.got.EventID != "" || len(store.got.InitialEvent) != 0 {
+		t.Fatalf("deployment forward = %#v, %v; calls=%d command=%#v", got, err, store.calls, store.got)
+	}
+	hostile := command
+	hostile.BundleHash = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	if _, err := bus.StartDeploymentRunAcknowledged(ctx, hostile, request); err == nil || store.calls != 1 {
+		t.Fatalf("mismatched bundle reached selected store: calls=%d error=%v", store.calls, err)
+	}
+	hostile = command
+	hostile.EventID = uuid.NewString()
+	hostile.InitialEvent = json.RawMessage(`{"type":"start"}`)
+	if _, err := bus.StartDeploymentRunAcknowledged(ctx, hostile, request); err == nil || store.calls != 1 {
+		t.Fatalf("event-bearing run reached deployment owner: calls=%d error=%v", store.calls, err)
+	}
 }
 
 func (s *publicationAcknowledgementProbeStore) CommitPublication(ctx context.Context, command PublicationCommand) (CommittedPublication, error) {

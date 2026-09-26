@@ -408,6 +408,9 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 				if completeErr != nil {
 					return completeErr
 				}
+				if err := storedurabledata.CommitRunCreationFeedsTx(txctx, tx, plan, s.PipelinePostgresOwner); err != nil {
+					return err
+				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)
 				if completeErr != nil {
 					return completeErr
@@ -501,6 +504,9 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 				record, completeErr := storedurabledata.CompleteRunCreationTx(s.durableData, txctx, tx, plan, command.RunCreation.EventID, status)
 				if completeErr != nil {
 					return completeErr
+				}
+				if err := storedurabledata.CommitRunCreationFeedsTx(txctx, tx, plan, s.PipelineSQLiteOwner); err != nil {
+					return err
 				}
 				completion, completeErr = bindRunCreationCompletion(completion, record)
 				if completeErr != nil {
