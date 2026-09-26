@@ -56,7 +56,7 @@ func prepareSelectedStoreForkForTest(t *testing.T, ctx context.Context, selected
 			t.Error(err)
 		}
 	})
-	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {
 		t.Fatal(err)
 	}
 	var hash string

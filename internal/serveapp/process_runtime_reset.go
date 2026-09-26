@@ -371,7 +371,7 @@ func (s *processLifecycleSupervisor) reconstructResetContexts(ctx context.Contex
 		if err := candidate.BindSelectedProcess(ctx, s.selectedProcess, s.processCapability); err != nil {
 			return err
 		}
-		if _, err := candidate.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), candidates[0].runtime.ExecutionPosture)); err != nil {
+		if _, err := candidate.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), candidates[0].runtime.ExecutionPosture), s.selectedRecoveryEnvironment); err != nil {
 			return err
 		}
 	}

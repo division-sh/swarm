@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -28,6 +30,8 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 			SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
 			SourceFrozen:       true,
 			ForkRunID:          runForkTestForkRunID,
+			ForkPointKind:      string(runfork.RunForkPointEvent),
+			ForkRevision:       1,
 			ForkEventID:        runForkTestEventID,
 			ForkRunStatus:      "running",
 			ExecutedEventCount: 1,
@@ -80,6 +84,8 @@ func TestOperatorRunForkHandlersExposePreservedSourceOutcome(t *testing.T) {
 			SourceRunStatus:    "running",
 			SourceFrozen:       false,
 			ForkRunID:          runForkTestForkRunID,
+			ForkPointKind:      string(runfork.RunForkPointEvent),
+			ForkRevision:       1,
 			ForkEventID:        runForkTestEventID,
 			ForkRunStatus:      "running",
 			ExecutedEventCount: 1,
@@ -112,6 +118,51 @@ func TestValidateRunForkExecutionResultRejectsContradictorySourceOutcome(t *test
 		if err := validateRunForkExecutionResult(result); err == nil {
 			t.Fatalf("validateRunForkExecutionResult(%#v) error = nil", result)
 		}
+	}
+}
+
+func TestValidateRunForkExecutionResultKeepsDeploymentPointEventless(t *testing.T) {
+	result := RunForkExecutionResult{
+		SourceRunStatus: "running", ForkPointKind: string(runfork.RunForkPointDeploymentRevision), ForkRevision: 4,
+	}
+	if err := validateRunForkExecutionResult(result); err != nil {
+		t.Fatalf("eventless deployment revision was refused: %v", err)
+	}
+	result.ForkEventID = runForkTestEventID
+	if err := validateRunForkExecutionResult(result); err == nil {
+		t.Fatal("deployment revision invented an event identity")
+	}
+	result.ForkEventID = ""
+	result.ForkRevision = 0
+	if err := validateRunForkExecutionResult(result); err == nil {
+		t.Fatal("deployment revision without durable revision was accepted")
+	}
+}
+
+func TestOperatorRunForkEventlessDeploymentPointReadback(t *testing.T) {
+	executor := &recordingRunForkExecutor{result: RunForkExecutionResult{
+		Owner:       runfork.RunForkSelectedContractExecutionOwner,
+		SourceRunID: runForkTestSourceRunID, SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
+		ForkRunID: runForkTestForkRunID, ForkPointKind: string(runfork.RunForkPointDeploymentRevision),
+		ForkRevision: 4, ForkRunStatus: runfork.RunForkActivatedStatus,
+	}}
+	handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+	}}, executor)
+	request := fmt.Sprintf(`{"jsonrpc":"2.0","id":"deployment","method":"run.fork","params":{"source_run_id":%q,"allow_source_freeze":true,"idempotency_key":"deployment-point"}}`, runForkTestSourceRunID)
+	response := rpcCall(t, handler, request)
+	if response.Error != nil {
+		t.Fatalf("eventless deployment fork: %#v", response.Error)
+	}
+	result := asMap(t, response.Result)
+	if result["fork_point_kind"] != string(runfork.RunForkPointDeploymentRevision) || result["fork_revision"] != float64(4) {
+		t.Fatalf("deployment fork lost typed revision: %#v", result)
+	}
+	if _, hasEvent := result["fork_event_id"]; hasEvent {
+		t.Fatalf("eventless deployment fork invented an event ID: %#v", result)
+	}
+	if replay := rpcCall(t, handler, request); replay.Error != nil || !reflect.DeepEqual(replay.Result, response.Result) || executor.calls != 1 {
+		t.Fatalf("deployment operation did not replay exact typed result: first=%#v replay=%#v calls=%d", response, replay, executor.calls)
 	}
 }
 
@@ -178,7 +229,7 @@ func TestOperatorRunForkStoreConsentRefusalUsesCurrentPermission(t *testing.T) {
 		runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
 	}}, executor)
 	resp := rpcCall(t, handler, fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"store-consent","method":"run.fork","params":{"source_run_id":%q,"allow_source_freeze":true}}`, runForkTestSourceRunID,
+		`{"jsonrpc":"2.0","id":"store-consent","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true}}`, runForkTestSourceRunID, runForkTestEventID,
 	))
 	if resp.Error == nil || resp.Error.Code != codeInvalidParams || executor.calls != 1 {
 		t.Fatalf("store refusal error=%#v executor calls=%d", resp.Error, executor.calls)
@@ -304,13 +355,17 @@ func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 
 func runForkTestHandler(t *testing.T, availability RunForkAvailabilityStore, executor RunForkExecutor) *Handler {
 	t.Helper()
+	operations := newRecordingRunForkOperations()
+	if recording, ok := executor.(*recordingRunForkExecutor); ok {
+		recording.operations = operations
+	}
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: availability,
+			RunForkOperations:   operations,
 			RunFork:             executor,
-			Idempotency:         newMutatingProbeIdempotencyStore(),
 		}),
 	})
 }
@@ -359,21 +414,91 @@ func (s *recordingRunForkAvailability) LoadRunBundleAvailability(_ context.Conte
 }
 
 type recordingRunForkExecutor struct {
-	calls  int
-	last   RunForkExecutionRequest
-	result RunForkExecutionResult
-	err    error
+	calls          int
+	last           RunForkExecutionRequest
+	result         RunForkExecutionResult
+	err            error
+	execute        func(context.Context, RunForkExecutionRequest) (RunForkExecutionResult, error)
+	operations     *recordingRunForkOperations
+	persistOnError bool
 }
 
-func (e *recordingRunForkExecutor) ExecuteRunFork(_ context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
+func (e *recordingRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
 	e.calls++
 	e.last = req
-	if e.err != nil {
-		return RunForkExecutionResult{}, e.err
+	result, err := e.result, e.err
+	if e.execute != nil {
+		result, err = e.execute(ctx, req)
 	}
-	result := e.result
 	if result.BundleHash == "" {
 		result.BundleHash = req.BundleHash
 	}
-	return result, nil
+	if e.operations != nil && (err == nil || e.persistOnError) {
+		if req.ForkOperation == nil {
+			return RunForkExecutionResult{}, fmt.Errorf("mock fork executor requires a durable operation request")
+		}
+		if recordErr := e.operations.activate(*req.ForkOperation, result); recordErr != nil {
+			return RunForkExecutionResult{}, recordErr
+		}
+	}
+	return result, err
+}
+
+type recordingRunForkOperations struct {
+	byID       map[string]runfork.ForkOperationRecord
+	byKey      map[string]string
+	keyedReads int
+	idReads    int
+}
+
+func newRecordingRunForkOperations() *recordingRunForkOperations {
+	return &recordingRunForkOperations{byID: map[string]runfork.ForkOperationRecord{}, byKey: map[string]string{}}
+}
+
+func (o *recordingRunForkOperations) LoadForkOperation(_ context.Context, actor, key, transportHash string) (runfork.ForkOperationRecord, bool, error) {
+	o.keyedReads++
+	id, ok := o.byKey[actor+"\x00"+key]
+	if !ok {
+		return runfork.ForkOperationRecord{}, false, nil
+	}
+	record := o.byID[id]
+	if record.Request.TransportHash != transportHash {
+		return runfork.ForkOperationRecord{}, false, &apiidempotency.ConflictError{
+			OriginalRequestHash: record.Request.TransportHash, ConflictingRequestHash: transportHash,
+			Method: "run.fork", ResourceID: id,
+		}
+	}
+	return record, true, nil
+}
+
+func (o *recordingRunForkOperations) LoadForkOperationByID(_ context.Context, id string) (runfork.ForkOperationRecord, bool, error) {
+	o.idReads++
+	record, ok := o.byID[id]
+	return record, ok, nil
+}
+
+func (o *recordingRunForkOperations) activate(request runfork.ForkOperationRequest, result RunForkExecutionResult) error {
+	point := runfork.RunForkPoint{Kind: runfork.RunForkPointKind(result.ForkPointKind), Revision: result.ForkRevision, EventID: result.ForkEventID}
+	request.ResolvedPoint = &point
+	canonical, hash, err := request.Canonical()
+	if err != nil {
+		return err
+	}
+	record := runfork.ForkOperationRecord{
+		Request: canonical, SemanticHash: hash, ForkRunID: result.ForkRunID,
+		BindingID: "00000000-0000-0000-0000-000000000704", Status: runfork.ForkOperationActivated,
+		Result: &runfork.ForkOperationResult{
+			SourceRunID: result.SourceRunID, SourceRunStatus: result.SourceRunStatus, SourceFrozen: result.SourceFrozen,
+			ForkRunID: result.ForkRunID, ForkEventID: result.ForkEventID, ForkPoint: point, ForkRunStatus: result.ForkRunStatus,
+			BundleHash: result.BundleHash, ExecutedEventCount: result.ExecutedEventCount, DataPins: result.DataPins,
+		},
+	}
+	if err := record.Validate(); err != nil {
+		return err
+	}
+	o.byID[canonical.OperationID] = record
+	if canonical.IdempotencyKey != "" {
+		o.byKey[canonical.Actor+"\x00"+canonical.IdempotencyKey] = canonical.OperationID
+	}
+	return nil
 }

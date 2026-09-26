@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -179,6 +180,36 @@ func (eb *EventBus) SweepPipelineObligations(ctx context.Context, limit int) (ru
 		limit = DefaultOutboxSweeperConfig().Limit
 	}
 	return eb.sweepPipelineObligations(ctx, runtimepipelineobligation.GlobalScanRequest(), limit)
+}
+
+// RecoverSelectedRunPipelineToExhaustion runs the existing pipeline recovery
+// under one exact selected child authority before its delivery continuation
+// inventory is considered. It never scans another run's obligations.
+func (eb *EventBus) RecoverSelectedRunPipelineToExhaustion(ctx context.Context, runID string) (finalErr error) {
+	authority, err := eb.DeliveryAuthority()
+	if err != nil {
+		return err
+	}
+	if authority.Kind() != runtimedelivery.ExecutionAuthoritySelectedContractFork || authority.ForkRunID() != runID {
+		return errors.New("selected pipeline recovery requires exact child authority")
+	}
+	request := runtimepipelineobligation.RunScanRequest(runID).WithExecutionPosture(eb.executionPosture)
+	defer func() { finalErr = errors.Join(finalErr, eb.closePipelineScan(context.WithoutCancel(ctx), request)) }()
+	for {
+		result, err := eb.sweepPipelineObligations(ctx, request, DefaultOutboxSweeperConfig().Limit)
+		if err != nil {
+			return err
+		}
+		if result.Blocked {
+			return errors.New("selected pipeline recovery blocked before explicit exhaustion")
+		}
+		if result.Exhausted {
+			return nil
+		}
+		if result.Examined == 0 {
+			return errors.New("selected pipeline recovery made no classified progress")
+		}
+	}
 }
 
 func (eb *EventBus) sweepPipelineObligations(ctx context.Context, request runtimepipelineobligation.ScanRequest, limit int) (result runtimepipelineobligation.SweepResult, err error) {

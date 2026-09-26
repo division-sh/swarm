@@ -39,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -152,6 +153,8 @@ type notifyAllChildrenRuntimeOptions struct {
 	fanOutExecutor         func(*runtimepipeline.PipelineCoordinator) runtimestartupownership.FanOutExecutor
 	fanOutWorkers          *int
 	nestedPublications     *nestedPublicationLifetime
+	testLifecycleProbe     runtimelifecycleprobe.Observer
+	deliveryLifecycle      runtimedelivery.Store
 }
 
 type notifyAllChildrenGenericScheduleLogger struct {
@@ -1958,11 +1961,16 @@ func newNotifyAllChildrenRuntime(
 	if opts.enableGenericSchedules {
 		runtimeControlEvents = append(runtimeControlEvents, "platform.join_complete")
 	}
-	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
+	deliveryLifecycle := runtimedelivery.Store(backend)
+	if opts.deliveryLifecycle != nil {
+		deliveryLifecycle = opts.deliveryLifecycle
+	}
+	busOptions := durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
 		ExecutionPosture:   posture,
 		ContractBundle:     source,
 		SourceArtifactFact: sourceArtifactFact,
 		WorkOwner:          workOwner,
+		TestLifecycleProbe: opts.testLifecycleProbe,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -1981,7 +1989,9 @@ func newNotifyAllChildrenRuntime(
 			}
 			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 		}),
-	}), runtimeControlEvents...)
+	})
+	busOptions.Durable.DeliveryLifecycle = deliveryLifecycle
+	eventBus, err := newScopedTestEventBus(t, backend, busOptions, runtimeControlEvents...)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -2108,7 +2118,7 @@ func newNotifyAllChildrenRuntime(
 		Persistence:             workflowPersistence,
 		RunLifecycle:            backend,
 		PipelineObligations:     backend.PipelineObligations(),
-		DeliveryStore:           backend,
+		DeliveryStore:           deliveryLifecycle,
 		DeadLetters:             backend,
 		DecisionCards:           backend,
 		ProposedEffects:         backend,
@@ -2140,7 +2150,7 @@ func newNotifyAllChildrenRuntime(
 		SourceArtifactFact: sourceArtifactFact,
 		WorkflowInstances:  coordinator,
 		WorkOwner:          workOwner,
-		DeliveryStore:      backend,
+		DeliveryStore:      deliveryLifecycle,
 		LifecycleStore:     lifecycleStore,
 		SemanticSource:     source,
 		Sessions:           sessionStore,

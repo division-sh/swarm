@@ -12,9 +12,11 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
@@ -89,6 +91,9 @@ func commitDeploymentRunCreationTx(
 		if err := storedurabledata.CommitRunCreationFeedsTx(ctx, tx, &plan, writer); err != nil {
 			return err
 		}
+		if err := recordDeploymentRunFeedFactsTx(ctx, tx, attempt, plan.DeploymentFeeds()); err != nil {
+			return err
+		}
 		allEmpty := true
 		for _, feed := range plan.DeploymentFeeds() {
 			allEmpty = allEmpty && feed.RowCount == 0
@@ -101,6 +106,71 @@ func commitDeploymentRunCreationTx(
 		return nil
 	})
 	return record, err
+}
+
+type deploymentFeedFactRecorder interface {
+	AddFacts(string, ...runforkrevision.FactRef) error
+}
+
+func recordDeploymentRunFeedFactsTx(ctx context.Context, tx *sql.Tx, recorder deploymentFeedFactRecorder, feeds []runtimedata.DeploymentFeed) error {
+	if tx == nil || recorder == nil {
+		return fmt.Errorf("deployment feed revision requires transaction and mutation attempt")
+	}
+	if len(feeds) == 0 {
+		return nil
+	}
+	runID := feeds[0].RunID
+	refs := make([]runforkrevision.FactRef, 0, len(feeds))
+	for _, feed := range feeds {
+		if err := feed.Validate(); err != nil {
+			return err
+		}
+		if feed.RunID != runID {
+			return fmt.Errorf("deployment feed revision spans multiple runs")
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT CAST(deployment_feed_id AS TEXT),bundle_hash,
+			source_resource_version_id,deployment_schema_digest,cardinality
+			FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'
+			AND source_resource_flow_path=$2 AND source_resource_event_name=$3`,
+			feed.RunID, feed.Declaration.FlowPath, feed.Declaration.EventName)
+		if err != nil {
+			return fmt.Errorf("read created deployment feed: %w", err)
+		}
+		var feedID, bundleHash, versionID, schemaDigest string
+		var cardinality int64
+		if !rows.Next() {
+			err := rows.Err()
+			_ = rows.Close()
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("created deployment feed for %s is missing", feed.Declaration.Key())
+		}
+		if err := rows.Scan(&feedID, &bundleHash, &versionID, &schemaDigest, &cardinality); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if rows.Next() {
+			_ = rows.Close()
+			return fmt.Errorf("created deployment feed for %s is ambiguous", feed.Declaration.Key())
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if bundleHash != feed.BundleHash || versionID != string(feed.VersionID) || schemaDigest != string(feed.SchemaDigest) || cardinality != int64(feed.RowCount) {
+			return fmt.Errorf("created deployment feed for %s contradicts its pinned source", feed.Declaration.Key())
+		}
+		ref, err := runforkrevision.FanOutIntentFact(fanoutobligation.IntentKey{RunID: runID, DeploymentFeedID: feedID})
+		if err != nil {
+			return err
+		}
+		refs = append(refs, ref)
+	}
+	return recorder.AddFacts(runID, refs...)
 }
 
 func deploymentRunCompletion(record runtimedata.RunCreationOperationRecord) (apiidempotency.Completion, error) {

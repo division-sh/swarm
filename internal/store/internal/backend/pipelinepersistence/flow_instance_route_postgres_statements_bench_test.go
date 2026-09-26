@@ -2,9 +2,11 @@ package pipelinepersistence
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/testpostgres"
 )
 
@@ -24,7 +26,7 @@ func benchmarkPostgresRouteTopologyStatements(b *testing.B, owners int) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	for _, state := range []string{"insert", "existing"} {
+	for _, state := range []string{"insert", "existing", "one_new_first", "one_new_last"} {
 		b.Run(state, func(b *testing.B) {
 			for _, mode := range []string{"direct", "reuse"} {
 				b.Run(mode, func(b *testing.B) {
@@ -54,12 +56,19 @@ func benchmarkPostgresRouteTopologyStatements(b *testing.B, owners int) {
 							b.Fatal(err)
 						}
 					}
-					if state == "existing" {
+					if state != "insert" {
 						tx, err := db.BeginTx(ctx, nil)
 						if err != nil {
 							b.Fatal(err)
 						}
-						if _, err := postgresRouteTopologyDirect(ctx, tx, sets); err != nil {
+						seed := sets
+						switch state {
+						case "one_new_first":
+							seed = sets[1:]
+						case "one_new_last":
+							seed = sets[:len(sets)-1]
+						}
+						if _, err := postgresRouteTopologyDirect(ctx, tx, seed); err != nil {
 							_ = tx.Rollback()
 							b.Fatal(err)
 						}
@@ -93,6 +102,74 @@ func benchmarkPostgresRouteTopologyStatements(b *testing.B, owners int) {
 					b.ReportMetric(float64(2*owners), "routes/op")
 				})
 			}
+		})
+	}
+}
+
+func BenchmarkRouteTopologyOneNewAt1024(b *testing.B) {
+	for _, postgres := range []bool{false, true} {
+		name := "sqlite"
+		if postgres {
+			name = "postgres"
+		}
+		b.Run(name, func(b *testing.B) {
+			var sets []runtimebus.FlowInstanceRouteRecordSet
+			var replaceErr error
+			ctx := context.Background()
+			var db *sql.DB
+			if postgres {
+				manager, err := testpostgres.ManagerFromEnvironment(ctx)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sandbox, err := manager.Acquire(ctx, false)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(func() {
+					cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+					defer cancel()
+					if err := sandbox.Release(cleanupCtx); err != nil {
+						b.Error(err)
+					}
+				})
+				db = sandbox.DB
+				sets = populatePostgresRouteStatementFixture(b, db, 1024, false, false)
+			} else {
+				db, sets = sqliteRouteStatementFixture(b, 1024)
+			}
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if postgres {
+				_, replaceErr = postgresRouteTopologyDirect(ctx, tx, sets[:len(sets)-1])
+			} else {
+				_, replaceErr = replaceFlowInstanceRouteTopologyTx(ctx, tx, false, sets[:len(sets)-1])
+			}
+			if replaceErr != nil {
+				_ = tx.Rollback()
+				b.Fatal(replaceErr)
+			}
+			if err := tx.Commit(); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_, replaceErr := replaceFlowInstanceRouteTopologyTx(ctx, tx, postgres, sets)
+				rollbackErr := tx.Rollback()
+				if replaceErr != nil || rollbackErr != nil {
+					b.Fatalf("replace=%v rollback=%v", replaceErr, rollbackErr)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(1024, "owners/op")
+			b.ReportMetric(2048, "routes/op")
 		})
 	}
 }

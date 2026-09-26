@@ -47,12 +47,17 @@ func fanOutFactRef(key fanoutobligation.IntentKey, kind string, ordinal *int64) 
 	if err := key.Validate(); err != nil {
 		return FactRef{}, err
 	}
+	if key.DeploymentFeedID != "" {
+		return newFactRef(FamilyFanOutObligations, key.RunID, factKeyCoordinates{
+			Kind: kind, OriginKind: "deployment", DeploymentFeedID: key.DeploymentFeedID, Ordinal: ordinal,
+		})
+	}
 	declaration, err := key.ElementRef.DeclarationIdentity()
 	if err != nil {
 		return FactRef{}, err
 	}
 	return newFactRef(FamilyFanOutObligations, key.RunID, factKeyCoordinates{
-		Kind: kind, TriggeringDeliveryID: key.TriggeringDeliveryID,
+		Kind: kind, OriginKind: "handler", TriggeringDeliveryID: key.TriggeringDeliveryID,
 		FlowPath: declaration.Flow().String(), DeclarationFamily: declaration.Family(),
 		SemanticPath: declaration.SemanticPath(), Ordinal: ordinal,
 	})

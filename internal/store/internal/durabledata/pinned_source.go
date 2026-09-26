@@ -20,7 +20,7 @@ func (o *Owner) LoadPinnedSource(ctx context.Context, runID, bundleHash string, 
 		return runtimedata.PinnedSource{}, err
 	}
 	var source runtimedata.PinnedSource
-	err := o.runTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		source, err = o.pinnedSourceTx(ctx, tx, runID, bundleHash, ref)
 		return err
@@ -33,10 +33,7 @@ func (o *Owner) LoadPinnedSource(ctx context.Context, runID, bundleHash string, 
 // The raw transaction stays in this private adapter rather than becoming an
 // effective method of the selected-store owner.
 func BindPinnedSourceTx(ctx context.Context, o *Owner, tx *sql.Tx, runID, bundleHash string, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID, cardinality int) error {
-	if o == nil || tx == nil {
-		return fmt.Errorf("durable data source transaction owner is required")
-	}
-	source, err := o.pinnedSourceTx(ctx, tx, runID, bundleHash, ref)
+	source, err := RequirePinnedSourceTx(ctx, o, tx, runID, bundleHash, ref)
 	if err != nil {
 		return err
 	}
@@ -44,6 +41,13 @@ func BindPinnedSourceTx(ctx context.Context, o *Owner, tx *sql.Tx, runID, bundle
 		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource source %s version/cardinality disagrees with the exact run pin", ref.Key())
 	}
 	return nil
+}
+
+func RequirePinnedSourceTx(ctx context.Context, o *Owner, tx *sql.Tx, runID, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
+	if o == nil || tx == nil {
+		return runtimedata.PinnedSource{}, fmt.Errorf("durable data source transaction owner is required")
+	}
+	return o.pinnedSourceTx(ctx, tx, runID, bundleHash, ref)
 }
 
 func (o *Owner) pinnedSourceTx(ctx context.Context, tx *sql.Tx, runID, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.PinnedSource, error) {
@@ -133,7 +137,7 @@ func (o *Owner) LoadPinnedRowsRange(ctx context.Context, runID, bundleHash strin
 		return nil, fmt.Errorf("resource source range [%d,%d) is invalid for cardinality %d", start, end, want.RowCount)
 	}
 	var items []any
-	err := o.runTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	err := o.runReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		current, err := o.pinnedSourceTx(ctx, tx, runID, bundleHash, want.Declaration)
 		if err != nil {
 			return err
@@ -160,7 +164,7 @@ func decodeCanonicalRowsRange(raw, schemaJSON []byte, key string, want runtimeda
 	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
 		return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource source schema is invalid: %v", err)
 	}
-	compiled, defects := runtimedata.CompileJSONL(want.Declaration, schema, key, raw)
+	compiled, defects := runtimedata.CompileStoredJSONL(want.Declaration, schema, key, raw)
 	if len(defects) != 0 || compiled.VersionID != want.VersionID || len(compiled.Rows) != want.RowCount || !bytes.Equal(compiled.CanonicalJSONL, raw) {
 		return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource source payload disagrees with exact pinned version %s", want.VersionID)
 	}

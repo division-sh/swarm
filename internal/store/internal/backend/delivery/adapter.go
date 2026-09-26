@@ -381,6 +381,14 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 		result.Disposition = ClaimWrongAuthority
 		return result, nil
 	}
+	current, err := a.selectedExecutionCurrent(ctx, tx, authority)
+	if err != nil {
+		return ClaimResult{}, err
+	}
+	if !current {
+		result.Disposition = ClaimWrongAuthority
+		return result, nil
+	}
 	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
 		return ClaimResult{}, err
@@ -448,6 +456,13 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 	}
 	if err := authority.Validate(); err != nil {
 		return ContinuationPage{}, err
+	}
+	current, err := a.selectedExecutionCurrentRead(ctx, tx, authority)
+	if err != nil {
+		return ContinuationPage{}, err
+	}
+	if !current {
+		return ContinuationPage{}, fmt.Errorf("selected delivery continuation authority is fenced")
 	}
 	if limit <= 0 || limit > 500 {
 		return ContinuationPage{}, fmt.Errorf("delivery continuation scan limit must be between 1 and 500")
@@ -2500,6 +2515,13 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 		record.SubscriberClass != claim.SubscriberClass() || record.SubscriberID != claim.SubscriberID() ||
 		record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: delivery claim is stale", ErrConflict)
+	}
+	current, err := a.selectedExecutionCurrent(ctx, tx, record.Authority)
+	if err != nil {
+		return deliveryRecord{}, time.Time{}, err
+	}
+	if !current {
+		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: selected delivery execution is fenced", ErrConflict)
 	}
 	return record, now, nil
 }

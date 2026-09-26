@@ -177,8 +177,8 @@ func TestSQLiteRouteTopologyStatementsReuseAndFreshSource(t *testing.T) {
 			t.Fatalf("owner=%d source=%d want=%d err=%v", i, source, want, err)
 		}
 	}
-	// A second call in the SAME transaction must create new local handles;
-	// all routes now exist, so INSERT must not even be prepared.
+	// The trigger changed the source after i000 was written. The next call
+	// must refresh only i000; i001 is already exact.
 	if _, err := replaceFlowInstanceRouteTopologyTx(ctx, tx, false, sets); err != nil {
 		t.Fatal(err)
 	}
@@ -186,8 +186,22 @@ func TestSQLiteRouteTopologyStatementsReuseAndFreshSource(t *testing.T) {
 	if want := (map[string]int{"source": 2, "update": 2, "insert": 1, "inactivate": 2}); !reflect.DeepEqual(r.prepared, want) {
 		t.Fatalf("second-call preparations=%v want=%v", r.prepared, want)
 	}
-	if r.executed["source"] != 8 || r.executed["update"] != 8 || r.executed["insert"] != 4 || r.executed["inactivate"] != 4 {
-		t.Fatalf("executions were skipped: %v", r.executed)
+	if r.executed["source"] != 6 || r.executed["update"] != 6 || r.executed["insert"] != 4 || r.executed["inactivate"] != 3 {
+		t.Fatalf("unexpected exact-diff writes: %v", r.executed)
+	}
+	var repairedSource int
+	if err := tx.QueryRow(`SELECT materialized_from FROM routing_rules WHERE flow_instance='review/i000' AND event_pattern='work.ready'`).Scan(&repairedSource); err != nil || repairedSource != 100 {
+		t.Fatalf("triggered source was not repaired: source=%d err=%v", repairedSource, err)
+	}
+	beforeNoop := make(map[string]int, len(r.executed))
+	for k, v := range r.executed {
+		beforeNoop[k] = v
+	}
+	if _, err := replaceFlowInstanceRouteTopologyTx(ctx, tx, false, sets); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(r.executed, beforeNoop) {
+		t.Fatalf("exact topology caused redundant writes: before=%v after=%v", beforeNoop, r.executed)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
@@ -310,6 +324,14 @@ func TestSQLiteRouteTopologyStatementsHostileFailureAndCancel(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+				// A genuinely changed source must still take the UPDATE path.
+				if _, err := db.Exec(`UPDATE routing_rules SET status='inactive' WHERE rule_id=1`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`INSERT INTO routing_rules(rule_id,event_pattern,subscriber_type,subscriber_id,source_flow,is_wildcard,is_materialized,status,created_at)
+					VALUES(100,'work.ready','node','receiver','review',TRUE,FALSE,'active','2020-01-02')`); err != nil {
 					t.Fatal(err)
 				}
 			}

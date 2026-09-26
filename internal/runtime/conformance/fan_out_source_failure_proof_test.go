@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -12,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 )
 
-func TestFanOutServingPayloadEntityAndResourceSnapshotsPreserveOrdinalsBothStores(t *testing.T) {
+func TestFanOutServingPayloadAndEntitySnapshotsPreserveOrdinalsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newSemanticProofFixture(t, backend)
@@ -23,19 +22,6 @@ func TestFanOutServingPayloadEntityAndResourceSnapshotsPreserveOrdinalsBothStore
 			f.waitIntent(t, payloadID, 0, "open")
 			entityID := f.submit(t, semanticProofEntityEvent, entityRows, 62)
 			f.waitIntent(t, entityID, 0, "open")
-			resourceRows := semanticProofRows(34)
-			for i := range resourceRows {
-				resourceRows[i]["account_id"] = fmt.Sprintf("resource-%02d", i)
-				resourceRows[i]["portfolio_id"] = f.runID
-				resourceRows[i]["eligible"] = true
-				resourceRows[i]["ordinal"] = i
-				resourceRows[i]["source_count"] = len(resourceRows)
-				resourceRows[i]["snapshot_threshold"] = 93
-			}
-			resourceSource := f.installPinnedResourceSource(t, resourceRows)
-			// Trigger payload deliberately differs from the pinned resource rows.
-			resourceID := f.submit(t, semanticProofResourceEvent, semanticProofRows(34), 93)
-			f.waitIntent(t, resourceID, 0, "open")
 			overwriteID := f.submit(t, semanticProofOverwriteEvent, semanticProofRows(1), 10)
 			semanticProofWait(t, func() (bool, error) {
 				var delivered int
@@ -54,34 +40,21 @@ func TestFanOutServingPayloadEntityAndResourceSnapshotsPreserveOrdinalsBothStore
 				t.Fatalf("real overwrite did not supersede both capsules: %s %v", current, err)
 			}
 			var total, progressed int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*),SUM(cursor) FROM fan_out_intents WHERE run_id=$1`, f.runID).Scan(&total, &progressed); err != nil || total != 3 || progressed != 0 {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*),SUM(cursor) FROM fan_out_intents WHERE run_id=$1`, f.runID).Scan(&total, &progressed); err != nil || total != 2 || progressed != 0 {
 				t.Fatalf("sources were not simultaneously pending: intents=%d cursor=%d err=%v", total, progressed, err)
 			}
 			release()
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, f.runID, 10*time.Second)
 			f.assertOutcomes(t, payloadID, payloadRows, 81, nil)
 			f.assertOutcomes(t, entityID, entityRows, 62, nil)
-			f.assertOutcomes(t, resourceID, resourceRows, 93, nil)
 			f.probe.mu.Lock()
 			payloadIntent, entityIntent := f.probe.intents[payloadID], f.probe.intents[entityID]
-			resourceIntent := f.probe.intents[resourceID]
 			f.probe.mu.Unlock()
-			if resourceIntent.Source != resourceSource {
-				t.Fatalf("resource source escaped its exact pinned version: got=%+v want=%+v", resourceIntent.Source, resourceSource)
-			}
-			var pin string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path=$2 AND event_name=$3`, f.runID, resourceSource.Declaration.FlowPath, resourceSource.Declaration.EventName).Scan(&pin); err != nil || pin != string(resourceSource.VersionID) {
-				t.Fatalf("serving changed immutable resource pin: %s %v", pin, err)
-			}
 			node := identitytest.FlowNode(t, "portfolio", "portfolio-coordinator")
 			payloadPlan := f.source.FanOutPlansForHandler(node, semanticProofPayloadEvent)
 			entityPlan := f.source.FanOutPlansForHandler(node, semanticProofEntityEvent)
-			resourcePlan := f.source.FanOutPlansForHandler(node, semanticProofResourceEvent)
-			if len(payloadPlan) != 1 || len(entityPlan) != 1 || len(resourcePlan) != 1 {
+			if len(payloadPlan) != 1 || len(entityPlan) != 1 {
 				t.Fatal("proof requires exact admitted producer plans")
-			}
-			if resourceIntent.Request.PlanRef != resourcePlan[0].Ref || resourcePlan[0].ResourceSource == nil {
-				t.Fatalf("resource fixture changed its compiled evaluator owner: %+v", resourceIntent.Request.PlanRef)
 			}
 			if payloadIntent.Source.Kind != fanoutobligation.SourceEventPayloadField || payloadIntent.Source.EventID != payloadID || payloadIntent.Request.PlanRef != payloadPlan[0].Ref {
 				t.Fatalf("payload/rules owner changed: %+v", payloadIntent)
@@ -193,23 +166,14 @@ func TestFanOutServingMixedAndCommitFailureIsolationBothStores(t *testing.T) {
 	}
 }
 
-func TestFanOutPinnedResourceChunkRollbackAndRetryBothStores(t *testing.T) {
+func TestFanOutPayloadChunkRollbackAndRetryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newSemanticProofFixture(t, backend, true)
 			release := f.pauseAtEmptyScan(t)
 			defer release()
 			rows := semanticProofRows(4)
-			for index := range rows {
-				rows[index]["account_id"] = fmt.Sprintf("rollback-resource-%02d", index)
-				rows[index]["portfolio_id"] = f.runID
-				rows[index]["eligible"] = true
-				rows[index]["ordinal"] = index
-				rows[index]["source_count"] = len(rows)
-				rows[index]["snapshot_threshold"] = 75
-			}
-			source := f.installPinnedResourceSource(t, rows)
-			trigger := f.submit(t, semanticProofResourceEvent, semanticProofRows(1), 75)
+			trigger := f.submit(t, semanticProofPayloadEvent, rows, 75)
 			f.waitIntent(t, trigger, 0, "open")
 			f.probe.mu.Lock()
 			f.probe.policies[trigger] = semanticProofPolicy{maxCommit: 2}
@@ -222,8 +186,8 @@ func TestFanOutPinnedResourceChunkRollbackAndRetryBothStores(t *testing.T) {
 			faults := append([]semanticProofAttempt(nil), f.probe.sqlFaults[trigger]...)
 			intent := f.probe.intents[trigger]
 			f.probe.mu.Unlock()
-			if intent.Source != source || len(attempts) < 3 || attempts[0] != (semanticProofAttempt{0, 4, true}) || attempts[1] != (semanticProofAttempt{0, 2, false}) || len(faults) == 0 || faults[0] != attempts[0] {
-				t.Fatalf("resource rollback/retry changed exact source or publication sequence: source=%+v attempts=%+v faults=%+v", intent.Source, attempts, faults)
+			if intent.Source.Kind != fanoutobligation.SourceEventPayloadField || intent.Source.EventID != trigger || len(attempts) < 3 || attempts[0] != (semanticProofAttempt{0, 4, true}) || attempts[1] != (semanticProofAttempt{0, 2, false}) || len(faults) == 0 || faults[0] != attempts[0] {
+				t.Fatalf("payload rollback/retry changed exact source or publication sequence: source=%+v attempts=%+v faults=%+v", intent.Source, attempts, faults)
 			}
 		})
 	}

@@ -35,6 +35,9 @@ func TestProjectionFactKeyPreservesRawOwnerAdmission(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, field := range fields {
+				if tc.family == FamilyFanOutObligations && (field == "origin_kind" || field == "deployment_feed_id") {
+					continue
+				}
 				original, present := body[field]
 				for _, value := range []any{nil, true, 7, "", " ", "not-an-identity", -1, 1.5} {
 					body[field] = value

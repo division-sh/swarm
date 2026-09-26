@@ -39,6 +39,15 @@ const fanOutFoldJoinedQuery = `
 		ORDER BY o.ordinal
 	`
 
+const fanOutFoldJoinedDeploymentQuery = `
+		SELECT i.cardinality, i.cursor, i.status, o.run_id IS NOT NULL,
+		       o.ordinal, o.outcome_kind, o.event_id, o.source_event_id, o.inherited_disposition
+		FROM fan_out_intents i
+		LEFT JOIN fan_out_outcomes o ON o.run_id=i.run_id AND o.deployment_feed_id=i.deployment_feed_id
+		WHERE i.run_id=$1 AND i.origin_kind='deployment' AND i.deployment_feed_id=$2
+		ORDER BY o.ordinal
+	`
+
 // fanOutFoldStatement retains only the fixed statement within one private
 // transaction loop. Preparation stays at the canonical fold's first SQL read,
 // after key and generation validation; every fold still reads fresh rows.
@@ -79,7 +88,13 @@ func foldFanOutIntentTerminalDispositions(
 	}
 	var cardinality, cursor int
 	var rawStatus string
-	rows, err := db.QueryContext(ctx, fanOutFoldJoinedQuery, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
+	query := fanOutFoldJoinedQuery
+	args := []any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath}
+	if key.DeploymentFeedID != "" {
+		query = fanOutFoldJoinedDeploymentQuery
+		args = []any{key.RunID, key.DeploymentFeedID}
+	}
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fanoutbarrier.Fold{}, err
 	}

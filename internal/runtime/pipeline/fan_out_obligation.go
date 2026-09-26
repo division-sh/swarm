@@ -172,8 +172,17 @@ func (i FanOutEvaluationInput) Validate(intent fanoutobligation.Intent) error {
 		return err
 	}
 	end := intent.ChunkEndOrdinal()
-	if i.StartOrdinal != intent.Cursor || len(i.Items) != end-intent.Cursor || i.Trigger.ID() != intent.Request.Capsule.Lineage.ParentEventID || i.Trigger.RunID() != intent.Request.Capsule.Lineage.RunID {
+	if i.StartOrdinal != intent.Cursor || len(i.Items) != end-intent.Cursor {
 		return fmt.Errorf("fan-out evaluation input disagrees with immutable intent")
+	}
+	if intent.Request.Deployment != nil {
+		if i.Trigger.ID() != "" {
+			return fmt.Errorf("deployment feed cannot borrow a triggering event")
+		}
+		return nil
+	}
+	if i.Trigger.ID() != intent.Request.Capsule.Lineage.ParentEventID || i.Trigger.RunID() != intent.Request.Capsule.Lineage.RunID {
+		return fmt.Errorf("fan-out evaluation input disagrees with immutable trigger")
 	}
 	return nil
 }

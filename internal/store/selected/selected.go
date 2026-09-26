@@ -155,6 +155,7 @@ type runForkPlannerMaterializer interface {
 type RunFork struct {
 	planner        runForkPlannerMaterializer
 	availability   apiv1.RunForkAvailabilityStore
+	operations     apiv1.RunForkOperationReader
 	activation     runtimerunforkexecution.SelectedContractActivationStore
 	executionOwner runtimerunforkexecution.SelectedContractExecutionOwner
 	construction   runForkConstruction
@@ -215,6 +216,8 @@ func (o RunFork) ConstructResetSuccessor(ctx context.Context, operationID string
 
 func (o RunFork) Availability() apiv1.RunForkAvailabilityStore { return o.availability }
 
+func (o RunFork) Operations() apiv1.RunForkOperationReader { return o.operations }
+
 func (o RunFork) RequireNormalControl(ctx context.Context, runID string, operation runfork.SelectedControl) error {
 	return o.executionOwner.RequireNormalControl(ctx, runID, operation)
 }
@@ -223,8 +226,8 @@ func (o RunFork) RetireSelectedContexts(ctx context.Context) error {
 	return o.executionOwner.RetireSelectedContexts(ctx)
 }
 
-func (o RunFork) RecoverSelectedForkContexts(ctx context.Context, req effects.RecoveryRequest) ([]runfork.SelectedForkRecoveryResult, error) {
-	return o.executionOwner.RecoverSelectedForkContexts(ctx, req)
+func (o RunFork) RecoverSelectedForkContexts(ctx context.Context, req effects.RecoveryRequest, environment runtimerunforkexecution.SelectedForkRecoveryEnvironment) ([]runfork.SelectedForkRecoveryResult, error) {
+	return o.executionOwner.RecoverSelectedForkContexts(ctx, req, environment)
 }
 
 func (o RunFork) BindSelectedProcess(ctx context.Context, process *worklifetime.Process, capability runtimestartupownership.ProcessCapability) error {
@@ -460,7 +463,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 	if err != nil {
 		return RunFork{}, err
 	}
-	return RunFork{planner: selected, availability: selected, activation: selected, executionOwner: execution, construction: postgresRunForkConstruction{selected, workflow}}, nil
+	return RunFork{planner: selected, availability: selected, operations: selected, activation: selected, executionOwner: execution, construction: postgresRunForkConstruction{selected, workflow}}, nil
 }
 
 func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
@@ -479,5 +482,5 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 	if err != nil {
 		return RunFork{}, err
 	}
-	return RunFork{planner: selected, availability: selected, activation: selected, executionOwner: execution, construction: sqliteRunForkConstruction{selected, workflow}}, nil
+	return RunFork{planner: selected, availability: selected, operations: selected, activation: selected, executionOwner: execution, construction: sqliteRunForkConstruction{selected, workflow}}, nil
 }

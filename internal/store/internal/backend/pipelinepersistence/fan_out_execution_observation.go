@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -50,9 +49,9 @@ func (s *fanOutServingStore) ObserveFanOutExecutions(ctx context.Context, regist
 			fanOutObservationHeaderColumns() + fanOutObservationFrom(grants, &args)
 		filters := make([]string, 0, len(keys))
 		for _, key := range keys {
-			start := len(args) + 1
-			args = append(args, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
-			filters = append(filters, fmt.Sprintf(`(i.run_id=$%d AND i.triggering_delivery_id=$%d AND i.flow_path=$%d AND i.declaration_family=$%d AND i.semantic_path=$%d)`, start, start+1, start+2, start+3, start+4))
+			predicate, keyArgs := fanOutKeyPredicate("i", key, len(args)+1)
+			args = append(args, keyArgs...)
+			filters = append(filters, `(`+predicate+`)`)
 		}
 		rows, err := tx.QueryContext(ctx, query+` WHERE `+strings.Join(filters, " OR "), args...)
 		if err != nil {

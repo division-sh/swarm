@@ -32,6 +32,9 @@ func commitFanOutIntentTx(
 	if err := request.Validate(); err != nil {
 		return err
 	}
+	if request.OriginKind() != fanoutobligation.OriginHandler {
+		return fmt.Errorf("handler mutation cannot create a deployment-origin fan-out intent")
+	}
 	if request.Key.RunID != strings.TrimSpace(stateRunID) {
 		return fmt.Errorf("fan-out intent run disagrees with engine mutation")
 	}
@@ -45,8 +48,11 @@ type fanOutRevisionSink interface {
 	AddFacts(string, ...privaterunforkrevision.FactRef) error
 }
 
-func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, resourceData *storedurabledata.Owner, facts fanOutRevisionSink, request fanoutobligation.IntentRequest, stateFields json.RawMessage, triggerEventID string, createdAt time.Time) error {
-	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, resourceData, facts, request, stateFields, triggerEventID, createdAt)
+func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, _ *storedurabledata.Owner, facts fanOutRevisionSink, request fanoutobligation.IntentRequest, stateFields json.RawMessage, triggerEventID string, createdAt time.Time) error {
+	if request.OriginKind() != fanoutobligation.OriginHandler {
+		return fmt.Errorf("handler intent writer requires handler origin")
+	}
+	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, facts, request, stateFields, triggerEventID, createdAt)
 	if err != nil {
 		return err
 	}
@@ -70,16 +76,15 @@ func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, resou
 			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 			bundle_hash, semantic_digest, source_kind, source_event_id,
 			source_run_id, source_entity_id, source_field, source_mutation_id,
-			source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 			cardinality, cursor, status, next_chunk_size, capsule, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-			$15, $16, $17, 0, $18, $19, $20, $21, $21
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+			$14, 0, $15, $16, $17, $18, $18
 		)`
 	if postgres {
-		query = strings.ReplaceAll(query, "$20", "$20::jsonb")
+		query = strings.ReplaceAll(query, "$17", "$17::jsonb")
 	} else {
-		query = postgresPlaceholdersToSQLite(query, 21)
+		query = postgresPlaceholdersToSQLite(query, 18)
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert fan-out intent: %w", err)
@@ -106,9 +111,6 @@ func fanOutIntentSQLArgs(request fanoutobligation.IntentRequest, source fanoutob
 		fanOutNullable(source.EntityID),
 		fanOutNullable(source.Field),
 		fanOutNullable(source.MutationID),
-		fanOutNullable(source.Declaration.FlowPath),
-		fanOutNullable(source.Declaration.EventName),
-		fanOutNullable(string(source.VersionID)),
 		request.Cardinality,
 		string(status),
 		fanoutobligation.InitialChunkSize,
@@ -129,7 +131,6 @@ func bindFanOutSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
-	resourceData *storedurabledata.Owner,
 	facts fanOutRevisionSink,
 	request fanoutobligation.IntentRequest,
 	stateFields json.RawMessage,
@@ -170,13 +171,6 @@ func bindFanOutSourceTx(
 			return fanoutobligation.SourceRef{}, err
 		}
 		source.MutationID = mutationID
-	case fanoutobligation.SourceResourceVersion:
-		if resourceData == nil {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out resource source owner is required")
-		}
-		if err := storedurabledata.BindPinnedSourceTx(ctx, resourceData, tx, request.Key.RunID, request.PlanRef.BundleHash, source.Declaration, source.VersionID, request.Cardinality); err != nil {
-			return fanoutobligation.SourceRef{}, err
-		}
 	default:
 		return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out source kind %q is unsupported", source.Kind)
 	}

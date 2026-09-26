@@ -142,7 +142,8 @@ func activationEqualityDatabase(t *testing.T, backend string) *sql.DB {
 	// SQL-backed activation-boundary fixture, not a full run/lineage materialization.
 	// Preserve real JSONB normalization while excluding unrelated foreign-key setup.
 	_, err := db.Exec(fmt.Sprintf(`CREATE TEMP TABLE run_fork_selected_contract_route_recoveries (
-		fork_run_id TEXT PRIMARY KEY, source_run_id TEXT NOT NULL, fork_event_id TEXT NOT NULL,
+		fork_run_id TEXT PRIMARY KEY, source_run_id TEXT NOT NULL,
+		fork_point_kind TEXT NOT NULL, fork_revision INTEGER NOT NULL, fork_event_id TEXT,
 		owner TEXT NOT NULL, runtime_recovery_owner TEXT NOT NULL, mode TEXT NOT NULL, bundle_hash TEXT,
 		route_topology_owner TEXT NOT NULL, dynamic_topology_owner TEXT, recipient_planning_owner TEXT NOT NULL,
 		frontier_evidence_fingerprint TEXT NOT NULL, route_topology_fingerprint TEXT NOT NULL, recipient_planning_fingerprint TEXT NOT NULL,
@@ -171,13 +172,87 @@ func activationEqualityRecord(t *testing.T, evidence []forkrecipient.Evidence) r
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{SourceEventID: eventID, EventName: "sink/work.completed", Recipients: slices.Clone(evidence)}},
 	}
 	record, err := normalizeRunForkSelectedContractRouteRecovery(runfork.RunForkSelectedContractRouteRecoveryRequest{
-		ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(), ForkEventID: eventID,
+		ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(),
+		ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
+		ForkEventID:       eventID,
 		ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
 	}, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return record
+}
+
+func TestSelectedContractRouteRecoveryDeploymentPointBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db := activationEqualityDatabase(t, backend)
+			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
+			topology := runfork.RunForkSelectedContractRouteTopology{
+				Owner: runfork.RunForkSelectedContractRouteTopologyOwner, NonMutating: true,
+				ContractSelection: selection, FrontierEvidenceFingerprint: "deployment-revision-frontier",
+			}
+			planning := runfork.RunForkSelectedContractRecipientPlanning{
+				Owner: runfork.RunForkSelectedContractRecipientPlanningOwner, NonMutating: true,
+				RecipientPlanningSupported: true, RouteTopologyOwner: topology.Owner,
+				ContractSelection: selection, FrontierEvidenceFingerprint: topology.FrontierEvidenceFingerprint,
+			}
+			req := runfork.RunForkSelectedContractRouteRecoveryRequest{
+				ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(),
+				ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 2},
+				ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
+			}
+			record, err := normalizeRunForkSelectedContractRouteRecovery(req, time.Now().UTC())
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if err := insertRunForkSelectedContractRouteRecovery(context.Background(), tx, record); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := loadRunForkSelectedContractRouteRecovery(context.Background(), tx, `WHERE fork_run_id=$1`, record.ForkRunID)
+			if err != nil || loaded.ForkPoint != record.ForkPoint || loaded.ForkEventID != "" {
+				t.Fatalf("deployment point round-trip = %+v, error=%v", loaded.ForkPoint, err)
+			}
+			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(context.Background(), tx, record); err != nil {
+				t.Fatalf("exact deployment point rejected: %v", err)
+			}
+			contradictory := req
+			contradictory.ForkEventID = uuid.NewString()
+			if _, err := normalizeRunForkSelectedContractRouteRecovery(contradictory, time.Now().UTC()); err == nil {
+				t.Fatal("deployment point admitted event evidence")
+			}
+			other := record
+			other.ForkPoint.Revision++
+			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(context.Background(), tx, other); err == nil {
+				t.Fatal("activation accepted a different deployment revision")
+			}
+			if err := insertRunForkSelectedContractRouteRecovery(context.Background(), tx, other); err == nil {
+				t.Fatal("recovery writer rewrote an existing fork point")
+			}
+			other = record
+			other.SourceRunID = uuid.NewString()
+			if err := insertRunForkSelectedContractRouteRecovery(context.Background(), tx, other); err == nil {
+				t.Fatal("recovery writer rewrote an existing source run")
+			}
+			if _, err := tx.ExecContext(context.Background(), `UPDATE run_fork_selected_contract_route_recoveries SET fork_point_kind='event' WHERE fork_run_id=$1`, record.ForkRunID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadRunForkSelectedContractRouteRecovery(context.Background(), tx, `WHERE fork_run_id=$1`, record.ForkRunID); err == nil {
+				t.Fatal("decoder admitted event point without event evidence")
+			}
+			if _, err := tx.ExecContext(context.Background(), `UPDATE run_fork_selected_contract_route_recoveries SET fork_point_kind='deployment_revision', fork_revision=0 WHERE fork_run_id=$1`, record.ForkRunID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadRunForkSelectedContractRouteRecovery(context.Background(), tx, `WHERE fork_run_id=$1`, record.ForkRunID); err == nil {
+				t.Fatal("decoder admitted nonpositive deployment revision")
+			}
+		})
+	}
 }
 
 func activationEqualitySourceRecipients(t *testing.T) []forkrecipient.Evidence {

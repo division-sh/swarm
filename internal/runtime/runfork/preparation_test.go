@@ -39,6 +39,7 @@ func preparedBindingFixture(t *testing.T) (SelectedForkPreparationBinding, manag
 			},
 		},
 	}
+	binding.ForkPoint = RunForkPoint{Kind: RunForkPointEvent, EventID: binding.ForkEventID, Revision: 1}
 	surface, err := managedcapabilities.New(managedcapabilities.Plan{
 		ActorPlan: plan, RuntimeMode: "startup_probe", Provider: "claude_cli", Transport: "cli", ProviderContract: "test", CreatedAt: time.Now().UTC(),
 		Authority: managedcapabilities.Authority{
@@ -117,6 +118,19 @@ func TestSelectedPreparationBindingClosedCensus(t *testing.T) {
 	empty.Actors = []SelectedForkPreparedActor{}
 	if err := empty.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSelectedPreparationBindingDeploymentRevisionHasNoEvent(t *testing.T) {
+	binding, _ := preparedBindingFixture(t)
+	binding.ForkPoint = RunForkPoint{Kind: RunForkPointDeploymentRevision, Revision: 2}
+	binding.ForkEventID = ""
+	if err := binding.Validate(); err != nil {
+		t.Fatalf("eventless preparation rejected: %v", err)
+	}
+	binding.ForkEventID = uuid.NewString()
+	if err := binding.Validate(); err == nil {
+		t.Fatal("eventless preparation accepted fabricated event")
 	}
 }
 

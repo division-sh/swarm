@@ -216,6 +216,11 @@ func executeOperatorEventPublication(
 		if params.DataPresent && !params.NewRunCreated {
 			return apiidempotency.Completion{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": params.RunID})
 		}
+		if req.Method == "run.start" && params.DataPresent {
+			if err := admitRunStartDeploymentFeeds(selectedOpts.Source, params.Data); err != nil {
+				return apiidempotency.Completion{}, err
+			}
+		}
 		ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, params.RunID, params.NewRunCreated, params.ScenarioExecution)
 		if err != nil {
 			return apiidempotency.Completion{}, err

@@ -54,6 +54,28 @@ func bindContextLifetimePreparation(t *testing.T, owner SelectedContractExecutio
 	owner.ports.contexts.mu.Unlock()
 }
 
+func TestSelectedForkContextCannotRebindOnePreparation(t *testing.T) {
+	owner, _, ctx := contextLifetimeOwner(t)
+	p := contextLifetimePreparation(t, owner, ctx)
+	identity := worklifetime.SelectedForkIdentity{RunID: uuid.NewString(), ExecutionID: uuid.NewString(), Generation: 1}
+	if err := p.operation.Bind(identity); err != nil {
+		t.Fatal(err)
+	}
+	first := runfork.RunForkSelectedContractBinding{BindingID: uuid.NewString(), ForkRunID: identity.RunID}
+	second := runfork.RunForkSelectedContractBinding{BindingID: uuid.NewString(), ForkRunID: uuid.NewString()}
+	contexts := owner.ports.contexts
+	contexts.mu.Lock()
+	err := contexts.bindStagedPreparationLocked(p.operation, first)
+	if err == nil {
+		err = contexts.bindStagedPreparationLocked(p.operation, second)
+	}
+	got := contexts.entries[p.operation].binding
+	contexts.mu.Unlock()
+	if err == nil || got != first {
+		t.Fatalf("repeated selected preparation binding changed identity: got=%+v err=%v", got, err)
+	}
+}
+
 func TestSelectedForkContextHandoffAndSiblingLifetime(t *testing.T) {
 	owner, process, ctx := contextLifetimeOwner(t)
 	caller, cancel := context.WithCancel(ctx)

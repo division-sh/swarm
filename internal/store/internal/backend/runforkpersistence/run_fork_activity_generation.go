@@ -87,7 +87,7 @@ func loadRunForkSourceStateAdmission(ctx context.Context, tx *sql.Tx, forkRunID 
 	if err := validate(ctx, tx, binding.SourceRunID); err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	point, err := resolve(ctx, tx, binding.SourceRunID, binding.ForkEventID)
+	point, err := resolveFixedRunForkRevisionPoint(ctx, tx, binding.SourceRunID, binding.ForkPoint, resolve)
 	if err != nil {
 		return runForkSourceStateAdmission{}, err
 	}

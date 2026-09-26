@@ -374,7 +374,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	if err := family.BindSelectedProcess(ctx, process, capability); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := family.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture)); err != nil {
+	if _, err := family.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture), runforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {
 		t.Fatal(err)
 	}
 	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}

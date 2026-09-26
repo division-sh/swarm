@@ -13,11 +13,20 @@ import (
 
 func proveSelectedExecutionPreparationTx(ctx context.Context, tx *sql.Tx, issued runfork.SelectedContractRuntimeExecution, sqlite bool) error {
 	var raw []byte
-	var fingerprint string
-	if err := tx.QueryRowContext(ctx, `SELECT preparation_binding, preparation_fingerprint
+	var fingerprint, pointKind, eventID string
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT preparation_binding, preparation_fingerprint,
+		fork_point_kind, fork_revision, COALESCE(CAST(fork_event_id AS TEXT),'')
 		FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1 AND fork_run_id=$2 AND generation=$3`,
-		issued.ExecutionID, issued.ForkRunID, issued.Generation).Scan(&raw, &fingerprint); err != nil {
+		issued.ExecutionID, issued.ForkRunID, issued.Generation).Scan(&raw, &fingerprint, &pointKind, &revision, &eventID); err != nil {
 		return fmt.Errorf("read selected execution preparation: %w", err)
+	}
+	if err := issued.ForkPoint.Validate(); err != nil {
+		return fmt.Errorf("issued selected execution point: %w", err)
+	}
+	if issued.ForkPoint.Kind != runfork.RunForkPointKind(pointKind) || issued.ForkPoint.Revision != revision ||
+		issued.ForkPoint.EventID != eventID || issued.ForkEventID != eventID {
+		return fmt.Errorf("selected execution point differs from issued authority")
 	}
 	var binding runfork.SelectedForkPreparationBinding
 	if err := canonicaljson.DecodeInto(raw, &binding); err != nil {

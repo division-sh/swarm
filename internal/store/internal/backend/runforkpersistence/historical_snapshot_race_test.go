@@ -37,6 +37,9 @@ func historicalSnapshotDatabase(t *testing.T, backend string) *sql.DB {
 		PRIMARY KEY(run_id,family,fact_key,revision))`, jsonType)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`CREATE TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
 	return db
 }
 
@@ -45,6 +48,9 @@ func TestRunForkHistoricalEventCursorContextBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := historicalSnapshotDatabase(t, backend)
 			runID, eventID := uuid.NewString(), uuid.NewString()
+			if _, err := db.Exec(`INSERT INTO runs VALUES($1,'event')`, runID); err != nil {
+				t.Fatal(err)
+			}
 			body := `{"event_id":"` + eventID + `","event_name":"at-R","payload_base64":"e30="}`
 			const insert = `INSERT INTO run_fork_fact_revisions VALUES($1,'events',$2,$3,$4,true)`
 			if _, err := db.Exec(insert, runID, eventID, 1, body); err != nil {
@@ -100,6 +106,9 @@ func TestRunForkHistoricalSnapshotCommitBarrierBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := historicalSnapshotDatabase(t, backend)
 			runID, eventID, laterID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+			if _, err := db.Exec(`INSERT INTO runs VALUES($1,'event')`, runID); err != nil {
+				t.Fatal(err)
+			}
 			body := func(id, name string) string {
 				return `{"event_id":"` + id + `","event_name":"` + name + `","payload_base64":"eyJ2YWx1ZSI6MS4wfQ=="}`
 			}

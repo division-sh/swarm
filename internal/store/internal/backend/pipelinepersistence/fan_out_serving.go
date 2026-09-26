@@ -84,17 +84,101 @@ func (s *PipelineSQLiteOwner) NewFanOutServingStore(admission FanOutAdmission) (
 }
 
 func (s *fanOutServingStore) BindFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+	if grant.SelectedFork != nil {
+		return nil, errors.New("selected deployment serving requires its selected-only binding")
+	}
+	return s.bindFanOutGrant(grant)
+}
+
+func (s *fanOutServingStore) bindFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
 	if err := grant.Validate(); err != nil {
 		return nil, err
 	}
-	if grant.State != startupownership.GrantAdmitted || grant.SelectedFork != nil {
-		return nil, errors.New("fan-out serving requires an admitted ordinary runtime grant")
+	if grant.State != startupownership.GrantAdmitted {
+		return nil, errors.New("fan-out serving requires an admitted runtime grant")
 	}
 	grant.ProbeSurfaceIDs = append([]string(nil), grant.ProbeSurfaceIDs...)
 	if s.postgres != nil {
 		return &fanOutPostgresOwner{PipelinePostgresOwner: s.postgres, grant: grant, admission: s.admission}, nil
 	}
 	return &fanOutSQLiteOwner{PipelineSQLiteOwner: s.sqlite, grant: grant, admission: s.admission}, nil
+}
+
+func (s *PipelinePostgresOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+	if s == nil || s.backend == nil || admission == nil || grant.SelectedFork == nil {
+		return nil, errors.New("selected deployment serving requires selected grant and admission")
+	}
+	return (&fanOutServingStore{postgres: s, admission: admission}).bindFanOutGrant(grant)
+}
+
+func (s *PipelineSQLiteOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+	if s == nil || s.backend == nil || admission == nil || grant.SelectedFork == nil {
+		return nil, errors.New("selected deployment serving requires selected grant and admission")
+	}
+	return (&fanOutServingStore{sqlite: s, admission: admission}).bindFanOutGrant(grant)
+}
+
+func listSelectedDeploymentFeedsTx(ctx context.Context, tx *sql.Tx, postgres bool, admission FanOutAdmission, grant startupownership.GrantEvidence) ([]fanoutobligation.Intent, error) {
+	if grant.SelectedFork == nil || grant.State != startupownership.GrantAdmitted {
+		return nil, errors.New("selected deployment feed listing requires an admitted selected grant")
+	}
+	if err := grant.Validate(); err != nil {
+		return nil, err
+	}
+	owned, err := admission.AdmitFanOutRunTx(ctx, tx, grant, grant.SelectedFork.ForkRunID)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return nil, fanoutobligation.ErrStaleClaim
+	}
+	collation := ` COLLATE BINARY`
+	if postgres {
+		collation = ` COLLATE "C"`
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT `+fanOutIntentColumns+` FROM fan_out_intents
+		WHERE run_id=$1 AND origin_kind='deployment' ORDER BY CAST(deployment_feed_id AS TEXT)`+collation, grant.SelectedFork.ForkRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	intents := make([]fanoutobligation.Intent, 0)
+	for rows.Next() {
+		intent, err := scanFanOutIntent(rows)
+		if err != nil {
+			return nil, err
+		}
+		if intent.Request.Deployment == nil || intent.Request.Key.RunID != grant.SelectedFork.ForkRunID || intent.Request.Deployment.BundleHash != grant.BundleHash {
+			return nil, errors.New("selected deployment feed contradicts its bound grant")
+		}
+		if err := intent.Validate(); err != nil {
+			return nil, fmt.Errorf("selected deployment feed state: %w", err)
+		}
+		intents = append(intents, intent)
+	}
+	return intents, rows.Err()
+}
+
+func (s *PipelinePostgresOwner) ListSelectedDeploymentFeeds(ctx context.Context, admission FanOutAdmission, grant startupownership.GrantEvidence) (intents []fanoutobligation.Intent, err error) {
+	if s == nil || s.backend == nil || admission == nil {
+		return nil, errors.New("selected deployment listing requires assembled store admission")
+	}
+	err = s.backend.RunTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		intents, err = listSelectedDeploymentFeedsTx(ctx, tx, true, admission, grant)
+		return err
+	})
+	return intents, err
+}
+
+func (s *PipelineSQLiteOwner) ListSelectedDeploymentFeeds(ctx context.Context, admission FanOutAdmission, grant startupownership.GrantEvidence) (intents []fanoutobligation.Intent, err error) {
+	if s == nil || s.backend == nil || admission == nil {
+		return nil, errors.New("selected deployment listing requires assembled store admission")
+	}
+	err = s.backend.RunTransaction(ctx, "list selected deployment feeds", func(ctx context.Context, tx *sql.Tx) error {
+		intents, err = listSelectedDeploymentFeedsTx(ctx, tx, false, admission, grant)
+		return err
+	})
+	return intents, err
 }
 
 // All acknowledged evidence reaches admission before closing registrations are
@@ -164,16 +248,16 @@ func observeFanOutCandidateTx(ctx context.Context, tx *sql.Tx, postgres bool, no
 			if err := key.Validate(); err != nil {
 				return err
 			}
-			start := len(args) + 1
-			args = append(args, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
-			query += fmt.Sprintf(` AND NOT (i.run_id=$%d AND i.triggering_delivery_id=$%d AND i.flow_path=$%d AND i.declaration_family=$%d AND i.semantic_path=$%d)`, start, start+1, start+2, start+3, start+4)
+			predicate, keyArgs := fanOutKeyPredicate("i", key, len(args)+1)
+			args = append(args, keyArgs...)
+			query += ` AND NOT (` + predicate + `)`
 		}
 		// Text identity ties must not inherit the PostgreSQL database locale.
 		collation := ` COLLATE BINARY`
 		if postgres {
 			collation = ` COLLATE "C"`
 		}
-		query += ` ORDER BY COALESCE(i.last_served_at,i.created_at),i.created_at,i.run_id,i.triggering_delivery_id,i.flow_path` + collation + `,i.declaration_family` + collation + `,i.semantic_path` + collation + `,g.grant_id LIMIT 1`
+		query += ` ORDER BY COALESCE(i.last_served_at,i.created_at),i.created_at,i.run_id,COALESCE(CAST(i.triggering_delivery_id AS TEXT),'')` + collation + `,COALESCE(i.flow_path,'')` + collation + `,COALESCE(i.declaration_family,'')` + collation + `,COALESCE(i.semantic_path,'')` + collation + `,COALESCE(CAST(i.deployment_feed_id AS TEXT),'')` + collation + `,g.grant_id LIMIT 1`
 		intent, scanErr := scanFanOutIntent(fanOutPrefixedRow{row: tx.QueryRowContext(ctx, query, args...), prefix: []any{&candidate.GrantID}})
 		err = scanErr
 		if errors.Is(err, sql.ErrNoRows) {
@@ -208,7 +292,7 @@ func observeFanOutCandidateTx(ctx context.Context, tx *sql.Tx, postgres bool, no
 // SQL only prefilters candidate readiness. Every returned header is decoded by
 // scanFanOutIntent and ServingAt before it can become a positive observation.
 const fanOutExecutionReasonSQL = `CASE
-	WHEN EXISTS (SELECT 1 FROM run_fork_selected_contract_bindings b WHERE b.fork_run_id=r.run_id) THEN 'selected_fork_reserved'
+	WHEN b.binding_id IS NOT NULL AND g.grant_id IS NULL THEN 'selected_fork_reserved'
 	WHEN g.grant_id IS NULL THEN 'runtime_unregistered'
 	WHEN r.bundle_hash<>i.bundle_hash THEN 'run_not_owned'
 	WHEN r.status<>'running' THEN 'run_' || r.status
@@ -277,9 +361,16 @@ func fanOutObservationFrom(grants []startupownership.GrantEvidence, args *[]any)
 	}
 	return ` FROM fan_out_intents i JOIN runs r ON r.run_id=i.run_id
 		LEFT JOIN run_control_state c ON c.run_id=r.run_id
+		LEFT JOIN run_fork_selected_contract_bindings b ON b.fork_run_id=r.run_id
+		LEFT JOIN run_fork_selected_contract_runtime_executions e ON e.binding_id=b.binding_id AND e.fork_run_id=r.run_id
 		LEFT JOIN runtime_generation_grants g ON g.bundle_hash=r.bundle_hash AND ` + grantFilter + `
 		AND g.state_version=(SELECT MAX(head.state_version) FROM runtime_generation_grants head WHERE head.grant_id=g.grant_id)
-		AND g.state='admitted' AND g.selected_binding_id IS NULL`
+		AND g.state='admitted' AND (
+			(g.selected_binding_id IS NULL AND b.binding_id IS NULL)
+			OR (i.origin_kind='deployment' AND g.selected_binding_id=b.binding_id
+				AND g.selected_fork_run_id=r.run_id AND g.selected_execution_id=e.execution_id
+				AND g.runtime_generation=e.generation AND e.state='running'
+				AND e.lease_expires_at>$1))`
 }
 
 func observeFanOutWorkTx(ctx context.Context, tx *sql.Tx, postgres bool, now func() time.Time, reader FanOutReadiness) (bool, error) {
@@ -319,6 +410,9 @@ func validateFanOutCandidate(request pipeline.FanOutClaimRequest, grant startupo
 	if request.Candidate == nil || request.BundleHash != grant.BundleHash {
 		return errors.New("fan-out claim requires the exact candidate and granted bundle")
 	}
+	if grant.SelectedFork != nil && (request.Candidate.DeploymentFeedID == "" || request.Candidate.RunID != grant.SelectedFork.ForkRunID) {
+		return errors.New("selected fan-out grant requires a deployment feed in its exact fork run")
+	}
 	return nil
 }
 
@@ -328,13 +422,17 @@ func admitFanOutRun(ctx context.Context, tx *sql.Tx, admission FanOutAdmission, 
 		return false, err
 	}
 	// InspectRunExecutionOwnershipTx holds the run lock, shared with pause/stop.
-	return fanOutRunAcceptsTurnTx(ctx, tx, runID, newTurn)
+	return fanOutRunAcceptsTurnTx(ctx, tx, grant, runID, newTurn)
 }
 
-func fanOutRunAcceptsTurnTx(ctx context.Context, tx *sql.Tx, runID string, newTurn bool) (bool, error) {
+func fanOutRunAcceptsTurnTx(ctx context.Context, tx *sql.Tx, grant startupownership.GrantEvidence, runID string, newTurn bool) (bool, error) {
 	var status, control string
 	if err := tx.QueryRowContext(ctx, `SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&status, &control); err != nil {
 		return false, err
+	}
+	if grant.SelectedFork != nil && grant.State == startupownership.GrantAdmitted &&
+		grant.SelectedFork.ForkRunID == runID && status == "paused" && control == "" {
+		return true, nil
 	}
 	return (status == "running" || (!newTurn && status == "paused")) && control != "stopped" && (!newTurn || control != "paused"), nil
 }
@@ -350,7 +448,7 @@ func observeFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmissi
 	if !owned {
 		return fanoutobligation.Intent{}, fanoutobligation.ErrStaleClaim
 	}
-	ready, err := fanOutRunAcceptsTurnTx(ctx, tx, claim.Key.RunID, false)
+	ready, err := fanOutRunAcceptsTurnTx(ctx, tx, grant, claim.Key.RunID, false)
 	if err != nil {
 		return fanoutobligation.Intent{}, err
 	}
@@ -361,8 +459,11 @@ func observeFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmissi
 	if err != nil {
 		return fanoutobligation.Intent{}, err
 	}
-	if intent.Request.PlanRef.BundleHash != grant.BundleHash {
+	if fanOutIntentBundleHash(intent.Request) != grant.BundleHash {
 		return fanoutobligation.Intent{}, fanoutobligation.ErrStaleClaim
+	}
+	if err := requireFanOutGrantOrigin(intent.Request, grant); err != nil {
+		return fanoutobligation.Intent{}, err
 	}
 	at, err := fanOutAdmissionTime(ctx, tx, postgres, now)
 	if err != nil {
@@ -385,16 +486,23 @@ func admitFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmission
 	if !ready {
 		return fanoutobligation.ErrStaleClaim
 	}
-	return requireFanOutClaimBundle(ctx, tx, postgres, claim, grant.BundleHash)
+	return requireFanOutClaimBundle(ctx, tx, postgres, claim, grant)
 }
 
-func requireFanOutClaimBundle(ctx context.Context, tx *sql.Tx, postgres bool, claim fanoutobligation.Claim, bundleHash string) error {
+func requireFanOutGrantOrigin(request fanoutobligation.IntentRequest, grant startupownership.GrantEvidence) error {
+	if grant.SelectedFork != nil && (request.Deployment == nil || request.Key.RunID != grant.SelectedFork.ForkRunID) {
+		return fanoutobligation.ErrStaleClaim
+	}
+	return nil
+}
+
+func requireFanOutClaimBundle(ctx context.Context, tx *sql.Tx, postgres bool, claim fanoutobligation.Claim, grant startupownership.GrantEvidence) error {
 	intent, err := lockOwnedFanOutIntent(ctx, tx, postgres, claim)
 	if err != nil {
 		return err
 	}
-	if intent.Request.PlanRef.BundleHash != bundleHash {
+	if fanOutIntentBundleHash(intent.Request) != grant.BundleHash {
 		return fanoutobligation.ErrStaleClaim
 	}
-	return nil
+	return requireFanOutGrantOrigin(intent.Request, grant)
 }

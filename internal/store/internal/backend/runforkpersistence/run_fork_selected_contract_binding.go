@@ -106,15 +106,15 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req r
 	}
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
-			fork_run_id, source_run_id, fork_event_id,
+			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id,
 			mode, bundle_hash, created_at
 		)
 		VALUES (
-			$1, $2, $3,
-			$4, NULLIF($5, ''), $6
+			$1, $2, $3, $4, $5,
+			$6, NULLIF($7, ''), $8
 		)
 		RETURNING binding_id
-	`, binding.ForkRunID, binding.SourceRunID, binding.ForkEventID,
+	`, binding.ForkRunID, binding.SourceRunID, binding.ForkPoint.Kind, binding.ForkPoint.Revision, nullableForkEventID(binding.ForkPoint),
 		binding.ContractSelection.Mode,
 		binding.ContractSelection.BundleHash,
 		binding.CreatedAt).Scan(&binding.BindingID); err != nil {
@@ -128,13 +128,17 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 }, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	var binding runfork.RunForkSelectedContractBinding
 	var selection runfork.RunForkContractSelection
+	var pointKind string
+	var forkRevision int64
 	var createdAt any
 	err := querier.QueryRowContext(ctx, `
 		SELECT
 			CAST(binding_id AS TEXT),
 			CAST(fork_run_id AS TEXT),
 			CAST(source_run_id AS TEXT),
-			CAST(fork_event_id AS TEXT),
+			fork_point_kind,
+			fork_revision,
+			COALESCE(CAST(fork_event_id AS TEXT), ''),
 			mode,
 			COALESCE(bundle_hash, ''),
 			created_at
@@ -144,6 +148,8 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 		&binding.BindingID,
 		&binding.ForkRunID,
 		&binding.SourceRunID,
+		&pointKind,
+		&forkRevision,
 		&binding.ForkEventID,
 		&selection.Mode,
 		&selection.BundleHash,
@@ -160,6 +166,10 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding created_at is required")
 	}
 	binding.Owner = runfork.RunForkSelectedContractBindingOwner
+	binding.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointKind(pointKind), Revision: forkRevision, EventID: binding.ForkEventID}
+	if err := binding.ForkPoint.Validate(); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("decode selected contract binding point: %w", err)
+	}
 	binding.ContractSelection = selection
 	binding.CreatedAt = parsedCreatedAt
 	return binding, nil
@@ -180,12 +190,8 @@ func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContract
 	if _, err := uuid.Parse(sourceRunID); err != nil {
 		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding source run_id must be a UUID: %w", err)
 	}
-	forkEventID := strings.TrimSpace(req.ForkEventID)
-	if forkEventID == "" {
-		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding requires fork event_id")
-	}
-	if _, err := uuid.Parse(forkEventID); err != nil {
-		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding fork event_id must be a UUID: %w", err)
+	if err := req.ForkPoint.Validate(); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding point: %w", err)
 	}
 	selection, err := normalizeRunForkSelectedContractSelection(req.ContractSelection)
 	if err != nil {
@@ -199,7 +205,8 @@ func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContract
 		Owner:             runfork.RunForkSelectedContractBindingOwner,
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
-		ForkEventID:       forkEventID,
+		ForkPoint:         req.ForkPoint,
+		ForkEventID:       req.ForkPoint.EventID,
 		ContractSelection: selection,
 		CreatedAt:         createdAt,
 	}, nil
@@ -207,6 +214,13 @@ func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContract
 
 func NormalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContractBindingRequest, createdAt time.Time) (runfork.RunForkSelectedContractBinding, error) {
 	return normalizeRunForkSelectedContractBinding(req, createdAt)
+}
+
+func nullableForkEventID(point runfork.RunForkPoint) any {
+	if point.Kind == runfork.RunForkPointEvent {
+		return point.EventID
+	}
+	return nil
 }
 
 func normalizeRunForkSelectedContractSelection(selection runfork.RunForkContractSelection) (runfork.RunForkContractSelection, error) {

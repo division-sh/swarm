@@ -147,6 +147,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 					forked_from_run_id uuid, forked_from_event_id uuid, started_at timestamptz);
 				CREATE TABLE run_fork_selected_contract_runtime_executions (
 					execution_id uuid PRIMARY KEY, fork_run_id uuid, generation bigint,
+					fork_point_kind text, fork_revision bigint, fork_event_id uuid,
 					state text, execution_owner text, lease_expires_at timestamptz, updated_at timestamptz,
 					admission_fingerprint text, container_plan_fingerprint text,
 					actor_census_fingerprint text, effective_config_fingerprint text,
@@ -172,6 +173,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 				ActorCensusFingerprint: "actors", EffectiveConfigFingerprint: "config",
 				ExecutionMode: executionmode.Live, FenceGeneration: 1,
 			}
+			issued.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: issued.ForkEventID, Revision: 1}
 			if _, err := db.Exec(`INSERT INTO source_artifacts VALUES ($1)`, hash); err != nil {
 				t.Fatal(err)
 			}
@@ -179,7 +181,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			origin, err := runlifecycle.ForkMaterializationRunOrigin(issued.SourceRunID, issued.ForkEventID)
+			origin, err := runlifecycle.ForkMaterializationRunOrigin(issued.SourceRunID, issued.ForkPoint.Kind, issued.ForkPoint.Revision, issued.ForkPoint.EventID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -210,7 +212,7 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_runtime_executions VALUES ($1,$2,1,'prepared','issuer',$3,NULL,'admission','container','actors','config',$4,$5,$6,$7)`, issued.ExecutionID, issued.ForkRunID, issued.LeaseExpiresAt, string(preparationJSON), issued.PreparationFingerprint, issued.DeclarationPlanFingerprint, issued.ExecutableCoordinateFingerprint); err != nil {
+			if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_runtime_executions VALUES ($1,$2,1,'event',1,$3,'prepared','issuer',$4,NULL,'admission','container','actors','config',$5,$6,$7,$8)`, issued.ExecutionID, issued.ForkRunID, issued.ForkEventID, issued.LeaseExpiresAt, string(preparationJSON), issued.PreparationFingerprint, issued.DeclarationPlanFingerprint, issued.ExecutableCoordinateFingerprint); err != nil {
 				t.Fatal(err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -286,7 +288,7 @@ func selectedClaimPreparationFixture(t *testing.T, db *sql.DB, issued runfork.Se
 		ForkRunID: issued.ForkRunID,
 		SelectedForkPreparation: runfork.SelectedForkPreparation{
 			PreparationID: uuid.NewString(), ProcessGeneration: authority.AuthorityGeneration,
-			SourceRunID: issued.SourceRunID, ForkEventID: issued.ForkEventID,
+			SourceRunID: issued.SourceRunID, ForkPoint: issued.ForkPoint, ForkEventID: issued.ForkEventID,
 			DeclarationPlanFingerprint: "sha256:" + fingerprint,
 			Actors:                     []runfork.SelectedForkPreparedActor{},
 			Coordinates: managedcapabilities.SelectedForkPreparationCoordinates{

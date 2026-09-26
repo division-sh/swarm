@@ -129,12 +129,14 @@ func publicationBatchFixture(t *testing.T, postgres bool) (*sql.DB, *publication
 		columns = append(columns, name+" "+jsonType)
 	}
 	columns = append(columns, "payload_bytes "+bytesType, "chain_depth INTEGER", "created_at "+timeType, "UNIQUE(event_id)")
-	coords := "run_id TEXT, triggering_delivery_id TEXT, flow_path TEXT, declaration_family TEXT, semantic_path TEXT"
+	coords := "run_id TEXT, deployment_feed_id TEXT, triggering_delivery_id TEXT, flow_path TEXT, declaration_family TEXT, semantic_path TEXT"
 	for _, ddl := range []string{
 		"CREATE TABLE events (" + strings.Join(columns, ",") + ")",
 		"CREATE TABLE run_fork_selected_contract_executions (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
 		"CREATE TABLE run_fork_delivery_event_replays (fork_event_id " + idType + ", source_run_id " + idType + ", source_event_id " + idType + ", selection_authority TEXT)",
-		"CREATE TABLE fan_out_outcomes (" + coords + ", ordinal INTEGER, outcome_kind TEXT, event_id " + idType + ", PRIMARY KEY(run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal))",
+		"CREATE TABLE fan_out_outcomes (" + coords + ", ordinal INTEGER, outcome_kind TEXT, event_id " + idType + ")",
+		"CREATE UNIQUE INDEX handler_outcome_key ON fan_out_outcomes(run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal) WHERE deployment_feed_id IS NULL",
+		"CREATE UNIQUE INDEX deployment_outcome_key ON fan_out_outcomes(run_id,deployment_feed_id,ordinal) WHERE deployment_feed_id IS NOT NULL",
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -173,12 +175,45 @@ func publicationBatchFixture(t *testing.T, postgres bool) (*sql.DB, *publication
 			t.Fatal(err)
 		}
 		key := g.claim.Key
-		if _, err := db.Exec(`INSERT INTO fan_out_outcomes VALUES ($1,$2,$3,$4,$5,$6,'committed',$7)`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, ordinal, event.ID()); err != nil {
+		if _, err := db.Exec(`INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id) VALUES ($1,$2,$3,$4,$5,$6,'committed',$7)`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, ordinal, event.ID()); err != nil {
 			t.Fatal(err)
 		}
 		members = append(members, &publicationGroupMember{ordinal: ordinal, event: event})
 	}
 	return db, g, members
+}
+
+func TestPublicationOutcomeSelectionKeepsDeploymentAndHandlerOriginsDistinct(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		name := "sqlite"
+		if postgres {
+			name = "postgres"
+		}
+		t.Run(name, func(t *testing.T) {
+			db, group, _ := publicationBatchFixture(t, postgres)
+			feedID := uuid.NewString()
+			if _, err := db.Exec(`INSERT INTO fan_out_outcomes (run_id,deployment_feed_id,ordinal,outcome_kind,event_id) VALUES ($1,$2,0,'committed',$3)`, group.claim.Key.RunID, feedID, uuid.NewString()); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []fanoutobligation.IntentKey{
+				group.claim.Key,
+				{RunID: group.claim.Key.RunID, DeploymentFeedID: feedID},
+			} {
+				where, args, err := fanOutOutcomeKeySelection(key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				args = append(args, 0)
+				var count int
+				if err := db.QueryRow(`SELECT COUNT(*) FROM fan_out_outcomes WHERE `+where+fmt.Sprintf(` AND ordinal=$%d`, len(args)), args...).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count != 1 {
+					t.Fatalf("origin selection returned %d rows for %#v", count, key)
+				}
+			}
+		})
+	}
 }
 
 func insertPublicationBatchEventFixture(ctx context.Context, db *sql.DB, record eventrecord.Record) error {
@@ -346,7 +381,7 @@ func TestPublicationGroupBatchNativeDifferentialBothStores(t *testing.T) {
 				for i := range coords {
 					other := append([]any{}, coords...)
 					other[i] = uuid.NewString()
-					if _, err := tx.Exec(`INSERT INTO fan_out_outcomes VALUES ($1,$2,$3,$4,$5,0,NULL,NULL)`, other...); err != nil {
+					if _, err := tx.Exec(`INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal,outcome_kind,event_id) VALUES ($1,$2,$3,$4,$5,0,NULL,NULL)`, other...); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -25,6 +25,7 @@ type runForkActivationLineage struct {
 	ForkBundleHash    string
 	SourceRunID       string
 	SourceBundleHash  string
+	ForkPoint         runfork.RunForkPoint
 	ForkEventID       string
 	ForkEventName     string
 	ForkEventTime     time.Time
@@ -70,7 +71,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 				ForkRunID:               lineage.ForkRunID,
 				ForkRunStatus:           lineage.ForkStatus,
 				SourceRunStatus:         lineage.SourceRunStatus,
-				ForkPoint:               runfork.RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime, Revision: lineage.ForkEventRevision},
+				ForkPoint:               runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime, Revision: lineage.ForkEventRevision},
 				ReplayResumeBlocked:     true,
 				MaterializedEntityCount: len(lineage.EntityIDs),
 			}
@@ -206,7 +207,7 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 			result = runfork.RunForkActivation{
 				SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID, ForkRunStatus: lineage.ForkStatus,
 				SourceRunStatus:     lineage.SourceRunStatus,
-				ForkPoint:           runfork.RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime, Revision: lineage.ForkEventRevision},
+				ForkPoint:           runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime, Revision: lineage.ForkEventRevision},
 				ReplayResumeBlocked: true, MaterializedEntityCount: len(lineage.EntityIDs),
 			}
 			if lineage.ForkStatus != runfork.RunForkMaterializedStatus {
@@ -386,7 +387,13 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 		ForkBundleHash: snapshot.BundleHash,
 		SourceRunID:    snapshot.Origin.SourceRunID(),
 		ForkEventID:    snapshot.Origin.SourceEventID(),
+		ForkPoint: runfork.RunForkPoint{Kind: snapshot.Origin.ForkPointKind(), Revision: snapshot.Origin.ForkRevision(),
+			EventID: snapshot.Origin.SourceEventID()},
 	}
+	if err := lineage.ForkPoint.Validate(); err != nil {
+		return runForkActivationLineage{}, fmt.Errorf("fork activation origin point: %w", err)
+	}
+	lineage.ForkEventRevision = lineage.ForkPoint.Revision
 	var forkEventTime sql.NullTime
 	err = tx.QueryRowContext(ctx, `
 		SELECT
@@ -395,7 +402,7 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 			COALESCE(e.event_name, ''),
 			e.created_at
 		FROM runs s
-		LEFT JOIN events e ON e.run_id = s.run_id AND e.event_id = $2::uuid
+		LEFT JOIN events e ON e.run_id = s.run_id AND e.event_id = NULLIF($2, '')::uuid
 		WHERE s.run_id = $1::uuid
 		FOR UPDATE OF s
 	`, lineage.SourceRunID, lineage.ForkEventID).Scan(
@@ -410,10 +417,12 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 	if err != nil {
 		return runForkActivationLineage{}, fmt.Errorf("load fork activation lineage: %w", err)
 	}
-	if lineage.SourceRunStatus == "" || !forkEventTime.Valid {
-		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run and fork point event")
+	if lineage.SourceRunStatus == "" || (lineage.ForkPoint.Kind == runfork.RunForkPointEvent && !forkEventTime.Valid) {
+		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run and exact fork point")
 	}
-	lineage.ForkEventTime = forkEventTime.Time
+	if forkEventTime.Valid {
+		lineage.ForkEventTime = forkEventTime.Time
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT entity_id::text, COALESCE(flow_instance, '')
 		FROM entity_state
@@ -467,7 +476,13 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	lineage := runForkActivationLineage{
 		ForkRunID: snapshot.RunID, ForkStatus: string(snapshot.State), ForkBundleHash: snapshot.BundleHash,
 		SourceRunID: snapshot.Origin.SourceRunID(), ForkEventID: snapshot.Origin.SourceEventID(),
+		ForkPoint: runfork.RunForkPoint{Kind: snapshot.Origin.ForkPointKind(), Revision: snapshot.Origin.ForkRevision(),
+			EventID: snapshot.Origin.SourceEventID()},
 	}
+	if err := lineage.ForkPoint.Validate(); err != nil {
+		return runForkActivationLineage{}, fmt.Errorf("fork activation origin point: %w", err)
+	}
+	lineage.ForkEventRevision = lineage.ForkPoint.Revision
 	var forkEventTimeRaw any
 	err = tx.QueryRowContext(ctx, `
 		SELECT COALESCE(s.status, ''), COALESCE(s.bundle_hash, ''), COALESCE(e.event_name, ''), e.created_at
@@ -487,10 +502,12 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	if err != nil {
 		return runForkActivationLineage{}, fmt.Errorf("decode sqlite fork activation event time: %w", err)
 	}
-	if lineage.SourceRunStatus == "" || !present {
-		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run and fork point event")
+	if lineage.SourceRunStatus == "" || (lineage.ForkPoint.Kind == runfork.RunForkPointEvent && !present) {
+		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run and exact fork point")
 	}
-	lineage.ForkEventTime = forkEventTime
+	if present {
+		lineage.ForkEventTime = forkEventTime
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT CAST(entity_id AS TEXT), COALESCE(flow_instance, '')
 		FROM entity_state
@@ -534,9 +551,9 @@ func lockRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, lineage 
 	if lineage == nil {
 		return fmt.Errorf("fork activation requires lineage")
 	}
-	point, err := resolveRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkEventID)
+	point, err := resolveFixedRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkPoint, resolveRunForkRevisionPoint)
 	if err != nil {
-		return fmt.Errorf("resolve fork activation event revision: %w", err)
+		return fmt.Errorf("resolve fork activation fixed revision: %w", err)
 	}
 	lineage.ForkEventRevision = point.Revision
 	var currentRevision int64
@@ -561,9 +578,9 @@ func lockSQLiteRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, li
 	if lineage == nil {
 		return fmt.Errorf("fork activation requires lineage")
 	}
-	point, err := resolveRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkEventID)
+	point, err := resolveFixedRunForkRevisionPoint(ctx, tx, lineage.SourceRunID, lineage.ForkPoint, resolveSQLiteRunForkRevisionPoint)
 	if err != nil {
-		return fmt.Errorf("resolve sqlite fork activation event revision: %w", err)
+		return fmt.Errorf("resolve sqlite fork activation fixed revision: %w", err)
 	}
 	lineage.ForkEventRevision = point.Revision
 	var currentRevision int64

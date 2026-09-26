@@ -444,6 +444,10 @@ func testFlowInstanceRouteTopologyAtomicity(
 	if committed, err := selected.ReplaceFlowInstanceRouteTopology(ctx, initial); err != nil || !committed.Acknowledged {
 		t.Fatalf("seed route topology: committed=%+v err=%v", committed, err)
 	}
+	if committed, err := selected.ReplaceFlowInstanceRouteTopology(ctx, initial); err != nil || !committed.Acknowledged {
+		t.Fatalf("exact no-op topology must still acknowledge durable comparison: committed=%+v err=%v", committed, err)
+	}
+	assertFlowRouteTopologySubscribers(t, ctx, selected, identities, "initial")
 	// Admission is reusable only for the exact run within this transaction.
 	// A later missing run must still fail and roll back earlier route owners.
 	foreign := flowRouteTopologySets(identities[:1], "foreign")

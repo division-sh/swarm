@@ -348,6 +348,7 @@ func (p selectedRunTargetOwnerProjection) resolveConnectEvaluation(ledger events
 }
 
 func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepipeline.FlowInstanceActivationPlan) (selectedRunTargetOwnerProjection, error) {
+	ordered := newOrderedActiveTargetDescriptors(p.descriptors)
 	for _, plan := range plans {
 		normalized, err := plan.Normalized()
 		if err != nil {
@@ -356,7 +357,7 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 		if err := normalized.Validate(); err != nil {
 			return selectedRunTargetOwnerProjection{}, fmt.Errorf("validate selected-run activation owner: %w", err)
 		}
-		p.descriptors = appendActiveTargetDescriptor(p.descriptors, ActiveTargetDescriptor{
+		ordered.add(ActiveTargetDescriptor{
 			ID:            normalized.Identity.InstanceID,
 			FlowInstance:  normalized.Identity.InstancePath,
 			EntityID:      normalized.Identity.EntityID,
@@ -364,6 +365,7 @@ func (p selectedRunTargetOwnerProjection) withActivationPlans(plans []runtimepip
 		})
 		p.targetsAvailable = true
 	}
+	p.descriptors = ordered.descriptors
 	return p, nil
 }
 
@@ -389,7 +391,7 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 	if err != nil {
 		return selectedRunTargetOwnerProjection{}, err
 	}
-	var descriptors []ActiveTargetDescriptor
+	ordered := newOrderedActiveTargetDescriptors(nil)
 	targetsAvailable := false
 	if p.loadActiveTargetDescriptors != nil {
 		loaded, available, err := p.loadActiveTargetDescriptors(ctx)
@@ -398,14 +400,14 @@ func (p deliveryRecipientPolicy) loadSelectedRunTargetOwnerProjection(ctx contex
 		}
 		targetsAvailable = targetsAvailable || available
 		for _, descriptor := range loaded {
-			descriptors = appendActiveTargetDescriptor(descriptors, descriptor)
+			ordered.add(descriptor)
 		}
 	}
 	projection := selectedRunTargetOwnerProjection{
 		prospective: p.prospective,
 		context:     ctx,
 		agents:      agents, agentsAvailable: agentsAvailable,
-		descriptors: descriptors, targetsAvailable: targetsAvailable,
+		descriptors: ordered.descriptors, targetsAvailable: targetsAvailable,
 		source: p.semanticSource, required: p.requireTargetOwners,
 	}
 	if projection.required {

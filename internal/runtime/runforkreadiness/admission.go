@@ -24,6 +24,7 @@ import (
 
 // MaterializeRequest carries an admitted relation, never caller-authored states.
 type MaterializeRequest struct {
+	ForkOperation           *runfork.ForkOperationRequest
 	Preparation             runfork.SelectedForkPreparation
 	OriginalLoopCarriage    semanticview.OriginalLoopCarriage `json:"-"`
 	SourceRunID             string

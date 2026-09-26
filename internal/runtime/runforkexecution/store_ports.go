@@ -12,8 +12,10 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	managedcapabilities "github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -23,13 +25,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
+
+type SelectedDeploymentFanOutStore interface {
+	BindSelectedDeploymentFanOutGrant(startupownership.GrantEvidence) (runtimepipeline.FanOutObligationOwner, error)
+	ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
+}
 
 // SelectedContractForkLifecycle owns planning, materialization, activation,
 // binding, and cleanup for one selected-contract fork.
 type SelectedContractForkLifecycle interface {
+	SelectedDeploymentFanOutStore
+	FailMaterializedSelectedContractExecutionFork(context.Context, string, runfork.ForkOperationFailure) error
 	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
 	RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
+	ReconcileSelectedSuccessorDeliveryAuthority(context.Context, string, runtimedelivery.ExecutionAuthority) error
 	StopSelectedFork(context.Context, runcontrol.SelectedStopRequest) (runcontrol.State, error)
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
@@ -73,6 +84,7 @@ type selectedContractExecutionPorts struct {
 	contexts                *selectedForkContexts
 	workflow                runtimepipeline.WorkflowPersistence
 	fork                    SelectedContractForkLifecycle
+	deploymentFanOut        SelectedDeploymentFanOutStore
 	runtimeExecution        SelectedContractRuntimeExecutionLifecycle
 	replay                  SelectedContractReplayPersistence
 	events                  runtimebus.EventStore
@@ -152,7 +164,7 @@ func NewSelectedContractExecutionOwner(
 	}
 	return SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{
 		contexts: new(selectedForkContexts),
-		workflow: workflow, fork: fork, runtimeExecution: runtimeExecution, replay: replay,
+		workflow: workflow, fork: fork, deploymentFanOut: fork, runtimeExecution: runtimeExecution, replay: replay,
 		events: events, busDurable: busDurable, pipelineObligations: pipelineObligations,
 		manager: manager, managerRoles: managerRoles, effects: effects, completion: completion,
 		completionHeartbeat: completionHeartbeat, liveSessions: liveSessions, managedCapabilities: managedCapabilities,

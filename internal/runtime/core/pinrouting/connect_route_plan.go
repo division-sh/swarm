@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -792,6 +793,14 @@ func connectSourceEndpointMatches(endpoint ConnectRoutePlanEndpoint, sourceEvent
 		scope = endpoint.flowID.value
 	}
 	switch sourceEvent.kind {
+	case events.RoutingSourceDeploymentFeed:
+		declarationFlow := endpoint.flowID.value
+		if endpoint.IsRoot() {
+			declarationFlow = "."
+		}
+		if route.FlowID != declarationFlow || route.FlowInstance != "" || route.EntityID != "" {
+			return false
+		}
 	case events.RoutingSourceExternalIngress:
 		return endpoint.IsExternalIngress() && (event == local || event == resolved)
 	case events.RoutingSourceRoot:
@@ -1882,6 +1891,31 @@ func AdmitSourceEvent(eventType events.EventType, source events.RoutingSource) (
 		return SourceEvent{}, fmt.Errorf("connect source event requires explicit routing provenance")
 	}
 	return SourceEvent{eventType: eventType, kind: source.Kind(), route: source.Route()}, nil
+}
+
+// AdmitDeploymentFeedDeclaration binds a source-neutral feed to the exact
+// compiled importable event declaration. A flow coordinate alone is not
+// permission to publish an arbitrary output-pin event.
+func AdmitDeploymentFeedDeclaration(source semanticview.Source, eventType events.EventType, routingSource events.RoutingSource) error {
+	if source == nil || routingSource.Kind() != events.RoutingSourceDeploymentFeed {
+		return fmt.Errorf("deployment feed requires semantic source and typed provenance")
+	}
+	ref, err := durabledata.ParseDeclarationRef(routingSource.Route().FlowID, string(eventType))
+	if err != nil {
+		return err
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return fmt.Errorf("deployment feed requires admitted bundle")
+	}
+	declaration, ok := bundle.DurableDataDeclarationByRef(ref)
+	if !ok || declaration.OwnerFlowID != routingSource.Route().FlowID || declaration.Ref != ref {
+		return fmt.Errorf("deployment feed event %q has no exact importable declaration in flow %q", eventType, ref.FlowPath)
+	}
+	if !PinDeclaredOutput(source, declaration.OwnerFlowID, declaration.Ref.EventName) {
+		return fmt.Errorf("deployment feed event %q has no exact declared output pin in flow %q", eventType, ref.FlowPath)
+	}
+	return nil
 }
 
 // AdmitRuntimeControlSourceEvent resolves one authored producer event against

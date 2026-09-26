@@ -28,11 +28,11 @@ func TestSelectedRunForkAdapterPreservesOutcomeAndError(t *testing.T) {
 						Owner: runfork.RunForkSelectedContractExecutionOwner,
 						Materialization: runfork.RunForkMaterialization{
 							SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
-							ForkRunStatus: "paused", ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+							ForkRunStatus: "paused", ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
 						},
 						Activation: runfork.RunForkActivation{
 							SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
-							ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+							ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
 							Activated: true, ForkRunStatus: "running", SourceFrozen: true, SourceRunStatus: "forked",
 						},
 						ExecutedEventCount: 2,
@@ -61,11 +61,11 @@ func TestSelectedRunForkAdapterRefusesContradictoryActivationEvidence(t *testing
 		Owner: runfork.RunForkSelectedContractExecutionOwner,
 		Materialization: runfork.RunForkMaterialization{
 			SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
-			ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+			ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
 		},
 		Activation: runfork.RunForkActivation{
 			SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
-			ForkPoint: runfork.RunForkPoint{EventID: runForkTestEventID},
+			ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
 			Activated: true, ForkRunStatus: runfork.RunForkActivatedStatus,
 			SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
 		},
