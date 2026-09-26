@@ -193,6 +193,15 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil || !successor.Acknowledged || successor.Reused {
 				t.Fatalf("begin exact successor after process takeover: result=%+v err=%v", successor, err)
 			}
+			forgedBinding := binding
+			forgedBinding.ProcessBootID = uuid.NewString()
+			forged, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(next.Attempt.ID(), next.Attempt.RunID(), next.Attempt.InstancePath(), next.Attempt.PlanRevision(), forgedBinding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, forged); err == nil {
+				t.Fatal("invented predecessor binding settled after foreign takeover")
+			}
 			if err := selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, next.Attempt); err != nil {
 				t.Fatalf("settle predecessor after foreign takeover: %v", err)
 			}
