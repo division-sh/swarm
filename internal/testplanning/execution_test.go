@@ -2,12 +2,14 @@ package testplanning
 
 import (
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -62,6 +64,11 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			if plan.BuildContext.GOOS == "" || len(plan.Units) == 0 {
 				t.Fatalf("unbound plan: %+v", plan)
 			}
+			if profile == ProfileLocal {
+				if err := validateLocalBusCoverage(plan, inventory, policy.Module+"/internal/runtime/bus"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if profile == ProfilePRCommon || profile == ProfileFull {
 				golden, err := plan.Unit("hitl-releasee2e-golden")
 				if err != nil {
@@ -77,6 +84,45 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				}
 			}
 		})
+	}
+	// A CI-only special-unit repack must not silently remove the bus from local.
+	mutated := policy
+	mutated.Profiles = make(map[string]ProfilePolicy, len(policy.Profiles))
+	for name, profile := range policy.Profiles {
+		mutated.Profiles[name] = profile
+	}
+	local := mutated.Profiles[ProfileLocal]
+	local.Units = slices.DeleteFunc(slices.Clone(local.Units), func(id string) bool { return id == "local-runtime-bus-full" })
+	mutated.Profiles[ProfileLocal] = local
+	missingBus, err := BuildPlan(mutated, model, packages, ProfileLocal, "missing local bus", "test-head")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BindExecution(&missingBus, inventory, proofs); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateLocalBusCoverage(missingBus, inventory, policy.Module+"/internal/runtime/bus"); err == nil {
+		t.Fatal("local bus omission escaped the required-root guard")
+	}
+	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
+		current, err := BuildPlan(policy, model, packages, profile, "unchanged CI selection", "test-head")
+		if err != nil {
+			t.Fatal(err)
+		}
+		withoutLocal, err := BuildPlan(mutated, model, packages, profile, "unchanged CI selection", "test-head")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := BindExecution(&current, inventory, proofs); err != nil {
+			t.Fatal(err)
+		}
+		if err := BindExecution(&withoutLocal, inventory, proofs); err != nil {
+			t.Fatal(err)
+		}
+		if current.Digest != withoutLocal.Digest || !reflect.DeepEqual(current.Units, withoutLocal.Units) || !reflect.DeepEqual(current.Packages, withoutLocal.Packages) {
+			t.Fatalf("%s CI execution signature changed with local-only bus repair", profile)
+		}
+		t.Logf("%s unchanged CI execution digest: %s", profile, current.Digest)
 	}
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated} {
 		plan, err := BuildPlan(policy, model, packages, profile, "semantic PR", "test-head", BuildOptions{IncludeParityFull: true, IncludeSoak: true})
@@ -96,6 +142,30 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 			}
 		}
 	}
+}
+
+func validateLocalBusCoverage(plan RunPlan, inventory RootInventory, pkg string) error {
+	entry, ok := inventory.Packages[pkg]
+	if !ok || len(entry.Roots) == 0 {
+		return fmt.Errorf("local bus inventory is empty or absent: %s", pkg)
+	}
+	required := make(map[string]int, len(entry.Roots))
+	for _, unit := range plan.Units {
+		for _, root := range unit.RequiredTests {
+			if root.Package == pkg {
+				required[root.Name]++
+			}
+		}
+	}
+	if len(required) != len(entry.Roots) {
+		return fmt.Errorf("local bus requires %d of %d discovered roots", len(required), len(entry.Roots))
+	}
+	for _, name := range entry.Roots {
+		if required[name] != 1 {
+			return fmt.Errorf("local bus root %s has %d required owners, want one", name, required[name])
+		}
+	}
+	return nil
 }
 
 func unitRequires(unit ProofUnit, name string) bool {

@@ -44,6 +44,7 @@ profiles:
       - local-release-golden-restart
       - local-release-lifecycle-smoke
       - local-serveapp-canaries
+      - local-runtime-bus-full
   pr-common:
     count_mode: cache-default
     environment_id: ci-postgres-gateway-empty-v1
@@ -316,6 +317,11 @@ units:
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
+  local-runtime-bus-full:
+    packages: [github.com/division-sh/swarm/internal/runtime/bus]
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: broad
   parity-served-source-artifact:
     packages: [github.com/division-sh/swarm/internal/serveapp]
     run: '^TestInternalLifecycleScenarioConsumesAdmittedSourceAcrossSupportedBackendsAndModes$'
