@@ -39,6 +39,18 @@ var canonicalDecoderExclusionClassifications = map[string]struct{}{
 	"deployment.swarm_yaml": {},
 }
 
+var canonicalDecodeBypassFamilies = map[string]struct{}{
+	"wave_4_node_handler":            {},
+	"wave_5_agent_tool_policy":       {},
+	"mixed_wave_4_wave_5":            {},
+	"mixed_existing_typed_admission": {},
+	"closure_pack_platform":          {},
+	"excluded_deployment_config":     {},
+	"excluded_scenario_tooling":      {},
+	"excluded_test_fixture":          {},
+	"excluded_test_tooling":          {},
+}
+
 var unquotedConnectYAMLKey = regexp.MustCompile(`(?m)^[\t ]*(?:-[\t ]+)?connect[\t ]*:`)
 
 type canonicalFormsRegistry struct {
@@ -47,7 +59,9 @@ type canonicalFormsRegistry struct {
 	Inventory         canonicalFormsInventory        `yaml:"inventory"`
 	Rows              []canonicalFormsRow            `yaml:"rows"`
 	DecoderCoverage   map[string]map[string][]string `yaml:"decoder_coverage"`
+	DecoderRetired    map[string]map[string][]string `yaml:"decoder_retired"`
 	DecoderExclusions map[string]map[string][]string `yaml:"decoder_exclusions"`
+	DecodeBypasses    canonicalDecodeBypassInventory `yaml:"decode_bypasses"`
 	Wave1             canonicalFormsWave1            `yaml:"wave_1"`
 	Wave2             canonicalFormsWave2            `yaml:"wave_2"`
 	Wave3             canonicalFormsWave3            `yaml:"wave_3"`
@@ -56,8 +70,28 @@ type canonicalFormsRegistry struct {
 type canonicalFormsInventory struct {
 	CustomUnmarshalTotal     int `yaml:"custom_unmarshal_total"`
 	CustomUnmarshalReachable int `yaml:"custom_unmarshal_reachable"`
+	CustomUnmarshalRetired   int `yaml:"custom_unmarshal_retired"`
 	CustomUnmarshalExcluded  int `yaml:"custom_unmarshal_excluded"`
 }
+
+type canonicalDecodeBypassInventory struct {
+	NodeSiteCeiling   int                                  `yaml:"node_site_ceiling"`
+	PackConfigCeiling int                                  `yaml:"pack_config_decode_ceiling"`
+	Files             map[string]canonicalDecodeBypassFile `yaml:"files"`
+}
+
+type canonicalDecodeBypassFile struct {
+	Family         string `yaml:"family"`
+	NodeSites      int    `yaml:"node_sites"`
+	PackConfigRoot int    `yaml:"pack_config_decode_roots"`
+}
+
+const (
+	initialCustomUnmarshalCeiling  = 91
+	initialReachableDecoderCeiling = 86
+	initialOffOwnerNodeSiteCeiling = 290
+	initialPackConfigDecodeCeiling = 6
+)
 
 type canonicalFormsRow struct {
 	ID                 string                 `yaml:"id"`
@@ -169,6 +203,24 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 		}
 	}
 	expectedExcluded := make(map[string]string)
+	expectedRetired := make(map[string]string)
+	for file, rowMappings := range record.DecoderRetired {
+		for rowID, receiverTypes := range rowMappings {
+			if _, ok := rows[rowID]; !ok {
+				t.Fatalf("retired decoder %s references unknown row %q", file, rowID)
+			}
+			for _, receiverType := range receiverTypes {
+				identity := canonicalDecoderIdentity(file, receiverType)
+				if owner, exists := expectedReachable[identity]; exists {
+					t.Fatalf("decoder %s is both reachable through %s and retired", identity, owner)
+				}
+				if previous, exists := expectedRetired[identity]; exists {
+					t.Fatalf("decoder %s is retired twice under %s and %s", identity, previous, rowID)
+				}
+				expectedRetired[identity] = rowID
+			}
+		}
+	}
 	for file, surfaceMappings := range record.DecoderExclusions {
 		for surface, receiverTypes := range surfaceMappings {
 			if _, ok := canonicalDecoderExclusionClassifications[surface]; !ok {
@@ -178,6 +230,9 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 				identity := canonicalDecoderIdentity(file, receiverType)
 				if owner, exists := expectedReachable[identity]; exists {
 					t.Fatalf("decoder %s is both reachable through %s and excluded as %s", identity, owner, surface)
+				}
+				if owner, exists := expectedRetired[identity]; exists {
+					t.Fatalf("decoder %s is both retired through %s and excluded as %s", identity, owner, surface)
 				}
 				if previous, exists := expectedExcluded[identity]; exists {
 					t.Fatalf("decoder %s is excluded by both %s and %s", identity, previous, surface)
@@ -190,11 +245,95 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if err := validateCustomYAMLDecoderInventory(expectedReachable, expectedExcluded, actual); err != nil {
+	classified := make(map[string]string, len(expectedReachable)+len(expectedRetired))
+	for identity, rowID := range expectedReachable {
+		classified[identity] = rowID
+	}
+	for identity, rowID := range expectedRetired {
+		classified[identity] = rowID
+	}
+	if err := validateCustomYAMLDecoderInventory(classified, expectedExcluded, actual); err != nil {
 		t.Fatal(err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 91 || record.Inventory.CustomUnmarshalReachable != 89 || record.Inventory.CustomUnmarshalExcluded != 2 || len(expectedReachable) != 89 || len(expectedExcluded) != 2 || len(actual) != 91 {
-		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 91/89/2/89/2/91", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
+	if record.Inventory.CustomUnmarshalTotal != len(actual) || record.Inventory.CustomUnmarshalReachable != len(expectedReachable) || record.Inventory.CustomUnmarshalRetired != len(expectedRetired) || record.Inventory.CustomUnmarshalExcluded != len(expectedExcluded) {
+		t.Fatalf("decoder inventory total/reachable/retired/excluded = %d/%d/%d/%d, source/classified = %d/%d/%d/%d", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalRetired, record.Inventory.CustomUnmarshalExcluded, len(actual), len(expectedReachable), len(expectedRetired), len(expectedExcluded))
+	}
+	if len(actual) > initialCustomUnmarshalCeiling || len(expectedReachable) > initialReachableDecoderCeiling {
+		t.Fatalf("decoder count exceeded initial census: total=%d reachable=%d", len(actual), len(expectedReachable))
+	}
+}
+
+func TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	record := loadCanonicalFormsRegistry(t, root)
+	actual, err := collectOffOwnerDecodeBypasses(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateOffOwnerDecodeBypasses(record.DecodeBypasses, actual); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCanonicalFormsRegistryRejectsUnregisteredDecodeBypasses(t *testing.T) {
+	root := t.TempDir()
+	writeRegistryMutationFile(t, filepath.Join(root, "internal/runtime/contracts/new.go"), `package contracts
+import source "gopkg.in/yaml.v3"
+var raw *source.Node
+`)
+	writeRegistryMutationFile(t, filepath.Join(root, "internal/packs/new.go"), `package packs
+import "gopkg.in/yaml.v3"
+func decode(raw []byte) error { return yaml.Unmarshal(raw, new(any)) }
+`)
+	actual, err := collectOffOwnerDecodeBypasses(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateOffOwnerDecodeBypasses(canonicalDecodeBypassInventory{Files: map[string]canonicalDecodeBypassFile{}}, actual); err == nil || !strings.Contains(err.Error(), "internal/runtime/contracts/new.go") || !strings.Contains(err.Error(), "internal/packs/new.go") {
+		t.Fatalf("unregistered bypass error = %v", err)
+	}
+	path := "internal/runtime/contracts/new.go"
+	packPath := "internal/packs/new.go"
+	baseline := canonicalDecodeBypassInventory{
+		NodeSiteCeiling:   1,
+		PackConfigCeiling: 1,
+		Files: map[string]canonicalDecodeBypassFile{
+			path:     {Family: "wave_4_node_handler", NodeSites: 1},
+			packPath: {Family: "closure_pack_platform", PackConfigRoot: 1},
+		},
+	}
+	if err := validateOffOwnerDecodeBypasses(baseline, actual); err != nil {
+		t.Fatalf("classified bypass validation: %v", err)
+	}
+	writeRegistryMutationFile(t, filepath.Join(root, path), `package contracts
+import source "gopkg.in/yaml.v3"
+var first *source.Node
+var second *source.Node
+`)
+	actual, err = collectOffOwnerDecodeBypasses(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateOffOwnerDecodeBypasses(baseline, actual); err == nil || !strings.Contains(err.Error(), "recorded node/root=1/0, actual=2/0") {
+		t.Fatalf("increased existing-file bypass error = %v", err)
+	}
+	writeRegistryMutationFile(t, filepath.Join(root, "internal/yamlsource/source.go"), `package yamlsource
+import "gopkg.in/yaml.v3"
+var owner *yaml.Node
+`)
+	writeRegistryMutationFile(t, filepath.Join(root, "internal/runtime/contracts/new_test.go"), `package contracts
+import "gopkg.in/yaml.v3"
+var fixture *yaml.Node
+`)
+	actual, err = collectOffOwnerDecodeBypasses(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := actual["internal/yamlsource/source.go"]; exists {
+		t.Fatal("canonical owner was included in off-owner bypass inventory")
+	}
+	if _, exists := actual["internal/runtime/contracts/new_test.go"]; exists {
+		t.Fatal("test-only fixture was included in production bypass inventory")
 	}
 }
 
@@ -597,6 +736,144 @@ func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func collectOffOwnerDecodeBypasses(root string) (map[string]canonicalDecodeBypassFile, error) {
+	out := make(map[string]canonicalDecodeBypassFile)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root {
+				if _, excluded := canonicalGoCorpusExcludedDirectories[entry.Name()]; excluded {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if strings.HasPrefix(relative, "internal/yamlsource/") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(raw, []byte("gopkg.in/yaml.v3")) {
+			return nil
+		}
+		files := token.NewFileSet()
+		parsed, err := parser.ParseFile(files, path, raw, 0)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", relative, err)
+		}
+		aliases := make(map[string]struct{})
+		for _, imported := range parsed.Imports {
+			name, err := strconv.Unquote(imported.Path.Value)
+			if err != nil || name != "gopkg.in/yaml.v3" {
+				continue
+			}
+			alias := "yaml"
+			if imported.Name != nil {
+				alias = imported.Name.Name
+			}
+			if alias == "." {
+				return fmt.Errorf("%s imports yaml.v3 with a dot alias; bypass census cannot classify it", relative)
+			}
+			aliases[alias] = struct{}{}
+		}
+		if len(aliases) == 0 {
+			return nil
+		}
+		lines := make(map[int]struct{})
+		packConfigRoots := 0
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			switch value := node.(type) {
+			case *ast.SelectorExpr:
+				identifier, ok := value.X.(*ast.Ident)
+				if !ok || value.Sel.Name != "Node" {
+					break
+				}
+				if _, ok := aliases[identifier.Name]; ok {
+					lines[files.Position(value.Pos()).Line] = struct{}{}
+				}
+			case *ast.CallExpr:
+				selector, ok := value.Fun.(*ast.SelectorExpr)
+				if !ok || (selector.Sel.Name != "Unmarshal" && selector.Sel.Name != "NewDecoder") || !isPackConfigDecodePath(relative) {
+					break
+				}
+				identifier, ok := selector.X.(*ast.Ident)
+				if !ok {
+					break
+				}
+				if _, ok := aliases[identifier.Name]; ok {
+					packConfigRoots++
+				}
+			}
+			return true
+		})
+		if len(lines) != 0 || packConfigRoots != 0 {
+			out[relative] = canonicalDecodeBypassFile{NodeSites: len(lines), PackConfigRoot: packConfigRoots}
+		}
+		return nil
+	})
+	return out, err
+}
+
+func isPackConfigDecodePath(relative string) bool {
+	for _, prefix := range []string{"internal/config/", "internal/packs/", "internal/packartifact/", "internal/packmodel/"} {
+		if strings.HasPrefix(relative, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateOffOwnerDecodeBypasses(record canonicalDecodeBypassInventory, actual map[string]canonicalDecodeBypassFile) error {
+	if record.Files == nil {
+		return fmt.Errorf("off-owner decode bypass inventory is missing")
+	}
+	if record.NodeSiteCeiling < 0 || record.PackConfigCeiling < 0 || record.NodeSiteCeiling > initialOffOwnerNodeSiteCeiling || record.PackConfigCeiling > initialPackConfigDecodeCeiling {
+		return fmt.Errorf("off-owner decode ceilings exceed initial census: node=%d pack/config=%d", record.NodeSiteCeiling, record.PackConfigCeiling)
+	}
+	var missing, unclassified, mismatched []string
+	var nodeSites, packConfigRoots int
+	for path, expected := range record.Files {
+		if _, known := canonicalDecodeBypassFamilies[expected.Family]; !known {
+			return fmt.Errorf("off-owner decode bypass %s has unknown migration family %q", path, expected.Family)
+		}
+		if expected.NodeSites < 0 || expected.PackConfigRoot < 0 {
+			return fmt.Errorf("off-owner decode bypass %s has negative count", path)
+		}
+		nodeSites += expected.NodeSites
+		packConfigRoots += expected.PackConfigRoot
+		got, exists := actual[path]
+		if !exists {
+			missing = append(missing, path)
+		} else if expected.NodeSites != got.NodeSites || expected.PackConfigRoot != got.PackConfigRoot {
+			mismatched = append(mismatched, fmt.Sprintf("%s: recorded node/root=%d/%d, actual=%d/%d", path, expected.NodeSites, expected.PackConfigRoot, got.NodeSites, got.PackConfigRoot))
+		}
+	}
+	for path := range actual {
+		if _, exists := record.Files[path]; !exists {
+			unclassified = append(unclassified, path)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(unclassified)
+	sort.Strings(mismatched)
+	if nodeSites != record.NodeSiteCeiling || packConfigRoots != record.PackConfigCeiling || len(missing) != 0 || len(unclassified) != 0 || len(mismatched) != 0 {
+		return fmt.Errorf("off-owner decode bypass drift: recorded node/root=%d/%d, ceiling=%d/%d; missing=%v; unclassified=%v; mismatched=%v", nodeSites, packConfigRoots, record.NodeSiteCeiling, record.PackConfigCeiling, missing, unclassified, mismatched)
+	}
+	return nil
 }
 
 func validateCustomYAMLDecoderInventory(reachable, excluded, actual map[string]string) error {
