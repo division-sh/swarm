@@ -28,10 +28,10 @@ receiver:
   subscribes_to: [work.ready]
   event_handlers:
     work.ready:
-      guard: {id: exact_owner, check: "entity.case_id == payload.case_id"}
+      guard: {id: exact_owner, check: "has(entity.case_id) && entity.case_id == payload.case_id"}
 `
 	if !requiresExisting {
-		nodes = strings.Replace(nodes, "entity.case_id == payload.case_id", "payload.case_id == 'exact'", 1)
+		nodes = strings.Replace(nodes, "has(entity.case_id) && entity.case_id == payload.case_id", "payload.case_id == 'exact'", 1)
 	}
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)
 	return root

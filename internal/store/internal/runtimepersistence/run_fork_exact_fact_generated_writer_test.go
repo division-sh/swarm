@@ -4,23 +4,27 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
 func TestRunForkExactFactsEntityIDSpellingsBothStores(t *testing.T) {
+	source := exactFactEntitySource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			for _, spelling := range []string{"canonical", "upper", "compact"} {
 				t.Run(spelling, func(t *testing.T) {
-					selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+					selected, db, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
 					owner := selected.(interface {
 						CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
 					})
@@ -31,7 +35,7 @@ func TestRunForkExactFactsEntityIDSpellingsBothStores(t *testing.T) {
 					} else if spelling == "compact" {
 						input = strings.ReplaceAll(canonical, "-", "")
 					}
-					created, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{RunID: runID, EntityID: input, FlowInstance: "exact-spelling/receiver", EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: time.Now().UTC(), Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}})
+					created, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{Source: source, RunID: runID, EntityID: input, FlowInstance: "exact-fact/receiver", EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: time.Now().UTC(), Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}})
 					if err != nil {
 						t.Fatalf("actual CreateEntity(%s, %q): %v", spelling, input, err)
 					}
@@ -244,16 +248,17 @@ func TestRunForkExactFactsGeneratedWriterIDsBothStores(t *testing.T) {
 				})
 			})
 			t.Run("entity_and_workflow_mutation_ids", func(t *testing.T) {
-				selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+				source := exactFactEntitySource(t)
+				selected, db, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
 				owner := selected.(interface {
 					pipeline.WorkflowEngineMutationOwner
 					CreateEntity(context.Context, tools.EntityCreateRecord) (tools.EntityCreateResult, error)
 				})
 				s := exactFactStore{db: db, postgres: backend == "postgres"}
-				entityID, flowID := uuid.NewString(), "exact-generated-"+uuid.NewString()
-				instance := flowID + "/receiver"
+				entityID, flowID := uuid.NewString(), "exact-fact"
+				instance := flowID + "/" + uuid.NewString()
 				at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-				if _, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{RunID: runID, EntityID: entityID, FlowInstance: instance, EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: at, Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}}); err != nil {
+				if _, err := owner.CreateEntity(ctx, tools.EntityCreateRecord{Source: source, RunID: runID, EntityID: entityID, FlowInstance: instance, EntityType: "review_item", CurrentState: "active", FieldsJSON: json.RawMessage(`{"account_id":"preserved"}`), CreatedAt: at, Writer: tools.EntityMutationWriter{Type: "agent", ID: "generated-writer-proof", HandlerStep: "create_entity"}}); err != nil {
 					t.Fatal(err)
 				}
 				initial := assertActualMutationLedger(t, ctx, s, runID, entityID)
@@ -277,6 +282,19 @@ func TestRunForkExactFactsGeneratedWriterIDsBothStores(t *testing.T) {
 			})
 		})
 	}
+}
+
+func exactFactEntitySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: exact-fact-source\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/schema.yaml"), "name: exact-fact\nmode: template\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/entities.yaml"), "review_item:\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
+	if err != nil {
+		t.Fatalf("load exact-fact entity source: %v", err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func assertActualMutationLedger(t *testing.T, ctx context.Context, s exactFactStore, runID, entityID string) map[string]bool {

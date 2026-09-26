@@ -22,6 +22,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimeentity "github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -282,10 +283,24 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if !ok {
 		t.Fatal("portfolio-coordinator notify handler missing")
 	}
+	entityContract, ok := runtimeentity.ResolveForFlow(source, notifyallchildren.OwnerFlowID)
+	if !ok {
+		t.Fatal("portfolio entity contract missing")
+	}
+	fields, err := runtimeentity.Initialize(entityContract, map[string]any{"portfolio_id": "portfolio", "account_ids": []any{"acct-a", "acct-b"}})
+	if err != nil {
+		t.Fatalf("initialize portfolio entity: %v", err)
+	}
+	state := runtimeengine.StateSnapshot{
+		EntityID:     runtimeidentity.EntityID(portfolioEntityID),
+		CurrentState: "active",
+		StateCarrier: runtimeengine.NewStateCarrier(fields, nil, nil),
+	}
+	stateStore := &fanOutPinRouteStateRepo{snapshot: state}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
 		Source:        source,
-		StateRepo:     fanOutPinRouteStateRepo{},
-		MutationOwner: fanOutPinRouteMutationOwner{},
+		StateRepo:     stateStore,
+		MutationOwner: stateStore,
 		Locker:        fanOutPinRouteLocker{},
 	}, nil)
 	if err != nil {
@@ -330,11 +345,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		HandlerEventKey: notifyallchildren.OwnerTriggerEvent,
 		Handler:         handler,
 		FanOutPlans:     source.FanOutPlansForHandler(portfolioNode, notifyallchildren.OwnerTriggerEvent),
-		State: runtimeengine.StateSnapshot{
-			EntityID:     runtimeidentity.EntityID(portfolioEntityID),
-			CurrentState: "active",
-			StateCarrier: runtimeengine.NewStateCarrier(map[string]any{"account_ids": []any{"acct-a", "acct-b"}}, nil, nil),
-		},
+		State:           state,
 	})
 	if err != nil {
 		t.Fatalf("Execute fan_out: %v", err)
@@ -602,20 +613,30 @@ func templateFlowPilotConformanceFindingContains(findings []runtimebootverify.Fi
 	return false
 }
 
-type fanOutPinRouteStateRepo struct{}
-
-func (fanOutPinRouteStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
-	return runtimeengine.StateSnapshot{}, false, nil
+type fanOutPinRouteStateRepo struct {
+	snapshot runtimeengine.StateSnapshot
 }
 
-func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
-	return nil
+func (s *fanOutPinRouteStateRepo) LoadState(_ context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
+	if address.EntityID != s.snapshot.EntityID {
+		return runtimeengine.StateSnapshot{}, false, fmt.Errorf("fan-out state owner %s does not match %s", address.EntityID, s.snapshot.EntityID)
+	}
+	return s.snapshot, true, nil
 }
 
-type fanOutPinRouteMutationOwner struct{}
+func (s *fanOutPinRouteStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
+	return fmt.Errorf("fan-out state must commit through the mutation owner")
+}
 
-func (fanOutPinRouteMutationOwner) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
-	return runtimeengine.CommittedEngineMutation{EmitIntents: mutation.EmitIntents, ActivityIntents: mutation.ActivityIntents}, nil
+func (s *fanOutPinRouteStateRepo) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
+	if mutation.Address.EntityID != s.snapshot.EntityID {
+		return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("fan-out mutation owner %s does not match %s", mutation.Address.EntityID, s.snapshot.EntityID)
+	}
+	s.snapshot.StateCarrier = mutation.State.StateCarrier
+	if mutation.State.NextState != "" {
+		s.snapshot.CurrentState = mutation.State.NextState
+	}
+	return runtimeengine.CommittedEngineMutation{Committed: true, EmitIntents: mutation.EmitIntents, ActivityIntents: mutation.ActivityIntents}, nil
 }
 
 type fanOutPinRouteLocker struct{}

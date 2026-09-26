@@ -265,6 +265,28 @@ func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcqui
 	return selected, db, ctx, runID
 }
 
+func openStateOnlyAcquisitionStoreWithSource(t *testing.T, backend string, source semanticview.Source) (stateOnlyAcquisitionStore, *sql.DB, context.Context, string) {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("state-only acquisition source requires admitted declarations")
+	}
+	runID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())), runID)
+	fixture := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact}
+	if backend == "sqlite" {
+		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		db := selected.backend.ConstructionHandle()
+		requireRunFixtureForTest(t, ctx, selected, fixture)
+		return selected, db, ctx, runID
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	selected := newTestPostgresStore(t, db)
+	requireRunFixtureForTest(t, ctx, selected, fixture)
+	return selected, db, ctx, runID
+}
+
 func stateOnlyAcquisitionSource(t *testing.T, flowID string) semanticview.Source {
 	return stateOnlyAcquisitionSourceWithMode(t, flowID, runtimecontracts.FlowModeSingleton)
 }

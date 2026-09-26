@@ -38,6 +38,7 @@ select:
   subscribes_to: [select]
   event_handlers:
     select:
+      guard: {check: "has(entity.marker)"}
       rules:
         - id: first
           condition: "entity.marker == 'first'"

@@ -178,6 +178,35 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 	}
 }
 
+func TestEntityOnCompleteCannotBorrowLaterTopLevelWrite(t *testing.T) {
+	root := writeWave1ExpressionFixture(t)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
+worker:
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  event_handlers:
+    task.assigned:
+      create_entity: true
+      on_complete:
+        - id: early
+          condition: "entity.base_score > 0"
+          advances_to: done
+      data_accumulation:
+        writes:
+          - target_field: base_score
+            value: {literal: 7}
+`)
+	repo := repoRootForBootverifyTest(t)
+	bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
+	checker := &checkerContext{ctx: context.Background(), source: semanticview.Wrap(bundle)}
+	for _, finding := range checker.expressionFieldReferences() {
+		if strings.Contains(finding.Message, "on_complete[early].condition") && strings.Contains(finding.Message, "not definitely assigned") {
+			return
+		}
+	}
+	t.Fatal("source-loaded on_complete borrowed a later top-level write")
+}
+
 func TestEntityDefiniteAssignmentStages(t *testing.T) {
 	for _, variant := range []string{"all paths write", "guard stage then value", "guard short circuit", "nontransitioning guarded reader", "nontransitioning clear", "bypass", "same destination outcomes", "on_complete outcomes", "same event different node", "zero trip", "backedge cannot prove first entry"} {
 		t.Run(variant, func(t *testing.T) {

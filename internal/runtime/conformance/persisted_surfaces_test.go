@@ -55,6 +55,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimesemanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	runtimeworkspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -1781,7 +1782,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 	requireMutationSurface(t, db)
 
 	createOut, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"flow_instance": "review/inst-1",
+		"flow_instance": runID,
 		"fields": map[string]any{
 			"status": "open",
 			"score":  10.0,
@@ -2114,34 +2115,28 @@ func mustCanonicalJSON(t *testing.T, value any) string {
 
 func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB, string) {
 	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	fixtureRoot := t.TempDir()
+	writeConformanceSnapshotFixture(t, fixtureRoot, "schema.yaml", "name: review\nmode: template\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n")
+	writeConformanceSnapshotFixture(t, fixtureRoot, "entities.yaml", "accounts:\n  score: numeric(10,2)\n  status: text\n")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load entity tool source: %v", err)
+	}
+	source := runtimesemanticview.Wrap(bundle)
+	fact := conformanceSourceArtifactFact(t, source)
+	ctx := testAuthorActivityContextForBundle(context.Background(), fact)
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
-	storetest.RequirePostgresRun(t, testAuthorActivityContext(context.Background()), db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		HumanTaskStore:                 pg,
 		AllowInternalLegacyEntityTools: true,
-		WorkflowSource: runtimesemanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			RootEntities: runtimecontracts.EntityContractsDocument{
-				"accounts": {
-					Fields: map[string]runtimecontracts.EntityFieldDecl{
-						"score":  {Type: "numeric(10,2)"},
-						"status": {Type: "text"},
-					},
-				},
-			},
-			Semantics: runtimecontracts.WorkflowSemanticView{
-				Name:         "review",
-				InitialStage: "queued",
-				FlowInitial:  map[string]string{"review": "queued"},
-				StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-					"review": runtimecontracts.BuildWorkflowStageTopology("review", "queued", []string{"queued", "done"}, []string{"done"}, nil, nil, nil),
-				},
-			},
-		}),
+		WorkflowSource:                 source,
 	})
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimetools.WithActor(ctx, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",

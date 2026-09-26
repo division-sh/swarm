@@ -3655,22 +3655,7 @@
               "Fields": null
             }
           },
-          "Guard": {
-            "ID": "",
-            "Check": "has(entity.account_ids)",
-            "OnFail": "",
-            "OnFailSpec": {
-              "Action": "",
-              "Escalation": {
-                "Event": "",
-                "From": "",
-                "Fields": null
-              },
-              "AuthoredMapping": false
-            },
-            "Checks": null,
-            "PolicyRef": ""
-          },
+          "Guard": null,
           "AdvancesTo": "",
           "SetsGate": null,
           "ClearGates": null,
@@ -4399,22 +4384,7 @@
               },
               "Filter": null,
               "GroupBy": null,
-              "Guard": {
-                "Check": "has(entity.account_ids)",
-                "Checks": null,
-                "ID": "",
-                "OnFail": "",
-                "OnFailSpec": {
-                  "Action": "",
-                  "AuthoredMapping": false,
-                  "Escalation": {
-                    "Event": "",
-                    "Fields": null,
-                    "From": ""
-                  }
-                },
-                "PolicyRef": ""
-              },
+              "Guard": null,
               "Join": null,
               "Logic": "",
               "Loop": null,
@@ -5088,22 +5058,7 @@
           "Input": null,
           "Approval": null
         },
-        "Guard": {
-          "ID": "",
-          "Check": "has(entity.account_ids)",
-          "OnFail": "",
-          "OnFailSpec": {
-            "Action": "",
-            "Escalation": {
-              "Event": "",
-              "From": "",
-              "Fields": null
-            },
-            "AuthoredMapping": false
-          },
-          "Checks": null,
-          "PolicyRef": ""
-        },
+        "Guard": null,
         "AdvancesTo": "",
         "SetsGate": null,
         "ClearGates": null,

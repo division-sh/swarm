@@ -51,7 +51,7 @@ func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
           - {target_field: processed_value, expression: payload.value}
 `
 	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+consumer)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n")
+	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
 	return root
 }
 

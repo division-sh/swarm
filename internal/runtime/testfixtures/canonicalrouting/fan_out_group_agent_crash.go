@@ -20,7 +20,7 @@ func CopyFanOutGroupAgentCrash(t testing.TB) string {
     module: mocks/item-worker.py
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: '[text]'\nitems.child:\n  value: text\nitems.processed:\n  value: text\n  request_event_id: text\nbatch.completed:\n  total: integer\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n")
+	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `fan-out-source:
   execution_type: system_node
   subscribes_to: [items.ready]

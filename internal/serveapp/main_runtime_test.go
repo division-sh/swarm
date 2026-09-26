@@ -3091,7 +3091,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err != nil {
 		t.Fatalf("new gate activation: %v", err)
 	}
-	carrier := runtimeengine.NewStateCarrier(map[string]any{"run_id": runID}, nil, nil)
+	carrier := runtimeengine.NewStateCarrier(nil, nil, nil)
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store gate activation: %v", err)
 	}

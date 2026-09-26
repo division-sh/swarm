@@ -29,8 +29,6 @@ delivery-node:
         source_event: timer.item.timeout
         writes:
           - target_field: timed_out
-            value:
-              literal: true
+            value: true
           - target_field: status
-            value:
-              literal: completed
+            value: completed

@@ -2415,8 +2415,9 @@ rule:
     definite_assignment_analysis: |
       Verification and boot use one entity assignment analysis over the
       existing compiled stage topology and the executor's ordered steps.
-      Each handler transition preserves its exact carrier kind and rule
-      index, including distinct rule outcomes with the same destination.
+      Each handler transition preserves its exact carrier kind and RuleRef,
+      including distinct rule outcomes with the same destination. List and
+      program-point ordinals are not rule identity.
       Stage facts intersect every reaching outcome and converge to a fixed
       point. The initial entry contributes independently of loop backedges.
       Non-transitioning handlers participate in the same-stage fixed point,

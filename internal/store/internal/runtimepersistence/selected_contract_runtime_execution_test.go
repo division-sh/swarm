@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -1346,7 +1347,7 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 	return newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, selectedPreparationProcessForTest(t, store))
 }
 
-func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability) selectedCompletionFixture {
+func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability, sourceArtifacts ...*sourceartifact.AdmittedSourceArtifact) selectedCompletionFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
@@ -1359,8 +1360,15 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 		t.Fatal("selected completion fixture store has no author activity catalog")
 	}
 	registerTestAuthorActivityCatalog(t, registrar)
-	requireRunningRunForTest(t, ctx, store, sourceRun, now)
-	requirePausedRunForTest(t, ctx, store, forkRun, now)
+	if len(sourceArtifacts) != 0 {
+		artifact := sourceArtifacts[0]
+		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
+		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
+		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, State: runtimerunlifecycle.StatePaused, StartedAt: now})
+	} else {
+		requireRunningRunForTest(t, ctx, store, sourceRun, now)
+		requirePausedRunForTest(t, ctx, store, forkRun, now)
+	}
 	seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	eventStore, ok := any(store).(semanticEventFixtureStore)
 	if !ok {

@@ -95,7 +95,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 		applyClosedReplacement(t, ownerNodes, "          event: account.notify.requested\n", "          event: account.notify.requested\n          broadcast: true\n")
 	}
 	if opts.ObjectMembership {
-		applyClosedReplacement(t, ownerEntities, "  account_ids: \"[text]\"\n", "  account_ids: \"[AccountRef]\"\n")
+		applyClosedReplacement(t, ownerEntities, "  account_ids: {type: \"[text]\", initial: []}\n", "  account_ids: {type: \"[AccountRef]\", initial: []}\n")
 		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
   AccountRef:
     account_id: text
@@ -193,8 +193,8 @@ portfolio.notify.completed:
 `, `  portfolio_id: text
   threshold: integer
 `)
-		applyClosedReplacement(t, ownerEntities, `  account_ids: "[text]"
-`, `  account_ids: "[NumericAccount]"
+		applyClosedReplacement(t, ownerEntities, `  account_ids: {type: "[text]", initial: []}
+`, `  account_ids: {type: "[NumericAccount]", initial: []}
 `)
 		applyClosedReplacement(t, ownerNodes, `          - source_field: portfolio_id
             target_field: portfolio_id
