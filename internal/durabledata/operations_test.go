@@ -315,6 +315,60 @@ func TestRunCreationEnvelopeRejectsDuplicateFusedChildInvocationIDsBeforeHashing
 	}
 }
 
+func TestRunCreationInitiationHasThreeClosedForms(t *testing.T) {
+	declaration, err := ParseDeclarationRef(".", "records.loaded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := ExplicitPin{Declaration: declaration, VersionID: VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")}
+	base := RunCreationCommand{RunID: uuid.NewString(), Actor: "operator", BundleHash: aggregateTestBundleHash}
+	event := base
+	event.EventID = uuid.NewString()
+	event.InitialEvent = json.RawMessage(`{"type":"start","payload":{"count":1}}`)
+	feed := base
+	feed.Data.Pins = []ExplicitPin{pin}
+	both := event
+	both.Data.Pins = []ExplicitPin{pin}
+	for _, tc := range []struct {
+		name string
+		cmd  RunCreationCommand
+		want RunCreationInitiation
+	}{
+		{"event_only", event, RunCreationEventOnly},
+		{"feed_only", feed, RunCreationFeedOnly},
+		{"event_and_feed", both, RunCreationEventAndFeed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := tc.cmd.Initiation(); err != nil || got != tc.want {
+				t.Fatalf("Initiation() = %q, %v; want %q", got, err, tc.want)
+			}
+			if _, _, canonical, err := tc.cmd.RequestHash(); err != nil {
+				t.Fatalf("RequestHash: %v", err)
+			} else if got, err := canonical.Initiation(); err != nil || got != tc.want {
+				t.Fatalf("canonical initiation = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		cmd  RunCreationCommand
+	}{
+		{"nothing", base},
+		{"event_id_without_event", RunCreationCommand{RunID: base.RunID, Actor: base.Actor, BundleHash: base.BundleHash, EventID: uuid.NewString()}},
+		{"event_without_event_id", RunCreationCommand{RunID: base.RunID, Actor: base.Actor, BundleHash: base.BundleHash, InitialEvent: event.InitialEvent}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, _, err := tc.cmd.RequestHash(); err == nil {
+				t.Fatal("RequestHash admitted an incomplete initiation")
+			}
+		})
+	}
+	feed.EventID = uuid.NewString()
+	if _, _, _, err := feed.RequestHash(); err == nil {
+		t.Fatal("feed-only request admitted a stray event_id")
+	}
+}
+
 func TestPermanentReceiptAggregateValidatorsRejectHostileContradictions(t *testing.T) {
 	sourceCommand, source := validSourceAggregate(t)
 	for _, test := range []struct {

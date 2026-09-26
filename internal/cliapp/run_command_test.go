@@ -300,6 +300,82 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	}
 }
 
+func TestRunStartInitiationRequiresEventPairOrData(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		opts      runCommandOptions
+		wantError bool
+	}{
+		{"event_only", runCommandOptions{eventName: "started", payloadPath: "payload.json"}, false},
+		{"feed_only_import", runCommandOptions{dataImports: []string{"records=file.jsonl"}}, false},
+		{"feed_only_pin", runCommandOptions{dataPins: []string{"records@head"}}, false},
+		{"event_and_feed", runCommandOptions{eventName: "started", payloadPath: "payload.json", dataPins: []string{"records@head"}}, false},
+		{"missing", runCommandOptions{}, true},
+		{"event_without_payload", runCommandOptions{eventName: "started"}, true},
+		{"payload_without_event", runCommandOptions{payloadPath: "payload.json"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.opts.validate()
+			if (err != nil) != tc.wantError {
+				t.Fatalf("validate() = %v; want error %v", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	root := t.TempDir()
+	input := filepath.Join(root, "rows.jsonl")
+	if err := os.WriteFile(input, []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "data.show":
+				return map[string]any{
+					"items": []any{map[string]any{
+						"declaration": map[string]any{"flow_path": ".", "event": "records.loaded"},
+						"local_name":  "records.loaded",
+						"head":        map[string]any{"state": "absent"},
+					}},
+					"item_count":   1,
+					"continuation": map[string]any{"state": "end"},
+				}
+			case "run.start":
+				if _, found := req.Params["event_name"]; found {
+					t.Fatal("feed-only run.start sent event_name")
+				}
+				if _, found := req.Params["payload"]; found {
+					t.Fatal("feed-only run.start sent payload")
+				}
+				if req.Params["run_id"] == "" || req.Params["data"] == nil {
+					t.Fatalf("feed-only run.start omitted durable run identity or data: %#v", req.Params)
+				}
+				return runStartCommandResult(req.Params["run_id"].(string), "completed")
+			default:
+				t.Fatalf("unexpected method %q", req.Method)
+				return nil
+			}
+		},
+	})
+	defer server.Close()
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), root,
+		[]string{"run", "start", "--connect", server.URL, "--data", "records.loaded=" + input, "--no-follow"},
+		&stdout, &stderr, testRunCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "data.show", "run.start"})
+	if len(*wsRequests) != 0 {
+		t.Fatalf("feed-only --no-follow opened websocket: %#v", *wsRequests)
+	}
+}
+
 func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	root := t.TempDir()

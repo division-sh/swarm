@@ -28,6 +28,29 @@ import (
 
 var runStartTestBundleHash = authorActivityTestSourceArtifact.BundleHash()
 
+func TestFeedOnlyRunStartRejectsIncompleteAdmissionBeforeSelectedStore(t *testing.T) {
+	data := map[string]any{"imports": []any{}, "pins": []any{map[string]any{
+		"declaration": map[string]any{"flow_path": ".", "event": "records.loaded"},
+		"version_id":  "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}}}
+	for _, tc := range []struct {
+		name   string
+		params map[string]any
+	}{
+		{"no_initiation", map[string]any{}},
+		{"empty_data", map[string]any{"run_id": uuid.NewString(), "data": map[string]any{"imports": []any{}, "pins": []any{}}}},
+		{"missing_run_id", map[string]any{"data": data}},
+		{"invalid_run_id", map[string]any{"run_id": "not-a-uuid", "data": data}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := executeRunStart(context.Background(), Request{Method: "run.start", Params: tc.params}, EventPublicationOptions{}, time.Now().UTC())
+			if err == nil {
+				t.Fatal("feed-only admission succeeded without required facts")
+			}
+		})
+	}
+}
+
 func runStartTestSourceArtifactFact() runtimecorrelation.SourceArtifactFact {
 	return mustAPITestSourceArtifactFact(runStartTestBundleHash)
 }
