@@ -389,12 +389,14 @@ func corruptOrigin(
 		    origin_service_id = NULLIF(?, ''),
 		    origin_generation = NULLIF(?, 0),
 		    forked_from_run_id = NULLIF(?, ''),
+		    forked_from_point_kind = NULLIF(?, ''),
+		    forked_from_revision = NULLIF(?, 0),
 		    forked_from_event_id = NULLIF(?, '')
 		WHERE run_id = ?
 	`
 	args := []any{
 		origin.Kind(), origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
-		origin.SourceRunID(), origin.SourceEventID(), strings.TrimSpace(runID),
+		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(), strings.TrimSpace(runID),
 	}
 	if dialect == DialectPostgres {
 		query = `
@@ -405,12 +407,14 @@ func corruptOrigin(
 			    origin_service_id = NULLIF($5, '')::uuid,
 			    origin_generation = NULLIF($6, 0),
 			    forked_from_run_id = NULLIF($7, '')::uuid,
-			    forked_from_event_id = NULLIF($8, '')::uuid
+			    forked_from_point_kind = NULLIF($8, ''),
+			    forked_from_revision = NULLIF($9, 0),
+			    forked_from_event_id = NULLIF($10, '')::uuid
 			WHERE run_id = $1::uuid
 		`
 		args = []any{
 			strings.TrimSpace(runID), origin.Kind(), origin.EventID(), origin.EventType(), origin.ServiceID(),
-			origin.Generation(), origin.SourceRunID(), origin.SourceEventID(),
+			origin.Generation(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
 		}
 	}
 	_, err := db.ExecContext(ctx, query, args...)

@@ -1115,7 +1115,7 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 		var sample fanoutobligation.FanOutSemanticRejectionSample
 		var failureRaw any
 		var deliveryID, feedID, flowPath, family, semanticPath sql.NullString
-		if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,deployment_feed_id,flow_path,declaration_family,semantic_path,ordinal,failure FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='semantic_rejected' ORDER BY COALESCE(CAST(triggering_delivery_id AS TEXT),''),COALESCE(CAST(deployment_feed_id AS TEXT),''),ordinal LIMIT 1`, summary.RunID).Scan(
+		if err := db.QueryRowContext(ctx, `SELECT triggering_delivery_id,deployment_feed_id,flow_path,declaration_family,semantic_path,ordinal,failure FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='semantic_rejected' ORDER BY COALESCE(CAST(triggering_delivery_id AS TEXT),''),COALESCE(CAST(deployment_feed_id AS TEXT),''),flow_path,declaration_family,semantic_path,ordinal LIMIT 1`, summary.RunID).Scan(
 			&deliveryID, &feedID, &flowPath, &family, &semanticPath, &sample.Ordinal, &failureRaw,
 		); err != nil {
 			return summary, err

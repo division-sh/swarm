@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -40,7 +41,9 @@ type runForkResult struct {
 	SourceRunStatus    string            `json:"source_run_status"`
 	SourceFrozen       *bool             `json:"source_frozen"`
 	ForkRunID          string            `json:"fork_run_id"`
-	ForkEventID        string            `json:"fork_event_id"`
+	ForkPointKind      string            `json:"fork_point_kind"`
+	ForkRevision       int64             `json:"fork_revision"`
+	ForkEventID        string            `json:"fork_event_id,omitempty"`
 	ForkRunStatus      string            `json:"fork_run_status"`
 	BundleHash         string            `json:"bundle_hash"`
 	ExecutedEventCount int               `json:"executed_event_count"`
@@ -252,7 +255,7 @@ func validateRunForkResult(result runForkResult) error {
 		{name: "source_run_id", value: result.SourceRunID},
 		{name: "source_run_status", value: result.SourceRunStatus},
 		{name: "fork_run_id", value: result.ForkRunID},
-		{name: "fork_event_id", value: result.ForkEventID},
+		{name: "fork_point_kind", value: result.ForkPointKind},
 		{name: "fork_run_status", value: result.ForkRunStatus},
 		{name: "bundle_hash", value: result.BundleHash},
 	} {
@@ -289,8 +292,14 @@ func validateRunForkResult(result runForkResult) error {
 	if _, err := validateRunForkUUIDValue("fork_run_id", result.ForkRunID); err != nil {
 		return fmt.Errorf("malformed run.fork result: %w", err)
 	}
-	if _, err := validateRunForkUUIDValue("fork_event_id", result.ForkEventID); err != nil {
-		return fmt.Errorf("malformed run.fork result: %w", err)
+	point := runfork.RunForkPoint{Kind: runfork.RunForkPointKind(result.ForkPointKind), Revision: result.ForkRevision, EventID: result.ForkEventID}
+	if err := point.Validate(); err != nil {
+		return fmt.Errorf("malformed run.fork result: fork point: %w", err)
+	}
+	if result.ForkEventID != "" {
+		if _, err := validateRunForkUUIDValue("fork_event_id", result.ForkEventID); err != nil {
+			return fmt.Errorf("malformed run.fork result: %w", err)
+		}
 	}
 	if _, err := validateBundleHashArg("bundle_hash", result.BundleHash); err != nil {
 		return fmt.Errorf("malformed run.fork result: %w", err)
@@ -303,7 +312,11 @@ func writeRunForkHuman(w io.Writer, result runForkResult) {
 		return
 	}
 	fmt.Fprintln(w, "Fork created")
-	fmt.Fprintf(w, "source_run_id=%s fork_run_id=%s fork_event_id=%s\n", result.SourceRunID, result.ForkRunID, result.ForkEventID)
+	fmt.Fprintf(w, "source_run_id=%s fork_run_id=%s fork_point=%s@%d", result.SourceRunID, result.ForkRunID, result.ForkPointKind, result.ForkRevision)
+	if result.ForkEventID != "" {
+		fmt.Fprintf(w, " fork_event_id=%s", result.ForkEventID)
+	}
+	fmt.Fprintln(w)
 	fmt.Fprintf(w, "source_status=%s source_frozen=%t\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.SourceRunStatus), *result.SourceFrozen)
 	fmt.Fprintf(w, "status=%s bundle_hash=%s executed_event_count=%d\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), result.BundleHash, result.ExecutedEventCount)
 	fmt.Fprintf(w, "data_pins=%d\n", len(result.DataPins))

@@ -94,7 +94,8 @@ func TestForkedSourceCannotWriteSelectedContractRouteRecoveryEvidence(t *testing
 	fixture.freeze(t)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 	_, err := fixture.postgres.RecordRunForkSelectedContractRouteRecovery(testAuthorActivitySourceArtifactContext(), runfork.RunForkSelectedContractRouteRecoveryRequest{
-		ForkRunID: fixture.continued, SourceRunID: fixture.sourceRun, ForkEventID: eventID,
+		ForkRunID: fixture.continued, SourceRunID: fixture.sourceRun,
+		ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID}, ForkEventID: eventID,
 		ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
 	})
 	requireForkedSourceRefusal(t, "record selected route recovery", err)

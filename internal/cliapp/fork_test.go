@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/durabledata"
 )
 
 func validBundleHash(hexDigit string) string {
@@ -90,7 +92,7 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
 		t.Fatalf("decode stdout json: %v\n%s", err, stdout.String())
 	}
-	if decoded["source_run_id"] != sourceRunID || decoded["fork_run_id"] != "33333333-3333-3333-3333-333333333333" || decoded["source_run_status"] != "running" || decoded["source_frozen"] != false {
+	if decoded["source_run_id"] != sourceRunID || decoded["fork_run_id"] != "33333333-3333-3333-3333-333333333333" || decoded["source_run_status"] != "running" || decoded["source_frozen"] != false || decoded["fork_point_kind"] != "event" || decoded["fork_revision"] != float64(1) {
 		t.Fatalf("json run fork result = %#v", decoded)
 	}
 	for _, wrapper := range []string{"run", "fork", "run"} {
@@ -378,11 +380,62 @@ func validRunForkResult(sourceRunID, bundleHash string) map[string]any {
 		"source_run_status":    "forked",
 		"source_frozen":        true,
 		"fork_run_id":          "33333333-3333-3333-3333-333333333333",
+		"fork_point_kind":      "event",
+		"fork_revision":        1,
 		"fork_event_id":        "44444444-4444-4444-4444-444444444444",
 		"fork_run_status":      "running",
 		"bundle_hash":          bundleHash,
 		"executed_event_count": 1,
 		"data_pins":            []any{},
+	}
+}
+
+func TestRunForkResultRequiresExactPointArm(t *testing.T) {
+	frozen := false
+	base := runForkResult{
+		Owner: "run.fork.selected_contracts.v1", SourceRunID: "55555555-5555-5555-5555-555555555555",
+		SourceRunStatus: "running", SourceFrozen: &frozen,
+		ForkRunID: "33333333-3333-3333-3333-333333333333", ForkPointKind: "event", ForkRevision: 1,
+		ForkEventID: "44444444-4444-4444-4444-444444444444", ForkRunStatus: "running",
+		BundleHash: validBundleHash("e"), DataPins: []durabledata.Pin{},
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*runForkResult)
+		valid  bool
+	}{
+		{"event", func(*runForkResult) {}, true},
+		{"missing_kind", func(r *runForkResult) { r.ForkPointKind = "" }, false},
+		{"zero_revision", func(r *runForkResult) { r.ForkRevision = 0 }, false},
+		{"deployment_with_event", func(r *runForkResult) { r.ForkPointKind = "deployment_revision" }, false},
+		{"deployment", func(r *runForkResult) { r.ForkPointKind = "deployment_revision"; r.ForkEventID = "" }, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := base
+			tc.mutate(&result)
+			err := validateRunForkResult(result)
+			if (err == nil) != tc.valid {
+				t.Fatalf("point validity=%t want=%t err=%v", err == nil, tc.valid, err)
+			}
+			if tc.name == "deployment" {
+				encoded, err := json.Marshal(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]any
+				if err := json.Unmarshal(encoded, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if _, exists := fields["fork_event_id"]; exists {
+					t.Fatal("deployment revision fork emitted absent event identity")
+				}
+				var output bytes.Buffer
+				writeRunForkHuman(&output, result)
+				if strings.Contains(output.String(), "fork_event_id=") || !strings.Contains(output.String(), "fork_point=deployment_revision@1") {
+					t.Fatalf("deployment revision fork output = %q", output.String())
+				}
+			}
+		})
 	}
 }
 

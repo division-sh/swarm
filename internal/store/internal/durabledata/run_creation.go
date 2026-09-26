@@ -43,29 +43,17 @@ func (p RunCreationPlan) DeploymentFeeds() []runtimedata.DeploymentFeed {
 	return append([]runtimedata.DeploymentFeed(nil), p.feeds...)
 }
 
-// DeploymentFeedWriterTx is the one transaction-bound handoff from run
-// creation to the existing fan-out obligation owner. It never publishes rows.
-type DeploymentFeedWriterTx interface {
-	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
-}
-
-func CommitRunCreationFeedsTx(ctx context.Context, tx *sql.Tx, plan *RunCreationPlan, writer DeploymentFeedWriterTx) error {
-	if tx == nil || plan == nil || plan.replay || plan.failed || !plan.committed || plan.feedsCommitted {
-		return fmt.Errorf("deployment feed commit requires one committed run-creation plan")
-	}
-	if len(plan.feeds) != 0 && writer == nil {
-		return fmt.Errorf("deployment feed owner is required for pinned run creation")
+func (plan *RunCreationPlan) ConsumeDeploymentFeeds() ([]runtimedata.DeploymentFeed, error) {
+	if plan == nil || plan.replay || plan.failed || !plan.committed || plan.feedsCommitted {
+		return nil, fmt.Errorf("deployment feed commit requires one committed run-creation plan")
 	}
 	for _, feed := range plan.feeds {
 		if err := feed.Validate(); err != nil {
-			return err
-		}
-		if err := writer.CreateDeploymentFeedTx(ctx, tx, feed); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	plan.feedsCommitted = true
-	return nil
+	return append([]runtimedata.DeploymentFeed(nil), plan.feeds...), nil
 }
 
 func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command runtimedata.RunCreationCommand) (RunCreationPlan, error) {

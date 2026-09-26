@@ -1,8 +1,6 @@
 package durabledata
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -10,10 +8,6 @@ import (
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/google/uuid"
 )
-
-type deploymentFeedWriterProbe struct {
-	feeds []runtimedata.DeploymentFeed
-}
 
 func TestDecodeFeedOnlyRunCreationReceipt(t *testing.T) {
 	declaration, err := runtimedata.ParseDeclarationRef(".", "records.loaded")
@@ -60,11 +54,6 @@ func TestDecodeFeedOnlyRunCreationReceipt(t *testing.T) {
 	}
 }
 
-func (p *deploymentFeedWriterProbe) CreateDeploymentFeedTx(_ context.Context, _ *sql.Tx, feed runtimedata.DeploymentFeed) error {
-	p.feeds = append(p.feeds, feed)
-	return nil
-}
-
 func TestRunCreationDeploymentFeedPortPreservesEmptyAndMultiplePins(t *testing.T) {
 	first, err := runtimedata.ParseDeclarationRef(".", "first.loaded")
 	if err != nil {
@@ -87,17 +76,14 @@ func TestRunCreationDeploymentFeedPortPreservesEmptyAndMultiplePins(t *testing.T
 	if plan.feeds[0].RowCount != 0 {
 		t.Fatal("DeploymentFeeds exposed mutable plan storage")
 	}
-	if err := CommitRunCreationFeedsTx(context.Background(), &sql.Tx{}, &plan, nil); err == nil {
-		t.Fatal("pinned run creation accepted a missing feed owner")
-	}
-	writer := &deploymentFeedWriterProbe{}
-	if err := CommitRunCreationFeedsTx(context.Background(), &sql.Tx{}, &plan, writer); err != nil {
+	consumed, err := plan.ConsumeDeploymentFeeds()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(writer.feeds) != 2 || writer.feeds[0].RowCount != 0 || writer.feeds[1].RowCount != 3 {
-		t.Fatalf("feed handoff = %#v", writer.feeds)
+	if len(consumed) != 2 || consumed[0].RowCount != 0 || consumed[1].RowCount != 3 {
+		t.Fatalf("feed handoff = %#v", consumed)
 	}
-	if err := CommitRunCreationFeedsTx(context.Background(), &sql.Tx{}, &plan, writer); err == nil {
+	if _, err := plan.ConsumeDeploymentFeeds(); err == nil {
 		t.Fatal("one run-creation plan committed feeds twice")
 	}
 }

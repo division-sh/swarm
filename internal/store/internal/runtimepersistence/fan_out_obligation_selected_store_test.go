@@ -36,7 +36,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -1769,19 +1768,17 @@ func TestFanOutTriggerRejectsUnrelatedRunWithoutProgressOnBothStores(t *testing.
 	}
 }
 
-func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
+func TestPinnedResourceVersionRequiresPinAndRejectsHandlerRemapBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			var (
-				owner    selectedFanOutResourceOwner
-				db       *sql.DB
-				postgres bool
+				owner selectedFanOutResourceOwner
+				db    *sql.DB
 			)
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
 				owner = admitTestPostgresStore(t, db)
-				postgres = true
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db = store.backend.ConstructionHandle()
@@ -1874,121 +1871,12 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if _, err := db.ExecContext(ctx, `UPDATE resource_versions SET canonical_jsonl=$2 WHERE version_id=$1`, imported.Candidate.VersionID, storedJSONL); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.ExecContext(ctx, `
-				UPDATE fan_out_intents
-				SET source_kind='resource_version', source_event_id=NULL, source_field=NULL,
-					source_resource_flow_path=$2, source_resource_event_name=$3, source_resource_version_id=$4,
-					updated_at=created_at
-				WHERE run_id=$1
-			`, fixture.runID, ref.FlowPath, ref.EventName, imported.Candidate.VersionID); err != nil {
-				t.Fatalf("bind resource fan-out source: %v", err)
+			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET source_kind='resource_version' WHERE run_id=$1`, fixture.runID); err == nil {
+				t.Fatal("handler intent accepted retired resource-version source ownership")
 			}
-
-			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "resource-worker", BundleHash: fixture.bundleHash, Now: createdAt.Add(time.Second), Lease: time.Minute})
-			if err != nil || !found {
-				t.Fatalf("claim resource fan-out: found=%v err=%v", found, err)
-			}
-			input, err := owner.LoadFanOutEvaluation(ctx, claim)
-			if err != nil {
-				t.Fatalf("load resource fan-out: %v", err)
-			}
-			if len(input.Items) != 5 || input.Items[0].(map[string]any)["slug"] != "alpha" || input.Items[3].(map[string]any)["slug"] != "delta" {
-				t.Fatalf("canonical bounded resource items = %#v", input.Items)
-			}
-			if input.Items[0].(map[string]any)["score"] != int64(1) {
-				t.Fatalf("resource numeric carrier = %#v", input.Items[0])
-			}
-			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.ExecContext(ctx, `DELETE FROM resource_version_pins WHERE run_id=$1 AND flow_path=$2 AND event_name=$3`, fixture.runID, ref.FlowPath, ref.EventName); err != nil {
-				t.Fatal(err)
-			}
-			_, hostileClaim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "resource-hostile", BundleHash: fixture.bundleHash, Now: createdAt.Add(2 * time.Second), Lease: time.Minute})
-			if err != nil || !found {
-				t.Fatalf("claim unpinned resource fan-out: found=%v err=%v", found, err)
-			}
-			accessDenied = nil
-			if _, err := owner.LoadFanOutEvaluation(ctx, hostileClaim); !errors.As(err, &accessDenied) || accessDenied.Code != durabledata.CodeAccessDenied {
-				t.Fatalf("unpinned resource load error = %v, want exact access refusal", err)
-			}
-			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
-			if _, err := owner.ReleaseFanOutClaim(ctx, hostileClaim); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.ExecContext(ctx, `INSERT INTO resource_version_pins (run_id,flow_path,event_name,schema_digest,version_id,selection,pinned_at) VALUES ($1,$2,$3,$4,$5,'explicit',$6)`, fixture.runID, ref.FlowPath, ref.EventName, imported.SchemaDigest, imported.Candidate.VersionID, createdAt); err != nil {
-				t.Fatal(err)
-			}
-
-			captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
-			forkPointEventID := historicalLineageCheckpoint(t, db, fixture.runID, postgres, createdAt.Add(3*time.Second))
-			forkOwner := owner.(interface {
-				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-			})
-			alternate, err := owner.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
-				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: fixture.bundleHash,
-				Declaration: ref, ExpectedHead: durabledata.VersionHead(imported.Candidate.VersionID), InputFormat: "jsonl",
-				Input: []byte("{\"slug\":\"different\",\"score\":99}\n"),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			beforeConflict := snapshotForkHistoricalExecutionTables(t, db, postgres)
-			if _, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-				SourceRunID: fixture.runID, At: forkPointEventID,
-				OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID),
-				DataPinOverrides:     []durabledata.ExplicitPin{{Declaration: ref, VersionID: alternate.Candidate.VersionID}},
-			}); err == nil {
-				t.Fatal("fork accepted an alternate pin while exact resource-source work remained owed")
-			}
-			if !reflect.DeepEqual(beforeConflict, snapshotForkHistoricalExecutionTables(t, db, postgres)) {
-				t.Fatal("conflicting fork pin changed durable domain evidence")
-			}
-			materialized, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)})
-			if err != nil {
-				t.Fatalf("materialize resource fan-out fork: %v", err)
-			}
-			var childPins int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1 AND version_id=$2`, materialized.ForkRunID, imported.Candidate.VersionID).Scan(&childPins); err != nil || childPins != 1 {
-				t.Fatalf("fork resource pins = %d err=%v, want 1", childPins, err)
-			}
-			childKey := fanoutobligation.IntentKey{RunID: materialized.ForkRunID, ElementRef: intent.Request.Key.ElementRef}
-			var childStatus, intentStatus, claimOwner string
-			var cursor, cardinality int
-			if err := db.QueryRowContext(ctx, `SELECT r.status,i.status,i.cursor,i.cardinality,COALESCE(i.claim_owner,''),i.triggering_delivery_id FROM runs r JOIN fan_out_intents i ON i.run_id=r.run_id WHERE r.run_id=$1`, materialized.ForkRunID).Scan(&childStatus, &intentStatus, &cursor, &cardinality, &claimOwner, &childKey.TriggeringDeliveryID); err != nil {
-				t.Fatal(err)
-			}
-			if childStatus != "paused" || intentStatus != "open" || cursor != 0 || cardinality != 5 || claimOwner != "" {
-				t.Fatalf("materialized resource child: status=%s intent=%s cursor=%d/%d owner=%q", childStatus, intentStatus, cursor, cardinality, claimOwner)
-			}
-			childRequest := pipeline.FanOutClaimRequest{Owner: "resource-fork-worker", BundleHash: fixture.bundleHash, Candidate: &childKey, Now: time.Now().UTC(), Lease: time.Minute}
-			before := snapshotForkHistoricalExecutionTables(t, db, postgres)
-			if _, _, found, err := owner.ClaimFanOutIntent(ctx, childRequest); err != nil || found {
-				t.Fatalf("paused resource child admitted claim: found=%v err=%v", found, err)
-			}
-			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, postgres)) {
-				t.Fatal("paused resource claim refusal changed durable evidence")
-			}
-			forkActivation, err := owner.(runForkSelectedLifecycleStore).ActivateRunFork(ctx, runfork.RunForkActivateRequest{
-				ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID),
-				HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
-			})
-			if err != nil || !forkActivation.Activated || !forkActivation.SourceFrozen || forkActivation.ForkRunStatus != runfork.RunForkActivatedStatus {
-				t.Fatalf("activate resource child: %+v err=%v", forkActivation, err)
-			}
-			granted, _, _, _ := grantedFanOutOwnerForTest(t, ctx, owner, fanOutOwnerFixture{runID: childKey.RunID, deliveryID: childKey.TriggeringDeliveryID, bundleHash: fixture.bundleHash})
-			childIntent, childClaim, found, err := granted.ClaimFanOutIntent(ctx, childRequest)
-			if err != nil || !found {
-				t.Fatalf("claim fork resource fan-out: found=%v err=%v", found, err)
-			}
-			defer func() {
-				if _, err := granted.ReleaseFanOutClaim(ctx, childClaim); err != nil {
-					t.Error(err)
-				}
-			}()
-			childInput, err := granted.LoadFanOutEvaluation(ctx, childClaim)
-			if err != nil || len(childInput.Items) != 5 || childInput.Items[0].(map[string]any)["slug"] != "alpha" || childIntent.NextChunkSize != 32 {
-				t.Fatalf("fork resource input = %#v err=%v", childInput, err)
+			var sourceKind string
+			if err := db.QueryRowContext(ctx, `SELECT source_kind FROM fan_out_intents WHERE run_id=$1`, fixture.runID).Scan(&sourceKind); err != nil || sourceKind != "event_payload_field" {
+				t.Fatalf("retired source remap changed handler intent: kind=%q err=%v", sourceKind, err)
 			}
 		})
 	}

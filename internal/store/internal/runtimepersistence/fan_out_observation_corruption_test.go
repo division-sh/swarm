@@ -2,6 +2,8 @@ package runtimepersistence
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/lib/pq"
 )
 
 func TestFanOutGrantedCorruptHeaderNeverObservesEligibleBothStores(t *testing.T) {
@@ -60,11 +63,11 @@ func TestFanOutGrantedCorruptHeaderNeverObservesEligibleBothStores(t *testing.T)
 					// Inject persisted corruption past the DDL only in this isolated
 					// store, so readers still have to prove canonical header validity.
 					if postgres {
-						constraint := "fan_out_intents_check2"
-						if corruption.name == "open_consumed_cursor" {
-							constraint = "fan_out_intents_check1"
+						var violation *pq.Error
+						if !errors.As(updateErr, &violation) || !strings.HasPrefix(violation.Constraint, "fan_out_intents_check") {
+							t.Fatalf("unexpected fan-out header constraint refusal: %v", updateErr)
 						}
-						if _, err := db.ExecContext(ctx, `ALTER TABLE fan_out_intents DROP CONSTRAINT `+constraint); err != nil {
+						if _, err := db.ExecContext(ctx, `ALTER TABLE fan_out_intents DROP CONSTRAINT `+pq.QuoteIdentifier(violation.Constraint)); err != nil {
 							t.Fatal(err)
 						}
 						_, updateErr = db.ExecContext(ctx, update, args...)

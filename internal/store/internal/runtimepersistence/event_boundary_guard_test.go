@@ -111,6 +111,9 @@ var directEventSQLTestFixtures = map[string]int{
 	// This pre-existing native batch-query differential seeds an admitted record
 	// into an isolated read-only probe schema; it never publishes or dispatches.
 	"internal/store/internal/backend/pipelinepersistence/publication_group_batch_test.go": 1,
+	// Physical schema test: direct INSERTs exercise fork-point CHECK/FK arms,
+	// not runtime publication or route admission.
+	"internal/store/internal/schemastore/fork_point_schema_test.go": 1,
 }
 
 var eventInsertSQL = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+events\b`)
@@ -616,7 +619,10 @@ func checkEventBoundaryFile(t *testing.T, path, relative string, gotAdmission ma
 				fixture.sql[fixtureSQL]++
 			}
 			if eventInsertSQL.MatchString(raw) || completeEventReadSQL.MatchString(raw) {
-				if _, ok := eventRecordSQLFiles[relative]; !ok && fixtureSQL == "" && !(relative == "internal/store/internal/backend/runforkrevision/projection.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "canonicalProjectionSpec" && !eventInsertSQL.MatchString(raw)) {
+				projectionRead := relative == "internal/store/internal/backend/runforkrevision/projection.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "canonicalProjectionSpec"
+				forkLineageRead := (relative == "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "RunForkPostgresOwner.ensureRunForkSelectedContractExecutionForkState") ||
+					(relative == "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_sqlite.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "RunForkSQLiteOwner.ensureSQLiteRunForkSelectedContractExecutionForkState")
+				if _, ok := eventRecordSQLFiles[relative]; !ok && fixtureSQL == "" && !((projectionRead || forkLineageRead) && !eventInsertSQL.MatchString(raw)) {
 					t.Fatalf("%s:%d owns event-record SQL outside a private backend adapter", relative, fset.Position(value.Pos()).Line)
 				}
 			}

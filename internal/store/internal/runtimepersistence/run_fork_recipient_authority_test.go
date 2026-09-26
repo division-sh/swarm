@@ -223,7 +223,8 @@ func recipientAuthorityRecoveryRequest(t *testing.T, ctx context.Context, store 
 	topology.StaticRouteEvents[0].DerivedRecipients = evidence
 	planning.RecipientPlanEvents[0].Recipients = evidence
 	return runfork.RunForkSelectedContractRouteRecoveryRequest{
-		ForkRunID: child, SourceRunID: source, ForkEventID: eventID,
+		ForkRunID: child, SourceRunID: source,
+		ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID}, ForkEventID: eventID,
 		ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
 	}
 }

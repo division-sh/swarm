@@ -51,7 +51,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		{
 			RunID: older, State: "running", BundleHash: bundleB,
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
-			ForkedFromRunID: newer, ForkedFromEventID: newerEvent,
+			ForkedFromRunID: newer, ForkedFromPointKind: "event", ForkedFromRevision: 1, ForkedFromEventID: newerEvent,
 			EntityCount: 5, StartedAt: now.Add(-time.Hour),
 		},
 	} {
