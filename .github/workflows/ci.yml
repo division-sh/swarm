@@ -143,6 +143,12 @@ jobs:
             test-results/proof-plan.md
           if-no-files-found: error
 
+      - name: Check YAML decode census against accepted base
+        if: github.event_name == 'pull_request'
+        env:
+          SWARM_CANONICAL_FORMS_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: go test ./internal/runtime/conformance -run '^TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses$' -count=1
+
   static-checks:
     name: Static checks
     runs-on: ubuntu-latest
