@@ -401,8 +401,8 @@ type RunCreationCommand struct {
 	RunID        string                  `json:"run_id"`
 	Actor        string                  `json:"actor"`
 	BundleHash   string                  `json:"bundle_hash"`
-	EventID      string                  `json:"event_id"`
-	InitialEvent json.RawMessage         `json:"initial_event"`
+	EventID      string                  `json:"event_id,omitempty"`
+	InitialEvent json.RawMessage         `json:"initial_event,omitempty"`
 	Data         RunCreationDataEnvelope `json:"data"`
 }
 
