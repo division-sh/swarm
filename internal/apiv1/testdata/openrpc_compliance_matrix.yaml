@@ -875,10 +875,10 @@ methods:
     gap_classification: []
   - method: run.start
     transport: http
-    required_params: [event_name, payload]
+    required_params: []
     declared_errors: [BUNDLE_MISMATCH, BUNDLE_SCOPE_REQUIRED, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_DEPENDENCY_INCOMPLETE, DATA_PIN_CONFLICT, DATA_SCHEMA_MISMATCH, RUN_DATA_REJECTED, RUN_DATA_HEAD_CONFLICT, DATA_INTEGRITY_ERROR]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency}]}
-    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
+    required_param_validation: {status: not_applicable}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
     declared_error_tests: {status: spot_checked, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunStartHandlersFailClosedBeforePersistence}]}

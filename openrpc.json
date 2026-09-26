@@ -10378,8 +10378,7 @@
     },
     {
       "name": "run.start",
-      "deprecated": true,
-      "description": "Deprecated wrapper over event.publish retained for older API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. No alternate bundle identity input is accepted.\n",
+      "description": "Starts a run with exactly one event, one or more selected data feeds, or both. Event-backed initiation requires event_name and payload together. Feed-only initiation requires data and a canonical run_id; it creates a deployment-origin run without a synthetic event. Every selected pin creates one feed obligation atomically with the run, imports, pins and permanent receipt. The selected bundle_hash must identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext; an existing run cannot acquire new run-creation data.\n",
       "params": [
         {
           "name": "bundle_hash",
@@ -10391,14 +10390,16 @@
         },
         {
           "name": "event_name",
-          "required": true,
+          "required": false,
+          "description": "Required with payload for event-backed initiation; forbidden for feed-only initiation.",
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "payload",
-          "required": true,
+          "required": false,
+          "description": "Required with event_name for event-backed initiation; forbidden for feed-only initiation.",
           "schema": {
             "additionalProperties": true,
             "type": "object"

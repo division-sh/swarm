@@ -13479,6 +13479,11 @@ agent_directive_operation_model:
 durable_data_resources:
   status: canonical
   owner: internal/durabledata semantic records and internal/store/internal/durabledata selected-store owner
+  deployment_origin:
+    initiation: run.start admits exactly event-only, feed-only, or event-plus-feed creation. Feed-only requires a canonical run_id, an exact selected bundle, and at least one import or pin; it stores a payload-free deployment RunOrigin and no synthetic event, handler, delivery, or scenario_setup origin.
+    atomicity: Every selected pin creates one deployment-origin feed intent in the same selected-store transaction as its imports, run row, pins, permanent run-creation receipt, and API completion. The feed intent binds the exact declaration, schema digest, immutable version, cardinality, and run. Retrying the same request consumes the permanent receipt and does not create another run, event, pin, or feed.
+    trigger: Pin existence alone never starts processing. The explicit run.start operation creates the feed obligations; issuance uses the existing fan-out pump and normal publication, routing, receiver initialization, settlement, and recovery paths. Authored data.* source events and fake triggering deliveries are not supported.
+    empty: A selected zero-row version creates a closed zero-cardinality feed. When all selected feeds and all other work are settled, the deployment run can complete without manufacturing an entity or event; ordinary event-origin completion rules are unchanged.
   declaration_projection:
     owner: workflow_model.compiled_event_schema_projection
     identity: Structured exact (flow_path, qualified event name). Bundle generation and source path are not identity. Rename or package move creates a new declaration without aliases, inference, migration, or backfill.
@@ -13509,7 +13514,7 @@ durable_data_resources:
     source_commit: Every accepted import receipt must join to its exact immutable admitted declaration, historical evaluation version and head revision, committed version manifest, import provenance, and conditional head-history transition. Check, validation-rejected, and head-conflict receipts and failed fused-child evidence must prove that no provenance or head-history mutation exists for that source invocation. Later head movement and payload prune or rematerialization never invalidate an otherwise complete historical receipt.
   run_pins:
     start: A run stores exactly the versions selected by its explicit imports and pins before execution. Authored event declarations and existing heads never create implicit dependencies or inject rows.
-    immutability: A data-bearing event.publish or run.start request is admitted only when authoritative selected-run resolution proves that the request creates the run. An existing run fails with RUN_DATA_IMMUTABLE before event publication, source evaluation, receipt creation, pinning, or version mutation; request-local create intent is never authority.
+    immutability: A data-bearing event.publish or run.start request may create a new run or replay its exact permanent run-creation receipt. A run that exists without a matching receipt rejects new creation data with RUN_DATA_IMMUTABLE before event publication, source evaluation, pinning, or version mutation; request-local create intent and expiring API cache are never authority.
     fork: A fork inherits the source run's exact stored pin set and applies explicit exact-version overrides atomically with fork creation. Unselected target declarations remain unpinned; a pinned source declaration absent from or schema-incompatible with the target bundle fails before fork mutation.
     retention: Active and terminal forkable runs pin versions. There is no automatic garbage collection in v1. Live pin pagination binds the selected version and its declaration in the fixed query fingerprint, then resumes strictly after the run_id carried by the bounded opaque cursor. Concurrent pin insertion never shifts an offset because offsets are forbidden.
     rejection_evidence: Failed run creation permanently records one closed typed rejection fact. Explicit-pin failures name the exact declaration and version, schema mismatch also records both schema digests, and fused aggregate failures carry their exact class without invented target facts.
@@ -16548,7 +16553,7 @@ platform_tables:
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),
             bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
-            origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'scenario_setup', 'standing_generation', 'fork_materialization')),
+            origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'deployment', 'scenario_setup', 'standing_generation', 'fork_materialization')),
             trigger_event_id   UUID,
             trigger_event_type TEXT,
             origin_service_id UUID,
@@ -16563,7 +16568,7 @@ platform_tables:
             failure           JSONB,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             ended_at          TIMESTAMPTZ,
-            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL)),
+            CHECK ((origin_kind = 'event' AND trigger_event_id IS NOT NULL AND NULLIF(TRIM(trigger_event_type), '') IS NOT NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'deployment' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'scenario_setup' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'standing_generation' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NOT NULL AND origin_generation IS NOT NULL AND origin_generation > 0 AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL) OR (origin_kind = 'fork_materialization' AND trigger_event_id IS NULL AND trigger_event_type IS NULL AND origin_service_id IS NULL AND origin_generation IS NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL)),
             CHECK (continued_as_run_id IS NULL OR continued_as_run_id <> run_id),
             CHECK ((status = 'forked') = (continued_as_run_id IS NOT NULL)),
             CHECK (completion_due_at IS NULL OR completion_revision > 0),
@@ -34219,16 +34224,13 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.start:
       tier: must_have
-      deprecated: true
-      description: 'Deprecated wrapper over event.publish retained for older API callers. New clients should call
-        event.publish directly.
-
-        Start a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash
-        semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no
-        run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and
-        existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the
-        resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE.
-        No alternate bundle identity input is accepted.
+      deprecated: false
+      description: 'Starts a run with exactly one event, one or more selected data feeds, or both. Event-backed
+        initiation requires event_name and payload together. Feed-only initiation requires data and a canonical
+        run_id; it creates a deployment-origin run without a synthetic event. Every selected pin creates one feed
+        obligation atomically with the run, imports, pins and permanent receipt. The selected bundle_hash must
+        identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext;
+        an existing run cannot acquire new run-creation data.
 
         '
       scope:
@@ -34242,11 +34244,13 @@ api_specification:
           schema:
             $ref: '#/components/schemas/BundleHash'
         - name: event_name
-          required: true
+          required: false
+          description: Required with payload for event-backed initiation; forbidden for feed-only initiation.
           schema:
             type: string
         - name: payload
-          required: true
+          required: false
+          description: Required with event_name for event-backed initiation; forbidden for feed-only initiation.
           schema:
             type: object
             additionalProperties: true

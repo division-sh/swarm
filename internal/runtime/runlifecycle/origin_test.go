@@ -20,6 +20,7 @@ func TestRunOriginRoundTripsEveryClosedVariant(t *testing.T) {
 	}
 	for _, origin := range []RunOrigin{
 		event,
+		DeploymentRunOrigin(),
 		ScenarioSetupRunOrigin(),
 		standing,
 		fork,
@@ -54,6 +55,8 @@ func TestRunOriginRejectsEveryPartialAndMixedShape(t *testing.T) {
 		{name: "event_missing_type", kind: string(OriginEvent), eventID: "event-1"},
 		{name: "event_with_standing", kind: string(OriginEvent), eventID: "event-1", eventType: "scan.requested", serviceID: "service-1", generation: 1},
 		{name: "scenario_with_event", kind: string(OriginScenarioSetup), eventID: "event-1", eventType: "scan.requested"},
+		{name: "deployment_with_event", kind: string(OriginDeployment), eventID: "event-1", eventType: "scan.requested"},
+		{name: "deployment_with_fork", kind: string(OriginDeployment), sourceRunID: "run-1", sourceEventID: "event-1"},
 		{name: "standing_missing_service", kind: string(OriginStandingGeneration), generation: 1},
 		{name: "standing_nonpositive_generation", kind: string(OriginStandingGeneration), serviceID: "service-1"},
 		{name: "standing_with_fork", kind: string(OriginStandingGeneration), serviceID: "service-1", generation: 1, sourceRunID: "run-1", sourceEventID: "event-1"},

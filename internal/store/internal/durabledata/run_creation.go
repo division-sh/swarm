@@ -90,7 +90,7 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 	if exists, err := o.runExistsTx(ctx, tx, canonical.RunID); err != nil {
 		return RunCreationPlan{}, err
 	} else if exists {
-		return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run %s exists without its permanent run-creation receipt", canonical.RunID)
+		return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodeRunDataImmutable, "run %s already exists and cannot acquire run-creation data", canonical.RunID)
 	}
 
 	var declarations []runtimedata.Declaration

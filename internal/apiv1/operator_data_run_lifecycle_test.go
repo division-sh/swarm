@@ -53,6 +53,7 @@ type dataRunLifecycleStore interface {
 	LoadDataPins(context.Context, durabledata.VersionID) ([]durabledata.Pin, error)
 	LoadDataHeadHistory(context.Context, durabledata.DeclarationRef) ([]durabledata.HeadHistory, error)
 	LoadDataRunCreationOperation(context.Context, string) (durabledata.RunCreationOperationRecord, error)
+	LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error)
 }
 
 type dataRunLifecycleFixture struct {
@@ -215,6 +216,9 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			parent, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
 			if err != nil || parent.Summary.Outcome != "created" || parent.Summary.PinCount != 1 || len(parent.Evidence.RunBinding) != 2 {
 				t.Fatalf("fused parent receipt = %#v, %v", parent, err)
+			}
+			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+				t.Fatalf("event-plus-feed created %d feed intents, want 1", got)
 			}
 			pins, err := fixture.reconstructed.LoadDataPins(ctx, firstVersion)
 			if err != nil || len(pins) != 1 || pins[0].RunID != runID || pins[0].Selection != "fused_import" {
