@@ -2164,6 +2164,18 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 			case <-time.After(5 * time.Second):
 				t.Fatal("automatic readiness retry did not complete")
 			}
+			am.dynamicFlowReadinessMu.Lock()
+			attempt := am.dynamicFlowReadinessAttempts[dynamicFlowRuntimeReadinessKey{
+				runID: req.TriggerEvent.RunID(), instancePath: req.Instance.Route().InstancePath,
+			}]
+			am.dynamicFlowReadinessMu.Unlock()
+			if attempt != nil {
+				select {
+				case <-attempt.done:
+				case <-time.After(5 * time.Second):
+					t.Fatal("automatic readiness attempt did not settle")
+				}
+			}
 			if len(bus.published) != 1 {
 				t.Fatalf("creation events after recovery = %d, want exactly one", len(bus.published))
 			}

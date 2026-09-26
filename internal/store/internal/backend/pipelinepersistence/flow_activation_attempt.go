@@ -280,7 +280,7 @@ func retireDynamicFlowRuntimeActivationAttempt(
 				if !currentID.Valid || !currentGrantID.Valid || currentID.String == attempt.ID() {
 					return errors.New("flow activation retirement does not own the current attempt slot")
 				}
-				foreign, err := agentpersistence.FlowActivationPredecessorIsFromAnotherProcessTx(txctx, tx, currentGrantID.String, attempt.ProcessBinding())
+				foreign, err := agentpersistence.FlowActivationRetirementHasForeignSuccessorTx(txctx, tx, currentGrantID.String, attempt.ProcessBinding())
 				if err != nil {
 					return err
 				}
