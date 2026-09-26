@@ -314,9 +314,38 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		t.Fatalf("fingerprint readiness owner: %v", err)
 	}
 	seedLifecycleReadinessOwner(t, ctx, store, runID, readinessPlan.Identity.InstancePath, readinessPlanJSON, now)
+	if _, err := readinessGrant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle readiness grant probes: %v", err)
+	}
+	if _, err := readinessGrant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("admit readiness grant: %v", err)
+	}
+	readinessBinding, err := readinessGrant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationStore, ok := store.(interface {
+		LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
+		BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimemanager.ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+	})
+	if !ok {
+		t.Fatal("process takeover fixture requires exact flow activation owner")
+	}
+	readiness, found, err := activationStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, readinessPlan.Identity.Route())
+	if err != nil || !found {
+		t.Fatalf("load readiness for lifecycle seed: found=%v err=%v", found, err)
+	}
+	admitted, err := activationStore.BeginDynamicFlowRuntimeActivation(ctx, readinessPlan, readiness.PlanRevision, readinessBinding)
+	if err != nil || !admitted.Acknowledged {
+		t.Fatalf("admit readiness lifecycle attempt: result=%+v err=%v", admitted, err)
+	}
 	readinessTopology, err := runtimeagenttopology.FlowReadinessAdmission(
 		runID, readinessPlan.Identity.InstancePath, readinessFingerprint,
 	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readinessTopology, err = readinessTopology.WithFlowActivationAttempt(admitted.Attempt.ID(), admitted.Attempt.PlanRevision())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,6 +363,17 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	readinessState, found, err := store.LoadAgentLifecycleState(ctx, readinessIdentity)
 	if err != nil || !found {
 		t.Fatalf("load readiness lifecycle before termination: found=%v err=%v", found, err)
+	}
+	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		OperationID:      uuid.NewString(), OperationKind: "process_takeover", RequestHash: uuid.NewString(),
+		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "forged_takeover",
+		ExpectedEpoch: readinessState.RuntimeEpoch, ExpectedGeneration: readinessState.Generation, ExpectedPhase: readinessState.Phase,
+		TargetEpoch: readinessState.RuntimeEpoch + 1, TargetGeneration: readinessState.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRunning,
+		ConfigRevision: readinessState.ConfigRevision, RunMode: readinessState.RunMode,
+		Topology: readinessState.Topology, Now: time.Now().UTC(),
+	}); err == nil || !strings.Contains(err.Error(), "readiness_takeover_must_only_rebind_execution") {
+		t.Fatalf("forged takeover phase change was not rejected: %v", err)
 	}
 	terminateLifecycleReadinessOwnerForTest(t, ctx, store, runID, readinessPlan.Identity.InstancePath)
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{

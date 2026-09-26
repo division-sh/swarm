@@ -12,6 +12,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 func AuthorizePostgresAgentTopologyMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) error {
@@ -129,8 +130,20 @@ func authorizeStaticDeclarationMutation(ctx context.Context, tx *sql.Tx, req run
 func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, sqlite bool) error {
 	authority := req.Topology.Authority.Readiness
 	present := req.TargetPhase != runtimemanager.AgentLifecycleTerminated
+	takeover := req.OperationKind == "process_takeover"
+	if takeover && (req.Agent != nil || req.Subordinate.Action != runtimesessions.LifecycleMutationNone ||
+		req.TargetPhase != req.ExpectedPhase || req.TargetEpoch != req.ExpectedEpoch+1 ||
+		req.TargetGeneration != req.ExpectedGeneration+1) {
+		return topologyConflict(req, "readiness_takeover_must_only_rebind_execution")
+	}
 	if present {
-		if err := AuthorizeDynamicFlowActivationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite); err != nil {
+		var err error
+		if takeover {
+			err = AuthorizeDynamicFlowTakeoverPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
+		} else {
+			err = AuthorizeDynamicFlowActivationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -169,7 +182,8 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 		return topologyConflict(req, "readiness_plan_changed")
 	}
 	var plan struct {
-		Agents []struct {
+		BundleHash string `json:"bundle_hash"`
+		Agents     []struct {
 			Identity       runtimeagentidentity.Identity `json:"identity"`
 			ConfigRevision string                        `json:"config_revision"`
 		} `json:"agents"`
@@ -188,12 +202,15 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 		desiredRevision = strings.TrimSpace(agent.ConfigRevision)
 	}
 	if present {
-		if authority.AttemptID == "" || authority.PlanRevision == 0 ||
+		if plan.BundleHash != req.ProcessBinding.BundleHash {
+			return topologyConflict(req, "readiness_generation_source_mismatch")
+		}
+		if !takeover && (authority.AttemptID == "" || authority.PlanRevision == 0 ||
 			!attemptID.Valid || attemptID.String != authority.AttemptID ||
 			!grantID.Valid || grantID.String != req.ProcessBinding.GenerationGrantID ||
 			!attemptRevision.Valid || attemptRevision.Int64 != int64(authority.PlanRevision) ||
 			planRevision != int64(authority.PlanRevision) || !attemptState.Valid ||
-			(attemptState.String != "accepted" && attemptState.String != "topology_committed") {
+			(attemptState.String != "accepted" && attemptState.String != "topology_committed")) {
 			return topologyConflict(req, "readiness_activation_attempt_not_current")
 		}
 		if strings.TrimSpace(instanceStatus) != "active" {
