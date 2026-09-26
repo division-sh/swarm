@@ -292,7 +292,7 @@ func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testi
 		})
 	}
 	for function, want := range map[string]int{
-		"admitSelectedContractDeferredWork":              2,
+		"admitSelectedContractDeferredWork":              3, // initial execution, activation gate, recovered finite feed
 		"BuildSelectedContractExecutionAdmission":        3, // initial execution, activation gate, recovered finite feed
 		"buildSelectedContractForkLocalRuntimeContainer": 2,
 	} {
