@@ -41,8 +41,9 @@ func TestSelectedBindingPersistsDisjointForkPointsBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
+			eventID := uuid.NewString()
 			for _, point := range []runfork.RunForkPoint{
-				{Kind: runfork.RunForkPointEvent, Revision: 4, EventID: uuid.NewString()},
+				{Kind: runfork.RunForkPointEvent, Revision: 4, Input: eventID, EventID: eventID, EventName: "worker.ready", Timestamp: time.Now().UTC()},
 				{Kind: runfork.RunForkPointDeploymentRevision, Revision: 7},
 			} {
 				req := runfork.RunForkSelectedContractBindingRequest{
@@ -56,6 +57,9 @@ func TestSelectedBindingPersistsDisjointForkPointsBothStores(t *testing.T) {
 				loaded, err := loadRunForkSelectedContractBinding(ctx, tx, inserted.ForkRunID)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if inserted.ForkPoint != loaded.ForkPoint {
+					t.Fatalf("inserted binding invents non-durable point fields: inserted=%+v loaded=%+v", inserted.ForkPoint, loaded.ForkPoint)
 				}
 				if loaded.ForkPoint.Kind != point.Kind || loaded.ForkPoint.Revision != point.Revision ||
 					loaded.ForkPoint.EventID != point.EventID || loaded.ForkEventID != point.EventID {

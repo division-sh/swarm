@@ -44,7 +44,7 @@ func (s *fanOutServingStore) ObserveFanOutExecutions(ctx context.Context, regist
 		if err != nil || len(keys) == 0 {
 			return err
 		}
-		var args []any
+		args := []any{snapshot.ObservedAt}
 		query := `SELECT COALESCE(CAST(g.grant_id AS TEXT),''),` + fanOutExecutionReasonSQL + `,` +
 			fanOutObservationHeaderColumns() + fanOutObservationFrom(grants, &args)
 		filters := make([]string, 0, len(keys))

@@ -818,6 +818,7 @@ seam_families:
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/delivery_planner_test.go
       - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/active_target_descriptor_dedup_test.go
       - internal/runtime/bus/eventbus_flow_instance_descriptors_test.go
       - internal/runtime/bus/eventbus_publish_test.go
       - internal/runtime/bus/eventbus_routing.go

@@ -155,7 +155,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 							want = "source_active_conversation_session_coupling_after_fork_point"
 						}
 						if surface == "empty_snapshot_refusal" {
-							want = "requires materialized fork entity_state rows"
+							want = "requires materialized entity or deployment work"
 						}
 						if err == nil || !strings.Contains(err.Error(), want) || result.Activation.Activated || result.Activation.SourceFrozen {
 							t.Fatalf("unsupported replay did not fail closed: %v activated=%t sourceFrozen=%t", err, result.Activation.Activated, result.Activation.SourceFrozen)

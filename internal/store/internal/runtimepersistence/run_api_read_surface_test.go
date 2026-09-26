@@ -44,7 +44,7 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 		{
 			RunID: middle, State: "completed", BundleHash: bundleB,
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
-			ForkedFromRunID: newer, ForkedFromEventID: newerEvent,
+			ForkedFromRunID: newer, ForkedFromPointKind: "event", ForkedFromRevision: 1, ForkedFromEventID: newerEvent,
 			EntityCount: 5, EventCount: 1,
 			StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-30 * time.Minute),
 		},

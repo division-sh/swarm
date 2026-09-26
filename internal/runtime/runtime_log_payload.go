@@ -66,6 +66,9 @@ func DecodeCanonicalRuntimeLogPayload(raw []byte) (CanonicalRuntimeLogPayload, e
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
+	if err := validateRuntimeLogDetailLists(detail); err != nil {
+		return CanonicalRuntimeLogPayload{}, err
+	}
 	if _, legacy := detail["error"]; legacy {
 		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log details.error is retired; use details.failure")
 	}
@@ -191,6 +194,27 @@ func DecodeCanonicalRuntimeLogPayload(raw []byte) (CanonicalRuntimeLogPayload, e
 		Terminal:      terminal,
 		RetryCount:    retryCount,
 	}, nil
+}
+
+func validateRuntimeLogDetailLists(value any) error {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, item := range typed {
+			if err := validateRuntimeLogDetailLists(item); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if item == nil {
+				return fmt.Errorf("runtime log detail lists cannot contain null")
+			}
+			if err := validateRuntimeLogDetailLists(item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func requiredRuntimeLogString(raw map[string]any, key string) (string, error) {

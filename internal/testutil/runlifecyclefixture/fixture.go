@@ -208,22 +208,24 @@ func ReviseSQLiteSource(
 }
 
 type CorruptSnapshot struct {
-	RunID             string
-	State             string
-	BundleHash        string
-	OriginKind        string
-	TriggerEventID    string
-	TriggerEventType  string
-	OriginServiceID   string
-	OriginGeneration  int64
-	ForkedFromRunID   string
-	ForkedFromEventID string
-	ContinuedAsRunID  string
-	EventCount        int
-	EntityCount       int
-	Failure           *runtimefailures.Envelope
-	StartedAt         time.Time
-	EndedAt           time.Time
+	RunID               string
+	State               string
+	BundleHash          string
+	OriginKind          string
+	TriggerEventID      string
+	TriggerEventType    string
+	OriginServiceID     string
+	OriginGeneration    int64
+	ForkedFromRunID     string
+	ForkedFromPointKind string
+	ForkedFromRevision  int64
+	ForkedFromEventID   string
+	ContinuedAsRunID    string
+	EventCount          int
+	EntityCount         int
+	Failure             *runtimefailures.Envelope
+	StartedAt           time.Time
+	EndedAt             time.Time
 }
 
 // RequireCorruptPostgresSnapshot is reserved for hostile readback tests whose
@@ -253,20 +255,20 @@ func AttemptCorruptPostgresSnapshot(
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
-			forked_from_run_id, forked_from_event_id, continued_as_run_id,
+			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
 			event_count, entity_count, failure, started_at, ended_at
 		)
 		VALUES (
 			$1::uuid, $2, $3, $4,
 			NULLIF($5, '')::uuid, NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, 0),
-			NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, '')::uuid,
-			$12, $13, NULLIF($14, '')::jsonb, $15, $16
+			NULLIF($9, '')::uuid, NULLIF($10, ''), NULLIF($11, 0), NULLIF($12, '')::uuid, NULLIF($13, '')::uuid,
+			$14, $15, NULLIF($16, '')::jsonb, $17, $18
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
 		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
-		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromEventID),
+		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
 		strings.TrimSpace(snapshot.ContinuedAsRunID),
 		snapshot.EventCount, snapshot.EntityCount, failure, snapshot.StartedAt.UTC(), endedAt)
 	return err
@@ -299,20 +301,20 @@ func AttemptCorruptSQLiteSnapshot(
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
-			forked_from_run_id, forked_from_event_id, continued_as_run_id,
+			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
 			event_count, entity_count, failure, started_at, ended_at
 		)
 		VALUES (
 			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0),
-			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
+			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''),
 			?, ?, NULLIF(?, ''), ?, ?
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
 		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
-		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromEventID),
+		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
 		strings.TrimSpace(snapshot.ContinuedAsRunID),
 		snapshot.EventCount, snapshot.EntityCount, failure, snapshot.StartedAt.UTC(), endedAt)
 	return err
