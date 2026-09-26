@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	stdruntime "runtime"
@@ -181,7 +182,7 @@ func runScopedIdentityRead(t *testing.T, root, relative string) string {
 
 func runScopedIdentityWalkProductionGo(t *testing.T, root string, check func(path, source string)) {
 	t.Helper()
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(runScopedIdentityRepoRoot(t), root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

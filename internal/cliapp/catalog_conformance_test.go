@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io"
 	"os"
 	"path/filepath"
@@ -194,7 +195,7 @@ func TestCatalogRequiredVerifyGateRejectsAddedDeploymentArtifact(t *testing.T) {
 func discoverRequiredExampleBundles(corpusRoot, configPath string) ([]requiredConformanceBundle, error) {
 	examplesRoot := filepath.Join(corpusRoot, "examples")
 	var bundles []requiredConformanceBundle
-	err := filepath.WalkDir(examplesRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(corpusRoot, examplesRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

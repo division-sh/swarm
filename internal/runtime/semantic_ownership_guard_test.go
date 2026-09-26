@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -509,12 +510,12 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 func inspectProductionGo(t *testing.T, inspect func(string, *ast.File)) {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
-	err := filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" {
+			if entry.Name() == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil

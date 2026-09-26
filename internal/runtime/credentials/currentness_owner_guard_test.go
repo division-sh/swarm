@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,7 +20,7 @@ func TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors(t *t
 		"internal/store/internal/backend/operatorchannel",
 	}
 	for _, zone := range retirementZones {
-		err := filepath.WalkDir(filepath.Join(repo, zone), func(path string, entry fs.DirEntry, err error) error {
+		err := checkoutsource.WalkDir(repo, filepath.Join(repo, zone), func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -42,14 +43,11 @@ func TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors(t *t
 		}
 	}
 
-	err := filepath.WalkDir(repo, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repo, repo, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 		if filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") || strings.Contains(path, filepath.Join("internal", "runtime", "credentials")) {

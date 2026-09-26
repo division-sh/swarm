@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -139,9 +140,19 @@ func TestProviderGuaranteeRegistryMatchesSpecAndNamesLiveProofs(t *testing.T) {
 
 func assertGoTestFunctionExists(t *testing.T, packagePath, testName string) {
 	t.Helper()
-	root := filepath.Join(RepoRoot(), filepath.FromSlash(packagePath))
+	found, err := goTestFunctionExists(RepoRoot(), packagePath, testName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatalf("execution proof %s %s does not name a live Go test", packagePath, testName)
+	}
+}
+
+func goTestFunctionExists(repoRoot, packagePath, testName string) (bool, error) {
+	root := filepath.Join(repoRoot, filepath.FromSlash(packagePath))
 	found := false
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
 			return err
 		}
@@ -154,10 +165,38 @@ func assertGoTestFunctionExists(t *testing.T, packagePath, testName string) {
 		}
 		return nil
 	})
-	if err != nil {
+	return found, err
+}
+
+func TestProviderGuaranteeProofCensusRejectsForeignOnlyDeclaration(t *testing.T) {
+	root := t.TempDir()
+	proofPackage := filepath.Join(root, "internal", "proof")
+	foreign := filepath.Join(proofPackage, "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if !found {
-		t.Fatalf("execution proof %s %s does not name a live Go test", packagePath, testName)
+	if err := os.Mkdir(filepath.Join(foreign, ".git"), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	proof := []byte("package proof\nimport \"testing\"\nfunc TestProviderBoundaryProof(t *testing.T) {}\n")
+	if err := os.WriteFile(filepath.Join(foreign, "foreign_test.go"), proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		found, err := goTestFunctionExists(root, "internal/proof", "TestProviderBoundaryProof")
+		if err != nil || found != want {
+			t.Fatalf("goTestFunctionExists = %v, %v; want %v", found, err, want)
+		}
+	}
+	check(false)
+	current := filepath.Join(proofPackage, "current_test.go")
+	if err := os.WriteFile(current, proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
 }

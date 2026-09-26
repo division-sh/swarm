@@ -1,6 +1,7 @@
 package effects
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,7 +14,7 @@ import (
 
 func TestPostCommitMutationErrorHasOnlyCanonicalProductionProducers(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

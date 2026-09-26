@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -37,12 +38,12 @@ var retiredHandlerActionSymbols = map[string]bool{
 func TestNoRetiredHandlerActionInterpreters(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	var violations []string
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" || entry.Name() == "node_modules" {
+			if entry.Name() == "vendor" || entry.Name() == "node_modules" {
 				return filepath.SkipDir
 			}
 			return nil

@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -1844,13 +1845,13 @@ func loadPublicSurfaceCLICommands(t *testing.T, root string) map[string]struct{}
 
 func loadPublicSurfaceGoTests(root string) (map[string][]string, error) {
 	out := map[string][]string{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", ".swarm", "node_modules", "vendor":
+			case ".swarm", "node_modules", "vendor":
 				return filepath.SkipDir
 			default:
 				return nil
@@ -1883,6 +1884,41 @@ func loadPublicSurfaceGoTests(root string) (map[string][]string, error) {
 		sort.Strings(out[name])
 	}
 	return out, nil
+}
+
+func TestPublicSurfaceProofCensusRejectsForeignOnlyDeclaration(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "internal", "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(foreign, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proof := []byte("package proof\nimport \"testing\"\nfunc TestPublicSurfaceBoundaryProof(t *testing.T) {}\n")
+	if err := os.WriteFile(filepath.Join(foreign, "foreign_test.go"), proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		got, err := loadPublicSurfaceGoTests(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if found := len(got["TestPublicSurfaceBoundaryProof"]) != 0; found != want {
+			t.Fatalf("public-surface proof credited = %v, want %v; census = %#v", found, want, got)
+		}
+	}
+	check(false)
+	current := filepath.Join(root, "current_test.go")
+	if err := os.WriteFile(current, proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
 }
 
 func publicSurfaceMatrixRowByID(t *testing.T, matrix *publicSurfaceBackendMatrix, id string) *publicSurfaceMatrixRow {

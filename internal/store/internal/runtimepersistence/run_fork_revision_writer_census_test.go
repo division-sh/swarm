@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -75,7 +76,7 @@ func TestRunForkRevisionCaptureIsBackendNeutralGuard(t *testing.T) {
 		}
 	}
 	forbiddenAPIs := []string{"CaptureCurrentTransaction", "CaptureChanges", "CommitRunForkRevisionTx"}
-	err := filepath.WalkDir(filepath.Join(root, "internal/store"), func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/store"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -439,7 +440,7 @@ func scanRunForkRevisionPhysicalWriters(t *testing.T, root string) map[string]st
 	dml := regexp.MustCompile(`(?is)\b(?:INSERT(?:\s+OR\s+[A-Z_]+)?\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:"?[A-Z_][A-Z_0-9]*"?\.)?"?([A-Z_][A-Z_0-9]*)"?`)
 	got := make(map[string]struct{})
 	storeRoot := filepath.Join(root, "internal/store")
-	err := filepath.WalkDir(storeRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, storeRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

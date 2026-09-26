@@ -1,6 +1,7 @@
 package releasee2e
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ func TestFullLifecycleFixtureIsFiniteFilesystemFlowTree(t *testing.T) {
 			t.Fatalf("full lifecycle source is missing %s", label)
 		}
 	}
-	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	if err := checkoutsource.WalkDir(releaseE2ERepoRoot(t), root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

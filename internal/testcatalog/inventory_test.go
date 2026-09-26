@@ -3,6 +3,7 @@ package testcatalog
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -70,6 +71,63 @@ func TestCatalogRequiredInventory(t *testing.T) {
 	}
 	if len(wantProofs) != 0 {
 		t.Fatalf("missing external proofs = %#v", wantProofs)
+	}
+}
+
+func TestCatalogDiscoveryExcludesNestedCheckout(t *testing.T) {
+	for _, level := range []string{"tier", "fixture"} {
+		for _, markerShape := range []string{"file", "directory"} {
+			for _, metadata := range []string{"valid", "missing"} {
+				t.Run(level+"/"+markerShape+"/"+metadata, func(t *testing.T) {
+					root := t.TempDir()
+					current := filepath.Join(root, "tests", "tier1", "current", "tests", "expected.yaml")
+					if err := os.MkdirAll(filepath.Dir(current), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(current, []byte(fixtureMetadata("runtime", "pass", "claim.runtime")), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					foreign := filepath.Join(root, "tests", "tier2")
+					if level == "fixture" {
+						foreign = filepath.Join(root, "tests", "tier1", "foreign")
+					}
+					if err := os.MkdirAll(foreign, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					gitMarker := filepath.Join(foreign, ".git")
+					if markerShape == "file" {
+						if err := os.WriteFile(gitMarker, []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+							t.Fatal(err)
+						}
+					} else if err := os.Mkdir(gitMarker, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					foreignFixture := foreign
+					if level == "tier" {
+						foreignFixture = filepath.Join(foreign, "foreign")
+					}
+					if err := os.MkdirAll(filepath.Join(foreignFixture, "tests"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if metadata == "valid" {
+						path := filepath.Join(foreignFixture, "tests", "expected.yaml")
+						if err := os.WriteFile(path, []byte(fixtureMetadata("runtime", "pass", "claim.runtime")), 0o644); err != nil {
+							t.Fatal(err)
+						}
+					}
+					fixtures, err := discoverFixtures(root)
+					if err != nil || len(fixtures) != 1 || fixtures[0].RelativePath != "tests/tier1/current" {
+						t.Fatalf("discoverFixtures = %#v, %v; want only current fixture", fixtures, err)
+					}
+					if err := os.Remove(current); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := discoverFixtures(root); err == nil || !strings.Contains(err.Error(), "read expected.yaml") {
+						t.Fatalf("broken current fixture must fail closed, got %v", err)
+					}
+				})
+			}
+		}
 	}
 }
 
@@ -225,7 +283,7 @@ func TestCatalogOwnershipHasNoLegacyClassifierOrSimulator(t *testing.T) {
 		} else if err != nil {
 			t.Fatalf("stat %s: %v", relativeRoot, err)
 		}
-		err := filepath.WalkDir(scanRoot, func(path string, entry os.DirEntry, err error) error {
+		err := checkoutsource.WalkDir(root, scanRoot, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

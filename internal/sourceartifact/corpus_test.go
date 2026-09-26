@@ -1,6 +1,7 @@
 package sourceartifact
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,11 +12,11 @@ import (
 func TestTrackedManifestRootsUseFiniteSourceGrammar(t *testing.T) {
 	repo := filepath.Clean(filepath.Join(testWorkingDirectory(t), "..", ".."))
 	roots := make([]string, 0)
-	err := filepath.WalkDir(repo, func(current string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repo, repo, func(current string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".swarm") {
+		if entry.IsDir() && (entry.Name() == ".swarm") {
 			return filepath.SkipDir
 		}
 		if !entry.IsDir() && entry.Name() == "manifest.yaml" {

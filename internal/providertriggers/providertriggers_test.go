@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"net/http"
 	"net/url"
 	"os"
@@ -1601,7 +1602,7 @@ func acceptInstalled(snapshot *CatalogSnapshot, req Request) (Delivery, error) {
 func testPlatformPackDirs(t *testing.T) []string {
 	t.Helper()
 	root := testPlatformPackRoot()
-	entries, err := os.ReadDir(root)
+	entries, err := checkoutsource.ReadDir(filepath.Clean(filepath.Join("..", "..")), root)
 	if err != nil {
 		t.Fatalf("read platform pack root: %v", err)
 	}

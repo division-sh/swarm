@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -16,7 +17,7 @@ func TestProviderRawSettlementAuthorityRemainsInboundOnly(t *testing.T) {
 		filepath.Clean("inbound_batch.go"):    true,
 		filepath.Clean("eventbus_publish.go"): true,
 	}
-	if err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+	if err := checkoutsource.WalkDir(filepath.Clean(filepath.Join("..", "..", "..")), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -36,7 +37,7 @@ func TestProviderRawSettlementAuthorityRemainsInboundOnly(t *testing.T) {
 	}
 
 	var callers []string
-	if err := filepath.WalkDir("..", func(path string, entry fs.DirEntry, err error) error {
+	if err := checkoutsource.WalkDir(filepath.Clean(filepath.Join("..", "..", "..")), "..", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

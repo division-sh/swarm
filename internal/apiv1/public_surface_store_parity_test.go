@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -1422,7 +1423,7 @@ func loadPublicSurfaceStoreParityProofPolicy(root, relative string) (testplannin
 }
 
 func loadPublicSurfaceStoreParitySourceSets(root string) (publicSurfaceStoreParitySourceSets, error) {
-	constructors, err := sourceExportedOpenFunctions(filepath.Join(root, "internal/store/selected"))
+	constructors, err := sourceExportedOpenFunctions(root, filepath.Join(root, "internal/store/selected"))
 	if err != nil {
 		return publicSurfaceStoreParitySourceSets{}, err
 	}
@@ -1616,9 +1617,9 @@ func sourceNamedTypeDeclaration(root, relativeDir, typeName string) (string, str
 	return "", "", fmt.Errorf("type %s not found in %s", typeName, relativeDir)
 }
 
-func sourceExportedOpenFunctions(dir string) (map[string]struct{}, error) {
+func sourceExportedOpenFunctions(root, dir string) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1645,12 +1646,12 @@ func sourceExportedOpenFunctions(dir string) (map[string]struct{}, error) {
 
 func sourceSelectedPurposeConsumers(root string) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" {
+			if entry.Name() == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -202,7 +203,7 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 		"internal/store/platformschema/platformschema.go",
 	}
 	var got []string
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

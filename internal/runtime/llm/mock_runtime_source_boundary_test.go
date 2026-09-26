@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -18,7 +19,7 @@ func TestProductionDoesNotImportCatalogOrFixtureRuntimeOwners(t *testing.T) {
 	}
 	repo := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 	for _, root := range []string{filepath.Join(repo, "cmd"), filepath.Join(repo, "internal")} {
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		err := checkoutsource.WalkDir(repo, root, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}

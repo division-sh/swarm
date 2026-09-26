@@ -1,6 +1,7 @@
 package events
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -82,7 +83,7 @@ func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
 			}
 			t.Fatalf("stat %s: %v", root, err)
 		}
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -117,7 +118,7 @@ func TestTestEventFixturesUseFixtureBuilders(t *testing.T) {
 			}
 			t.Fatalf("stat %s: %v", root, err)
 		}
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -150,7 +151,7 @@ func TestRemovedEventConstructionAliasesStayDeleted(t *testing.T) {
 		"RuntimeEventInput": {}, "DiagnosticDirectEventInput": {}, "RootIngressEventInput": {},
 	}
 	root := filepath.Join(repoRoot, "internal", "events")
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -415,13 +416,13 @@ func validateSelectedStoreAbstractionProofRefs(root, rowID string, refs []select
 
 func loadSelectedStoreAbstractionGoTests(root string) (map[string]string, error) {
 	out := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", ".swarm", "node_modules", "vendor":
+			case ".swarm", "node_modules", "vendor":
 				return filepath.SkipDir
 			default:
 				return nil
@@ -451,6 +452,43 @@ func loadSelectedStoreAbstractionGoTests(root string) (map[string]string, error)
 		return nil, err
 	}
 	return out, nil
+}
+
+func TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "internal", "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proof := "package proof\nimport \"testing\"\nfunc TestSelectedStoreBoundaryProof(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(foreign, "proof_test.go"), []byte(proof), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := []selectedStoreAbstractionProofRef{{Kind: "go_test", Name: "TestSelectedStoreBoundaryProof"}}
+	check := func(wantMissing bool) {
+		t.Helper()
+		goTests, err := loadSelectedStoreAbstractionGoTests(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		problems := validateSelectedStoreAbstractionProofRefs(root, "nested-checkout", ref, selectedStoreAbstractionValidationContext{goTests: goTests})
+		if missing := selectedStoreAbstractionProblemsContain(problems, "does not resolve"); missing != wantMissing {
+			t.Fatalf("foreign-only missing = %v, want %v; census = %#v; problems = %#v", missing, wantMissing, goTests, problems)
+		}
+	}
+	check(true)
+	current := filepath.Join(root, "current_test.go")
+	if err := os.WriteFile(current, []byte(proof), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
 }
 
 func selectedStoreAbstractionRowByID(t *testing.T, matrix *selectedStoreAbstractionGuardMatrix, id string) *selectedStoreAbstractionGuardMatrixRow {

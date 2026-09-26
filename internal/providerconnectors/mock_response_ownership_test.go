@@ -1,6 +1,7 @@
 package providerconnectors
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -27,7 +28,7 @@ func TestMockResponsePlanHasOneProductionProducer(t *testing.T) {
 	}
 
 	for _, root := range []string{filepath.Join(repo, "cmd"), filepath.Join(repo, "internal")} {
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		err := checkoutsource.WalkDir(repo, root, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}

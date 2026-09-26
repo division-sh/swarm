@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -330,12 +331,12 @@ func TestActionRetirementCorpusExcludesGeneratedTestResults(t *testing.T) {
 func actionRetirementCorpusFiles(t *testing.T, root string, allAuthored bool) map[string][]byte {
 	t.Helper()
 	out := map[string][]byte{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" || entry.Name() == "node_modules" || entry.Name() == "test-results" {
+			if entry.Name() == "vendor" || entry.Name() == "node_modules" || entry.Name() == "test-results" {
 				return filepath.SkipDir
 			}
 			return nil

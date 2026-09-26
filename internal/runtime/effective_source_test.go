@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -227,7 +228,7 @@ func TestEffectiveSourceProjectionHasNoProductionCompositionBypass(t *testing.T)
 			"internal/runtime/tools/executor.go": true,
 		},
 	}
-	err := filepath.WalkDir(filepath.Join(repoRoot, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

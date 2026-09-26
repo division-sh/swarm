@@ -1,6 +1,8 @@
 package testutil
 
 import (
+	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -84,7 +86,18 @@ func TestCanonicalTestRunnerHasNoRemovedBinaryAlias(t *testing.T) {
 
 func TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector(t *testing.T) {
 	root := testRepoRoot(t)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	violations, err := postgresEnvironmentAuthorityViolations(root)
+	if err != nil {
+		t.Fatalf("scan Postgres environment owners: %v", err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+}
+
+func postgresEnvironmentAuthorityViolations(root string) ([]string, error) {
+	var violations []string
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -102,7 +115,7 @@ func TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector(t *testing.T) {
 		text := string(data)
 		isProduction := !strings.HasSuffix(path, "_test.go")
 		if strings.Contains(text, "withDB"+"Name(") {
-			t.Errorf("non-authoritative Postgres DSN projector survives in %s", rel)
+			violations = append(violations, fmt.Sprintf("non-authoritative Postgres DSN projector survives in %s", rel))
 		}
 		manualParserFragments := []string{
 			"strings.Fields(" + "dsn)",
@@ -111,14 +124,14 @@ func TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector(t *testing.T) {
 		}
 		for _, fragment := range manualParserFragments {
 			if strings.Contains(text, fragment) {
-				t.Errorf("manual Postgres DSN interpreter %q survives in %s", fragment, rel)
+				violations = append(violations, fmt.Sprintf("manual Postgres DSN interpreter %q survives in %s", fragment, rel))
 			}
 		}
 		if isProduction && strings.Contains(text, `pq.NewConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
-			t.Errorf("competing pq.NewConfig owner survives in %s", rel)
+			violations = append(violations, fmt.Sprintf("competing pq.NewConfig owner survives in %s", rel))
 		}
 		if isProduction && strings.Contains(text, `pq.NewConnectorConfig(`) && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
-			t.Errorf("competing pq.NewConnectorConfig owner survives in %s", rel)
+			violations = append(violations, fmt.Sprintf("competing pq.NewConnectorConfig owner survives in %s", rel))
 		}
 		if isProduction && filepath.ToSlash(rel) != "internal/testpostgres/connection.go" {
 			file, err := parser.ParseFile(token.NewFileSet(), path, data, 0)
@@ -126,14 +139,40 @@ func TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector(t *testing.T) {
 				return err
 			}
 			for _, violation := range postgresSourceAuthorityViolations(file) {
-				t.Errorf("%s survives in %s", violation, rel)
+				violations = append(violations, fmt.Sprintf("%s survives in %s", violation, rel))
 			}
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("scan Postgres environment owners: %v", err)
+	return violations, err
+}
+
+func TestPostgresGuardIgnoresNestedCheckoutAndRejectsCurrentSource(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "internal", "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := []byte("package probe\nfunc x() { pq.NewConfig() }\n")
+	if err := os.WriteFile(filepath.Join(foreign, "stale.go"), stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		violations, err := postgresEnvironmentAuthorityViolations(root)
+		if err != nil || (len(violations) > 0) != want {
+			t.Fatalf("guard violations = %v, %v; want violation %v", violations, err, want)
+		}
+	}
+	check(false)
+	current := filepath.Join(root, "internal", "current.go")
+	if err := os.WriteFile(current, stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
 }
 
 func postgresSourceAuthorityViolations(file *ast.File) []string {

@@ -1,6 +1,7 @@
 package testcatalog
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 
 func TestCatalogFixturesUseCanonicalCreateFlowInstanceAuthoring(t *testing.T) {
 	repoRoot := catalogRepoRoot(t)
-	err := filepath.WalkDir(filepath.Join(repoRoot, "tests"), func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, "tests"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

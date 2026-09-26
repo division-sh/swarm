@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -379,13 +380,13 @@ func TestProducerRoutingRetirementExcludedDeadOutputs(t *testing.T) {
 
 func TestCheckedYAMLRejectsAllProducerRoutingAuthority(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	err := filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "vendor", "node_modules":
+			case "vendor", "node_modules":
 				return filepath.SkipDir
 			}
 			return nil
@@ -652,12 +653,12 @@ func isOptionalProducerRoutingProofFile(path string) bool {
 func repositoryTestEntrypoints(t testing.TB, repoRoot string) map[string]struct{} {
 	t.Helper()
 	out := map[string]struct{}{}
-	err := filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" {
+			if entry.Name() == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -692,6 +693,38 @@ func repositoryTestEntrypoints(t testing.TB, repoRoot string) map[string]struct{
 		t.Fatalf("scan test entrypoints: %v", err)
 	}
 	return out
+}
+
+func TestProducerRoutingProofCensusRejectsForeignOnlyEntrypoint(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "internal", "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proof := []byte("package proof\nimport \"testing\"\nfunc TestRoutingBoundaryProof(t *testing.T) {}\n")
+	if err := os.WriteFile(filepath.Join(foreign, "foreign_test.go"), proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		_, found := repositoryTestEntrypoints(t, root)["TestRoutingBoundaryProof"]
+		if found != want {
+			t.Fatalf("routing proof credited = %v, want %v", found, want)
+		}
+	}
+	check(false)
+	current := filepath.Join(root, "current_test.go")
+	if err := os.WriteFile(current, proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
 }
 
 func loadProducerRoutingFixture(t testing.TB, relative string) *runtimecontracts.WorkflowContractBundle {

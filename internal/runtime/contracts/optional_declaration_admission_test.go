@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
@@ -464,13 +465,13 @@ func TestRepositoryContainsNoPresentZeroOptionalDeclarationFiles(t *testing.T) {
 		roles[role.fileName] = role
 	}
 	checked := 0
-	err := filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "vendor":
+			case "vendor":
 				return filepath.SkipDir
 			}
 			return nil

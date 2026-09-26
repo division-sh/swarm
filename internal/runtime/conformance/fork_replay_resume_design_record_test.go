@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"sort"
@@ -320,7 +321,7 @@ func validateForkReplayResumeStalePolicy(root string, policy forkReplayResumeSta
 	}
 	for _, rel := range scanPaths {
 		path := filepath.Join(root, rel)
-		if err := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+		if err := checkoutsource.WalkDir(root, path, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ func TestRepositoryRunCreationHasCanonicalOwnersOnly(t *testing.T) {
 		"internal/store/internal/backend/runlifecycle/run_lifecycle_mutation.go": false,
 		"internal/testutil/runlifecyclefixture/fixture.go":                       false,
 	}
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -69,7 +70,7 @@ func TestRepositoryRunInsertFixturesHaveExplicitCanonicalIdentity(t *testing.T) 
 		}
 	}
 
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -112,7 +113,7 @@ func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {
 		"UNSUPPORTED_BUNDLE_" + "REF",
 	}
 	var files []string
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -418,7 +419,7 @@ func eventBusSourceOperationLedger() map[string]string {
 func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 	root := repositoryRootForBundleIdentityTest(t)
 	sources := map[string]string{}
-	err := filepath.WalkDir(filepath.Join(root, "internal", "runtime", "bus"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "runtime", "bus"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

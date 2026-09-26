@@ -3,6 +3,7 @@ package runforkpersistence
 import (
 	"bytes"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/constant"
 	"go/parser"
@@ -160,7 +161,7 @@ func TestRunForkHistoricalAdmissionConsumers(t *testing.T) {
 // different production package cannot hide outside a fixed package allowlist.
 func historicalBoundaryPackages(root string) ([]string, error) {
 	dirs := map[string]bool{"./internal/events": true, "./internal/store/internal/backend/runforkpersistence": true, "./internal/store/internal/backend/runforkrevision": true}
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -739,7 +740,7 @@ func TestCompletionAdaptersDoNotRetainLegacyTurnOrBudgetOwners(t *testing.T) {
 
 func TestCompletionTurnEvidenceHasNoLegacyProductionWriter(t *testing.T) {
 	internalRoot := filepath.Clean(filepath.Join("..", ".."))
-	err := filepath.WalkDir(internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(filepath.Clean(filepath.Join(internalRoot, "..")), internalRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

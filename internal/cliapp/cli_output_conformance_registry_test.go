@@ -3,6 +3,7 @@ package cliapp
 import (
 	"bytes"
 	"context"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -488,7 +489,7 @@ func TestCLIOutputConformanceNoRawCobraArgCountValidators(t *testing.T) {
 	}
 	fset := token.NewFileSet()
 	root := driftTestRepoRoot(t)
-	err := filepath.WalkDir(filepath.Join(root, "internal", "cliapp"), func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "cliapp"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -522,7 +523,7 @@ func TestCLIOutputConformanceNoRawCobraArgCountValidators(t *testing.T) {
 func TestCLIOutputConformanceNoRawCobraArgCountExpectations(t *testing.T) {
 	rawExpectation := regexp.MustCompile(`accepts (?:at most )?\d+ arg\(s\)`)
 	root := driftTestRepoRoot(t)
-	err := filepath.WalkDir(filepath.Join(root, "internal", "cliapp"), func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "cliapp"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

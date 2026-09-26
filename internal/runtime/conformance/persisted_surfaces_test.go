@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io"
 	"net/http"
 	"os"
@@ -790,7 +791,7 @@ func TestRetiredAccumulationTimeoutSurfaceHasNoProductionConsumer(t *testing.T) 
 		"accumulation_timeout",
 	}
 	for _, root := range []string{"cmd", "internal"} {
-		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, err error) error {
+		err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

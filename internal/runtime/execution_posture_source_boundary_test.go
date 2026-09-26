@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -29,7 +30,7 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 	}
 	var violations []string
 	for _, root := range []string{"internal", "cmd"} {
-		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, entry fs.DirEntry, walkErr error) error {
+		err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, root), func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}

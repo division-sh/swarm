@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ func TestRetiredStandingRestartInterpretersStayAbsent(t *testing.T) {
 		"copyStanding" + "EntityStateTx",
 		"StandingServiceTransition" + "Repaired",
 	}
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -46,7 +47,7 @@ func TestStandingRestartClassificationHasOneProductionOwner(t *testing.T) {
 		filepath.Join(root, "internal", "runtime", "pipeline", "standing_service_store.go"):                 {},
 		filepath.Join(root, "internal", "store", "internal", "backend", "standingdisposition", "reader.go"): {},
 	}
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -711,7 +712,7 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 		"internal/store/testsql/event.go":                                                                     true,
 	}
 	var failures []string
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
