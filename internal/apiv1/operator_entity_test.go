@@ -3,15 +3,19 @@ package apiv1
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type fakeEntityReadStore struct {
@@ -136,11 +140,13 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := "11111111-1111-1111-1111-111111111111"
-	ctx = runtimecorrelation.WithRunID(testAuthorActivityContext(ctx), runID)
+	bundle := operatorReadbackBundle(t)
+	source := semanticview.Wrap(bundle)
+	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForSource(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
-	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	createOperatorReadbackEntities(t, ctx, pg, runID, entityA, entityB, time.Now().UTC())
+	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+	createOperatorReadbackEntities(t, ctx, pg, source, runID, entityA, entityB, time.Now().UTC())
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -197,12 +203,14 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	ctx := context.Background()
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	runID := "11111111-1111-1111-1111-111111111111"
-	ctx = runtimecorrelation.WithRunID(testAuthorActivityContext(ctx), runID)
+	bundle := operatorReadbackBundle(t)
+	source := semanticview.Wrap(bundle)
+	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForSource(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()
-	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
-	createOperatorReadbackEntities(t, ctx, sqliteStore, runID, entityA, entityB, now)
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: now})
+	createOperatorReadbackEntities(t, ctx, sqliteStore, source, runID, entityA, entityB, now)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -247,17 +255,17 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 
 }
 
-func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected runtimetools.EntityPersistence, runID, entityA, entityB string, at time.Time) {
+func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected runtimetools.EntityPersistence, source semanticview.Source, runID, entityA, entityB string, at time.Time) {
 	t.Helper()
 	for _, record := range []runtimetools.EntityCreateRecord{
 		{
-			RunID: runID, EntityID: entityA, FlowInstance: "scoring/vertical-a", EntityType: "vertical",
-			CurrentState: "discovered", FieldsJSON: json.RawMessage(`{"vertical_name":"Healthcare"}`), CreatedAt: at,
+			Source: source, RunID: runID, EntityID: entityA, FlowInstance: "scoring/vertical-a", EntityType: "vertical",
+			CurrentState: "discovered", FieldsJSON: json.RawMessage(`{"vertical_id":"vertical-a","vertical_name":"Healthcare"}`), CreatedAt: at,
 			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
 		},
 		{
-			RunID: runID, EntityID: entityB, FlowInstance: "scoring/vertical-b", EntityType: "vertical",
-			CurrentState: "pending", FieldsJSON: json.RawMessage(`{"vertical_name":"Manufacturing"}`), CreatedAt: at,
+			Source: source, RunID: runID, EntityID: entityB, FlowInstance: "scoring/vertical-b", EntityType: "vertical",
+			CurrentState: "pending", FieldsJSON: json.RawMessage(`{"vertical_id":"vertical-b","vertical_name":"Manufacturing"}`), CreatedAt: at,
 			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
 		},
 	} {
@@ -265,6 +273,25 @@ func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected 
 			t.Fatalf("create materialized entity %s: %v", record.EntityID, err)
 		}
 	}
+}
+
+func operatorReadbackBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	for path, contents := range map[string]string{
+		"schema.yaml":           "initial_state: active\nstates: [active]\n",
+		"entities.yaml":         "run: {}\n",
+		"scoring/schema.yaml":   "name: scoring\nmode: template\ninstance: vertical_id\ninitial_state: discovered\nstates: [discovered, pending]\n",
+		"scoring/entities.yaml": "vertical:\n  vertical_id: string\n  vertical_name: string\n",
+	} {
+		writeRunCompletionFixtureFile(t, filepath.Join(root, path), contents)
+	}
+	repo := runCompletionRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load operator readback source: %v", err)
+	}
+	return bundle
 }
 
 func TestOperatorEntityHandlersTypedErrors(t *testing.T) {
