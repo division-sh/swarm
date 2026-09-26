@@ -47,6 +47,12 @@ type APIEventPublicationCommitOwner interface {
 	CommitAPIEventPublication(context.Context, APIEventPublicationCommand) (CommittedAPIEventPublication, error)
 }
 
+// DeploymentRunCreationCommitOwner commits an eventless run and its selected
+// feeds without passing a transaction or synthetic publication through runtime.
+type DeploymentRunCreationCommitOwner interface {
+	CommitDeploymentRunCreation(context.Context, durabledata.RunCreationCommand, apiidempotency.Request) (durabledata.RunCreationOperationRecord, error)
+}
+
 type APIEventPublicationCommand struct {
 	Publication PublicationCommand
 	Idempotency apiidempotency.Request

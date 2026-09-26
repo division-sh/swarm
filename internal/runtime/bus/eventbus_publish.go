@@ -233,6 +233,41 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 	return eb.PublishAPIEventWithRunCreationAcknowledged(ctx, evt, endpoint, idempotency, completion, nil)
 }
 
+func (eb *EventBus) StartDeploymentRunAcknowledged(
+	ctx context.Context,
+	command durabledata.RunCreationCommand,
+	request apiidempotency.Request,
+) (durabledata.RunCreationOperationRecord, error) {
+	_, _, canonical, err := command.RequestHash()
+	if err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	initiation, err := canonical.Initiation()
+	if err != nil || initiation != durabledata.RunCreationFeedOnly || request.Method != "run.start" {
+		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires an eventless feed-only command and run.start authority")
+	}
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+	}
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok || fact.BundleHash() != canonical.BundleHash {
+		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires the exact selected bundle source fact")
+	}
+	owner, ok := eb.store.(DeploymentRunCreationCommitOwner)
+	if !ok || owner == nil {
+		return durabledata.RunCreationOperationRecord{}, errors.New("selected store does not support atomic deployment run creation")
+	}
+	return owner.CommitDeploymentRunCreation(ctx, canonical, request)
+}
+
 // PublishAPIEventWithRunCreationAcknowledged adds the method-neutral durable
 // parent operation required by create-new-run event.publish and run.start.
 func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
