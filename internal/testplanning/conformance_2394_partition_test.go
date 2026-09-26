@@ -138,7 +138,8 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration",
 		"TestCanonicalFormsRegistryPinsHandlerActionRetirement",
 	}
-	want := []int{122, 14, 5, 1}
+	// #2300 adds two census/ratchet roots without moving existing proof units.
+	want := []int{124, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -160,11 +161,16 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[0], generatedResultsProof); i == len(groups[0]) || groups[0][i] != generatedResultsProof {
 		t.Fatalf("general conformance partition omitted generated-results guard %s", generatedResultsProof)
 	}
+	for _, name := range []string{"TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses", "TestCanonicalFormsRegistryRejectsUnregisteredDecodeBypasses"} {
+		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
+			t.Fatalf("general conformance partition omitted #2300 census root %s", name)
+		}
+	}
 	const reporterProof = "TestIssue2394ReporterFiveHundredDelayedCommitsBothStores"
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:142 =122 general +14 core +5 pressure +1 reporter")
+	t.Log("complete disjoint census:144 =124 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

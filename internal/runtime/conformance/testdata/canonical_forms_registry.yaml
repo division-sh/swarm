@@ -43,7 +43,8 @@ classification_tests:
 
 inventory:
   custom_unmarshal_total: 91
-  custom_unmarshal_reachable: 89
+  custom_unmarshal_reachable: 86
+  custom_unmarshal_retired: 3
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
     contracts: 76
@@ -685,7 +686,6 @@ decoder_coverage:
     typed_field: [TypeFieldSpec, EntityFieldDecl]
     entity_document: [EntityContractsDocument, EntityContract]
   workflow_contract_yaml_schema.go:
-    unreachable_retired_decoders: [EntitySchema, EventPayloadSpec]
     node.state_schema: [NodeStateSchema, NodeGateStateSchema]
     tool.schema_value: [ToolInputSchema]
     platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
@@ -699,7 +699,6 @@ decoder_coverage:
     flow.other_surface: [FlowVariable]
   workflow_contract_yaml_handlers.go:
     node.timer: [WorkflowTimerContract]
-    unreachable_retired_decoders: [EventEmission]
     handler.emit_action_activity: [EmitSpec, HandlerOnSuccessSpec, ActivitySpec]
     handler.container: [SystemNodeEventHandler]
   durable_data.go:
@@ -736,12 +735,56 @@ decoder_coverage:
   internal/packs/channel.go:
     pack.channel: [ChannelMapping]
 
+decoder_retired:
+  workflow_contract_yaml_schema.go:
+    unreachable_retired_decoders: [EntitySchema, EventPayloadSpec]
+  workflow_contract_yaml_handlers.go:
+    unreachable_retired_decoders: [EventEmission]
+
 decoder_exclusions:
   internal/config/config.go:
     deployment.swarm_yaml: [WorkspaceConfig, RuntimeConfig]
 
+decode_bypasses:
+  # Counts are production source lines containing yaml.Node selectors outside internal/yamlsource.
+  # Pack/config roots count direct yaml.Unmarshal and yaml.NewDecoder calls in those paths.
+  # Each migration PR must lower the ceiling with the per-file ledger; increases fail review.
+  node_site_ceiling: 290
+  pack_config_decode_ceiling: 6
+  files:
+    internal/cliapp/test_command.go: {family: excluded_scenario_tooling, node_sites: 11, pack_config_decode_roots: 0}
+    internal/cliapp/unified_config.go: {family: excluded_deployment_config, node_sites: 18, pack_config_decode_roots: 0}
+    internal/config/config.go: {family: excluded_deployment_config, node_sites: 3, pack_config_decode_roots: 2}
+    internal/packs/channel.go: {family: closure_pack_platform, node_sites: 3, pack_config_decode_roots: 1}
+    internal/packartifact/inventory.go: {family: closure_pack_platform, node_sites: 0, pack_config_decode_roots: 1}
+    internal/packartifact/project.go: {family: closure_pack_platform, node_sites: 0, pack_config_decode_roots: 1}
+    internal/packmodel/envelope.go: {family: closure_pack_platform, node_sites: 0, pack_config_decode_roots: 1}
+    internal/runtime/agentintent/model.go: {family: wave_5_agent_tool_policy, node_sites: 1, pack_config_decode_roots: 0}
+    internal/runtime/contracts/durable_data.go: {family: wave_5_agent_tool_policy, node_sites: 1, pack_config_decode_roots: 0}
+    internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
+    internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 6, pack_config_decode_roots: 0}
+    internal/runtime/contracts/receiver_initialization.go: {family: wave_4_node_handler, node_sites: 6, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_action_retirement.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_activity.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_agent_writes.go: {family: wave_4_node_handler, node_sites: 1, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_join.go: {family: wave_4_node_handler, node_sites: 10, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 6, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_policy_sheet.go: {family: wave_5_agent_tool_policy, node_sites: 25, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_stages.go: {family: wave_4_node_handler, node_sites: 9, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 6, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 10, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_flow.go: {family: mixed_wave_4_wave_5, node_sites: 27, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_handlers.go: {family: wave_4_node_handler, node_sites: 37, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 20, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 24, pack_config_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 28, pack_config_decode_roots: 0}
+    internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 12, pack_config_decode_roots: 0}
+    internal/runtime/testfixtures/canonicalrouting/fixture.go: {family: excluded_test_fixture, node_sites: 13, pack_config_decode_roots: 0}
+    internal/testcatalog/inventory.go: {family: excluded_test_tooling, node_sites: 6, pack_config_decode_roots: 0}
+    internal/testtiming/budget.go: {family: excluded_test_tooling, node_sites: 4, pack_config_decode_roots: 0}
+
 registry_result:
-  completeness: "all 91 remaining production custom unmarshallers classified as 89 source-reachable row owners and 2 deployment swarm.yaml exclusions; seven authored-action decoders removed by #2307"
+  completeness: "all 91 remaining production custom unmarshallers classified as 86 bundle-reachable row owners, 3 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
