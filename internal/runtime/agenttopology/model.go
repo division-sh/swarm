@@ -121,6 +121,18 @@ func (a Admission) WithFlowActivationAttempt(attemptID string, revision uint64) 
 	return bound, bound.Validate()
 }
 
+func (a Admission) WithFlowPreparationRevision(revision uint64) (Admission, error) {
+	if a.Authority.Kind != AuthorityFlowReadinessPlan || a.Authority.Readiness == nil || revision == 0 {
+		return Admission{}, errors.New("flow preparation requires readiness topology and a positive plan revision")
+	}
+	bound := a
+	readiness := *a.Authority.Readiness
+	readiness.AttemptID = ""
+	readiness.PlanRevision = revision
+	bound.Authority.Readiness = &readiness
+	return bound, bound.Validate()
+}
+
 func NewEphemeralAdmission(executionID, producer string) (Admission, error) {
 	admission := Admission{
 		Authority: Authority{
@@ -196,7 +208,7 @@ func (a Authority) Validate() error {
 		if strings.Trim(strings.TrimSpace(a.Readiness.InstancePath), "/") == "" || strings.TrimSpace(a.Readiness.PlanFingerprint) == "" {
 			return errors.New("flow readiness topology authority is incomplete")
 		}
-		if a.Readiness.AttemptID != "" || a.Readiness.PlanRevision != 0 {
+		if a.Readiness.AttemptID != "" {
 			if _, err := uuid.Parse(a.Readiness.AttemptID); err != nil || a.Readiness.PlanRevision == 0 {
 				return errors.New("flow readiness activation attempt coordinate is invalid")
 			}
