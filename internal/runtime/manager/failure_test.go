@@ -434,6 +434,11 @@ func TestProcessEventSelectedForkTerminalizesRetryableFailureBeforeRuntimeRetire
 	if err != nil {
 		t.Fatalf("managedexecution.New: %v", err)
 	}
+	selectedAuthority, err := runtimedelivery.NewExecutionAuthority(deliveryStore.authority.SourceArtifact(), admission)
+	if err != nil {
+		t.Fatalf("construct selected delivery authority: %v", err)
+	}
+	deliveryStore.seedSelectedExecution(t, selectedAuthority)
 	ctx := managedexecution.WithAdmission(testAuthorActivityContext(context.Background()), admission)
 	ctx = managerClaimedDeliveryContext(t, am, ctx, evt, agent.ID())
 	result := am.processEventDetailed(ctx, agent, evt)
