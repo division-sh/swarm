@@ -342,10 +342,12 @@ func TestRunCreationInitiationHasThreeClosedForms(t *testing.T) {
 			if got, err := tc.cmd.Initiation(); err != nil || got != tc.want {
 				t.Fatalf("Initiation() = %q, %v; want %q", got, err, tc.want)
 			}
-			if _, _, canonical, err := tc.cmd.RequestHash(); err != nil {
+			if _, raw, canonical, err := tc.cmd.RequestHash(); err != nil {
 				t.Fatalf("RequestHash: %v", err)
 			} else if got, err := canonical.Initiation(); err != nil || got != tc.want {
 				t.Fatalf("canonical initiation = %q, %v; want %q", got, err, tc.want)
+			} else if tc.want == RunCreationFeedOnly && (strings.Contains(string(raw), `"event_id"`) || strings.Contains(string(raw), `"initial_event"`)) {
+				t.Fatalf("feed-only request fabricated event fields: %s", raw)
 			}
 		})
 	}
