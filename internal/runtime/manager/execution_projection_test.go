@@ -27,6 +27,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type projectionTestRoute struct {
@@ -959,7 +960,7 @@ func projectionDeliveryAuthorities(t *testing.T) map[string]runtimedelivery.Exec
 	if err != nil {
 		t.Fatalf("construct normal projection authority: %v", err)
 	}
-	selected, err := runtimedelivery.NewSelectedExecutionAuthority(source, eventtest.UUID("projection-selected-execution"), eventtest.UUID("projection-selected-run"), 1)
+	selected, err := runtimedelivery.NewSelectedExecutionAuthority(sourceartifactfixture.Fact(), eventtest.UUID("projection-selected-execution"), eventtest.UUID("projection-selected-run"), 1)
 	if err != nil {
 		t.Fatalf("construct selected projection authority: %v", err)
 	}
@@ -1025,6 +1026,9 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 					return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}, handled: handled}, nil
 				})
 				baseStore := am.deliveryStore
+				if test.delegate && authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+					baseStore.(*managerDeliveryTestStore).seedSelectedExecution(t, authority)
+				}
 				const agentID = "carrier-disposition-agent"
 				runID := eventtest.UUID("projection-run")
 				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
