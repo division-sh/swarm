@@ -8,9 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/google/uuid"
 )
 
 type reconfigureTestAgent struct{ id string }
@@ -121,6 +123,53 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	afterSession, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
 	if !ok || !reflect.DeepEqual(afterSession, beforeSession) || afterSession.SessionID != lease.SessionID {
 		t.Fatalf("same-current memory changed: before=%#v after=%#v ok=%v", beforeSession, afterSession, ok)
+	}
+}
+
+func TestReconfigureAgent_TopologyOnlyRebindPreservesMemory(t *testing.T) {
+	registry := sessions.NewInMemoryRegistry(0)
+	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
+		return reconfigureTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{Sessions: registry})
+	cfg := managerTestAgentConfig(models.AgentConfig{
+		ExecutionMode: "live", ID: "topology-memory-agent",
+		Memory: agentmemory.Authored(true), FlowPath: "review/instance-1",
+	})
+	if err := spawnManagerTestAgent(am, cfg); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	am.Run(managedExecutionTestContext(t, runCtx))
+	lease := acquireReconfigureMemory(t, am, registry, cfg)
+	currentConfig, err := am.ResolveAgentConfig(managerIdentityTestRunID, cfg.ID, cfg.FlowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := currentConfig.ConcreteIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparation, err := runtimeagenttopology.FlowReadinessAdmission(identity.RunID, cfg.CanonicalFlowPath(), "plan-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparation, err = preparation.WithFlowPreparationRevision(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := preparation.WithFlowActivationAttempt(uuid.NewString(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, topology := range []runtimeagenttopology.Admission{preparation, attempt} {
+		if err := am.reconfigureAgentIdentityExactWithTopology(am.runtimeContext(), am.semanticSource, identity, currentConfig, &topology); err != nil {
+			t.Fatalf("rebind topology: %v", err)
+		}
+		current, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
+		if !ok || current.SessionID != lease.SessionID {
+			t.Fatalf("topology-only rebind changed memory: current=%#v present=%t want session=%s", current, ok, lease.SessionID)
+		}
 	}
 }
 

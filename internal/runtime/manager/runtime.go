@@ -1585,7 +1585,9 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 		candidateAdmission = subscriptionAdmission
 		rec = &candidateRecord
-		subordinate = reconfigureSessionMutationPlan(current.Config, updated)
+		if revision != currentRevision {
+			subordinate = reconfigureSessionMutationPlan(current.Config, updated)
+		}
 	}
 	if patch == nil {
 		if err := am.executionPosture.Admit(candidate.Config.ExecutionMode, "agent lifecycle replacement"); err != nil {
