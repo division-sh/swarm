@@ -10,8 +10,7 @@ import (
 func selectedStoreManagerPersistenceRoles(selected any, eventBus *runtimebus.EventBus) runtimemanager.PersistenceRoles {
 	roles := runtimemanager.PersistenceRoles{
 		AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus,
-		RouteRestorer: eventBus, RouteRetirer: eventBus, RouteRemover: eventBus,
-		CreationPublisher: eventBus, DeliveryRuntime: eventBus,
+		RouteRestorer: eventBus, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
 	}
 	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)
 	roles.LifecycleEffects, _ = selected.(runtimeeffects.Store)

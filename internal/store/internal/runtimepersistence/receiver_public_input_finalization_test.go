@@ -95,7 +95,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			am = ownStoreTestAgentManager(t, manager.NewAgentManagerWithOptions(publisher, nil, manager.AgentManagerOptions{
 				ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: fact, SemanticSource: source, WorkflowInstances: workflow,
 				DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
-				PersistenceRoles: manager.PersistenceRoles{AgentRoutes: publisher, FlowActivation: agentFixtureFlowActivationCommitter{store: selected}, RouteInstaller: publisher, RouteVerifier: publisher, RouteRestorer: publisher, RouteRetirer: publisher, CreationPublisher: publisher},
+				PersistenceRoles: manager.PersistenceRoles{AgentRoutes: publisher, FlowActivation: agentFixtureFlowActivationCommitter{store: selected}, RouteInstaller: publisher, RouteVerifier: publisher, RouteRestorer: publisher, CreationPublisher: publisher},
 			}, selected))
 			admission, err := agenttopology.StaticAdmission(set.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 			if err != nil {

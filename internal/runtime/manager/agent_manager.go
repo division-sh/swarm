@@ -83,6 +83,7 @@ type AgentManager struct {
 
 	dynamicFlowReadinessMu            sync.Mutex
 	dynamicFlowReadinessAttempts      map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
+	dynamicFlowActiveAttempts         map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt
 	dynamicFlowReadinessSignal        chan struct{}
 	dynamicFlowReadinessRetryInterval time.Duration
 	dynamicFlowStartupTopologyPending bool

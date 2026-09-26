@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"testing"
 	"time"
@@ -97,10 +98,8 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						if _, err := coordinator.MaterializeInitialEntry(ctx, testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef), instance, createdAt); err != nil {
 							t.Fatalf("materialize %s: %v", instance.Fields["owner"], err)
 						}
-						if _, err := coordinator.MarkDynamicFlowRuntimeTopologyReady(ctx, readiness, createdAt); err != nil {
-							t.Fatalf("mark %s topology ready: %v", instance.Fields["owner"], err)
-						}
-						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef)}); err != nil {
+						markGateRecoveryTopologyReadyFixture(t, selected, readiness, createdAt)
+						if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, instance.StorageRef)}); err != nil {
 							t.Fatalf("publish %s route: %v", instance.Fields["owner"], err)
 						}
 					}

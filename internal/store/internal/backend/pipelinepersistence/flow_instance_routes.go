@@ -919,7 +919,7 @@ func listFlowInstanceRouteRecords(
 }
 
 const postgresActiveFlowInstanceDescriptorsSQL = `
-		SELECT fi.run_id::text, fi.instance_path, fi.flow_template, readiness.plan,
+		SELECT fi.run_id::text, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_revision,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
@@ -941,7 +941,7 @@ const postgresActiveFlowInstanceDescriptorsSQL = `
 	`
 
 const sqliteActiveFlowInstanceDescriptorsSQL = `
-		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan,
+		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_revision,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
@@ -1355,7 +1355,8 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, label string) ([]run
 	for rows.Next() {
 		var runID, instancePath, templateID string
 		var planRaw, bundleHash, fieldsRaw sql.NullString
-		if err := rows.Scan(&runID, &instancePath, &templateID, &planRaw, &bundleHash, &fieldsRaw); err != nil {
+		var planRevision sql.NullInt64
+		if err := rows.Scan(&runID, &instancePath, &templateID, &planRaw, &planRevision, &bundleHash, &fieldsRaw); err != nil {
 			return nil, fmt.Errorf("scan %s: %w", label, err)
 		}
 		instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
@@ -1366,12 +1367,16 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, label string) ([]run
 		if !planRaw.Valid || strings.TrimSpace(planRaw.String) == "" {
 			return nil, fmt.Errorf("%s %s is missing exact readiness plan", label, instancePath)
 		}
+		if !planRevision.Valid || planRevision.Int64 <= 0 {
+			return nil, fmt.Errorf("%s %s is missing exact readiness plan revision", label, instancePath)
+		}
 		if !bundleHash.Valid {
 			return nil, fmt.Errorf("%s %s is missing exact run source artifact", label, instancePath)
 		}
 		readiness, err := runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(
 			runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{
 				RunID: runID, InstancePath: instancePath, Plan: []byte(planRaw.String),
+				PlanRevision:        uint64(planRevision.Int64),
 				OwningRunBundleHash: bundleHash.String,
 			},
 		)

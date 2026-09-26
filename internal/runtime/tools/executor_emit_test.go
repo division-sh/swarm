@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1226,7 +1227,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 	store := newEmitRoutePlanStore()
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
 	route := runtimeflowidentity.DeriveRoute("review", "instance-1")
-	if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+	if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: toolTestRunID,
 		Route: route,
 	}}); err != nil {

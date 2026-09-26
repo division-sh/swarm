@@ -965,6 +965,9 @@ func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLif
 		<-wait
 	}
 	runSettleErr := am.lifecycle.retireRunOwner(context.Background())
+	if runSettleErr == nil {
+		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+	}
 	settleErr := executor.Done()
 	am.lifecycle.completeShutdownTransition(transition, errors.Join(runSettleErr, settleErr))
 }

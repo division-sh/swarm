@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -48,6 +49,7 @@ type DynamicFlowRuntimeCreationOccurrenceRequest struct {
 	RunID        string
 	InstancePath string
 	Plan         DynamicFlowRuntimeReadinessPlan
+	Attempt      DynamicFlowRuntimeActivationAttempt
 	Event        events.Event
 	OccurredAt   time.Time
 	DispatchMode DynamicFlowRuntimeCreationDispatchMode
@@ -73,6 +75,12 @@ func (r DynamicFlowRuntimeCreationOccurrenceRequest) Validate() error {
 	}
 	if expected.RunID != r.RunID || expected.Identity.InstancePath != r.InstancePath {
 		return fmt.Errorf("dynamic flow runtime creation occurrence identity does not match readiness plan")
+	}
+	if err := r.Attempt.Validate(); err != nil {
+		return fmt.Errorf("dynamic flow runtime creation occurrence requires admitted attempt: %w", err)
+	}
+	if r.Attempt.RunID() != r.RunID || r.Attempt.InstancePath() != r.InstancePath || r.Attempt.ProcessBinding().BundleHash != expected.BundleHash {
+		return fmt.Errorf("dynamic flow runtime creation occurrence attempt does not match readiness plan")
 	}
 	if expected.CreationEvent == nil {
 		return fmt.Errorf("dynamic flow runtime creation occurrence plan is missing creation event")
@@ -180,7 +188,10 @@ type DynamicFlowRuntimeReadinessPersistence interface {
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.SourceArtifactFact) (DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.SourceArtifactFact) ([]DynamicFlowRuntimeReadiness, error)
-	MarkDynamicFlowRuntimeTopologyReady(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) (DynamicFlowRuntimeTopologyReadyResult, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, DynamicFlowRuntimeReadinessPlan, uint64, runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error)
+	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
+	MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, DynamicFlowRuntimeActivationAttempt, DynamicFlowRuntimeReadinessPlan, time.Time) (DynamicFlowRuntimeTopologyReadyResult, error)
+	RetireDynamicFlowRuntimeActivationAttempt(context.Context, DynamicFlowRuntimeActivationAttempt) error
 }
 
 type DynamicFlowRuntimeReadinessPersistenceRecord struct {
@@ -229,6 +240,12 @@ func (r DynamicFlowRuntimeReadiness) Eligible() bool {
 	return err == nil && runState.Active() &&
 		strings.EqualFold(strings.TrimSpace(r.InstanceStatus), "active") &&
 		r.InstanceTerminatedAt.IsZero()
+}
+
+func (r DynamicFlowRuntimeReadiness) Terminal() bool {
+	runState, err := runtimerunlifecycle.ParseState(r.RunStatus)
+	return (err == nil && runState.Terminal()) || !r.InstanceTerminatedAt.IsZero() ||
+		strings.EqualFold(strings.TrimSpace(r.InstanceStatus), "terminated")
 }
 
 func (r DynamicFlowRuntimeReadiness) Pending() bool {

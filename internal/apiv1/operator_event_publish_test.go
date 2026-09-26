@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1177,7 +1178,7 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	`, runID, targetEntityID); err != nil {
 		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
 	}
-	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
 	}}); err != nil {
@@ -1407,7 +1408,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	targetFlowInstance := "operating/inst-1"
 	targetEntityID := runtimeflowidentity.EntityID(targetFlowInstance)
 	seedEventPublishEntityState(t, db, source, runID, targetEntityID, targetFlowInstance, "pending")
-	if err := bus.AddFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: runID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
 	}}); err != nil {

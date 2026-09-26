@@ -189,7 +189,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			if err := eventBus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+			if err := eventBus.AddFlowInstanceRouteContextFixture(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
 				Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one")),
 			}); err != nil {
 				t.Fatalf("AddFlowInstanceRouteContext: %v", err)

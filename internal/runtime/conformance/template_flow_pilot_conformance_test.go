@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"testing"
 	"time"
@@ -430,7 +431,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		return nil
 	}))
 	for _, instanceID := range []string{"acct-a", "acct-b"} {
-		if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		if err := flowroutefixture.StageAndPublish(busCtx, eb, runtimebus.FlowInstanceRouteMaterializationRequest{
 			Identity: runtimeflowidentity.RunScopedFlowInstance{
 				RunID: parent.RunID(),
 				Route: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),

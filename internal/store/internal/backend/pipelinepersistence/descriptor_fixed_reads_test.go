@@ -18,7 +18,7 @@ import (
 // Frozen raw queries are the pre-preparation oracle; predicates and order are
 // intentionally identical, including nullable joined readiness/entity facts.
 const descriptorFixedReadFlowsBefore = `
-		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan,
+		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan, readiness.plan_revision,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
@@ -64,7 +64,7 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin()})
 	for _, ddl := range []string{
 		`CREATE TABLE flow_instances (run_id TEXT, instance_path TEXT, flow_template TEXT, status TEXT, mode TEXT, terminated_at TIMESTAMP)`,
-		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT)`,
+		`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_revision INTEGER)`,
 		`CREATE TABLE entity_state (run_id TEXT, flow_instance TEXT, entity_id TEXT, current_state TEXT, fields TEXT)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
@@ -119,7 +119,7 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 	}{
 		{`INSERT INTO entity_state VALUES ('run','review/one',?,'ready','{"address":"first"}')`, []any{entityID}, false, false},
 		{`INSERT INTO flow_instances VALUES ('run','review/one','review','active','template',NULL)`, nil, true, false},
-		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?)`, []any{string(planRaw)}, false, false},
+		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?,1)`, []any{string(planRaw)}, false, false},
 		{`UPDATE entity_state SET fields='{"address":"second"}', current_state='done'`, nil, false, false},
 		{`UPDATE entity_state SET fields='[]'`, nil, true, false},
 		{`UPDATE entity_state SET fields='{}'`, nil, false, false},
@@ -131,8 +131,8 @@ func TestDescriptorFixedReadsFreshFactsAndCanonicalErrors(t *testing.T) {
 		{`ALTER TABLE entity_state RENAME COLUMN fields TO missing_fields`, nil, true, false},
 		{`ALTER TABLE entity_state RENAME COLUMN missing_fields TO fields`, nil, false, false},
 		{`DROP TABLE flow_instance_runtime_readiness`, nil, true, false},
-		{`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT)`, nil, true, false},
-		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?)`, []any{string(planRaw)}, false, false},
+		{`CREATE TABLE flow_instance_runtime_readiness (run_id TEXT, instance_path TEXT, plan TEXT, plan_revision INTEGER)`, nil, true, false},
+		{`INSERT INTO flow_instance_runtime_readiness VALUES ('run','review/one',?,1)`, []any{string(planRaw)}, false, false},
 		{`DELETE FROM entity_state WHERE run_id='run'`, nil, false, false},
 	} {
 		if _, err := db.ExecContext(ctx, strings.ReplaceAll(tc.query, "'run'", "'"+runID+"'"), tc.args...); err != nil {

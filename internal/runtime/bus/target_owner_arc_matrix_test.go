@@ -107,7 +107,7 @@ func TestNestedChildToConcreteTemplateReceiverUsesSelectedOwner(t *testing.T) {
 	}
 	store.bus = eventBus
 	runID := uuid.NewString()
-	if err := eventBus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
+	if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
 		t.Fatalf("add selected template route: %v", err)
 	}
 	sourceRoute := events.RouteIdentity{
@@ -746,7 +746,7 @@ func TestEventBusTwoLevelFanOutDiamondKeepsNestedOwnersAndRootConvergenceExact(t
 		runtimeflowidentity.DeriveRoute("branch", "left"),
 		runtimeflowidentity.DeriveRoute("branch", "right"),
 	} {
-		if err := eventBus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, identity)}); err != nil {
+		if err := eventBus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRouteForRun(runID, identity)}); err != nil {
 			t.Fatalf("materialize diamond branch route %s: %v", identity.InstancePath, err)
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"sync"
 	"testing"
@@ -473,7 +474,7 @@ func newFanInBarrierRouteProofBus(t *testing.T, backend fanInBarrierConformanceS
 		t.Fatalf("create fan-in route proof EventBus: %v", err)
 	}
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
+		if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
 			t.Fatalf("restore fan-in proof route %s: %v", route.Identity.Route.InstancePath, err)
 		}
 	}
@@ -696,7 +697,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	for _, route := range mustFanInBarrierRoutes(t, backend) {
-		if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
+		if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route.Identity}); err != nil {
 			t.Fatalf("restore fan-in route %s: %v", route.Identity.Route.InstancePath, err)
 		}
 	}

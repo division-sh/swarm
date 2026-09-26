@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"sync"
 	"testing"
 	"time"
@@ -147,7 +148,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					t.Fatalf("materialize exact join owner: %v", err)
 				}
 				if flowID != "" {
-					if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
+					if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
 						t.Fatalf("add flow join route: %v", err)
 					}
 				}
@@ -342,7 +343,7 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						t.Fatalf("materialize immediate join owner: %v", err)
 					}
 					if flowID != "" {
-						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
+						if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: testRunScopedWorkflowInstanceForRun(runID, route.InstancePath)}); err != nil {
 							t.Fatalf("add flow join route: %v", err)
 						}
 					}

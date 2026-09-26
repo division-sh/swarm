@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -26,7 +27,10 @@ type preparedFlowInstanceDeactivation struct {
 type preparedFlowTopologyRetirement struct {
 	manager     *AgentManager
 	lease       *worklifetime.Lease
+	publication runtimebus.FlowRoutePublicationHandle
+	attempt     runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	transferred bool
+	set         *terminalFlowRetirement
 }
 
 func (p *preparedFlowTopologyRetirement) abort() error {
@@ -37,6 +41,14 @@ func (p *preparedFlowTopologyRetirement) abort() error {
 }
 
 func (p *preparedFlowTopologyRetirement) retire(flow runtimeflowidentity.RunScopedFlowInstance) error {
+	return p.retireWithDisposition(flow, false)
+}
+
+func (p *preparedFlowTopologyRetirement) retireTerminal(flow runtimeflowidentity.RunScopedFlowInstance) error {
+	return p.retireWithDisposition(flow, true)
+}
+
+func (p *preparedFlowTopologyRetirement) retireWithDisposition(flow runtimeflowidentity.RunScopedFlowInstance, terminal bool) error {
 	if p.transferred {
 		return errors.New("readiness topology retirement already transferred")
 	}
@@ -49,15 +61,33 @@ func (p *preparedFlowTopologyRetirement) retire(flow runtimeflowidentity.RunScop
 	if err != nil && set == nil {
 		return err
 	}
-	retireErr := errors.Join(err, am.retirePublishedDynamicFlowRoute(flow))
+	routeErr := am.retireFlowRouteAttempt(p.attempt, p.publication)
+	retireErr := errors.Join(err, routeErr)
 	if set == nil {
 		return retireErr
 	}
-	set.trigger = "teardown"
-	retireErr = errors.Join(retireErr, am.lifecycle.commitTerminalFlow(context.WithoutCancel(p.lease.Context()), set))
+	if terminal {
+		retireErr = errors.Join(retireErr, am.lifecycle.commitTerminalFlow(context.WithoutCancel(p.lease.Context()), set))
+	} else {
+		set.trigger = "teardown"
+		retireErr = errors.Join(retireErr, am.lifecycle.fenceProcessFlowExecutions(context.WithoutCancel(p.lease.Context()), set))
+	}
 	p.transferred = true
-	am.launchTerminalFlowCompletion(p.lease, set, retireErr)
+	p.set = set
+	if terminal {
+		am.launchTerminalFlowCompletion(p.lease, set, retireErr)
+	} else {
+		am.launchProcessFlowRetirement(p.lease, set, retireErr)
+	}
 	return retireErr
+}
+
+func (p *preparedFlowTopologyRetirement) wait() error {
+	if p.set == nil {
+		return nil
+	}
+	<-p.set.done
+	return p.set.result
 }
 
 func (am *AgentManager) PrepareFlowInstanceDeactivation(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) (runtimepipeline.PreparedFlowInstanceDeactivation, error) {
@@ -132,6 +162,8 @@ type terminalFlowRetirement struct {
 	members     []terminalFlowMember
 	retirements []*agentRetirement
 	completed   bool
+	done        chan struct{}
+	result      error
 }
 
 func (c *agentLifecycleCoordinator) fenceTerminalFlow(plan terminalFlowInstanceSideEffectPlan) (*terminalFlowRetirement, error) {
@@ -206,6 +238,63 @@ func (c *agentLifecycleCoordinator) commitTerminalFlow(ctx context.Context, set 
 	return result
 }
 
+// Activation retirement releases only this process's execution projections.
+// The readiness row, not process cleanup, decides whether agents remain desired.
+func (c *agentLifecycleCoordinator) fenceProcessFlowExecutions(ctx context.Context, set *terminalFlowRetirement) error {
+	var result error
+	for _, member := range set.members {
+		cell := member.cell
+		cell.opMu.Lock()
+		c.mu.Lock()
+		if cell.terminalSet != set || cell.execution == nil || cell.execution.token != member.token {
+			result = errors.Join(result, fmt.Errorf("flow activation predecessor changed after fencing: %s", cell.identity.Description()))
+			c.mu.Unlock()
+			cell.opMu.Unlock()
+			continue
+		}
+		retirement := retainAgentRetirement(cell, cell.execution)
+		if cell.execution.cancelGeneration != nil {
+			cell.execution.cancelGeneration()
+		}
+		c.mu.Unlock()
+		cell.opMu.Unlock()
+		set.retirements = append(set.retirements, retirement)
+		releaseReadinessRetirementWaiters(ctx, retirement)
+	}
+	return result
+}
+
+func (am *AgentManager) launchProcessFlowRetirement(lease *worklifetime.Lease, set *terminalFlowRetirement, preparationErr error) {
+	set.done = make(chan struct{})
+	go func() {
+		result := preparationErr
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				result = errors.Join(result, fmt.Errorf("flow activation retirement panic: %v", recovered))
+			}
+			am.lifecycle.recordTerminalCompletion(result)
+			leaseErr := lease.Done()
+			am.lifecycle.recordTerminalCompletion(leaseErr)
+			set.result = errors.Join(result, leaseErr)
+			close(set.done)
+		}()
+		for _, retirement := range set.retirements {
+			joined := am.lifecycle.joinAgentRetirement(retirement)
+			result = errors.Join(result, joined)
+			if joined != nil {
+				continue
+			}
+			am.lifecycle.mu.Lock()
+			cell := retirement.cell
+			if cell.terminalSet == set && cell.retirement == retirement && cell.execution == retirement.execution {
+				cell.retirement = nil
+				cell.terminalSet = nil
+			}
+			am.lifecycle.mu.Unlock()
+		}
+	}()
+}
+
 func (c *agentLifecycleCoordinator) commitTerminalFlowMember(ctx context.Context, set *terminalFlowRetirement, member terminalFlowMember) (committed agentTerminalCommit, result error) {
 	cell := member.cell
 	cell.opMu.Lock()
@@ -249,6 +338,7 @@ func (c *agentLifecycleCoordinator) commitTerminalFlowMember(ctx context.Context
 }
 
 func (am *AgentManager) launchTerminalFlowCompletion(lease *worklifetime.Lease, set *terminalFlowRetirement, commitErr error) {
+	set.done = make(chan struct{})
 	go func() {
 		result := commitErr
 		var diagnosticErr error
@@ -271,7 +361,10 @@ func (am *AgentManager) launchTerminalFlowCompletion(lease *worklifetime.Lease, 
 			}
 			am.lifecycle.recordTerminalCompletion(result)
 			am.lifecycle.recordLifecycleDiagnosticFailure(diagnosticErr)
-			am.lifecycle.recordTerminalCompletion(lease.Done())
+			leaseErr := lease.Done()
+			am.lifecycle.recordTerminalCompletion(leaseErr)
+			set.result = errors.Join(result, leaseErr)
+			close(set.done)
 		}()
 		result = errors.Join(result, am.completeTerminalRetirements(context.WithoutCancel(lease.Context()), set.retirements))
 		diagnosticErr = am.projectLifecycleDiagnostics(context.WithoutCancel(lease.Context()))

@@ -122,6 +122,7 @@ func TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation(t *testing.T
 				if err != nil || !found {
 					t.Fatalf("readiness missing: %v", err)
 				}
+				preparedRevision := before.PlanRevision
 				beforeJSON, err := canonicaljson.MarshalPreservingNumberKinds(before)
 				if err != nil {
 					t.Fatal(err)
@@ -147,7 +148,7 @@ func TestReceiverConfigRecoveryRejectsInvalidEvidenceBeforeMutation(t *testing.T
 						runCtx := worklifetime.WithOccurrence(runtimecorrelation.WithRunID(ctx, req.TriggerEvent.RunID()), restarted.workOwner)
 						return restarted.ReconcileDynamicFlowRuntimeReadinessPlansForRun(runCtx, time.Now().UTC())
 					default:
-						return restarted.FinalizeCommittedFlowInstanceActivation(ctx, runtimepipeline.CommittedFlowInstanceActivation{Plan: prepared})
+						return restarted.FinalizeCommittedFlowInstanceActivation(ctx, runtimepipeline.CommittedFlowInstanceActivation{Plan: prepared, ReadinessRevision: preparedRevision, Acknowledged: true})
 					}
 				}
 				for attempt := 0; attempt < 2; attempt++ {

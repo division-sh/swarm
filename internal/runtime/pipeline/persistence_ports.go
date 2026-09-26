@@ -8,6 +8,7 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -243,6 +244,13 @@ func (pc *PipelineCoordinator) ReconcileInitialEntryTimers(ctx context.Context, 
 	return pc.workflowStore.ReconcileInitialEntryTimers(ctx, identity)
 }
 
+func (pc *PipelineCoordinator) ReconcileInitialEntryTimersForAttempt(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt DynamicFlowRuntimeActivationAttempt, plan DynamicFlowRuntimeReadinessPlan) error {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.workflowTimers == nil {
+		return fmt.Errorf("dynamic initial timer reconciliation requires workflow lifecycle owner")
+	}
+	return pc.workflowTimers.reconcileInitialEntryDeclarations(ctx, identity, &attempt, &plan)
+}
+
 func (pc *PipelineCoordinator) RetireInitialEntryTimerWakeups(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
 	return pc.workflowStore.RetireInitialEntryTimerWakeups(ctx, identity)
 }
@@ -263,8 +271,20 @@ func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForRun(ctx cont
 	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
-func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
-	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
+func (pc *PipelineCoordinator) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, revision uint64, binding runtimeprocessbinding.Binding) (DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return pc.workflowStore.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
+}
+
+func (pc *PipelineCoordinator) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {
+	return pc.workflowStore.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+}
+
+func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
+	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, plan, readyAt)
+}
+
+func (pc *PipelineCoordinator) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {
+	return pc.workflowStore.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
 func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error {

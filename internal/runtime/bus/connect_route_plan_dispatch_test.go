@@ -923,7 +923,7 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 	if s.bus == nil {
 		return nil
 	}
-	return s.bus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
+	return s.bus.AddFlowInstanceRouteContextFixture(ctx, FlowInstanceRouteMaterializationRequest{
 		Identity:            testRunScopedFlowRouteForRun(req.TriggerEvent.RunID(), req.Instance.Route()),
 		ActivationVariables: connectRoutePlanActivationVariables(req),
 	})
@@ -979,7 +979,7 @@ func (s *connectRoutePlanStaleSnapshotStore) afterDescriptorRead(descriptors []A
 	s.mutations--
 	s.mutating = true
 	defer func() { s.mutating = false }()
-	if err := s.bus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+	if err := s.bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
 		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", fmt.Sprintf("stale-%d", ordinal))),
 	}); err != nil {
 		return nil, err
@@ -1010,7 +1010,7 @@ func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context,
 	if bus == nil {
 		return nil
 	}
-	return bus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
+	return bus.AddFlowInstanceRouteContextFixture(ctx, FlowInstanceRouteMaterializationRequest{
 		Identity:            testRunScopedFlowRouteForRun(req.TriggerEvent.RunID(), req.Instance.Route()),
 		ActivationVariables: connectRoutePlanActivationVariables(req),
 	})
@@ -2210,7 +2210,7 @@ func TestEventRouteSettlementDuplicateAndRecoveryPreserveOriginalFact(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := uuid.NewString()
@@ -2274,7 +2274,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
 		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "alpha")),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(alpha): %v", err)
@@ -2287,7 +2287,7 @@ func TestEventBusResetInMemoryStateRefreshesConnectRoutePlanner(t *testing.T) {
 		InstanceID: "beta", EntityID: betaEntityID, FlowInstance: "consumer/beta",
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{
 		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "beta")),
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(beta): %v", err)
@@ -2348,7 +2348,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := uuid.NewString()
@@ -2497,7 +2497,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
 	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "drift"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "drift"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
 	store.flowInstanceDescriptorCalls = 0
@@ -2977,7 +2977,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionUsesRenamedPayloadSourc
 			}
 			store.bus = eb
 			for _, instanceID := range []string{"authoritative", "conflicting"} {
-				if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
+				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
 			}
@@ -3080,7 +3080,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store.bus = eb
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
 	}
 	eventID := uuid.NewString()
@@ -3128,7 +3128,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 		t.Fatalf("restart EventBus against replacement topology: %v", err)
 	}
 	store.bus = restarted
-	if err := restarted.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift"))}); err != nil {
+	if err := restarted.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift) after restart: %v", err)
 	}
 	replayTarget := subscribeInternalDeliveriesForTest(t, restarted, want.Recipient.ID())
@@ -3210,7 +3210,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			}
 			store.bus = eb
 			for _, instanceID := range tc.addRoutes {
-				if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
+				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
 			}
@@ -3282,7 +3282,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store.bus = eb
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
 	}
 	existingID := uuid.NewString()
@@ -3378,7 +3378,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 		AddressFields: map[string]string{"entity.account_id": "acct-2"},
 	}}
 	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", "drift"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
 	store.flowInstanceDescriptorCalls = 0
@@ -3458,7 +3458,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	}
 	store.bus = eb
 	for _, instanceID := range []string{"one", "two"} {
-		if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
+		if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("account", instanceID))}); err != nil {
 			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 		}
 	}
@@ -3949,7 +3949,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	store.bus = eb
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
@@ -4028,7 +4028,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
 	}
 	consumerOne := subscribeInternalDeliveriesForTest(t, eb, testFlowNode(t, "consumer", "consumer-node").Key(), events.EventType("producer/deploy.done"))
@@ -4057,7 +4057,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 	}}
 	store.flowInstanceDescriptorCalls = 0
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "two"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "two"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(two): %v", err)
 	}
 	store.flowInstanceDescriptorCalls = 0
@@ -4098,7 +4098,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := uuid.NewString()
@@ -4163,7 +4163,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
+	if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one"))}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
 	eventID := uuid.NewString()
@@ -4256,7 +4256,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			for _, instanceID := range tc.addRoutes {
-				if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", instanceID))}); err != nil {
+				if err := eb.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", instanceID))}); err != nil {
 					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
 				}
 			}

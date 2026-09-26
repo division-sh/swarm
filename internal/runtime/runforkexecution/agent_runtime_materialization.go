@@ -278,8 +278,6 @@ func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, 
 	roles.RouteInstaller = bus
 	roles.RouteVerifier = bus
 	roles.RouteRestorer = bus
-	roles.RouteRetirer = bus
-	roles.RouteRemover = bus
 	roles.FlowTermination = pipeline
 	roles.CreationPublisher = bus
 	roles.DeliveryRuntime = bus
@@ -503,28 +501,51 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		return nil, managedexecution.Admission{}, err
 	}
 	grantOwned := true
+	cleanupRetained := false
+	var published []selectedFlowActivation
 	defer func() {
 		if grantOwned {
-			resultErr = errors.Join(resultErr, generationGrant.Retire(context.Background()))
-		}
-	}()
-	var published []runtimeflowidentity.RunScopedFlowInstance
-	defer func() {
-		if resultErr != nil {
-			for _, owner := range published {
-				resultErr = errors.Join(resultErr, bus.RetirePublishedFlowInstanceRoute(owner))
+			if cleanupRetained || len(published) != 0 {
+				resultErr = errors.Join(resultErr, errors.New("selected activation retains its generation grant after incomplete resource cleanup"))
+			} else {
+				resultErr = errors.Join(resultErr, generationGrant.Retire(context.Background()))
 			}
 		}
 	}()
-	for _, flow := range req.AgentRuntime.Flows {
-		owner, err := runtimeflowidentity.NewRunScopedFlowInstance(authority.SelectedFork.ForkRunID, flow.Instance.Route())
+	defer func() {
+		if resultErr != nil && !cleanupRetained {
+			var cleanupErr error
+			published, cleanupErr = retireSelectedFlowActivations(context.Background(), bus, pipeline, published)
+			resultErr = errors.Join(resultErr, cleanupErr)
+			cleanupRetained = cleanupErr != nil
+		}
+	}()
+	publishRoutes := func() error {
+		binding, err := generationGrant.ProcessExecutionBinding()
 		if err != nil {
-			return nil, managedexecution.Admission{}, err
+			return err
 		}
-		route := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, ActivationVariables: flow.ActivationVariables}
-		if err := publishSelectedContractFlowRoute(ctx, bus, route, diagnostics, &published); err != nil {
-			return nil, managedexecution.Admission{}, err
+		for _, flow := range req.AgentRuntime.Flows {
+			owner, err := runtimeflowidentity.NewRunScopedFlowInstance(authority.SelectedFork.ForkRunID, flow.Instance.Route())
+			if err != nil {
+				return err
+			}
+			route := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: owner, ActivationVariables: flow.ActivationVariables}
+			if err := admitSelectedContractFlowRoute(ctx, pipeline, bus, binding, route, diagnostics, &published); err != nil {
+				return err
+			}
 		}
+		return nil
+	}
+	transferRoutes := func(manager *runtimemanager.AgentManager) error {
+		for len(published) > 0 {
+			activation := published[0]
+			if err := manager.AdoptSelectedFlowActivation(activation.attempt, activation.publication, activation.timersProjected); err != nil {
+				return err
+			}
+			published = published[1:]
+		}
+		return nil
 	}
 	if len(req.AgentRuntime.Records) == 0 {
 		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
@@ -543,10 +564,27 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			ReceiverExecution:  req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution,
 		}, generationGrant, bus, ports, pipeline)
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, ports.manager)
+		defer func() {
+			if resultErr != nil {
+				if err := manager.Shutdown(); err != nil {
+					resultErr = errors.Join(resultErr, err)
+					cleanupRetained = true
+				}
+			}
+		}()
 		if _, err := generationGrant.MarkProbesSettled(ctx, nil); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
 		if _, err := generationGrant.AdmitExecution(ctx); err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+		if err := publishRoutes(); err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+		if err := completeSelectedContractFlowRoutes(ctx, pipeline, published, diagnostics); err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+		if err := transferRoutes(manager); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
 		grantOwned = false
@@ -577,19 +615,55 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		builder.bindManager(manager)
 	}
 	started := false
-	cleanup := func() {
-		_ = manager.Shutdown()
+	cleanup := func() error {
+		if err := manager.Shutdown(); err != nil {
+			return err
+		}
 		if builder.cleanup != nil {
 			builder.cleanup()
 			builder.cleanup = nil
 		}
+		return nil
 	}
 	defer func() {
 		if !started {
-			cleanup()
+			if err := cleanup(); err != nil {
+				resultErr = errors.Join(resultErr, err)
+				cleanupRetained = true
+			}
 		}
 	}()
+	if _, err := generationGrant.MarkProbesSettled(ctx, admission.CapabilitySurfaceIDs); err != nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("settle selected-contract runtime generation probes: %w", err)
+	}
+	if _, err := generationGrant.AdmitExecution(ctx); err != nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("admit selected-contract runtime generation: %w", err)
+	}
+	if err := publishRoutes(); err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
 	for _, rec := range req.AgentRuntime.Records {
+		if rec.Topology.Authority.Kind == runtimeagenttopology.AuthorityFlowReadinessPlan {
+			identity, err := rec.Config.ConcreteIdentity()
+			if err != nil {
+				return nil, managedexecution.Admission{}, err
+			}
+			matched := false
+			for _, activation := range published {
+				if identity.RunID != activation.attempt.RunID() || identity.FlowInstance() != activation.attempt.InstancePath() {
+					continue
+				}
+				rec.Topology, err = rec.Topology.WithFlowActivationAttempt(activation.attempt.ID(), activation.attempt.PlanRevision())
+				if err != nil {
+					return nil, managedexecution.Admission{}, err
+				}
+				matched = true
+				break
+			}
+			if !matched {
+				return nil, managedexecution.Admission{}, errors.New("selected flow agent has no admitted activation attempt")
+			}
+		}
 		if err := manager.MaterializeAdmittedAgent(ctx, rec); err != nil {
 			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s: %w", runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
 		}
@@ -602,11 +676,11 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			EntityID: rec.Config.EffectiveEntityID(),
 		})
 	}
-	if _, err := generationGrant.MarkProbesSettled(ctx, admission.CapabilitySurfaceIDs); err != nil {
-		return nil, managedexecution.Admission{}, fmt.Errorf("settle selected-contract runtime generation probes: %w", err)
+	if err := completeSelectedContractFlowRoutes(ctx, pipeline, published, diagnostics); err != nil {
+		return nil, managedexecution.Admission{}, err
 	}
-	if _, err := generationGrant.AdmitExecution(ctx); err != nil {
-		return nil, managedexecution.Admission{}, fmt.Errorf("admit selected-contract runtime generation: %w", err)
+	if err := transferRoutes(manager); err != nil {
+		return nil, managedexecution.Admission{}, err
 	}
 	receiverExecution, err := builder.options.ReceiverExecution.WithSelectedAdmission(admission)
 	if err != nil {
@@ -886,6 +960,9 @@ func (r *selectedContractAgentRuntime) Shutdown() error {
 	var err error
 	if r.manager != nil {
 		err = r.manager.Shutdown()
+		if err != nil {
+			return err
+		}
 	}
 	if r.cleanup != nil {
 		r.cleanup()

@@ -115,10 +115,11 @@ type WorkflowTimerActivationPersistence interface {
 }
 
 type WorkflowTimerReconciliationCommand struct {
-	RunID    string
-	Route    runtimeflowidentity.Route
-	EntityID string
-	Plan     WorkflowLifecycleMutationPlan
+	RunID             string
+	Route             runtimeflowidentity.Route
+	EntityID          string
+	Plan              WorkflowLifecycleMutationPlan
+	ActivationAttempt *DynamicFlowRuntimeActivationAttempt
 }
 
 func (c WorkflowTimerReconciliationCommand) Validate() error {
@@ -127,6 +128,14 @@ func (c WorkflowTimerReconciliationCommand) Validate() error {
 	c.Route = runtimeflowidentity.StoredRoute(c.Route.ScopeKey, c.Route.InstanceID, c.Route.InstancePath)
 	if len(c.Plan.Schedules) != 0 || len(c.Plan.GateCards) != 0 {
 		return fmt.Errorf("workflow timer reconciliation may contain only timer mutations")
+	}
+	if c.ActivationAttempt != nil {
+		if err := c.ActivationAttempt.Validate(); err != nil {
+			return err
+		}
+		if c.ActivationAttempt.RunID() != c.RunID || c.ActivationAttempt.InstancePath() != c.Route.InstancePath {
+			return fmt.Errorf("workflow timer reconciliation attempt differs from instance")
+		}
 	}
 	return c.Plan.Validate(c.RunID, c.Route, c.EntityID)
 }

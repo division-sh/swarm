@@ -486,8 +486,7 @@ func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEv
 func externalRuntimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
 		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
-		RouteRestorer: bus, RouteRetirer: bus, RouteRemover: bus,
-		FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
+		RouteRestorer: bus, FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 	}
 }
 

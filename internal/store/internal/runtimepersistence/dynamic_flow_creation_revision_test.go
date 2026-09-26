@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -16,6 +17,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -125,7 +127,40 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 				if string(gotPlan) != string(wantPlan) || !replaced.TopologyReadyAt.IsZero() {
 					t.Fatalf("replacement was not complete or retained old topology readiness: got=%s want=%s readiness=%v", gotPlan, wantPlan, replaced.TopologyReadyAt)
 				}
-				if committed, err := f.workflow.MarkDynamicFlowRuntimeTopologyReady(ctx, desired, time.Now().UTC()); err != nil || !committed.Acknowledged {
+				if err := f.selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, f.attempt); err != nil {
+					t.Fatalf("settle superseded creation attempt: %v", err)
+				}
+				sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: source.BundleHash()}}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				previousSet, found, err := f.process.CurrentSourceSet(ctx)
+				if err != nil || !found {
+					t.Fatalf("load predecessor source set: found=%v err=%v", found, err)
+				}
+				if _, err := f.process.RestoreSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: previousSet.Revision, Plan: sourceSet}); err != nil {
+					t.Fatalf("restore revised source set: %v", err)
+				}
+				grant, err := f.process.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{BundleHash: source.BundleHash(), RuntimeInstanceID: "11111111-1111-1111-1111-111111111111", RuntimeGeneration: 2, SourceSetRevision: sourceSet.Revision})
+				if err != nil {
+					t.Fatalf("issue revised generation grant: %v", err)
+				}
+				if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := grant.AdmitExecution(ctx); err != nil {
+					t.Fatal(err)
+				}
+				binding, err := grant.ProcessExecutionBinding()
+				if err != nil {
+					t.Fatal(err)
+				}
+				admitted, err := f.selected.BeginDynamicFlowRuntimeActivation(ctx, desired, replaced.PlanRevision, binding)
+				if err != nil || !admitted.Acknowledged {
+					t.Fatalf("admit revised activation: %+v err=%v", admitted, err)
+				}
+				f.attempt = admitted.Attempt
+				if committed, err := f.workflow.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, f.attempt, desired, time.Now().UTC()); err != nil || !committed.Acknowledged {
 					t.Fatalf("revised topology: %v", err)
 				}
 				if oldPublished {

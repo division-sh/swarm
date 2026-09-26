@@ -859,10 +859,6 @@ func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record
 	return s.activityPostgresOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
-}
-
 func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
 	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, expected, readyAt)
 }
@@ -1285,6 +1281,10 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule manager.Pers
 
 func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
 	return s.eventPostgresOwner.ValidateInboundPublicationIntegrity(ctx)
+}
+
+func (s *PostgresStore) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelinePostgresOwner.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
 func (s *PostgresStore) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable bus.PreparedPublishEvent) error {
@@ -2063,10 +2063,6 @@ func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, r
 	return s.activitySQLiteOwner.MarkActivityAttemptUncertain(ctx, record)
 }
 
-func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
-}
-
 func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
 	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, expected, readyAt)
 }
@@ -2489,6 +2485,10 @@ func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route 
 
 func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
 	return s.eventSQLiteOwner.ValidateInboundPublicationIntegrity(ctx)
+}
+
+func (s *SQLiteRuntimeStore) VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelineSQLiteOwner.VerifyDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
 func (s *SQLiteRuntimeStore) VerifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable bus.PreparedPublishEvent) error {

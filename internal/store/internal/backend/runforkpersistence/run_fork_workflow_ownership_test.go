@@ -308,7 +308,7 @@ func workflowOwnershipCompanionDatabase(t *testing.T, backend string) *sql.DB {
 	for _, query := range []string{
 		fmt.Sprintf(`CREATE TEMP TABLE entity_state (run_id %s, entity_id %s, flow_instance TEXT, entity_type TEXT, PRIMARY KEY(run_id,entity_id))`, idType, idType),
 		fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id %s, instance_path TEXT, flow_template TEXT, mode TEXT, config %s, status TEXT, created_at %s, terminated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, timeType, timeType),
-		fmt.Sprintf(`CREATE TEMP TABLE flow_instance_runtime_readiness (run_id %s, instance_path TEXT, plan %s, topology_ready_at %s, creation_event_emitted_at %s, created_at %s, updated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, timeType, timeType, timeType, timeType),
+		fmt.Sprintf(`CREATE TEMP TABLE flow_instance_runtime_readiness (run_id %s, instance_path TEXT, plan %s, plan_revision BIGINT NOT NULL DEFAULT 1, activation_attempt_id %s, activation_attempt_grant_id %s, activation_attempt_revision BIGINT, activation_attempt_state TEXT, topology_ready_at %s, creation_event_emitted_at %s, created_at %s, updated_at %s, PRIMARY KEY(run_id,instance_path))`, idType, jsonType, idType, idType, timeType, timeType, timeType, timeType),
 	} {
 		if _, err := db.Exec(query); err != nil {
 			t.Fatal(err)

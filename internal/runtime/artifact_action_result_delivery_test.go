@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"testing"
 	"time"
@@ -94,7 +95,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			if _, err := pc.MaterializeInitialEntry(testLiveExecutionContext(ctx), runtimeflowidentity.RunScopedFlowInstance{RunID: templateInstanceDeliveryRunID, Route: runtimeflowidentity.RouteForInstancePath(instance.StorageRef)}, instance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
-			if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+			if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 				RunID: templateInstanceDeliveryRunID,
 				Route: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1"),
 			}}); err != nil {

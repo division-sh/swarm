@@ -24,8 +24,8 @@ type readinessPostcommitFaultWorkflow struct {
 	marks atomic.Int32
 }
 
-func (w *readinessPostcommitFaultWorkflow) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan pipeline.DynamicFlowRuntimeReadinessPlan, at time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
-	result, err := w.PipelineCoordinator.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, at)
+func (w *readinessPostcommitFaultWorkflow) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, plan pipeline.DynamicFlowRuntimeReadinessPlan, at time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
+	result, err := w.PipelineCoordinator.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, plan, at)
 	if err != nil || !result.Acknowledged {
 		return result, err
 	}

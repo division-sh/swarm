@@ -565,10 +565,15 @@ func (p terminalReadinessRouteProbe) RetirePublishedFlowInstanceRoute(runtimeflo
 	return p.err
 }
 
+func (p terminalReadinessRouteProbe) Retire() error {
+	return p.RetirePublishedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance{})
+}
+
 func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 	for _, mode := range []string{"success", "route_error", "route_panic"} {
 		t.Run(mode, func(t *testing.T) {
-			c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil, nil)
+			probe := newLifecyclePersistenceProbe()
+			c := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 			rec := lifecycleTestPersistedAgent(t)
 			rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, rec.Config.Identity.RunID, rec.Config.ID, "lifecycle-test", "review", "inst-1", "review/inst-1")
 			rec.Config.FlowPath = "review/inst-1"
@@ -587,12 +592,16 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 				route.err = injected
 				route.panicOnRetire = mode == "route_panic"
 			}
-			am := &AgentManager{lifecycle: c, workOwner: newTestManagerWorkOwner(t), roles: PersistenceRoles{RouteRetirer: route}}
+			am := &AgentManager{lifecycle: c, workOwner: newTestManagerWorkOwner(t)}
 			lease, err := am.beginWork(ctx, "test readiness topology retirement")
 			if err != nil {
 				t.Fatal(err)
 			}
-			prepared := &preparedFlowTopologyRetirement{manager: am, lease: lease}
+			attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), rec.Config.Identity.RunID, "review/inst-1", 1, lifecycleProbeProcessBinding())
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared := &preparedFlowTopologyRetirement{manager: am, lease: lease, attempt: attempt, publication: route}
 			defer prepared.abort()
 			flow, err := runtimeflowidentity.NewRunScopedFlowInstance(rec.Config.Identity.RunID, runtimeflowidentity.RouteForInstancePath("review/inst-1"))
 			if err != nil {
@@ -618,6 +627,14 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 			if err := releaseCoordinatorLoop(c, token, done); err != nil {
 				t.Fatal(err)
 			}
+			probe.mu.Lock()
+			for _, request := range probe.requests {
+				if request.TargetPhase == AgentLifecycleTerminated {
+					probe.mu.Unlock()
+					t.Fatal("process-only activation retirement durably terminated a desired agent")
+				}
+			}
+			probe.mu.Unlock()
 			if err := c.waitForWork(ctx); (err != nil) != (mode != "success") || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
 				t.Fatalf("owned readiness completion result: %v", err)
 			}
@@ -682,10 +699,10 @@ func TestTerminalReadinessReplacementReleasesDependentCaller(t *testing.T) {
 	if err := attempt.wait(ctx); !errors.Is(err, errDynamicFlowRuntimeReadinessRetiring) {
 		t.Fatalf("coalesced caller retained the predecessor dependency: %v", err)
 	}
+	accepted.Release()
 	if err := releaseCoordinatorLoop(am.lifecycle, token, done); err != nil {
 		t.Fatal(err)
 	}
-	accepted.Release()
 	<-attempt.done
 	if attempt.err != nil {
 		t.Fatalf("owned readiness replacement: %v", attempt.err)

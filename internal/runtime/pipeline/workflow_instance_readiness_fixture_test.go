@@ -318,6 +318,13 @@ func (s *workflowInstanceStore) legacyMarkDynamicFlowRuntimeTopologyReady(
 	)
 }
 
+// These test-only methods construct committed topology fixtures without
+// granting execution authority. Production completion requires an attempt.
+func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReadyFixture(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, at time.Time) (DynamicFlowRuntimeTopologyReadyResult, error) {
+	err := s.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, at)
+	return DynamicFlowRuntimeTopologyReadyResult{Acknowledged: err == nil}, err
+}
+
 func (s *workflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
 	ctx context.Context,
 	tx *sql.Tx,

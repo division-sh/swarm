@@ -55,6 +55,14 @@ func (p *runExecutionOwnerProbe) set(disposition RunExecutionOwnership, err erro
 	p.disposition, p.err = disposition, err
 }
 
+func (p *runExecutionOwnerProbe) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
+	provider, ok := p.AgentLifecyclePersistence.(processExecutionBindingProvider)
+	if !ok {
+		return ProcessExecutionBinding{}, errors.New("run execution ownership probe has no process binding")
+	}
+	return provider.ProcessExecutionBinding()
+}
+
 func TestLifecycleRegistrationRequiresRunOwnershipForSpawnAndAdoption(t *testing.T) {
 	for _, persist := range []bool{false, true} {
 		t.Run(map[bool]string{false: "adoption", true: "spawn"}[persist], func(t *testing.T) {

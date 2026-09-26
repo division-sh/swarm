@@ -39,12 +39,16 @@ type flowInstancePersistence interface {
 	FinalizeInitialEntryLifecycle(ctx context.Context, committed runtimepipeline.CommittedWorkflowLifecycleMutation) error
 	ArmInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
 	ReconcileInitialEntryTimers(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
+	ReconcileInitialEntryTimersForAttempt(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan) error
 	RetireInitialEntryTimerWakeups(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error
 	ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.SourceArtifactFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.SourceArtifactFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
-	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error)
+	BeginDynamicFlowRuntimeActivation(ctx context.Context, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, revision uint64, binding ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
+	VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
+	MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error)
+	RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error
 	Load(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
@@ -64,15 +68,8 @@ type FlowInstanceRouteContextVerifier interface {
 }
 
 type PersistedFlowInstanceRouteRestorer interface {
-	PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
-}
-
-type PublishedFlowInstanceRouteRetirer interface {
-	RetirePublishedFlowInstanceRoute(runtimeflowidentity.RunScopedFlowInstance) error
-}
-
-type FlowInstanceRouteContextRemover interface {
-	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
+	PublishPersistedFlowInstanceRouteForAttempt(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest, runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error)
+	RetireFlowInstanceRouteForAttempt(runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 }
 
 type FlowInstanceTerminalMutationOwner interface {

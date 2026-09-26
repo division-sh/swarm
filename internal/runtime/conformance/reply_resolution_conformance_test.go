@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"strings"
 	"sync"
 	"testing"
@@ -93,7 +94,7 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.AddFlowInstanceRouteContext(ctx, bus.FlowInstanceRouteMaterializationRequest{
+	if err := flowroutefixture.StageAndPublish(ctx, eb, bus.FlowInstanceRouteMaterializationRequest{
 		Identity: runtimeflowidentity.RunScopedFlowInstance{
 			RunID: runID,
 			Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, "account-a", templatereply.RequesterFlowID+"/account-a"),
@@ -164,7 +165,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	for _, accountID := range []string{"account-a", "account-b"} {
-		if err := eb.AddFlowInstanceRouteContext(ctx, bus.FlowInstanceRouteMaterializationRequest{
+		if err := flowroutefixture.StageAndPublish(ctx, eb, bus.FlowInstanceRouteMaterializationRequest{
 			Identity: runtimeflowidentity.RunScopedFlowInstance{
 				RunID: runID,
 				Route: runtimeflowidentity.StoredRoute(templatereply.RequesterFlowID, accountID, templatereply.RequesterFlowID+"/"+accountID),
@@ -906,9 +907,9 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 		}
 		var err error
 		if _, exists := persistedByPath[req.Identity.Key()]; exists {
-			err = eb.PublishPersistedFlowInstanceRoute(req)
+			err = flowroutefixture.Publish(eb, req)
 		} else {
-			err = eb.AddFlowInstanceRouteContext(ctx, req)
+			err = flowroutefixture.StageAndPublish(ctx, eb, req)
 		}
 		if err != nil {
 			t.Fatalf("materialize requester route %s: %v", accountID, err)

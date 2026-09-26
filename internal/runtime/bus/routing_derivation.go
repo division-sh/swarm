@@ -115,6 +115,7 @@ type RouteTable struct {
 	templates                   map[string]routeFlowTemplate
 	instanceOwners              map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance
 	publications                map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord
+	fencedPublications          map[flowRoutePublicationFence]struct{}
 	nextPublication             uint64
 	instanceEventPath           map[runtimeflowidentity.RunScopedFlowInstance][]string
 	templateObservers           map[string][]routeTemplateSourceObserver
@@ -867,6 +868,7 @@ func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.
 		templates:                   make(map[string]routeFlowTemplate),
 		instanceOwners:              make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance),
 		publications:                make(map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord),
+		fencedPublications:          make(map[flowRoutePublicationFence]struct{}),
 		instanceEventPath:           make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
 		templateObservers:           make(map[string][]routeTemplateSourceObserver),
 		connectGraph:                graph,

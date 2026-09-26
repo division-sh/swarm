@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,7 +81,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	})
 	seedTemplateInstanceDeliveryRouteOwner(t, ctx, db)
 
-	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
 	}}); err != nil {
@@ -137,7 +138,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	seedTemplateInstanceDeliveryRouteOwner(t, ctx, db)
-	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
+	if err := flowroutefixture.StageAndPublish(ctx, bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
 		Route: runtimeflowidentity.DeriveRoute("operating", "inst-1"),
 	}}); err != nil {

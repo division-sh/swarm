@@ -128,15 +128,23 @@ func authorizeStaticDeclarationMutation(ctx context.Context, tx *sql.Tx, req run
 
 func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, sqlite bool) error {
 	authority := req.Topology.Authority.Readiness
+	present := req.TargetPhase != runtimemanager.AgentLifecycleTerminated
+	if present {
+		if err := AuthorizeDynamicFlowActivationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite); err != nil {
+			return err
+		}
+	}
 	query := `
-		SELECT readiness.plan, instance.status
+		SELECT readiness.plan, instance.status, readiness.plan_revision,
+		       readiness.activation_attempt_id, readiness.activation_attempt_grant_id, readiness.activation_attempt_revision, readiness.activation_attempt_state
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 		WHERE readiness.run_id = ? AND readiness.instance_path = ?`
 	args := []any{authority.RunID, authority.InstancePath}
 	if !sqlite {
 		query = `
-			SELECT readiness.plan, instance.status
+			SELECT readiness.plan, instance.status, readiness.plan_revision,
+			       readiness.activation_attempt_id::text, readiness.activation_attempt_grant_id::text, readiness.activation_attempt_revision, readiness.activation_attempt_state
 			FROM flow_instance_runtime_readiness AS readiness
 			JOIN flow_instances AS instance ON instance.run_id = readiness.run_id AND instance.instance_path = readiness.instance_path
 			WHERE readiness.run_id = $1::uuid AND readiness.instance_path = $2
@@ -144,7 +152,10 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 	}
 	var raw []byte
 	var instanceStatus string
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw, &instanceStatus); err != nil {
+	var planRevision int64
+	var attemptID, grantID, attemptState sql.NullString
+	var attemptRevision sql.NullInt64
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw, &instanceStatus, &planRevision, &attemptID, &grantID, &attemptRevision, &attemptState); err != nil {
 		if err == sql.ErrNoRows {
 			return topologyConflict(req, "readiness_owner_missing")
 		}
@@ -176,8 +187,15 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 		}
 		desiredRevision = strings.TrimSpace(agent.ConfigRevision)
 	}
-	present := req.TargetPhase != runtimemanager.AgentLifecycleTerminated
 	if present {
+		if authority.AttemptID == "" || authority.PlanRevision == 0 ||
+			!attemptID.Valid || attemptID.String != authority.AttemptID ||
+			!grantID.Valid || grantID.String != req.ProcessBinding.GenerationGrantID ||
+			!attemptRevision.Valid || attemptRevision.Int64 != int64(authority.PlanRevision) ||
+			planRevision != int64(authority.PlanRevision) || !attemptState.Valid ||
+			(attemptState.String != "accepted" && attemptState.String != "topology_committed") {
+			return topologyConflict(req, "readiness_activation_attempt_not_current")
+		}
 		if strings.TrimSpace(instanceStatus) != "active" {
 			return topologyConflict(req, "readiness_instance_not_active")
 		}
