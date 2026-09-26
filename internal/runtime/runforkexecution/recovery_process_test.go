@@ -65,7 +65,7 @@ func TestSelectedForkCommittedProcessDeathBothStores(t *testing.T) {
 				if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
 					t.Fatal(err)
 				}
-				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
+				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
 				want := runfork.SelectedForkRecoveryControlOnly
 				if cut == "materialized" {
 					want = runfork.SelectedForkRecoveryStaged

@@ -512,6 +512,15 @@ type Pin struct {
 	Selection    string         `json:"selection"`
 }
 
+// PinnedSource is the immutable metadata needed to create or verify one
+// resource-backed fan-out intent. Row bytes are not part of trigger admission.
+type PinnedSource struct {
+	Declaration  DeclarationRef
+	VersionID    VersionID
+	SchemaDigest SchemaDigest
+	RowCount     int
+}
+
 func SortPins(pins []Pin) {
 	sort.Slice(pins, func(i, j int) bool {
 		if cmp := CompareDeclarationRef(pins[i].Declaration, pins[j].Declaration); cmp != 0 {

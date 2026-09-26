@@ -75,7 +75,8 @@ func CreateSQLiteScenarioSchema(ctx context.Context, db *sql.DB) error {
 			run_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'running', bundle_hash TEXT NOT NULL,
 			origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT,
 			origin_service_id TEXT, origin_generation INTEGER,
-			forked_from_run_id TEXT, forked_from_event_id TEXT,
+			forked_from_run_id TEXT, forked_from_point_kind TEXT,
+			forked_from_revision INTEGER, forked_from_event_id TEXT,
 			started_at TIMESTAMP, ended_at TIMESTAMP, failure TEXT,
 			continued_as_run_id TEXT, event_count INTEGER NOT NULL DEFAULT 0
 		)`,
@@ -207,22 +208,24 @@ func ReviseSQLiteSource(
 }
 
 type CorruptSnapshot struct {
-	RunID             string
-	State             string
-	BundleHash        string
-	OriginKind        string
-	TriggerEventID    string
-	TriggerEventType  string
-	OriginServiceID   string
-	OriginGeneration  int64
-	ForkedFromRunID   string
-	ForkedFromEventID string
-	ContinuedAsRunID  string
-	EventCount        int
-	EntityCount       int
-	Failure           *runtimefailures.Envelope
-	StartedAt         time.Time
-	EndedAt           time.Time
+	RunID               string
+	State               string
+	BundleHash          string
+	OriginKind          string
+	TriggerEventID      string
+	TriggerEventType    string
+	OriginServiceID     string
+	OriginGeneration    int64
+	ForkedFromRunID     string
+	ForkedFromPointKind string
+	ForkedFromRevision  int64
+	ForkedFromEventID   string
+	ContinuedAsRunID    string
+	EventCount          int
+	EntityCount         int
+	Failure             *runtimefailures.Envelope
+	StartedAt           time.Time
+	EndedAt             time.Time
 }
 
 // RequireCorruptPostgresSnapshot is reserved for hostile readback tests whose
@@ -252,20 +255,20 @@ func AttemptCorruptPostgresSnapshot(
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
-			forked_from_run_id, forked_from_event_id, continued_as_run_id,
+			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
 			event_count, entity_count, failure, started_at, ended_at
 		)
 		VALUES (
 			$1::uuid, $2, $3, $4,
 			NULLIF($5, '')::uuid, NULLIF($6, ''), NULLIF($7, '')::uuid, NULLIF($8, 0),
-			NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, '')::uuid,
-			$12, $13, NULLIF($14, '')::jsonb, $15, $16
+			NULLIF($9, '')::uuid, NULLIF($10, ''), NULLIF($11, 0), NULLIF($12, '')::uuid, NULLIF($13, '')::uuid,
+			$14, $15, NULLIF($16, '')::jsonb, $17, $18
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
 		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
-		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromEventID),
+		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
 		strings.TrimSpace(snapshot.ContinuedAsRunID),
 		snapshot.EventCount, snapshot.EntityCount, failure, snapshot.StartedAt.UTC(), endedAt)
 	return err
@@ -298,20 +301,20 @@ func AttemptCorruptSQLiteSnapshot(
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
-			forked_from_run_id, forked_from_event_id, continued_as_run_id,
+			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id, continued_as_run_id,
 			event_count, entity_count, failure, started_at, ended_at
 		)
 		VALUES (
 			?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0),
-			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
+			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''), NULLIF(?, ''),
 			?, ?, NULLIF(?, ''), ?, ?
 		)
 	`, strings.TrimSpace(snapshot.RunID), strings.TrimSpace(snapshot.State),
 		strings.TrimSpace(snapshot.BundleHash), strings.TrimSpace(snapshot.OriginKind),
 		strings.TrimSpace(snapshot.TriggerEventID), strings.TrimSpace(snapshot.TriggerEventType),
 		strings.TrimSpace(snapshot.OriginServiceID), snapshot.OriginGeneration,
-		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromEventID),
+		strings.TrimSpace(snapshot.ForkedFromRunID), strings.TrimSpace(snapshot.ForkedFromPointKind), snapshot.ForkedFromRevision, strings.TrimSpace(snapshot.ForkedFromEventID),
 		strings.TrimSpace(snapshot.ContinuedAsRunID),
 		snapshot.EventCount, snapshot.EntityCount, failure, snapshot.StartedAt.UTC(), endedAt)
 	return err
@@ -970,7 +973,8 @@ func (m sqlMutation) load(
 		SELECT status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
-		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_event_id, '')
+		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
+		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id, '')
 		FROM runs
 		WHERE run_id = ?
 	`
@@ -979,15 +983,16 @@ func (m sqlMutation) load(
 			SELECT status, bundle_hash, origin_kind,
 			       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 			       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
-			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_event_id::text, '')
+			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
+			       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id::text, '')
 			FROM runs
 			WHERE run_id = $1::uuid
 			FOR UPDATE
 		`
 	}
 	var statusRaw, bundleHash, originKind string
-	var eventID, eventType, serviceID, sourceRunID, sourceEventID string
-	var generation int64
+	var eventID, eventType, serviceID, sourceRunID, forkPointKind, sourceEventID string
+	var generation, forkRevision int64
 	if err := m.tx.QueryRowContext(ctx, query, runID).Scan(
 		&statusRaw,
 		&bundleHash,
@@ -997,6 +1002,8 @@ func (m sqlMutation) load(
 		&serviceID,
 		&generation,
 		&sourceRunID,
+		&forkPointKind,
+		&forkRevision,
 		&sourceEventID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1022,7 +1029,7 @@ func (m sqlMutation) load(
 		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err
 	}
 	origin, err := runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
+		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return "", runtimecorrelation.SourceArtifactFact{}, runtimerunlifecycle.RunOrigin{}, err

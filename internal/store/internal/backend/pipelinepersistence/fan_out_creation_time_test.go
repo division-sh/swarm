@@ -2,11 +2,10 @@ package pipelinepersistence
 
 import (
 	"context"
-	"strings"
+	"encoding/json"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
@@ -21,15 +20,21 @@ func TestFanOutProducerFairnessIgnoresCallerAuditTimeBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`CREATE TABLE resource_version_pins (run_id TEXT,flow_path TEXT,event_name TEXT,version_id TEXT)`); err != nil {
-				t.Fatal(err)
-			}
 			request := intent.Request
-			request.Source = fanoutobligation.SourceRef{Kind: fanoutobligation.SourceResourceVersion,
-				Declaration: durabledata.DeclarationRef{FlowPath: "root", EventName: "items"}, VersionID: durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("a", 64))}
-			if _, err := db.Exec(`INSERT INTO resource_version_pins VALUES ($1,$2,$3,$4)`, request.Key.RunID, request.Source.Declaration.FlowPath, request.Source.Declaration.EventName, request.Source.VersionID); err != nil {
+			request.Capsule.EntityID = uuid.NewString()
+			request.Source = fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEntityField,
+				RunID: request.Key.RunID, EntityID: request.Capsule.EntityID, Field: "items"}
+			valueType := "TEXT"
+			if backend == "postgres" {
+				valueType = "JSONB"
+			}
+			if _, err := db.Exec(`CREATE TABLE entity_mutations (
+				mutation_id TEXT, run_id TEXT, entity_id TEXT, domain TEXT, path TEXT,
+				old_value ` + valueType + `, new_value ` + valueType + `, caused_by_event TEXT,
+				writer_type TEXT, writer_id TEXT, handler_step TEXT, created_at TIMESTAMP)`); err != nil {
 				t.Fatal(err)
 			}
+			stateFields := json.RawMessage(`{"items":[{"value":1},{"value":2}]}`)
 			for _, offset := range []time.Duration{-24 * time.Hour, 24 * time.Hour} {
 				request.Key.TriggeringDeliveryID = uuid.NewString()
 				before := time.Now().UTC().Add(-time.Millisecond)
@@ -40,7 +45,7 @@ func TestFanOutProducerFairnessIgnoresCallerAuditTimeBothStores(t *testing.T) {
 				if err := request.Validate(); err != nil {
 					t.Fatal(err)
 				}
-				if err := insertFanOutIntentSQL(context.Background(), tx, backend == "postgres", runforkrevision.NewEffects(), request, nil, request.Capsule.Lineage.ParentEventID, before.Add(offset)); err != nil {
+				if err := insertFanOutIntentSQL(context.Background(), tx, backend == "postgres", nil, runforkrevision.NewEffects(), request, stateFields, request.Capsule.Lineage.ParentEventID, before.Add(offset)); err != nil {
 					_ = tx.Rollback()
 					t.Fatal(err)
 				}

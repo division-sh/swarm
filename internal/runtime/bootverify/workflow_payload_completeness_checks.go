@@ -178,7 +178,7 @@ func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidenti
 			RuntimeFields: owned,
 		})
 	}
-	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, source.FanOutPlansForHandler(node, triggerEventType)) {
 		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec, nil)
 	}
 	if handler.Guard != nil {

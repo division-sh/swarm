@@ -181,9 +181,6 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 		return nil, err
 	}
 	populateEffectiveEventProvenance(bundle)
-	if err := loadDurableDataDeclarations(bundle); err != nil {
-		return nil, err
-	}
 	if _, err := BuildDurableDataCatalog(bundle); err != nil {
 		return nil, fmt.Errorf("compile durable data catalog: %w", err)
 	}
@@ -275,9 +272,6 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s uses deprecated id-only guard; migrate to check:", ErrDeprecatedGuardFallback, nodeID, eventType))
 			}
 		}
-	}
-	for _, failure := range bundle.PrepareFanOutPlans() {
-		errs = append(errs, fmt.Errorf("%w: %s", ErrInvalidField, failure.Error()))
 	}
 	for eventType, owners := range bundle.Semantics.EventOwners {
 		if len(normalizeStrings(owners)) > 1 {

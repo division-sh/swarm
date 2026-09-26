@@ -80,9 +80,11 @@ func TestTargetOwnerDedupPreservesUnavailableEvidenceInBothOrders(t *testing.T) 
 	unavailable.Availability = runtimepipeline.NewDeliveryTargetAvailability("active", "draining", false)
 	for _, descriptors := range [][]ActiveTargetDescriptor{{active, unavailable}, {unavailable, active}} {
 		projection := selectedRunTargetOwnerProjection{required: true, source: source}
+		ordered := newOrderedActiveTargetDescriptors(projection.descriptors)
 		for _, descriptor := range descriptors {
-			projection.descriptors = appendActiveTargetDescriptor(projection.descriptors, descriptor)
+			ordered.add(descriptor)
 		}
+		projection.descriptors = ordered.descriptors
 		if len(projection.descriptors) != 2 {
 			t.Fatalf("dedup erased contradictory availability: %#v", projection.descriptors)
 		}

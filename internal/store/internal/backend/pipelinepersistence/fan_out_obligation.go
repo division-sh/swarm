@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -20,6 +21,7 @@ func commitFanOutIntentTx(
 	ctx context.Context,
 	attempt *mutationprotocol.Attempt,
 	postgres bool,
+	resourceData *storedurabledata.Owner,
 	request fanoutobligation.IntentRequest,
 	stateRunID string,
 	stateFields json.RawMessage,
@@ -30,11 +32,14 @@ func commitFanOutIntentTx(
 	if err := request.Validate(); err != nil {
 		return err
 	}
+	if request.OriginKind() != fanoutobligation.OriginHandler {
+		return fmt.Errorf("handler mutation cannot create a deployment-origin fan-out intent")
+	}
 	if request.Key.RunID != strings.TrimSpace(stateRunID) {
 		return fmt.Errorf("fan-out intent run disagrees with engine mutation")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return insertFanOutIntentSQL(ctx, tx, postgres, attempt, request, stateFields, triggerEventID, createdAt)
+		return insertFanOutIntentSQL(ctx, tx, postgres, resourceData, attempt, request, stateFields, triggerEventID, createdAt)
 	})
 }
 
@@ -43,7 +48,10 @@ type fanOutRevisionSink interface {
 	AddFacts(string, ...privaterunforkrevision.FactRef) error
 }
 
-func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, facts fanOutRevisionSink, request fanoutobligation.IntentRequest, stateFields json.RawMessage, triggerEventID string, createdAt time.Time) error {
+func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, _ *storedurabledata.Owner, facts fanOutRevisionSink, request fanoutobligation.IntentRequest, stateFields json.RawMessage, triggerEventID string, createdAt time.Time) error {
+	if request.OriginKind() != fanoutobligation.OriginHandler {
+		return fmt.Errorf("handler intent writer requires handler origin")
+	}
 	persistedSource, err := bindFanOutSourceTx(ctx, tx, postgres, facts, request, stateFields, triggerEventID, createdAt)
 	if err != nil {
 		return err
@@ -68,16 +76,15 @@ func insertFanOutIntentSQL(ctx context.Context, tx *sql.Tx, postgres bool, facts
 			run_id, triggering_delivery_id, flow_path, declaration_family, semantic_path,
 			bundle_hash, semantic_digest, source_kind, source_event_id,
 			source_run_id, source_entity_id, source_field, source_mutation_id,
-			source_resource_flow_path, source_resource_event_name, source_resource_version_id,
 			cardinality, cursor, status, next_chunk_size, capsule, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-			$15, $16, $17, 0, $18, $19, $20, $21, $21
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+			$14, 0, $15, $16, $17, $18, $18
 		)`
 	if postgres {
-		query = strings.ReplaceAll(query, "$20", "$20::jsonb")
+		query = strings.ReplaceAll(query, "$17", "$17::jsonb")
 	} else {
-		query = postgresPlaceholdersToSQLite(query, 21)
+		query = postgresPlaceholdersToSQLite(query, 18)
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert fan-out intent: %w", err)
@@ -104,9 +111,6 @@ func fanOutIntentSQLArgs(request fanoutobligation.IntentRequest, source fanoutob
 		fanOutNullable(source.EntityID),
 		fanOutNullable(source.Field),
 		fanOutNullable(source.MutationID),
-		fanOutNullable(source.Declaration.FlowPath),
-		fanOutNullable(source.Declaration.EventName),
-		fanOutNullable(string(source.VersionID)),
 		request.Cardinality,
 		string(status),
 		fanoutobligation.InitialChunkSize,
@@ -167,11 +171,6 @@ func bindFanOutSourceTx(
 			return fanoutobligation.SourceRef{}, err
 		}
 		source.MutationID = mutationID
-	case fanoutobligation.SourceResourceVersion:
-		var present int
-		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM resource_version_pins WHERE run_id=$1 AND flow_path=$2 AND event_name=$3 AND version_id=$4`, request.Key.RunID, source.Declaration.FlowPath, source.Declaration.EventName, source.VersionID).Scan(&present); err != nil {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out resource source requires exact run pin: %w", err)
-		}
 	default:
 		return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out source kind %q is unsupported", source.Kind)
 	}

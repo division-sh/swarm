@@ -162,6 +162,7 @@ type RunControlHandlerOptions struct {
 type RunForkHandlerOptions struct {
 	Now          func() time.Time
 	Availability RunForkAvailabilityStore
+	Operations   RunForkOperationReader
 	Executor     RunForkExecutor
 	Idempotency  APIIdempotencyStore
 }

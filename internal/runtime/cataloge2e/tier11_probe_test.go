@@ -73,7 +73,7 @@ func TestTier11Probe(t *testing.T) {
 					}
 					for _, owner := range source.RuntimeEventOwners(trigger) {
 						if handler, ok := source.ExecutableNodeEventHandler(owner, trigger); ok {
-							t.Logf("handler owner=%s emits=%v advances_to=%s", owner.Key(), runtimecontracts.HandlerEmitEvents(handler), handler.AdvancesTo)
+							t.Logf("handler owner=%s emits=%v advances_to=%s", owner.Key(), runtimecontracts.HandlerEmitEvents(handler, source.FanOutPlansForHandler(owner, trigger)), handler.AdvancesTo)
 						}
 					}
 					for _, observed := range []string{

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -18,21 +19,83 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
 type runForkFanOutBarrierOwner interface {
 	MaterializeRunForkFanOutBarrierTx(context.Context, *mutationprotocol.Attempt, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, *loopruntime.ForkChildReference, time.Time) error
+	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
 }
 
-func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage) error {
-	var intentCount int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, forkRunID).Scan(&intentCount); err != nil {
-		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
+type forkDeploymentCarriage struct {
+	inherit       bool
+	cursor        int
+	status        fanoutobligation.Status
+	blockedReason string
+	outcomes      []fanoutobligation.Outcome
+	pending       []runfork.RunForkFanOutPendingReplay
+}
+
+func projectForkDeploymentCarriage(obligation runfork.RunForkFanOutObligation, target runtimedata.PinnedSource) (forkDeploymentCarriage, error) {
+	intent := obligation.Intent
+	if err := intent.Validate(); err != nil {
+		return forkDeploymentCarriage{}, err
 	}
-	if intentCount != len(plan.FanOutObligations) {
-		return fmt.Errorf("fork materialization %s has %d fan-out intents, want %d", forkRunID, intentCount, len(plan.FanOutObligations))
+	if intent.Request.Deployment == nil || intent.Source.Declaration != target.Declaration || target.RowCount < 0 {
+		return forkDeploymentCarriage{}, fmt.Errorf("fork deployment source does not match exact child pin")
+	}
+	if target.VersionID != intent.Source.VersionID {
+		status := fanoutobligation.StatusOpen
+		if target.RowCount == 0 {
+			status = fanoutobligation.StatusClosed
+		}
+		return forkDeploymentCarriage{status: status}, nil
+	}
+	if target.SchemaDigest != intent.Request.Deployment.SchemaDigest || target.RowCount != intent.Request.Cardinality {
+		return forkDeploymentCarriage{}, fmt.Errorf("fork deployment unchanged version contradicts source schema or cardinality")
+	}
+	return forkDeploymentCarriage{
+		inherit: true, cursor: intent.Cursor, status: intent.Status, blockedReason: intent.BlockedReason,
+		outcomes: obligation.Outcomes, pending: obligation.PendingReplays,
+	}, nil
+}
+
+func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runtimedata.Pin) error {
+	byDeclaration := make(map[runtimedata.DeclarationRef]runtimedata.VersionID, len(pins))
+	for _, pin := range pins {
+		if _, duplicate := byDeclaration[pin.Declaration]; duplicate {
+			return fmt.Errorf("fork has duplicate resource pin for %s", pin.Declaration.Key())
+		}
+		byDeclaration[pin.Declaration] = pin.VersionID
 	}
 	for _, obligation := range plan.FanOutObligations {
+		source := obligation.Intent.Source
+		if source.Kind != fanoutobligation.SourceResourceVersion {
+			continue
+		}
+		if obligation.Intent.Request.Deployment == nil {
+			return fmt.Errorf("fork resource source %s has no deployment origin", source.Declaration.Key())
+		}
+		if _, pinned := byDeclaration[source.Declaration]; !pinned {
+			return fmt.Errorf("fork deployment feed requires child pin for %s", source.Declaration.Key())
+		}
+	}
+	return nil
+}
+
+func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage, targetBundleHash string, data *storedurabledata.Owner, pins []runtimedata.Pin) error {
+	var intentCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='handler'`, forkRunID).Scan(&intentCount); err != nil {
+		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
+	}
+	wantHandlerCount := len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan)
+	if intentCount != wantHandlerCount {
+		return fmt.Errorf("fork materialization %s has %d handler fan-out intents, want %d", forkRunID, intentCount, wantHandlerCount)
+	}
+	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment != nil {
+			continue
+		}
 		sourceIntent := obligation.Intent
 		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
 		if err != nil {
@@ -150,7 +213,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 			return fmt.Errorf("fork materialization %s has %d fan-out outcomes, want %d", forkRunID, index, len(obligation.Outcomes))
 		}
 	}
-	return nil
+	return requireExactMaterializedRunForkDeploymentFeeds(ctx, tx, postgres, forkRunID, targetBundleHash, data, plan, pins)
 }
 
 func equalOptionalJSON(left, right []byte) bool {
@@ -181,6 +244,12 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 	}
 	resolved := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, len(plan.FanOutObligations))
 	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment != nil {
+			if obligation.Intent.Request.PlanRef != (runtimecontracts.FanOutPlanRef{}) {
+				return nil, fmt.Errorf("deployment feed cannot carry a handler plan proof")
+			}
+			continue
+		}
 		source := obligation.Intent.Request.PlanRef
 		if source.BundleHash == targetBundleHash {
 			if proof, present := proofByElement[source.ElementRef]; present {
@@ -218,12 +287,18 @@ func materializeRunForkFanOutObligations(
 	plan runfork.RunForkPlan,
 	planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef,
 	original semanticview.OriginalLoopCarriage,
+	targetBundleHash string,
+	data *storedurabledata.Owner,
+	pins []runtimedata.Pin,
 	now time.Time,
 ) (int, error) {
 	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
 		return 0, err
 	}
 	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment != nil {
+			continue
+		}
 		intent := obligation.Intent
 		capsuleProjection, generation, err := projectRunForkFanOutCapsule(ctx, tx, forkRunID, plan, obligation, original)
 		if err != nil {
@@ -328,7 +403,151 @@ func materializeRunForkFanOutObligations(
 			}
 		}
 	}
-	return len(plan.FanOutObligations), nil
+	count, err := materializeRunForkDeploymentFeeds(ctx, tx, postgres, attempt, barriers, data, forkRunID, targetBundleHash, plan, pins, now)
+	if err != nil {
+		return 0, err
+	}
+	return len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + count, nil
+}
+
+func countRunForkSourceDeploymentFeeds(plan runfork.RunForkPlan) int {
+	count := 0
+	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment != nil {
+			count++
+		}
+	}
+	return count
+}
+
+func materializeRunForkDeploymentFeeds(ctx context.Context, tx *sql.Tx, postgres bool, attempt *mutationprotocol.Attempt, writer runForkFanOutBarrierOwner, data *storedurabledata.Owner, forkRunID, targetBundleHash string, plan runfork.RunForkPlan, pins []runtimedata.Pin, now time.Time) (int, error) {
+	if len(pins) != 0 && (writer == nil || data == nil) {
+		return 0, fmt.Errorf("fork deployment feed requires selected pipeline and durable-data owners")
+	}
+	sourceByDeclaration := make(map[runtimedata.DeclarationRef]runfork.RunForkFanOutObligation)
+	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment == nil {
+			continue
+		}
+		ref := obligation.Intent.Source.Declaration
+		if _, duplicate := sourceByDeclaration[ref]; duplicate {
+			return 0, fmt.Errorf("fork source has duplicate deployment feed for %s", ref.Key())
+		}
+		sourceByDeclaration[ref] = obligation
+	}
+	for _, pin := range pins {
+		if pin.RunID != forkRunID {
+			return 0, fmt.Errorf("fork deployment pin belongs to another run")
+		}
+		target, err := storedurabledata.RequirePinnedSourceTx(ctx, data, tx, forkRunID, targetBundleHash, pin.Declaration)
+		if err != nil {
+			return 0, err
+		}
+		if target.VersionID != pin.VersionID || target.SchemaDigest != pin.SchemaDigest {
+			return 0, fmt.Errorf("fork deployment target contradicts exact child pin for %s", pin.Declaration.Key())
+		}
+		feed := runtimedata.DeploymentFeed{
+			RunID: forkRunID, BundleHash: targetBundleHash, Declaration: target.Declaration,
+			VersionID: target.VersionID, SchemaDigest: target.SchemaDigest, RowCount: uint64(target.RowCount),
+		}
+		if err := writer.CreateDeploymentFeedTx(ctx, tx, feed); err != nil {
+			return 0, err
+		}
+		key, err := loadRunForkChildDeploymentFeedKeyTx(ctx, tx, forkRunID, target.Declaration)
+		if err != nil {
+			return 0, err
+		}
+		if source, present := sourceByDeclaration[target.Declaration]; present {
+			carriage, err := projectForkDeploymentCarriage(source, target)
+			if err != nil {
+				return 0, err
+			}
+			if carriage.inherit {
+				if err := carryRunForkDeploymentFeedPrefixTx(ctx, tx, key, carriage); err != nil {
+					return 0, err
+				}
+				for _, outcome := range carriage.outcomes {
+					if outcome.EventID != "" {
+						return 0, fmt.Errorf("fork deployment terminal prefix cannot own a source-run event")
+					}
+					var failure any
+					if len(outcome.Failure) != 0 {
+						failure = string(outcome.Failure)
+					}
+					query := `INSERT INTO fan_out_outcomes (run_id,deployment_feed_id,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at)
+					VALUES ($1,$2,$3,$4,NULL,$5,$6,$7,$8)`
+					if postgres {
+						query = strings.Replace(query, "$7,", "$7::jsonb,", 1)
+					}
+					if _, err := tx.ExecContext(ctx, query, forkRunID, key.DeploymentFeedID, outcome.Ordinal, string(outcome.Kind),
+						nullableRunForkString(outcome.SourceEventID), nullableRunForkString(string(outcome.InheritedDisposition)), failure, now); err != nil {
+						return 0, fmt.Errorf("carry fork deployment ordinal %d: %w", outcome.Ordinal, err)
+					}
+					ref, err := runforkrevision.FanOutOutcomeFact(key, outcome.Ordinal)
+					if err != nil {
+						return 0, err
+					}
+					if err := attempt.AddFacts(forkRunID, ref); err != nil {
+						return 0, err
+					}
+				}
+			}
+		}
+		ref, err := runforkrevision.FanOutIntentFact(key)
+		if err != nil {
+			return 0, err
+		}
+		if err := attempt.AddFacts(forkRunID, ref); err != nil {
+			return 0, err
+		}
+	}
+	return len(pins), nil
+}
+
+func carryRunForkDeploymentFeedPrefixTx(ctx context.Context, tx *sql.Tx, key fanoutobligation.IntentKey, carriage forkDeploymentCarriage) error {
+	// The feed was inserted in this transaction. Its insertion timestamp is
+	// authoritative; an earlier materialization timestamp must not move it back.
+	result, err := tx.ExecContext(ctx, `UPDATE fan_out_intents SET cursor=$3,status=$4,blocked_reason=$5,updated_at=created_at WHERE run_id=$1 AND deployment_feed_id=$2`,
+		key.RunID, key.DeploymentFeedID, carriage.cursor, string(carriage.status), nullableRunForkString(carriage.blockedReason))
+	if err != nil {
+		return fmt.Errorf("carry fork deployment feed prefix: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count carried fork deployment feed rows: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("carry fork deployment feed prefix changed %d rows, want 1", rows)
+	}
+	return nil
+}
+
+func loadRunForkChildDeploymentFeedKeyTx(ctx context.Context, tx *sql.Tx, runID string, declaration runtimedata.DeclarationRef) (fanoutobligation.IntentKey, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(deployment_feed_id AS TEXT) FROM fan_out_intents
+		WHERE run_id=$1 AND origin_kind='deployment' AND source_resource_flow_path=$2 AND source_resource_event_name=$3`,
+		runID, declaration.FlowPath, declaration.EventName)
+	if err != nil {
+		return fanoutobligation.IntentKey{}, err
+	}
+	defer rows.Close()
+	var key fanoutobligation.IntentKey
+	key.RunID = runID
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return key, err
+		}
+		return key, fmt.Errorf("fork child has no deployment feed for %s", declaration.Key())
+	}
+	if err := rows.Scan(&key.DeploymentFeedID); err != nil {
+		return key, err
+	}
+	if rows.Next() {
+		return key, fmt.Errorf("fork child has duplicate deployment feeds for %s", declaration.Key())
+	}
+	if err := rows.Err(); err != nil {
+		return key, err
+	}
+	return key, key.Validate()
 }
 
 func bindRunForkFanOutPendingReplays(
@@ -343,6 +562,12 @@ func bindRunForkFanOutPendingReplays(
 		return err
 	}
 	for _, obligation := range plan.FanOutObligations {
+		if obligation.Intent.Request.Deployment != nil {
+			if err := bindRunForkDeploymentPendingReplays(ctx, tx, attempt, forkRunID, obligation, now); err != nil {
+				return err
+			}
+			continue
+		}
 		for _, replay := range obligation.PendingReplays {
 			forkEventID := deterministicRunForkReplayEventID(forkRunID, replay.SourceEventID)
 			var replayCount int

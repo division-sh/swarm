@@ -31,6 +31,9 @@ type AuthoredEmitSite struct {
 
 func (s AuthoredEmitSite) FlowPathIdentity() string { return s.Node.FlowPath() }
 func (s AuthoredEmitSite) NodeID() string           { return s.Node.NodeID() }
+func (s AuthoredEmitSite) EventType() string {
+	return s.Spec.EventType()
+}
 
 func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 	if source == nil {
@@ -110,7 +113,7 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 			Handler:        handler,
 		})
 	}
-	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, b.source.FanOutPlansForHandler(node, handlerEvent)) {
 		add(site.Source, site.SiteKey, site.RuleID, site.RuleRef, site.Spec)
 	}
 	if handler.Guard != nil {

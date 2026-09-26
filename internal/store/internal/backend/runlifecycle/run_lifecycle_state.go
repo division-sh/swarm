@@ -128,7 +128,8 @@ func loadPostgresRunLifecycleSnapshot(
 		SELECT run_id::text, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
-		       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_event_id::text, ''),
+		       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
+		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id::text, ''),
 		       COALESCE(event_count, 0),
 		       COALESCE((SELECT COUNT(DISTINCT es.entity_id)::integer FROM entity_state es WHERE es.run_id = runs.run_id), 0),
 		       failure, COALESCE(continued_as_run_id::text, ''), started_at, ended_at
@@ -147,6 +148,8 @@ func loadPostgresRunLifecycleSnapshot(
 		serviceID     string
 		generation    int64
 		sourceRunID   string
+		forkPointKind string
+		forkRevision  int64
 		sourceEventID string
 		failureRaw    []byte
 		startedAt     sql.NullTime
@@ -154,7 +157,7 @@ func loadPostgresRunLifecycleSnapshot(
 	)
 	err := q.QueryRowContext(ctx, query, runID).Scan(
 		&snapshot.RunID, &state, &snapshot.BundleHash,
-		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &sourceEventID,
+		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -164,7 +167,7 @@ func loadPostgresRunLifecycleSnapshot(
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load PostgreSQL run lifecycle snapshot: %w", err)
 	}
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
+		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("decode PostgreSQL run lifecycle origin: %w", err)
@@ -214,6 +217,8 @@ func loadSQLiteRunLifecycleSnapshot(
 		serviceID     string
 		generation    int64
 		sourceRunID   string
+		forkPointKind string
+		forkRevision  int64
 		sourceEventID string
 		failureRaw    sql.NullString
 		startedAt     any
@@ -223,7 +228,8 @@ func loadSQLiteRunLifecycleSnapshot(
 		SELECT run_id, status, bundle_hash, origin_kind,
 		       COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
-		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_event_id, ''),
+		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
+		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id, ''),
 		       COALESCE(event_count, 0),
 		       COALESCE((SELECT COUNT(DISTINCT es.entity_id) FROM entity_state es WHERE es.run_id = runs.run_id), 0),
 		       failure, COALESCE(continued_as_run_id, ''), started_at, ended_at
@@ -231,7 +237,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		WHERE run_id = ?
 	`, runID).Scan(
 		&snapshot.RunID, &state, &snapshot.BundleHash,
-		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &sourceEventID,
+		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -241,7 +247,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load SQLite run lifecycle snapshot: %w", err)
 	}
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
+		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("decode SQLite run lifecycle origin: %w", err)

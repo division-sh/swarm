@@ -368,7 +368,6 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 								Emit:      EmitSpec{Event: "task.rules.else"},
 							},
 						},
-						FanOut: &FanOutSpec{ItemsFrom: "payload.items", As: "task_item", Identity: "task_item", Emit: EmitSpec{Event: "task.child"}},
 					},
 				},
 			},
@@ -391,7 +390,7 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 	if got, want := effective.RuntimeSubscriptions, []string{"task.review", "task.rules", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("effective subscriptions = %#v, want %#v", got, want)
 	}
-	if got, want := effective.Produces, []string{"task.approved", "task.child", "task.done", "task.expired", "task.rules.else", "task.rules.then"}; !reflect.DeepEqual(got, want) {
+	if got, want := effective.Produces, []string{"task.approved", "task.done", "task.expired", "task.rules.else", "task.rules.then"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("effective produces = %#v, want %#v", got, want)
 	}
 	handler, ok := bundle.Semantics.NodeHandlers[worker.Key()]["task.start"]

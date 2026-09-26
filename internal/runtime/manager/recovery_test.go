@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	semanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -672,6 +673,7 @@ func selectedContractRouteRecoveryRecord(t *testing.T, forkRunID string) Selecte
 		RuntimeRecoveryOwner:         SelectedContractRouteRecoveryOwner,
 		ForkRunID:                    forkRunID,
 		SourceRunID:                  "00000000-0000-0000-0000-000000000501",
+		ForkPoint:                    runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: "00000000-0000-0000-0000-000000000701"},
 		ForkEventID:                  "00000000-0000-0000-0000-000000000701",
 		RouteTopologyOwner:           selectedContractRouteTopologyOwner,
 		DynamicTopologyOwner:         "runtime.run_fork.selected_contract_dynamic_route_topology",

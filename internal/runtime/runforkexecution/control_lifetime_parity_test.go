@@ -150,7 +150,7 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						if strings.HasPrefix(outcomeOperation, "recovery") {
 							owner.ports.fork = selectedControlOutcomeStore{SelectedContractForkLifecycle: owner.ports.fork, operation: outcomeOperation, cause: outcomeErr}
 						}
-						recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
+						recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
 						if strings.HasPrefix(outcomeOperation, "recovery") {
 							if !errors.Is(err, outcomeErr) {
 								t.Fatalf("recovery lost cleanup or refusal diagnostic: %+v %v", recovered, err)

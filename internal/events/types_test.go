@@ -135,6 +135,7 @@ func TestRoutingSourceKindCoverageIsExhaustive(t *testing.T) {
 		RoutingSourceConcreteTemplateInstance,
 		RoutingSourceFlowOwnedControl,
 		RoutingSourcePlatformControl,
+		RoutingSourceDeploymentFeed,
 	}
 	if len(kinds) != int(routingSourceKindCount) {
 		t.Fatalf("routing-source coverage has %d variants, want %d", len(kinds), routingSourceKindCount)

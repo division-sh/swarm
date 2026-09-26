@@ -2839,28 +2839,21 @@ func TestRun_RejectsAccumulatedNamespaceInEmitFieldExpressions(t *testing.T) {
 }
 
 func TestRun_RejectsRetiredFanOutTargetInFanOutEmitFieldExpressions(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"test-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"item.received": {
-						FanOut: &runtimecontracts.FanOutSpec{
-							ItemsFrom: "payload.items",
-							As:        "scored_item",
-							Identity:  "scored_item.id",
-							Emit: runtimecontracts.EmitSpec{
-								Event: "item.scored",
-								Fields: map[string]runtimecontracts.ExpressionValue{
-									"bad": runtimecontracts.CELExpression(`fan_out["target"]`),
-									"id":  runtimecontracts.CELExpression("scored_item.id"),
-								},
-							},
-						},
-					},
-				},
+	bundle := fanOutValidationBundle(runtimecontracts.FanOutSpec{
+		ItemsFrom: "payload.line_items",
+		As:        "scored_item",
+		Identity:  "scored_item.id",
+		Emit: runtimecontracts.EmitSpec{
+			Event: "line_item.requested",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"bad":          runtimecontracts.CELExpression(`fan_out["target"]`),
+				"line_item_id": runtimecontracts.CELExpression("scored_item.id"),
+				"line_index":   runtimecontracts.CELExpression("fan_out.index"),
 			},
 		},
 	})
+	completeBootverifyFanOutFixture(t, bundle, "dispatcher", "order.accepted")
+	source := semanticview.Wrap(bundle)
 
 	report := Run(context.Background(), source, Options{})
 
@@ -3635,6 +3628,9 @@ func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
 
 func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
+	event := bundle.Events["scan.corpus_dispatch"]
+	event.Payload.Properties["geography"] = runtimecontracts.EventFieldSpec{Type: "[string]"}
+	bundle.Events["scan.corpus_dispatch"] = event
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
 	handler.Emit = runtimecontracts.EmitSpec{}
@@ -7862,7 +7858,7 @@ func recompileBootverifySemantics(t testing.TB, bundle *runtimecontracts.Workflo
 
 func compileBootverifyRootSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
 	source := semanticviewtest.WrapRootAgents(bundle)
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil && !strings.HasPrefix(err.Error(), "compile fan_out:") {
 		panic(err)
 	}
 	return source

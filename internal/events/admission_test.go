@@ -571,9 +571,14 @@ func TestPayloadAdmissionRejectsNonObjectJSON(t *testing.T) {
 			t.Fatalf("NewPayloadAdmission(%s) accepted a non-object payload", payload)
 		}
 	}
-	for _, payload := range [][]byte{[]byte(`{"value":null}`), []byte(`{"nested":{"value":null}}`), []byte(`{"items":[null]}`)} {
+	for _, payload := range [][]byte{[]byte(`{"value":null}`)} {
 		if _, err := NewPayloadAdmission(payload, binding); err == nil {
-			t.Fatalf("NewPayloadAdmission(%s) accepted an internal null value", payload)
+			t.Fatalf("NewPayloadAdmission(%s) accepted a top-level null value", payload)
+		}
+	}
+	for _, payload := range [][]byte{[]byte(`{"document":{"value":null}}`), []byte(`{"document":[null]}`)} {
+		if _, err := NewPayloadAdmission(payload, binding); err != nil {
+			t.Fatalf("NewPayloadAdmission(%s) rejected nested JSON null: %v", payload, err)
 		}
 	}
 }

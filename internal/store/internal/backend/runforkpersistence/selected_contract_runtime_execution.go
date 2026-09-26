@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
 
@@ -19,6 +22,17 @@ const selectedContractRuntimeExecutionLease = 2 * time.Minute
 func (s *RunForkPostgresOwner) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
 	if s == nil || s.backend == nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("postgres store is required")
+	}
+	if req.RecoveryFromExecutionID != "" {
+		result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil,
+			func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedContractRuntimeExecution, error) {
+				return issueSelectedSuccessorExecution(txctx, attempt, postgresDialect{}, req, postgresDeliveryAdapter)
+			})
+		if !result.Acknowledged() {
+			return runfork.SelectedContractRuntimeExecution{}, result.Err()
+		}
+		issued, _ := result.Value()
+		return issued, result.Err()
 	}
 	var issued runfork.SelectedContractRuntimeExecution
 	committed, err := s.backend.RunTransactionWithOptionsOutcome(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sql.Tx) error {
@@ -36,6 +50,17 @@ func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx co
 	if err := s.requireCurrentSchema(); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
+	if req.RecoveryFromExecutionID != "" {
+		result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite selected successor execution issuance", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil,
+			func(txctx context.Context, attempt *mutationprotocol.Attempt) (runfork.SelectedContractRuntimeExecution, error) {
+				return issueSelectedSuccessorExecution(txctx, attempt, sqliteDialect{}, req, sqliteDeliveryAdapter)
+			})
+		if !result.Acknowledged() {
+			return runfork.SelectedContractRuntimeExecution{}, result.Err()
+		}
+		issued, _ := result.Value()
+		return issued, result.Err()
+	}
 	committed, err := s.backend.RunTransactionOutcome(ctx, "sqlite selected-contract runtime issuance", func(txctx context.Context, tx *sql.Tx) error {
 		var issueErr error
 		issued, issueErr = issueSelectedContractRuntimeExecution(txctx, tx, sqliteDialect{}, req)
@@ -45,6 +70,35 @@ func (s *RunForkSQLiteOwner) IssueRunForkSelectedContractRuntimeExecution(ctx co
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	return issued, err
+}
+
+func issueSelectedSuccessorExecution(ctx context.Context, attempt *mutationprotocol.Attempt, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest, deliveries interface {
+	TransferSelectedSuccessorAuthority(context.Context, *mutationprotocol.Attempt, string, runtimedelivery.ExecutionAuthority) error
+}) (runfork.SelectedContractRuntimeExecution, error) {
+	if req.Admission.ForkPoint.Kind != runfork.RunForkPointDeploymentRevision {
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected successor issuance is restricted to finite deployment feeds")
+	}
+	var issued runfork.SelectedContractRuntimeExecution
+	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var issueErr error
+		issued, issueErr = issueSelectedContractRuntimeExecution(ctx, tx, dialect, req)
+		return issueErr
+	})
+	if err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	source, err := correlation.NewSourceArtifactFact(req.DeclarationPlan.BundleHash)
+	if err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	authority, err := runtimedelivery.NewSelectedExecutionAuthority(source, issued.ExecutionID, issued.ForkRunID, issued.Generation)
+	if err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	if err := deliveries.TransferSelectedSuccessorAuthority(ctx, attempt, req.RecoveryFromExecutionID, authority); err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
+	return issued, nil
 }
 
 type selectedRuntimeDialect interface {
@@ -61,7 +115,7 @@ type postgresDialect struct{}
 func (postgresDialect) placeholder(n int) string { return fmt.Sprintf("$%d", n) }
 func (postgresDialect) uuid(v string) string     { return v }
 func (postgresDialect) lockBindingSQL() string {
-	return `SELECT binding_id::text, source_run_id::text, fork_event_id::text, mode, COALESCE(bundle_hash,'') FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1::uuid FOR UPDATE`
+	return `SELECT binding_id::text, source_run_id::text, fork_point_kind, fork_revision, COALESCE(fork_event_id::text,''), mode, COALESCE(bundle_hash,'') FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1::uuid FOR UPDATE`
 }
 func (postgresDialect) currentSQL() string {
 	return `SELECT execution_id::text FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid AND state <> 'closed'`
@@ -70,7 +124,7 @@ func (postgresDialect) maxGenerationSQL() string {
 	return `SELECT COALESCE(MAX(generation),0) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid`
 }
 func (postgresDialect) insertSQL() string {
-	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,'prepared',$12,$13,1,'{}'::jsonb,$14,$14,$15,$16::jsonb,$17,$18::jsonb)`
+	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_point_kind,fork_revision,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6,$7::uuid,$8,$9,$10,$11,$12,$13,'prepared',$14,$15,1,'{}'::jsonb,$16,$16,$17,$18::jsonb,$19,$20::jsonb)`
 }
 
 type sqliteDialect struct{}
@@ -78,7 +132,7 @@ type sqliteDialect struct{}
 func (sqliteDialect) placeholder(n int) string { return "?" }
 func (sqliteDialect) uuid(v string) string     { return v }
 func (sqliteDialect) lockBindingSQL() string {
-	return `SELECT binding_id, source_run_id, fork_event_id, mode, COALESCE(bundle_hash,'') FROM run_fork_selected_contract_bindings WHERE fork_run_id=?`
+	return `SELECT binding_id, source_run_id, fork_point_kind, fork_revision, COALESCE(fork_event_id,''), mode, COALESCE(bundle_hash,'') FROM run_fork_selected_contract_bindings WHERE fork_run_id=?`
 }
 func (sqliteDialect) currentSQL() string {
 	return `SELECT execution_id FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=? AND state <> 'closed'`
@@ -87,7 +141,7 @@ func (sqliteDialect) maxGenerationSQL() string {
 	return `SELECT COALESCE(MAX(generation),0) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=?`
 }
 func (sqliteDialect) insertSQL() string {
-	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding) VALUES (?,?,?,?,?,?,?,?,?,?,?,'prepared',?,?,1,'{}',?,?,?,?,?,?)`
+	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_point_kind,fork_revision,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'prepared',?,?,1,'{}',?,?,?,?,?,?)`
 }
 
 func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
@@ -139,13 +193,16 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	if err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, err
 	}
-	var bindingID, sourceRunID, forkEventID, mode, bundleHash string
+	var bindingID, sourceRunID, pointKind, forkEventID, mode, bundleHash string
+	var forkRevision int64
 	if err := tx.QueryRowContext(ctx, dialect.lockBindingSQL(), dialect.uuid(admission.ForkRunID)).Scan(
-		&bindingID, &sourceRunID, &forkEventID, &mode, &bundleHash,
+		&bindingID, &sourceRunID, &pointKind, &forkRevision, &forkEventID, &mode, &bundleHash,
 	); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("lock selected-contract runtime binding: %w", err)
 	}
-	if sourceRunID != admission.SourceRunID || forkEventID != admission.ForkEventID ||
+	if sourceRunID != admission.SourceRunID || pointKind != string(admission.ForkPoint.Kind) ||
+		forkRevision != admission.ForkPoint.Revision || forkEventID != admission.ForkPoint.EventID ||
+		forkEventID != admission.ForkEventID ||
 		mode != admission.ContractSelection.Mode ||
 		strings.TrimSpace(bundleHash) != strings.TrimSpace(admission.ContractSelection.BundleHash) {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime admission does not match durable binding")
@@ -181,7 +238,8 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	executionID := uuid.NewString()
 	issued := runfork.SelectedContractRuntimeExecution{
 		PreparationFingerprint: preparationFingerprint,
-		ExecutionID:            executionID, ForkRunID: admission.ForkRunID, SourceRunID: admission.SourceRunID, ForkEventID: admission.ForkEventID,
+		ExecutionID:            executionID, ForkRunID: admission.ForkRunID, SourceRunID: admission.SourceRunID,
+		ForkPoint: admission.ForkPoint, ForkEventID: admission.ForkEventID,
 		Generation: generation, ExecutableCoordinateFingerprint: executableFingerprint, AdmissionFingerprint: admissionFingerprint,
 		ContainerPlanFingerprint: req.ContainerPlanFingerprint, ActorCensusFingerprint: req.ActorCensusFingerprint,
 		EffectiveConfigFingerprint: req.EffectiveConfigFingerprint, State: "prepared",
@@ -189,7 +247,8 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 		ExecutionOwner:             "selected-issue:" + executionID + ":" + uuid.NewString(), LeaseExpiresAt: now.Add(selectedContractRuntimeExecutionLease), FenceGeneration: 1,
 		ExecutionMode: req.ExecutionMode,
 	}
-	args := []any{issued.ExecutionID, issued.ForkRunID, issued.SourceRunID, bindingID, issued.ForkEventID, issued.Generation,
+	args := []any{issued.ExecutionID, issued.ForkRunID, issued.SourceRunID, bindingID, issued.ForkPoint.Kind,
+		issued.ForkPoint.Revision, nullableForkEventID(issued.ForkPoint), issued.Generation,
 		issued.ExecutableCoordinateFingerprint, issued.AdmissionFingerprint, issued.ContainerPlanFingerprint, issued.ActorCensusFingerprint,
 		issued.EffectiveConfigFingerprint, issued.ExecutionOwner, issued.LeaseExpiresAt, now}
 	if _, ok := dialect.(sqliteDialect); ok {
@@ -209,7 +268,8 @@ func validateSelectedRuntimeAdmission(admission runfork.RunForkSelectedContractE
 		admission.DeferredWorkAdmissionOwner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
 		return fmt.Errorf("selected-contract runtime issuance requires exact non-mutating execution admission")
 	}
-	if !validUUIDStrings(admission.ForkRunID, admission.SourceRunID, admission.ForkEventID) {
+	if !validUUIDStrings(admission.ForkRunID, admission.SourceRunID) ||
+		admission.ForkPoint.Validate() != nil || admission.ForkEventID != admission.ForkPoint.EventID {
 		return fmt.Errorf("selected-contract runtime admission coordinates are invalid")
 	}
 	return nil
@@ -387,6 +447,9 @@ func (s *RunForkPostgresOwner) QuiesceRunForkSelectedContractRuntimeExecution(ct
 		if err := requireSelectedRuntimeNoLiveAttempts(ctx, tx, s.EffectPostgresOwner, authority.ID); err != nil {
 			return err
 		}
+		if err := requireSelectedDeploymentDrainedTx(ctx, tx, authority.SelectedFork.ForkRunID); err != nil {
+			return err
+		}
 		now := time.Now().UTC()
 		res, err := tx.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET state='quiesced',lease_expires_at=NULL,terminal_at=$2,updated_at=$2 WHERE execution_id=$1::uuid AND state='running'`, authority.ID, now)
 		if err := requireExactlyOneMutation(res, err, "quiesce selected-contract runtime execution"); err != nil {
@@ -402,6 +465,9 @@ func (s *RunForkSQLiteOwner) QuiesceRunForkSelectedContractRuntimeExecution(ctx 
 			return err
 		}
 		if err := requireSelectedRuntimeNoLiveAttempts(txctx, tx, s.EffectSQLiteOwner, authority.ID); err != nil {
+			return err
+		}
+		if err := requireSelectedDeploymentDrainedTx(txctx, tx, authority.SelectedFork.ForkRunID); err != nil {
 			return err
 		}
 		now := time.Now().UTC()

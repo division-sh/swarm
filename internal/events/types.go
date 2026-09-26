@@ -162,6 +162,7 @@ const (
 	RoutingSourceConcreteTemplateInstance
 	RoutingSourceFlowOwnedControl
 	RoutingSourcePlatformControl
+	RoutingSourceDeploymentFeed
 	routingSourceKindCount
 )
 
@@ -212,6 +213,16 @@ func NewFlowOwnedControlRoutingSource(route RouteIdentity) (RoutingSource, error
 
 func NewPlatformControlRoutingSource() RoutingSource {
 	return RoutingSource{kind: RoutingSourcePlatformControl}
+}
+
+// NewDeploymentFeedRoutingSource identifies the declaration scope of a pinned
+// dataset event without claiming a flow instance or entity as its producer.
+func NewDeploymentFeedRoutingSource(flowID string) (RoutingSource, error) {
+	flow, err := runtimeidentity.AdmitFlowIdentity(flowID)
+	if err != nil {
+		return RoutingSource{}, err
+	}
+	return RoutingSource{kind: RoutingSourceDeploymentFeed, route: RouteIdentity{FlowID: flow.String()}}, nil
 }
 
 func newRoutingSource(kind RoutingSourceKind, route RouteIdentity) (RoutingSource, error) {
@@ -302,6 +313,11 @@ func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode st
 			return RoutingSource{}, fmt.Errorf("platform control routing source cannot carry route or authority")
 		}
 		return NewPlatformControlRoutingSource(), nil
+	case RoutingSourceDeploymentFeed:
+		if authorityCode != "" || route.FlowInstance != "" || route.EntityID != "" {
+			return RoutingSource{}, fmt.Errorf("deployment feed routing source requires only declaration flow_id")
+		}
+		return NewDeploymentFeedRoutingSource(route.FlowID)
 	}
 	return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kindCode)
 }
@@ -359,6 +375,8 @@ func (k RoutingSourceKind) StorageCode() string {
 		return "flow_owned_control"
 	case RoutingSourcePlatformControl:
 		return "platform_control"
+	case RoutingSourceDeploymentFeed:
+		return "deployment_feed"
 	default:
 		return ""
 	}
@@ -387,6 +405,8 @@ func routingSourceKindFromCode(raw string) (RoutingSourceKind, bool) {
 		return RoutingSourceFlowOwnedControl, true
 	case "platform_control":
 		return RoutingSourcePlatformControl, true
+	case "deployment_feed":
+		return RoutingSourceDeploymentFeed, true
 	default:
 		return 0, false
 	}
@@ -1474,7 +1494,7 @@ func newSemanticEvent(class EventAdmissionClass, rootIntent rootIngressRunIntent
 		if !envelope.Source.Normalized().Empty() {
 			return Event{}, fmt.Errorf("event envelope source requires a typed routing source")
 		}
-	case RoutingSourceExternalIngress, RoutingSourcePlatformControl:
+	case RoutingSourceExternalIngress, RoutingSourcePlatformControl, RoutingSourceDeploymentFeed:
 		if !envelope.Source.Normalized().Empty() {
 			return Event{}, fmt.Errorf("opaque routing source cannot become envelope source evidence")
 		}

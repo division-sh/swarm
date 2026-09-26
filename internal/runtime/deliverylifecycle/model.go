@@ -342,30 +342,31 @@ func (o Obligation) MaxRetries() int                             { return o.maxR
 func (o Obligation) Authority() ExecutionAuthority               { return o.authority }
 
 type Snapshot struct {
-	FinalSelection   SelectionPresence
-	DeliveryID       string
-	EventID          string
-	RunID            string
-	RouteIdentity    events.DeliveryRouteIdentity
-	Route            events.DeliveryRoute
-	SubscriberClass  SubscriberClass
-	SubscriberID     string
-	Status           Status
-	RetryCount       int
-	MaxRetries       int
-	NextEligibleAt   time.Time
-	ClaimVersion     int64
-	ClaimExpiresAt   time.Time
-	ActiveSessionID  string
-	ReasonCode       string
-	Failure          *runtimefailures.Envelope
-	StartedAt        time.Time
-	SettledAt        time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	RetryScheduled   bool
-	ClaimReclaimable bool
-	Authority        ExecutionAuthority
+	FinalSelection        SelectionPresence
+	DeliveryID            string
+	EventID               string
+	RunID                 string
+	RouteIdentity         events.DeliveryRouteIdentity
+	Route                 events.DeliveryRoute
+	SubscriberClass       SubscriberClass
+	SubscriberID          string
+	Status                Status
+	RetryCount            int
+	MaxRetries            int
+	NextEligibleAt        time.Time
+	ClaimVersion          int64
+	ClaimExpiresAt        time.Time
+	ActiveSessionID       string
+	ReasonCode            string
+	Failure               *runtimefailures.Envelope
+	StartedAt             time.Time
+	ContinuationHandoffAt time.Time
+	SettledAt             time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	RetryScheduled        bool
+	ClaimReclaimable      bool
+	Authority             ExecutionAuthority
 }
 
 func (s Snapshot) Terminal() bool { return s.Status.Terminal() }

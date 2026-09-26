@@ -8,6 +8,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -29,20 +30,27 @@ type LifecycleDiagnosticOrigin struct {
 	ParentEventID string                                       `json:"parent_event_id,omitempty"`
 	SelectedFork  runtimeeffects.SelectedContractForkAuthority `json:"selected_fork"`
 	SourceRunID   string                                       `json:"source_run_id,omitempty"`
+	ForkPoint     runfork.RunForkPoint                         `json:"fork_point"`
 	ForkEventID   string                                       `json:"fork_event_id,omitempty"`
 }
 
 func (o LifecycleDiagnosticOrigin) Validate() error {
 	switch o.Owner {
 	case LifecycleDiagnosticNormal:
-		if o.SelectedFork != (runtimeeffects.SelectedContractForkAuthority{}) || o.SourceRunID != "" || o.ForkEventID != "" {
+		if o.SelectedFork != (runtimeeffects.SelectedContractForkAuthority{}) || o.SourceRunID != "" || o.ForkPoint != (runfork.RunForkPoint{}) || o.ForkEventID != "" {
 			return errors.New("normal lifecycle diagnostic cannot carry selected-fork authority")
 		}
 	case LifecycleDiagnosticSelectedFork:
-		for _, id := range []string{o.SelectedFork.ExecutionID, o.SelectedFork.ForkRunID, o.SourceRunID, o.ForkEventID} {
+		for _, id := range []string{o.SelectedFork.ExecutionID, o.SelectedFork.ForkRunID, o.SourceRunID} {
 			if _, err := uuid.Parse(id); err != nil {
 				return fmt.Errorf("selected lifecycle diagnostic identity: %w", err)
 			}
+		}
+		if err := o.ForkPoint.Validate(); err != nil {
+			return fmt.Errorf("selected lifecycle diagnostic fork point: %w", err)
+		}
+		if o.ForkEventID != o.ForkPoint.EventID {
+			return errors.New("selected lifecycle diagnostic event differs from fork point")
 		}
 		if o.SelectedFork.Generation == 0 || o.SelectedFork.AdmissionFingerprint == "" || o.SelectedFork.ContainerPlanFingerprint == "" || o.SelectedFork.ActorCensusFingerprint == "" || o.SelectedFork.EffectiveConfigFingerprint == "" {
 			return errors.New("selected lifecycle diagnostic requires exact execution fingerprints")

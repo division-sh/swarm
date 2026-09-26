@@ -98,7 +98,7 @@ func (s runCompletionOwnerSummaries) validate() error {
 	return nil
 }
 
-func (s runCompletionOwnerSummaries) blocksCompletion() bool {
+func (s runCompletionOwnerSummaries) blocksCompletion(allowEmptyEntities bool) bool {
 	return runDeliveryWorkBlocksCompletion(s.Delivery, s.Pipeline) ||
 		s.FanOut.BlocksCompletion() ||
 		s.Barriers.BlocksCompletion() ||
@@ -106,7 +106,7 @@ func (s runCompletionOwnerSummaries) blocksCompletion() bool {
 		s.Sessions.BlocksCompletion() ||
 		s.Decisions.BlocksCompletion() ||
 		s.Effects.BlocksCompletion() ||
-		!s.Entities.ReadyForCompletion()
+		!entityReadyForCompletion(s.Entities, allowEmptyEntities)
 }
 
 func runDeliveryWorkBlocksCompletion(delivery runtimedelivery.RunSummary, pipeline runtimepipelineobligation.RunSummary) bool {
@@ -129,7 +129,7 @@ func validateRunDeliveryWork(runID string, delivery runtimedelivery.RunSummary, 
 // A validated nonterminal obligation can refute completion without repeatedly
 // decoding every already-published fan-out ledger. This never establishes
 // successful completion or constructs a partial public summary.
-func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog) (bool, *time.Time, error) {
+func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog, allowEmptyEntities bool) (bool, *time.Time, error) {
 	delivery, err := postgresDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 	if err != nil {
 		return false, nil, err
@@ -146,7 +146,7 @@ func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context
 		if err != nil {
 			return false, nil, err
 		}
-		pending, err := entityWorkBlocksCompletion(runID, entities)
+		pending, err := entityWorkBlocksCompletion(runID, entities, allowEmptyEntities)
 		if err != nil || !pending {
 			return false, nil, err
 		}
@@ -158,7 +158,7 @@ func (s *RunLifecyclePostgresOwner) pendingPostgresRunCompletionWork(ctx context
 	return pendingRunDeliveryWorkWake(runID, sessions)
 }
 
-func (s *RunLifecycleSQLiteOwner) pendingSQLiteRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog) (bool, *time.Time, error) {
+func (s *RunLifecycleSQLiteOwner) pendingSQLiteRunCompletionWork(ctx context.Context, tx *sql.Tx, runID string, now time.Time, catalog runtimerunlifecycle.TerminalCatalog, allowEmptyEntities bool) (bool, *time.Time, error) {
 	delivery, err := sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
 	if err != nil {
 		return false, nil, err
@@ -175,7 +175,7 @@ func (s *RunLifecycleSQLiteOwner) pendingSQLiteRunCompletionWork(ctx context.Con
 		if err != nil {
 			return false, nil, err
 		}
-		pending, err := entityWorkBlocksCompletion(runID, entities)
+		pending, err := entityWorkBlocksCompletion(runID, entities, allowEmptyEntities)
 		if err != nil || !pending {
 			return false, nil, err
 		}
@@ -187,14 +187,18 @@ func (s *RunLifecycleSQLiteOwner) pendingSQLiteRunCompletionWork(ctx context.Con
 	return pendingRunDeliveryWorkWake(runID, sessions)
 }
 
-func entityWorkBlocksCompletion(runID string, entities runtimeentity.RunSummary) (bool, error) {
+func entityWorkBlocksCompletion(runID string, entities runtimeentity.RunSummary, allowEmptyEntities bool) (bool, error) {
 	if err := entities.Validate(); err != nil {
 		return false, err
 	}
 	if entities.RunID != runID {
 		return false, fmt.Errorf("completion entity summary does not belong to exact run %s", runID)
 	}
-	return !entities.ReadyForCompletion(), nil
+	return !entityReadyForCompletion(entities, allowEmptyEntities), nil
+}
+
+func entityReadyForCompletion(entities runtimeentity.RunSummary, allowEmptyEntities bool) bool {
+	return entities.ReadyForCompletion() || (allowEmptyEntities && entities.Total == 0)
 }
 
 func pendingRunDeliveryWorkWake(runID string, sessions runtimesessions.RunSummary) (bool, *time.Time, error) {

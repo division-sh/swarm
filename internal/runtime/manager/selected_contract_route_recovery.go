@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 const (
@@ -27,6 +28,7 @@ type SelectedContractRouteRecoveryRecord struct {
 	RuntimeRecoveryOwner         string
 	ForkRunID                    string
 	SourceRunID                  string
+	ForkPoint                    runfork.RunForkPoint
 	ForkEventID                  string
 	RouteTopologyOwner           string
 	DynamicTopologyOwner         string
@@ -125,10 +127,11 @@ func validateSelectedContractRouteRecoveryRecord(record SelectedContractRouteRec
 	if strings.TrimSpace(record.RuntimeRecoveryOwner) != SelectedContractRouteRecoveryOwner {
 		return fmt.Errorf("selected-contract route recovery requires %s runtime owner; got %q", SelectedContractRouteRecoveryOwner, record.RuntimeRecoveryOwner)
 	}
-	if strings.TrimSpace(record.ForkRunID) == "" ||
-		strings.TrimSpace(record.SourceRunID) == "" ||
-		strings.TrimSpace(record.ForkEventID) == "" {
-		return fmt.Errorf("selected-contract route recovery requires fork/source/event identity")
+	if strings.TrimSpace(record.ForkRunID) == "" || strings.TrimSpace(record.SourceRunID) == "" {
+		return fmt.Errorf("selected-contract route recovery requires fork/source identity")
+	}
+	if err := record.ForkPoint.Validate(); err != nil || record.ForkEventID != record.ForkPoint.EventID {
+		return fmt.Errorf("selected-contract route recovery requires exact typed fork point: %v", err)
 	}
 	if strings.TrimSpace(record.RouteTopologyOwner) != selectedContractRouteTopologyOwner {
 		return fmt.Errorf("selected-contract route recovery requires route topology owner; got %q", record.RouteTopologyOwner)

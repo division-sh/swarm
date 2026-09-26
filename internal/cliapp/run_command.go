@@ -158,6 +158,7 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 		Use:   "start [directory]",
 		Short: "Start a workflow run on a running runtime, or reattach to one.",
 		Example: `  swarm run start --event <event-name> --payload payload.json
+  swarm run start --data records.loaded=records.jsonl
   swarm run start --reattach <run-id>`,
 		Args: argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -228,10 +229,13 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 		return runReattachCommand(ctx, out, errOut, opts, wsEndpoint)
 	}
 
-	payload, err := loadRunCommandPayload(root.Resolve(opts.payloadPath))
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return commandExitError{code: 2}
+	var payload map[string]any
+	if strings.TrimSpace(opts.eventName) != "" {
+		payload, err = loadRunCommandPayload(root.Resolve(opts.payloadPath))
+		if err != nil {
+			writeCLIAPIError(errOut, err)
+			return commandExitError{code: 2}
+		}
 	}
 
 	var stopLocal func()
@@ -353,11 +357,13 @@ func (o runCommandOptions) validate() error {
 			}
 		}
 	}
-	if strings.TrimSpace(o.eventName) == "" {
-		return fmt.Errorf("--event is required")
+	hasEvent := strings.TrimSpace(o.eventName) != ""
+	hasPayload := strings.TrimSpace(o.payloadPath) != ""
+	if hasEvent != hasPayload {
+		return fmt.Errorf("--event and --payload must be provided together")
 	}
-	if strings.TrimSpace(o.payloadPath) == "" {
-		return fmt.Errorf("--payload is required")
+	if !hasEvent && len(o.dataImports)+len(o.dataPins) == 0 {
+		return fmt.Errorf("--event with --payload, or at least one --data/--pin, is required")
 	}
 	return nil
 }
@@ -624,9 +630,10 @@ func runCommandHealth(ctx context.Context, client *cliAPIClient) (diagnosticHeal
 }
 
 func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPIClient, health diagnosticHealthCheckResult, opts runCommandOptions, payload map[string]any) (runStartResult, error) {
-	params := map[string]any{
-		"event_name": strings.TrimSpace(opts.eventName),
-		"payload":    payload,
+	params := map[string]any{}
+	if strings.TrimSpace(opts.eventName) != "" {
+		params["event_name"] = strings.TrimSpace(opts.eventName)
+		params["payload"] = payload
 	}
 	if bundleHash := strings.TrimSpace(opts.bundleHash); bundleHash != "" {
 		params["bundle_hash"] = bundleHash

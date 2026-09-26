@@ -581,7 +581,8 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance fan-out delivery barriers: %w", err)
 		}
-		pending, wake, err := s.pendingPostgresRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog)
+		allowEmptyEntities := snapshot.Origin.Kind() == runtimerunlifecycle.OriginDeployment
+		pending, wake, err := s.pendingPostgresRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog, allowEmptyEntities)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
@@ -594,7 +595,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
-		if summaries.blocksCompletion() {
+		if summaries.blocksCompletion(allowEmptyEntities) {
 			result, err := s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
 			result.GenericScheduleActivations = barrierActivations
 			return result, err
@@ -726,7 +727,8 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance sqlite fan-out delivery barriers: %w", err)
 		}
-		pending, wake, err := s.pendingSQLiteRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog)
+		allowEmptyEntities := snapshot.Origin.Kind() == runtimerunlifecycle.OriginDeployment
+		pending, wake, err := s.pendingSQLiteRunCompletionWork(ctx, tx, candidate.RunID, selectedNow, catalog, allowEmptyEntities)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
@@ -739,7 +741,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
-		if summaries.blocksCompletion() {
+		if summaries.blocksCompletion(allowEmptyEntities) {
 			result, err := s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
 			result.GenericScheduleActivations = barrierActivations
 			return result, err

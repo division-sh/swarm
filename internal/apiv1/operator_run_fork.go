@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,8 +18,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const runForkIdempotencyTTL = 24 * time.Hour
-
 func activeRunStatus(raw string) bool {
 	state, err := runtimerunlifecycle.ParseState(raw)
 	return err == nil && state.Active()
@@ -30,11 +27,17 @@ type RunForkAvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 }
 
+type RunForkOperationReader interface {
+	LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+	LoadForkOperationByID(context.Context, string) (runfork.ForkOperationRecord, bool, error)
+}
+
 type RunForkExecutor interface {
 	ExecuteRunFork(context.Context, RunForkExecutionRequest) (RunForkExecutionResult, error)
 }
 
 type RunForkExecutionRequest struct {
+	ForkOperation     *runfork.ForkOperationRequest
 	SourceRunID       string
 	ForkEventID       string
 	BundleHash        string
@@ -49,7 +52,9 @@ type RunForkExecutionResult struct {
 	SourceRunStatus        string            `json:"source_run_status"`
 	SourceFrozen           bool              `json:"source_frozen"`
 	ForkRunID              string            `json:"fork_run_id"`
-	ForkEventID            string            `json:"fork_event_id"`
+	ForkPointKind          string            `json:"fork_point_kind"`
+	ForkRevision           int64             `json:"fork_revision"`
+	ForkEventID            string            `json:"fork_event_id,omitempty"`
 	ForkRunStatus          string            `json:"fork_run_status"`
 	BundleHash             string            `json:"bundle_hash"`
 	ExecutedEventCount     int               `json:"executed_event_count"`
@@ -70,6 +75,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		return RunForkExecutionResult{}, fmt.Errorf("run.fork requires selected-contract executor")
 	}
 	result, err := e.ExecuteSelectedContractRunFork(ctx, runtimerunforkexecution.SelectedContractExecutionRequest{
+		ForkOperation:      req.ForkOperation,
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
 		At:                 strings.TrimSpace(req.ForkEventID),
 		ExpectedBundleHash: strings.TrimSpace(req.BundleHash),
@@ -101,6 +107,8 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		SourceRunStatus:        strings.TrimSpace(result.Activation.SourceRunStatus),
 		SourceFrozen:           result.Activation.SourceFrozen,
 		ForkRunID:              strings.TrimSpace(result.Materialization.ForkRunID),
+		ForkPointKind:          string(result.Materialization.ForkPoint.Kind),
+		ForkRevision:           result.Materialization.ForkPoint.Revision,
 		ForkEventID:            strings.TrimSpace(result.Materialization.ForkPoint.EventID),
 		ForkRunStatus:          status,
 		BundleHash:             strings.TrimSpace(req.BundleHash),
@@ -112,10 +120,17 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 
 func exactSelectedForkActivation(req RunForkExecutionRequest, result runtimerunforkexecution.SelectedContractExecutionResult) bool {
 	materialization, activation := result.Materialization, result.Activation
+	if err := materialization.ForkPoint.Validate(); err != nil {
+		return false
+	}
+	if err := activation.ForkPoint.Validate(); err != nil {
+		return false
+	}
 	return result.Owner == runfork.RunForkSelectedContractExecutionOwner && activation.Activated &&
 		strings.TrimSpace(materialization.SourceRunID) != "" && strings.TrimSpace(materialization.ForkRunID) != "" &&
-		strings.TrimSpace(materialization.ForkPoint.EventID) != "" &&
 		activation.SourceRunID == materialization.SourceRunID && activation.ForkRunID == materialization.ForkRunID &&
+		activation.ForkPoint.Kind == materialization.ForkPoint.Kind &&
+		activation.ForkPoint.Revision == materialization.ForkPoint.Revision &&
 		activation.ForkPoint.EventID == materialization.ForkPoint.EventID &&
 		activation.ForkRunStatus == runfork.RunForkActivatedStatus &&
 		(req.SourceRunID == "" || materialization.SourceRunID == req.SourceRunID) &&
@@ -123,7 +138,7 @@ func exactSelectedForkActivation(req RunForkExecutionRequest, result runtimerunf
 }
 
 func OperatorRunForkHandlers(opts RunForkHandlerOptions) map[string]MethodHandler {
-	if opts.Availability == nil || opts.Executor == nil || opts.Idempotency == nil {
+	if opts.Availability == nil || opts.Operations == nil || opts.Executor == nil {
 		return nil
 	}
 	now := opts.Now
@@ -138,102 +153,145 @@ func OperatorRunForkHandlers(opts RunForkHandlerOptions) map[string]MethodHandle
 }
 
 func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions, now time.Time) (any, error) {
+	_ = now
+	if opts.Availability == nil || opts.Operations == nil || opts.Executor == nil {
+		return nil, fmt.Errorf("run.fork requires availability, durable operation and selected executor")
+	}
 	params, err := runForkParamsFromRequest(req.Params)
 	if err != nil {
 		return nil, err
 	}
-	availability, err := opts.Availability.LoadRunBundleAvailability(ctx, params.SourceRunID)
-	if err != nil {
-		return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
-	}
-	if availability.DataIntegrityError() {
-		return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, runForkAvailabilityDetails(availability))
-	}
-	if !availability.Available() {
-		return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
-	}
-	if activeRunStatus(availability.Status) && !params.AllowSourceFreeze {
-		return nil, NewInvalidParamsError(map[string]any{
-			"field":  "allow_source_freeze",
-			"reason": "must be true to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started",
-		})
-	}
-	sourceBundleHash := strings.TrimSpace(availability.BundleHash)
-	targetBundleHash := strings.TrimSpace(params.BundleHash)
-	if targetBundleHash == "" {
-		targetBundleHash = sourceBundleHash
-	}
-	if targetBundleHash == "" {
-		return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
-			"source_run_id": availability.RunID,
-			"reason":        "source run has no canonical bundle_hash",
-		})
-	}
-	contractSelection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
-	if targetBundleHash != sourceBundleHash {
-		contractSelection = runfork.RunForkContractSelection{
-			Mode:       runfork.RunForkContractSelectionModeBundleHash,
-			BundleHash: targetBundleHash,
-		}
-	}
-	params.BundleHash = targetBundleHash
-
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
-		Method:         req.Method,
-		Actor:          apiidempotency.BearerActor(req.ActorTokenID),
-		IdempotencyKey: params.IdempotencyKey,
-		RequestHash:    req.RequestHash,
-		ResourceID:     params.SourceRunID,
-		TTL:            runForkIdempotencyTTL,
-		Now:            now,
-	}, func(ctx context.Context) (apiidempotency.Completion, error) {
-		result, err := opts.Executor.ExecuteRunFork(ctx, RunForkExecutionRequest{
-			SourceRunID:       params.SourceRunID,
-			ForkEventID:       params.ForkEventID,
-			BundleHash:        params.BundleHash,
-			AllowSourceFreeze: params.AllowSourceFreeze,
-			DataPinOverrides:  params.DataPinOverrides,
-			ContractSelection: contractSelection,
-		})
-		if err != nil && (!result.activationAcknowledged || params.IdempotencyKey == "") {
-			return apiidempotency.Completion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
-		}
-		if result.BundleHash == "" {
-			result.BundleHash = params.BundleHash
-		}
-		if result.DataPins == nil {
-			result.DataPins = []durabledata.Pin{}
-		}
-		if err := validateRunForkExecutionResult(result); err != nil {
-			return apiidempotency.Completion{}, err
-		}
-		if err != nil {
-			diaglog.ProcessLog(diaglog.LevelWarn, "api", "acknowledged run.fork cleanup failed",
-				"source_run_id", result.SourceRunID, "fork_run_id", result.ForkRunID, "error", err.Error())
-		}
-		response, err := json.Marshal(result)
-		if err != nil {
-			return apiidempotency.Completion{}, err
-		}
-		return apiidempotency.Completion{ResourceID: result.ForkRunID, Response: response}, nil
-	})
-	if err != nil {
-		return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
-	}
-	var stored RunForkExecutionResult
-	if err := json.Unmarshal(completion.Response, &stored); err != nil {
-		if replay {
-			return nil, fmt.Errorf("decode run.fork idempotency response: %w", err)
-		}
-		return nil, fmt.Errorf("decode run.fork response: %w", err)
-	}
-	if err := validateRunForkExecutionResult(stored); err != nil {
+	actor := apiidempotency.BearerActor(req.ActorTokenID)
+	if err := actor.ValidateMethod("run.fork"); err != nil {
 		return nil, err
 	}
-	return stored, nil
+	actorKey := string(actor.Kind) + ":" + actor.ID
+	var operation runfork.ForkOperationRequest
+	if params.IdempotencyKey != "" {
+		stored, found, err := opts.Operations.LoadForkOperation(ctx, actorKey, params.IdempotencyKey, req.RequestHash)
+		if err != nil {
+			return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
+		}
+		if found {
+			if stored.Request.SourceRunID != params.SourceRunID || stored.Request.ForkEventID != params.ForkEventID {
+				return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("durable fork operation disagrees with request coordinates"))
+			}
+			if stored.Status == runfork.ForkOperationActivated {
+				return projectForkOperationResult(stored)
+			}
+			if stored.Status != runfork.ForkOperationMaterialized {
+				return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("durable fork operation ended with %s", stored.Status))
+			}
+			operation = stored.Request
+		}
+	}
+	if operation.OperationID == "" {
+		availability, err := opts.Availability.LoadRunBundleAvailability(ctx, params.SourceRunID)
+		if err != nil {
+			return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
+		}
+		if availability.DataIntegrityError() {
+			return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, runForkAvailabilityDetails(availability))
+		}
+		if !availability.Available() {
+			return nil, NewApplicationError(BundleUnavailableCode, false, runForkAvailabilityDetails(availability))
+		}
+		if activeRunStatus(availability.Status) && !params.AllowSourceFreeze {
+			return nil, NewInvalidParamsError(map[string]any{
+				"field":  "allow_source_freeze",
+				"reason": "must be true to allow permanent source freeze if it has not advanced beyond the fork point. A frozen source cannot resume; an advanced source stays independently live. Without this permission, no fork is started",
+			})
+		}
+		sourceBundleHash := strings.TrimSpace(availability.BundleHash)
+		targetBundleHash := strings.TrimSpace(params.BundleHash)
+		if targetBundleHash == "" {
+			targetBundleHash = sourceBundleHash
+		}
+		if targetBundleHash == "" {
+			return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
+				"source_run_id": availability.RunID,
+				"reason":        "source run has no canonical bundle_hash",
+			})
+		}
+		selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
+		if targetBundleHash != sourceBundleHash {
+			selection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: targetBundleHash}
+		}
+		operation = runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: actorKey, IdempotencyKey: params.IdempotencyKey,
+			TransportHash: req.RequestHash, SourceRunID: params.SourceRunID, ForkEventID: params.ForkEventID,
+			TargetBundleHash: targetBundleHash, AllowSourceFreeze: params.AllowSourceFreeze,
+			ContractSelection: selection, DataPinOverrides: params.DataPinOverrides,
+		}
+	}
+	canonical, _, err := operation.Canonical()
+	if err != nil {
+		return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
+	}
+	_, executionErr := opts.Executor.ExecuteRunFork(ctx, RunForkExecutionRequest{
+		ForkOperation: &canonical, SourceRunID: canonical.SourceRunID, ForkEventID: canonical.ForkEventID,
+		BundleHash: canonical.TargetBundleHash, AllowSourceFreeze: canonical.AllowSourceFreeze,
+		DataPinOverrides: canonical.DataPinOverrides, ContractSelection: canonical.ContractSelection,
+	})
+	stored, found, lookupErr := opts.Operations.LoadForkOperationByID(ctx, canonical.OperationID)
+	if lookupErr != nil {
+		return nil, runForkError(params.SourceRunID, params.ForkEventID, errors.Join(executionErr, lookupErr))
+	}
+	if found && stored.Status == runfork.ForkOperationActivated {
+		if executionErr != nil {
+			diaglog.ProcessLog(diaglog.LevelWarn, "api", "acknowledged run.fork cleanup failed",
+				"source_run_id", canonical.SourceRunID, "fork_run_id", stored.ForkRunID, "error", executionErr.Error())
+		}
+		return projectForkOperationResult(stored)
+	}
+	if executionErr != nil {
+		return nil, runForkError(params.SourceRunID, params.ForkEventID, executionErr)
+	}
+	return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("run.fork returned without a durable activation result"))
+}
+
+func projectForkOperationResult(record runfork.ForkOperationRecord) (RunForkExecutionResult, error) {
+	if err := record.Validate(); err != nil {
+		return RunForkExecutionResult{}, err
+	}
+	if record.Status != runfork.ForkOperationActivated || record.Result == nil {
+		return RunForkExecutionResult{}, fmt.Errorf("fork operation has no activated result")
+	}
+	r := record.Result
+	pins := append([]durabledata.Pin(nil), r.DataPins...)
+	if pins == nil {
+		pins = []durabledata.Pin{}
+	}
+	result := RunForkExecutionResult{
+		Owner:       runfork.RunForkSelectedContractExecutionOwner,
+		SourceRunID: r.SourceRunID, SourceRunStatus: r.SourceRunStatus, SourceFrozen: r.SourceFrozen,
+		ForkRunID: r.ForkRunID, ForkPointKind: string(r.ForkPoint.Kind), ForkRevision: r.ForkPoint.Revision,
+		ForkEventID: r.ForkPoint.EventID, ForkRunStatus: r.ForkRunStatus,
+		BundleHash: r.BundleHash, ExecutedEventCount: r.ExecutedEventCount, DataPins: pins,
+		activationAcknowledged: true,
+	}
+	if err := validateRunForkExecutionResult(result); err != nil {
+		return RunForkExecutionResult{}, err
+	}
+	return result, nil
 }
 
 func validateRunForkExecutionResult(result RunForkExecutionResult) error {
+	if result.ForkRevision <= 0 {
+		return fmt.Errorf("run.fork result has no selected revision")
+	}
+	switch result.ForkPointKind {
+	case string(runfork.RunForkPointEvent):
+		if result.ForkEventID == "" {
+			return fmt.Errorf("event run.fork result has no exact event identity")
+		}
+	case string(runfork.RunForkPointDeploymentRevision):
+		if result.ForkEventID != "" {
+			return fmt.Errorf("deployment revision run.fork result invented an event identity")
+		}
+	default:
+		return fmt.Errorf("run.fork result has invalid point kind %q", result.ForkPointKind)
+	}
 	status, err := runtimerunlifecycle.ParseState(result.SourceRunStatus)
 	if err != nil {
 		return fmt.Errorf("run.fork result has invalid source_run_status %q", result.SourceRunStatus)
@@ -393,6 +451,13 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 				"method":      conflict.Method,
 				"resource_id": conflict.ResourceID,
 			},
+		})
+	}
+	var operationConflict *runfork.ForkOperationKeyConflictError
+	if errors.As(err, &operationConflict) {
+		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
+			"original_request_hash":    operationConflict.OriginalRequestHash,
+			"conflicting_request_hash": operationConflict.ConflictingRequestHash,
 		})
 	}
 	msg := err.Error()

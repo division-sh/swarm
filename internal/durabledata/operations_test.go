@@ -315,6 +315,139 @@ func TestRunCreationEnvelopeRejectsDuplicateFusedChildInvocationIDsBeforeHashing
 	}
 }
 
+func TestRunCreationInitiationHasThreeClosedForms(t *testing.T) {
+	declaration, err := ParseDeclarationRef(".", "records.loaded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := ExplicitPin{Declaration: declaration, VersionID: VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")}
+	base := RunCreationCommand{RunID: uuid.NewString(), Actor: "operator", BundleHash: aggregateTestBundleHash}
+	event := base
+	event.EventID = uuid.NewString()
+	event.InitialEvent = json.RawMessage(`{"type":"start","payload":{"count":1}}`)
+	feed := base
+	feed.Data.Pins = []ExplicitPin{pin}
+	both := event
+	both.Data.Pins = []ExplicitPin{pin}
+	for _, tc := range []struct {
+		name string
+		cmd  RunCreationCommand
+		want RunCreationInitiation
+	}{
+		{"event_only", event, RunCreationEventOnly},
+		{"feed_only", feed, RunCreationFeedOnly},
+		{"event_and_feed", both, RunCreationEventAndFeed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := tc.cmd.Initiation(); err != nil || got != tc.want {
+				t.Fatalf("Initiation() = %q, %v; want %q", got, err, tc.want)
+			}
+			if _, raw, canonical, err := tc.cmd.RequestHash(); err != nil {
+				t.Fatalf("RequestHash: %v", err)
+			} else if got, err := canonical.Initiation(); err != nil || got != tc.want {
+				t.Fatalf("canonical initiation = %q, %v; want %q", got, err, tc.want)
+			} else if tc.want == RunCreationFeedOnly && (strings.Contains(string(raw), `"event_id"`) || strings.Contains(string(raw), `"initial_event"`)) {
+				t.Fatalf("feed-only request fabricated event fields: %s", raw)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		cmd  RunCreationCommand
+	}{
+		{"nothing", base},
+		{"event_id_without_event", RunCreationCommand{RunID: base.RunID, Actor: base.Actor, BundleHash: base.BundleHash, EventID: uuid.NewString()}},
+		{"event_without_event_id", RunCreationCommand{RunID: base.RunID, Actor: base.Actor, BundleHash: base.BundleHash, InitialEvent: event.InitialEvent}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, _, err := tc.cmd.RequestHash(); err == nil {
+				t.Fatal("RequestHash admitted an incomplete initiation")
+			}
+		})
+	}
+	feed.EventID = uuid.NewString()
+	if _, _, _, err := feed.RequestHash(); err == nil {
+		t.Fatal("feed-only request admitted a stray event_id")
+	}
+}
+
+func TestFeedOnlyRunCreationReceiptValidation(t *testing.T) {
+	declaration, err := ParseDeclarationRef(".", "records.loaded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	command := RunCreationCommand{
+		RunID: uuid.NewString(), Actor: "operator", BundleHash: aggregateTestBundleHash,
+		Data: RunCreationDataEnvelope{Pins: []ExplicitPin{{Declaration: declaration, VersionID: version}}},
+	}
+	pin := Pin{RunID: command.RunID, RunState: "running", Declaration: declaration,
+		SchemaDigest: SchemaDigest("resource-schema-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		VersionID:    version, Selection: "explicit"}
+	items := []RunCreationDataItem{{Kind: "pin", Pin: &pin}}
+	page := FirstEvidencePage(items)
+	record := RunCreationOperationRecord{
+		Summary: RunCreationOperationSummary{
+			Kind: "run_creation", Outcome: "created", RunID: command.RunID, BundleHash: command.BundleHash,
+			Status: "running", PinCount: 1, Rejection: NoRunCreationRejection(),
+			CompletedAt: time.Now().UTC().Truncate(time.Microsecond),
+		},
+		Binding:  DataBinding{State: "bound", RunID: command.RunID, PinCount: 1, Evidence: &page},
+		Evidence: RunCreationEvidence{RunBinding: items},
+	}
+	if err := ValidateRunCreationReceiptForCommand(record, command); err != nil {
+		t.Fatalf("feed-only created receipt: %v", err)
+	}
+	completed := cloneJSON(t, record)
+	completed.Summary.Status = "completed"
+	completed.Evidence.RunBinding[0].Pin.RunState = "completed"
+	completedPage := FirstEvidencePage(completed.Evidence.RunBinding)
+	completed.Binding.Evidence = &completedPage
+	if err := ValidateRunCreationReceiptForCommand(completed, command); err != nil {
+		t.Fatalf("all-empty completed feed receipt: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*RunCreationOperationRecord)
+	}{
+		{"fake event", func(r *RunCreationOperationRecord) { r.Summary.EventID = uuid.NewString() }},
+		{"wrong run", func(r *RunCreationOperationRecord) { r.Summary.RunID = uuid.NewString() }},
+		{"missing pin", func(r *RunCreationOperationRecord) { r.Evidence.RunBinding = nil }},
+		{"wrong version", func(r *RunCreationOperationRecord) {
+			r.Evidence.RunBinding[0].Pin.VersionID = VersionID("resource-version-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+			r.Binding.Evidence.Items[0].Pin.VersionID = r.Evidence.RunBinding[0].Pin.VersionID
+		}},
+		{"wrong pin state", func(r *RunCreationOperationRecord) {
+			r.Evidence.RunBinding[0].Pin.RunState = "completed"
+			r.Binding.Evidence.Items[0].Pin.RunState = "completed"
+		}},
+		{"extra child", func(r *RunCreationOperationRecord) { r.Evidence.ChildEvaluations = []FusedChildEvaluation{{}} }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hostile := cloneJSON(t, record)
+			test.mutate(&hostile)
+			if err := ValidateRunCreationReceiptForCommand(hostile, command); err == nil {
+				t.Fatal("contradictory feed-only receipt validated")
+			}
+		})
+	}
+	rejected := RunCreationOperationRecord{
+		Summary: RunCreationOperationSummary{
+			Kind: "run_creation", Outcome: "data_rejected", RunID: command.RunID, BundleHash: command.BundleHash,
+			Rejection: RunCreationRejection{State: "rejected", Code: RunCreationRejectionVersionMissing,
+				Declaration: &declaration, VersionID: version}, CompletedAt: record.Summary.CompletedAt,
+		},
+		Binding: DataBinding{State: "none"},
+	}
+	if err := ValidateRunCreationReceiptForCommand(rejected, command); err != nil {
+		t.Fatalf("feed-only refusal receipt: %v", err)
+	}
+	rejected.Summary.Rejection.VersionID = VersionID("resource-version-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+	if err := ValidateRunCreationReceiptForCommand(rejected, command); err == nil {
+		t.Fatal("feed-only refusal targeted an unrequested version")
+	}
+}
+
 func TestPermanentReceiptAggregateValidatorsRejectHostileContradictions(t *testing.T) {
 	sourceCommand, source := validSourceAggregate(t)
 	for _, test := range []struct {

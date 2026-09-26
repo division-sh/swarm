@@ -1472,6 +1472,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
+	supervisor.selectedRecoveryEnvironment = apiStoreCaps.SelectedForkRecovery
 	if apiStoreCaps.SelectedForkRetirement != nil {
 		if rt == nil {
 			if err := apiStoreCaps.SelectedForkRetirement.RetireSelectedContexts(ctx); err != nil {
@@ -1483,7 +1484,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 				presenter.fail(5, "selected_fork_process", err)
 				return 1
 			}
-			if _, err := apiStoreCaps.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture)); err != nil {
+			if _, err := apiStoreCaps.SelectedForkProcess.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), rt.ExecutionPosture), supervisor.selectedRecoveryEnvironment); err != nil {
 				presenter.fail(5, "selected_fork_recovery", err)
 				return 1
 			}

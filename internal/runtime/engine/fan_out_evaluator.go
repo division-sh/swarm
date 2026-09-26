@@ -75,6 +75,9 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	if err != nil {
 		return nil, err
 	}
+	if intent.Source.Kind == fanoutobligation.SourceResourceVersion {
+		return nil, fmt.Errorf("fan-out resource intent has no authored fan_out plan")
+	}
 
 	payload, err := decodeFanOutPayload(trigger.Payload())
 	if err != nil {

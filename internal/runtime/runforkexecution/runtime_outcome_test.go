@@ -416,7 +416,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					if err := restarted.BindSelectedProcess(ctx, process, capability); err != nil {
 						t.Fatal(err)
 					}
-					recovered, err := restarted.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly))
+					recovered, err := restarted.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
 					if err != nil || len(recovered) != 1 || recovered[0].RunID != forkID || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
 						t.Fatalf("acknowledged fork restart recovery=%+v err=%v", recovered, err)
 					}

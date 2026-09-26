@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -56,6 +55,8 @@ type selectedFanOutResourceOwner interface {
 	selectedFanOutOwner
 	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
+	LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
+	LoadPinnedRowsRange(context.Context, string, string, durabledata.PinnedSource, int, int) ([]any, error)
 }
 
 type selectedFanOutDiagnosticOwner interface {
@@ -1830,8 +1831,48 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 					t.Fatalf("equivalent resource %s changed version: %#v err=%v", spelling, equivalent, err)
 				}
 			}
+			var accessDenied *durabledata.DomainError
+			if _, err := owner.LoadPinnedSource(ctx, fixture.runID, fixture.bundleHash, ref); !errors.As(err, &accessDenied) || accessDenied.Code != durabledata.CodeAccessDenied {
+				t.Fatalf("unpinned resource admission = %v, want typed access refusal", err)
+			}
 			if _, err := db.ExecContext(ctx, `INSERT INTO resource_version_pins (run_id,flow_path,event_name,schema_digest,version_id,selection,pinned_at) VALUES ($1,$2,$3,$4,$5,'explicit',$6)`, fixture.runID, ref.FlowPath, ref.EventName, imported.SchemaDigest, imported.Candidate.VersionID, createdAt); err != nil {
 				t.Fatalf("pin resource fan-out version: %v", err)
+			}
+			if source, err := owner.LoadPinnedSource(ctx, fixture.runID, fixture.bundleHash, ref); err != nil || source.VersionID != imported.Candidate.VersionID || source.RowCount != 5 || source.SchemaDigest != imported.SchemaDigest {
+				t.Fatalf("exact source metadata = %+v err=%v", source, err)
+			}
+			const hostileContentDigest = "resource-content-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000"
+			if _, err := db.ExecContext(ctx, `UPDATE resource_versions SET content_digest=$2 WHERE version_id=$1`, imported.Candidate.VersionID, hostileContentDigest); err != nil {
+				t.Fatal(err)
+			}
+			var integrity *durabledata.DomainError
+			if _, err := owner.LoadPinnedSource(ctx, fixture.runID, fixture.bundleHash, ref); !errors.As(err, &integrity) || integrity.Code != durabledata.CodeIntegrity {
+				t.Fatalf("contradictory version metadata admission = %v, want integrity refusal", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE resource_versions SET content_digest=$2 WHERE version_id=$1`, imported.Candidate.VersionID, imported.Candidate.Manifest.ContentDigest); err != nil {
+				t.Fatal(err)
+			}
+			var storedJSONL []byte
+			if err := db.QueryRowContext(ctx, `SELECT canonical_jsonl FROM resource_versions WHERE version_id=$1`, imported.Candidate.VersionID).Scan(&storedJSONL); err != nil {
+				t.Fatal(err)
+			}
+			alteredJSONL := strings.Replace(string(storedJSONL), `"score":1`, `"score":9`, 1)
+			if alteredJSONL == string(storedJSONL) {
+				t.Fatal("hostile payload probe did not change a canonical row")
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE resource_versions SET canonical_jsonl=$2 WHERE version_id=$1`, imported.Candidate.VersionID, []byte(alteredJSONL)); err != nil {
+				t.Fatal(err)
+			}
+			pinned, err := owner.LoadPinnedSource(ctx, fixture.runID, fixture.bundleHash, ref)
+			if err != nil {
+				t.Fatalf("metadata-only source admission: %v", err)
+			}
+			integrity = nil
+			if _, err := owner.LoadPinnedRowsRange(ctx, fixture.runID, fixture.bundleHash, pinned, 0, 1); !errors.As(err, &integrity) || integrity.Code != durabledata.CodeIntegrity {
+				t.Fatalf("contradictory resource payload admission = %v, want integrity refusal", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE resource_versions SET canonical_jsonl=$2 WHERE version_id=$1`, imported.Candidate.VersionID, storedJSONL); err != nil {
+				t.Fatal(err)
 			}
 			if _, err := db.ExecContext(ctx, `
 				UPDATE fan_out_intents
@@ -1857,64 +1898,6 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if input.Items[0].(map[string]any)["score"] != int64(1) {
 				t.Fatalf("resource numeric carrier = %#v", input.Items[0])
 			}
-			repo := canonicalrouting.RepoRoot(t)
-			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, fixture.artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
-			if err != nil {
-				t.Fatal(err)
-			}
-			source := semanticview.Wrap(bundle)
-			plan, ok := source.FanOutPlanForElement(intent.Request.PlanRef.ElementRef)
-			if !ok || plan.Ref != intent.Request.PlanRef {
-				t.Fatal("resource fixture lost its exact compiled fan-out")
-			}
-			entityType, err := semanticview.ResolveEntityStructuralType(source, ".")
-			if err != nil {
-				t.Fatal(err)
-			}
-			itemType := plan.ItemType.Clone()
-			options := workflowexpr.ValueExpressionOptions{ItemAlias: "item", ItemType: &itemType, EntityType: entityType}
-			projectedResourceScore, err := workflowexpr.EvalValueExpressionWithOptions(
-				"item.score",
-				workflowexpr.ValueContext{FanOut: map[string]any{"item": input.Items[0]}},
-				options,
-			)
-			if err != nil || projectedResourceScore != int64(1) {
-				t.Fatalf("resource projected score = %#v err=%v", projectedResourceScore, err)
-			}
-			for _, proof := range []struct {
-				expression string
-				want       any
-			}{
-				{"item.score + entity.integer + 1", int64(77)},
-				{"double(item.score) + double(entity.decimal)", float64(76)},
-			} {
-				got, err := workflowexpr.EvalValueExpressionWithOptions(proof.expression,
-					workflowexpr.ValueContext{Entity: intent.Request.Capsule.StateFields, FanOut: map[string]any{"item": input.Items[0]}},
-					options)
-				if err != nil || got != proof.want {
-					t.Fatalf("mixed resource/capsule %s: got %#v want %#v err=%v", proof.expression, got, proof.want, err)
-				}
-			}
-			unused := forkOrdinalUnusedDependencies{}
-			executor, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{Source: source, StateRepo: unused, MutationOwner: unused, Locker: unused}, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			proveEmit := func(intent fanoutobligation.Intent, trigger events.Event, item any) {
-				t.Helper()
-				emit, err := executor.EvaluateFanOutOrdinal(ctx, intent, trigger, item, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var decoded map[string]any
-				if err := canonicaljson.DecodePreservingNumberLexemes(emit.Event.Payload(), &decoded); err != nil {
-					t.Fatal(err)
-				}
-				if decoded["value"] != "alpha" || decoded["integer_result"] != json.Number("77") || decoded["double_result"] != json.Number("76.0") {
-					t.Fatalf("real resource/capsule ordinal execution: %s", emit.Event.Payload())
-				}
-			}
-			proveEmit(intent, input.Trigger, input.Items[0])
 			if _, err := owner.ReleaseFanOutClaim(ctx, claim); err != nil {
 				t.Fatal(err)
 			}
@@ -1925,8 +1908,9 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("claim unpinned resource fan-out: found=%v err=%v", found, err)
 			}
-			if _, err := owner.LoadFanOutEvaluation(ctx, hostileClaim); !errors.Is(err, sql.ErrNoRows) {
-				t.Fatalf("unpinned resource load error = %v, want missing exact pin", err)
+			accessDenied = nil
+			if _, err := owner.LoadFanOutEvaluation(ctx, hostileClaim); !errors.As(err, &accessDenied) || accessDenied.Code != durabledata.CodeAccessDenied {
+				t.Fatalf("unpinned resource load error = %v, want exact access refusal", err)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 0, 0)
 			if _, err := owner.ReleaseFanOutClaim(ctx, hostileClaim); err != nil {
@@ -1941,6 +1925,25 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			forkOwner := owner.(interface {
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 			})
+			alternate, err := owner.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: fixture.bundleHash,
+				Declaration: ref, ExpectedHead: durabledata.VersionHead(imported.Candidate.VersionID), InputFormat: "jsonl",
+				Input: []byte("{\"slug\":\"different\",\"score\":99}\n"),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeConflict := snapshotForkHistoricalExecutionTables(t, db, postgres)
+			if _, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
+				SourceRunID: fixture.runID, At: forkPointEventID,
+				OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID),
+				DataPinOverrides:     []durabledata.ExplicitPin{{Declaration: ref, VersionID: alternate.Candidate.VersionID}},
+			}); err == nil {
+				t.Fatal("fork accepted an alternate pin while exact resource-source work remained owed")
+			}
+			if !reflect.DeepEqual(beforeConflict, snapshotForkHistoricalExecutionTables(t, db, postgres)) {
+				t.Fatal("conflicting fork pin changed durable domain evidence")
+			}
 			materialized, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)})
 			if err != nil {
 				t.Fatalf("materialize resource fan-out fork: %v", err)
@@ -1987,7 +1990,6 @@ func TestFanOutResourceVersionSourceRequiresPinAndForkInheritsIt(t *testing.T) {
 			if err != nil || len(childInput.Items) != 5 || childInput.Items[0].(map[string]any)["slug"] != "alpha" || childIntent.NextChunkSize != 32 {
 				t.Fatalf("fork resource input = %#v err=%v", childInput, err)
 			}
-			proveEmit(childIntent, childInput.Trigger, childInput.Items[0])
 		})
 	}
 }

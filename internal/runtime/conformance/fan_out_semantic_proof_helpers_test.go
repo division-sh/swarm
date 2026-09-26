@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -29,9 +30,14 @@ import (
 )
 
 const (
-	semanticProofPayloadEvent   = "portfolio.proof.payload.requested"
-	semanticProofEntityEvent    = "portfolio.proof.entity.requested"
-	semanticProofOverwriteEvent = "portfolio.proof.overwrite.requested"
+	semanticProofPayloadEvent      = "portfolio.proof.payload.requested"
+	semanticProofEntityEvent       = "portfolio.proof.entity.requested"
+	semanticProofResourceEvent     = "portfolio.proof.resource.requested"
+	semanticProofJobflowEvent      = "portfolio.proof.jobflow.requested"
+	semanticProofKeylessEvent      = "portfolio.proof.keyless.requested"
+	semanticProofRuleDataEvent     = "portfolio.proof.rule_data.requested"
+	semanticProofCompleteDataEvent = "portfolio.proof.complete_data.requested"
+	semanticProofOverwriteEvent    = "portfolio.proof.overwrite.requested"
 )
 
 func TestFanOutSemanticProofFixtureAdmitsExactProducerSites(t *testing.T) {
@@ -56,8 +62,12 @@ func TestFanOutSemanticProofFixtureAdmitsExactProducerSites(t *testing.T) {
 
 // Extend a copy of the existing admitted numeric fixture, not its shared files.
 func semanticProofSource(t *testing.T) semanticview.Source {
+	return semanticProofSourceWithCrossFlow(t, false)
+}
+
+func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview.Source {
 	t.Helper()
-	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericReporterSink: true, RegistrationUUIDField: true})
+	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericInternalSettlement: !crossFlow, RegistrationUUIDField: true})
 	modify := func(relative string, change func(string) string) {
 		t.Helper()
 		path := filepath.Join(root, notifyallchildren.OwnerFlowID, relative)
@@ -82,7 +92,8 @@ func semanticProofSource(t *testing.T) semanticview.Source {
 		for _, name := range eventsToAdd {
 			fmt.Fprintf(&added, "      - event: %s\n        source: external\n", name)
 		}
-		return replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
+		raw = replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
+		return raw
 	})
 	modify("events.yaml", func(raw string) string {
 		raw = replace(raw, "  eligible: boolean\n", "  eligible: boolean\n  ordinal: integer\n  source_count: integer\n  snapshot_threshold: integer\n")
@@ -310,14 +321,23 @@ type semanticProofFixture struct {
 	db       *sql.DB
 	source   semanticview.Source
 	runtime  notifyAllChildrenRuntime
+	topology *notifyAllChildrenProcessTopology
 	probe    *semanticProofProbe
 	ctx      context.Context
 	runID    string
 }
 
 func newSemanticProofFixture(t *testing.T, backend string, sqlFaults ...bool) *semanticProofFixture {
+	return newSemanticProofFixtureWithPreparation(t, backend, nil, sqlFaults...)
+}
+
+func newSemanticProofFixtureWithPreparation(t *testing.T, backend string, prepare func(*semanticProofFixture) []durabledata.ExplicitPin, sqlFaults ...bool) *semanticProofFixture {
+	return newSemanticProofFixtureWithSourcePreparation(t, backend, semanticProofSource(t), prepare, sqlFaults...)
+}
+
+func newSemanticProofFixtureWithSourcePreparation(t *testing.T, backend string, source semanticview.Source, prepare func(*semanticProofFixture) []durabledata.ExplicitPin, sqlFaults ...bool) *semanticProofFixture {
 	t.Helper()
-	f := &semanticProofFixture{source: semanticProofSource(t), runID: uuid.NewString()}
+	f := &semanticProofFixture{source: source, runID: uuid.NewString()}
 	if len(sqlFaults) != 0 && sqlFaults[0] {
 		f.selected, f.db = newSemanticProofSQLFaultStore(t, backend)
 	} else if backend == "postgres" {
@@ -329,7 +349,9 @@ func newSemanticProofFixture(t *testing.T, backend string, sqlFaults ...bool) *s
 		f.selected, f.db = selected, storetest.DatabaseForTest(selected)
 	}
 	f.probe = &semanticProofProbe{db: f.db, policies: map[string]semanticProofPolicy{}, intents: map[string]fanoutobligation.Intent{}, attempts: map[string][]semanticProofAttempt{}, sqlFaults: map[string][]semanticProofAttempt{}, outcomeSQLFaults: map[string]int{}, blocks: map[string]pipeline.FanOutBlockRequest{}, retries: map[string]pipeline.FanOutRetryableRelease{}, completed: make(chan semanticProofReceipt, 1024)}
+	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, f.source)), f.selected, f.source)
 	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: f.topology,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			f.probe.PipelineCoordinator = pc
 			return f.probe
@@ -339,7 +361,11 @@ func newSemanticProofFixture(t *testing.T, backend string, sqlFaults ...bool) *s
 	if err := f.runtime.manager.Run(managedConformanceExecutionContextForBundle(t, f.ctx, "fan-out-semantic-proof", f.runtime.sourceArtifactFact)); err != nil {
 		t.Fatal(err)
 	}
-	publishNotifyAllChildrenRunCreatingEvent(t, f.ctx, f.runtime, f.source, f.runID, "portfolio.opened", map[string]any{"portfolio_id": f.runID, "threshold": 75})
+	if prepare == nil {
+		publishNotifyAllChildrenRunCreatingEvent(t, f.ctx, f.runtime, f.source, f.runID, "portfolio.opened", map[string]any{"portfolio_id": f.runID, "threshold": 75})
+	} else {
+		publishSemanticProofRunWithPins(t, f, prepare(f))
+	}
 	return f
 }
 
@@ -384,6 +410,23 @@ func (f *semanticProofFixture) waitIntent(t *testing.T, trigger string, cursor i
 	defer func() {
 		if reached {
 			return
+		}
+		var deliveryStatus string
+		var deliveryFailure []byte
+		if err := f.db.QueryRowContext(f.ctx, `SELECT status,failure FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, f.runID, trigger).Scan(&deliveryStatus, &deliveryFailure); err == nil {
+			t.Logf("trigger delivery status=%s failure=%s", deliveryStatus, deliveryFailure)
+		} else {
+			t.Logf("trigger delivery readback: %v", err)
+		}
+		logs, err := f.db.QueryContext(f.ctx, `SELECT payload FROM events WHERE run_id=$1 AND event_name='platform.runtime_log' ORDER BY insertion_sequence DESC LIMIT 3`, f.runID)
+		if err == nil {
+			defer logs.Close()
+			for logs.Next() {
+				var payload []byte
+				if logs.Scan(&payload) == nil {
+					t.Logf("recent runtime log: %s", payload)
+				}
+			}
 		}
 		f.probe.mu.Lock()
 		policy := f.probe.policies[trigger]

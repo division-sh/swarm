@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
@@ -25,27 +26,28 @@ type processLifecycleSupervisor struct {
 	shutdownRuntime   func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	operationMu       sync.Mutex
 
-	mu                        sync.RWMutex
-	currentRT                 *runtime.Runtime
-	currentSourceArtifactFact runtimecorrelation.SourceArtifactFact
-	runtimeContexts           *runtime.RuntimeContextManager
-	execution                 map[string]apiv1.MethodHandler
-	resetting                 bool
-	apiReady                  bool
-	resetContexts             []serveRuntimeBundleContext
-	resetContextsManaged      bool
-	resetRequests             []serveRuntimeBundleContextRequest
-	resetBuildExecution       func(serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error)
-	resetRefresh              func(context.Context) error
-	resetGeneration           uint64
-	resetOperationID          string
-	resetConverged            bool
-	resetStartup              bool
-	resetRecoveredProjections []destructivereset.SourceProjection
-	selected                  *storeselected.RunFork
-	selectedResetPredecessor  *storeselected.RunFork
-	selectedProcess           *worklifetime.Process
-	resetContainerRuntime     interface {
+	mu                          sync.RWMutex
+	currentRT                   *runtime.Runtime
+	currentSourceArtifactFact   runtimecorrelation.SourceArtifactFact
+	runtimeContexts             *runtime.RuntimeContextManager
+	execution                   map[string]apiv1.MethodHandler
+	resetting                   bool
+	apiReady                    bool
+	resetContexts               []serveRuntimeBundleContext
+	resetContextsManaged        bool
+	resetRequests               []serveRuntimeBundleContextRequest
+	resetBuildExecution         func(serveRuntimeBundleContext) (map[string]apiv1.MethodHandler, error)
+	resetRefresh                func(context.Context) error
+	resetGeneration             uint64
+	resetOperationID            string
+	resetConverged              bool
+	resetStartup                bool
+	resetRecoveredProjections   []destructivereset.SourceProjection
+	selected                    *storeselected.RunFork
+	selectedResetPredecessor    *storeselected.RunFork
+	selectedProcess             *worklifetime.Process
+	selectedRecoveryEnvironment runtimerunforkexecution.SelectedForkRecoveryEnvironment
+	resetContainerRuntime       interface {
 		destructivereset.ManagedContainerRuntime
 		destructivereset.ManagedContainerInventoryReader
 		DisposeProjectionContainers(context.Context, sourceartifact.RuntimeProjectionCleanup) error

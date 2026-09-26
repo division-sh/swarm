@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func TestRecoverRejectsMalformedCanonicalRecipientEvidence(t *testing.T) {
@@ -73,6 +75,25 @@ func TestRecoverCanonicalRecipientReadbackPreservesSelectedEvidence(t *testing.T
 				t.Fatal("evidence readback installed live routes")
 			}
 		})
+	}
+}
+
+func TestRecoverDeploymentRevisionRouteHasNoSyntheticEvent(t *testing.T) {
+	record := selectedContractRouteRecoveryRecord(t, "00000000-0000-0000-0000-000000000606")
+	record.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 4}
+	record.ForkEventID = ""
+	bus := &recoveryTestBus{selectedRouteRecoveries: []SelectedContractRouteRecoveryRecord{record}}
+	manager := newTestAgentManager(t, bus, nil, &recoveryTestStore{})
+	if err := manager.restoreSelectedContractRouteRecoveries(context.Background()); err != nil {
+		t.Fatalf("eventless recovery rejected: %v", err)
+	}
+	truth := manager.SelectedContractRouteRecoverySnapshot()[record.ForkRunID]
+	if truth.Record.ForkPoint != record.ForkPoint || truth.Record.ForkEventID != "" {
+		t.Fatalf("recovery invented or changed fork event: %+v", truth.Record)
+	}
+	record.ForkEventID = "00000000-0000-0000-0000-000000000701"
+	if err := validateSelectedContractRouteRecoveryRecord(record); err == nil {
+		t.Fatal("deployment revision accepted event-shaped route identity")
 	}
 }
 

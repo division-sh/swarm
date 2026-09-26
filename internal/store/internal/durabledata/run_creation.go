@@ -17,21 +17,55 @@ import (
 // existing selected-store event transaction. Its internals are deliberately
 // opaque outside this owner package.
 type RunCreationPlan struct {
-	command     runtimedata.RunCreationCommand
-	requestHash string
-	requestJSON []byte
-	record      runtimedata.RunCreationOperationRecord
-	replay      bool
-	failed      bool
-	sources     []sourceEvaluation
-	pins        []runtimedata.Pin
-	committed   bool
+	command        runtimedata.RunCreationCommand
+	requestHash    string
+	requestJSON    []byte
+	record         runtimedata.RunCreationOperationRecord
+	replay         bool
+	failed         bool
+	sources        []sourceEvaluation
+	pins           []runtimedata.Pin
+	feeds          []runtimedata.DeploymentFeed
+	committed      bool
+	feedsCommitted bool
 }
 
 func (p RunCreationPlan) Replay() bool { return p.replay }
 func (p RunCreationPlan) Failed() bool { return p.failed }
 func (p RunCreationPlan) Record() runtimedata.RunCreationOperationRecord {
 	return p.record
+}
+
+func (p RunCreationPlan) DeploymentFeeds() []runtimedata.DeploymentFeed {
+	if p.replay || p.failed {
+		return nil
+	}
+	return append([]runtimedata.DeploymentFeed(nil), p.feeds...)
+}
+
+// DeploymentFeedWriterTx is the one transaction-bound handoff from run
+// creation to the existing fan-out obligation owner. It never publishes rows.
+type DeploymentFeedWriterTx interface {
+	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
+}
+
+func CommitRunCreationFeedsTx(ctx context.Context, tx *sql.Tx, plan *RunCreationPlan, writer DeploymentFeedWriterTx) error {
+	if tx == nil || plan == nil || plan.replay || plan.failed || !plan.committed || plan.feedsCommitted {
+		return fmt.Errorf("deployment feed commit requires one committed run-creation plan")
+	}
+	if len(plan.feeds) != 0 && writer == nil {
+		return fmt.Errorf("deployment feed owner is required for pinned run creation")
+	}
+	for _, feed := range plan.feeds {
+		if err := feed.Validate(); err != nil {
+			return err
+		}
+		if err := writer.CreateDeploymentFeedTx(ctx, tx, feed); err != nil {
+			return err
+		}
+	}
+	plan.feedsCommitted = true
+	return nil
 }
 
 func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command runtimedata.RunCreationCommand) (RunCreationPlan, error) {
@@ -56,7 +90,7 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 	if exists, err := o.runExistsTx(ctx, tx, canonical.RunID); err != nil {
 		return RunCreationPlan{}, err
 	} else if exists {
-		return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run %s exists without its permanent run-creation receipt", canonical.RunID)
+		return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodeRunDataImmutable, "run %s already exists and cannot acquire run-creation data", canonical.RunID)
 	}
 
 	var declarations []runtimedata.Declaration
@@ -160,14 +194,26 @@ func PrepareRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, command run
 			RunID: canonical.RunID, RunState: "running", Declaration: declaration.Ref,
 			SchemaDigest: declaration.SchemaDigest, VersionID: version.VersionID, Selection: "explicit",
 		})
+		plan.feeds = append(plan.feeds, runtimedata.DeploymentFeed{
+			RunID: canonical.RunID, BundleHash: canonical.BundleHash, Declaration: declaration.Ref,
+			SchemaDigest: declaration.SchemaDigest, VersionID: version.VersionID, RowCount: version.Manifest.RowCount,
+		})
 	}
 	for _, evaluation := range plan.sources {
 		plan.pins = append(plan.pins, runtimedata.Pin{
 			RunID: canonical.RunID, RunState: "running", Declaration: evaluation.command.Declaration,
 			SchemaDigest: evaluation.declaration.SchemaDigest, VersionID: evaluation.compiled.VersionID, Selection: "fused_import",
 		})
+		plan.feeds = append(plan.feeds, runtimedata.DeploymentFeed{
+			RunID: canonical.RunID, BundleHash: canonical.BundleHash, Declaration: evaluation.command.Declaration,
+			SchemaDigest: evaluation.declaration.SchemaDigest, VersionID: evaluation.compiled.VersionID,
+			RowCount: evaluation.compiled.Manifest.RowCount,
+		})
 	}
 	runtimedata.SortPins(plan.pins)
+	sort.Slice(plan.feeds, func(i, j int) bool {
+		return runtimedata.CompareDeclarationRef(plan.feeds[i].Declaration, plan.feeds[j].Declaration) < 0
+	})
 	return plan, nil
 }
 
@@ -273,6 +319,9 @@ func CompleteRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, plan *RunC
 		return runtimedata.RunCreationOperationRecord{}, fmt.Errorf("run creation completion requires one matching committed plan and event")
 	}
 	now := o.currentTime()
+	for index := range plan.pins {
+		plan.pins[index].RunState = status
+	}
 	for _, pin := range plan.pins {
 		if _, err := tx.ExecContext(ctx, o.query(`
 			INSERT INTO resource_version_pins
@@ -333,7 +382,7 @@ func pageRunCreationItems(all []runtimedata.RunCreationDataItem) runtimedata.Pag
 }
 
 func (o *Owner) insertRunCreationReceiptTx(ctx context.Context, tx *sql.Tx, plan RunCreationPlan, record runtimedata.RunCreationOperationRecord) error {
-	if err := record.ValidateForCommand(plan.command); err != nil {
+	if err := runtimedata.ValidateRunCreationReceiptForCommand(record, plan.command); err != nil {
 		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s is contradictory: %v", plan.command.RunID, err)
 	}
 	if err := validatePlannedSourceEvaluations(plan, record); err != nil {
@@ -432,7 +481,7 @@ func decodeRunCreationReceipt(runID, storedHash string, requestJSON, summaryJSON
 	if err := json.Unmarshal(evidenceJSON, &record.Evidence); err != nil {
 		return runtimedata.RunCreationOperationRecord{}, runtimedata.RunCreationCommand{}, err
 	}
-	if err := record.ValidateForCommand(canonical); err != nil {
+	if err := runtimedata.ValidateRunCreationReceiptForCommand(record, canonical); err != nil {
 		return runtimedata.RunCreationOperationRecord{}, runtimedata.RunCreationCommand{}, err
 	}
 	return record, canonical, nil

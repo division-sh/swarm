@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,56 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func TestExecutorReadResourceDataAcceptsExpandedCanonicalPayload(t *testing.T) {
+	source, _ := loadResourceDataToolSource(t)
+	actor := flowDataActorWithIdentity(t, source, "expanded-resource-reader")
+	refs := flowdata.AllowedResourceData(source, actor)
+	if len(refs) != 1 {
+		t.Fatalf("resource refs = %+v", refs)
+	}
+	schema := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"id":      map[string]any{"type": "string"},
+			"payload": map[string]any{"type": "string"},
+		},
+		"required": []string{"id", "payload"},
+	}
+	var input strings.Builder
+	for index := 0; index < 100; index++ {
+		fmt.Fprintf(&input, "{\"id\":\"row-%02d\",\"payload\":\"%s\"}\n", index, strings.Repeat("<", 1_300))
+	}
+	compiled, defects := durabledata.CompileJSONL(refs[0], schema, "id", []byte(input.String()))
+	if len(defects) != 0 || len(compiled.CanonicalJSONL) <= durabledata.MaxDecodedImportBytes {
+		t.Fatalf("admitted expanded payload bytes=%d, defects=%+v", len(compiled.CanonicalJSONL), defects)
+	}
+	item := durabledata.ResourceAccessItem{
+		Kind: "resource", Declaration: refs[0], VersionID: compiled.VersionID,
+		SchemaDigest: compiled.Manifest.SchemaDigest, RowCount: uint64(len(compiled.Rows)),
+		BusinessKey: "id", Schema: compiled.CanonicalSchema, Content: compiled.CanonicalJSONL,
+	}
+	read := func(item durabledata.ResourceAccessItem) (any, error) {
+		exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, DataAccessStore: flowDataResourceStore{item: item}})
+		return exec.Execute(flowDataToolContext(actor), "read_flow_data", map[string]any{
+			"kind": "resource_row", "declaration": refs[0], "key": "row-00",
+		})
+	}
+	result, err := read(item)
+	if err != nil {
+		t.Fatalf("read admitted expanded payload: %v", err)
+	}
+	if result.(map[string]any)["row"] == nil {
+		t.Fatalf("expanded row = %#v", result)
+	}
+	item.Content = bytes.Replace(compiled.CanonicalJSONL, []byte(`\u003c`), []byte(`<`), 1)
+	if bytes.Equal(item.Content, compiled.CanonicalJSONL) {
+		t.Fatal("noncanonical probe did not change stored bytes")
+	}
+	if _, err := read(item); err == nil {
+		t.Fatal("same-meaning noncanonical payload was accepted")
+	}
+}
 
 type flowDataResourceStore struct {
 	item durabledata.ResourceAccessItem

@@ -115,12 +115,12 @@ func listFanOutIntents(ctx context.Context, db *sql.DB, postgres bool, now func(
 	if postgres {
 		collation = ` COLLATE "C"`
 	}
-	identity := `triggering_delivery_id,flow_path` + collation + `,declaration_family` + collation + `,semantic_path` + collation
+	identity := `COALESCE(CAST(triggering_delivery_id AS TEXT),'')` + collation + `,COALESCE(flow_path,'')` + collation + `,COALESCE(declaration_family,'')` + collation + `,COALESCE(semantic_path,'')` + collation + `,COALESCE(CAST(deployment_feed_id AS TEXT),'')` + collation
 	if cursor != nil {
 		key := cursor.After
 		start := len(args) + 1
-		args = append(args, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath)
-		query += fmt.Sprintf(" AND (%s) > ($%d,$%d,$%d,$%d)", identity, start, start+1, start+2, start+3)
+		args = append(args, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, key.DeploymentFeedID)
+		query += fmt.Sprintf(" AND (%s) > ($%d,$%d,$%d,$%d,$%d)", identity, start, start+1, start+2, start+3, start+4)
 	}
 	args = append(args, q.Limit+1)
 	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d", identity, len(args))

@@ -233,6 +233,41 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 	return eb.PublishAPIEventWithRunCreationAcknowledged(ctx, evt, endpoint, idempotency, completion, nil)
 }
 
+func (eb *EventBus) StartDeploymentRunAcknowledged(
+	ctx context.Context,
+	command durabledata.RunCreationCommand,
+	request apiidempotency.Request,
+) (durabledata.RunCreationOperationRecord, error) {
+	_, _, canonical, err := command.RequestHash()
+	if err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	initiation, err := canonical.Initiation()
+	if err != nil || initiation != durabledata.RunCreationFeedOnly || request.Method != "run.start" {
+		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires an eventless feed-only command and run.start authority")
+	}
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+	}
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return durabledata.RunCreationOperationRecord{}, err
+	}
+	fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok || fact.BundleHash() != canonical.BundleHash {
+		return durabledata.RunCreationOperationRecord{}, errors.New("deployment run start requires the exact selected bundle source fact")
+	}
+	owner, ok := eb.store.(DeploymentRunCreationCommitOwner)
+	if !ok || owner == nil {
+		return durabledata.RunCreationOperationRecord{}, errors.New("selected store does not support atomic deployment run creation")
+	}
+	return owner.CommitDeploymentRunCreation(ctx, canonical, request)
+}
+
 // PublishAPIEventWithRunCreationAcknowledged adds the method-neutral durable
 // parent operation required by create-new-run event.publish and run.start.
 func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
@@ -683,6 +718,7 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 		runtimeflowidentity.RunScopedFlowInstance{},
 		graph,
 		inputProducers,
+		true,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("derive active route topology before activation: %w", err)
@@ -700,12 +736,15 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 			Identity:            identity,
 			ActivationVariables: plan.ActivationVariables,
 		}
-		if err := staged.addFlowInstanceRouteForContextWithInputProducers(nil, request, &inputProducers); err != nil {
+		_, err = staged.addFlowInstanceRouteForTopology(request, &inputProducers)
+		if err != nil {
 			return nil, fmt.Errorf("derive publication activation route %d: %w", index, err)
 		}
 		identity = request.Normalized().Identity
 		byIdentity[identity] = struct{}{}
 	}
+	// The staged table is discarded after record projection; it is never used
+	// to resolve subscribers, so rebuilding its resolution index is unnecessary.
 	identities = identities[:0]
 	for identity := range byIdentity {
 		identities = append(identities, identity)
@@ -1818,7 +1857,7 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 	_, _, platformProtocol := runtimecontracts.PlatformEventCatalogEntry(eb.semanticSource.PlatformSpec(), name)
 	if !platformProtocol {
 		switch evt.RoutingSource().Kind() {
-		case events.RoutingSourceRoot, events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
+		case events.RoutingSourceRoot, events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance, events.RoutingSourceDeploymentFeed:
 			declaration, err := runtimepinrouting.PublicationDeclarationForSourceEvent(evt.Type(), evt.RoutingSource())
 			if err != nil {
 				return ctx, fmt.Errorf("publication metadata: %w", err)

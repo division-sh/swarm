@@ -112,33 +112,17 @@ func NewPayloadAdmission(payload []byte, binding PayloadSchemaBinding) (PayloadA
 	if !ok || object == nil {
 		return PayloadAdmission{}, fmt.Errorf("admitted event payload must be a JSON object")
 	}
-	if payloadValueContainsNull(object) {
-		return PayloadAdmission{}, fmt.Errorf("admitted event payload cannot contain null")
+	// Nested null belongs to the bound schema (notably JSON fields); this
+	// structural admission can reject only top-level null unconditionally.
+	for _, value := range object {
+		if value == nil {
+			return PayloadAdmission{}, fmt.Errorf("admitted event payload cannot contain top-level null")
+		}
 	}
 	if err := binding.Validate(); err != nil {
 		return PayloadAdmission{}, err
 	}
 	return PayloadAdmission{payload: bytes.Clone(payload), binding: binding}, nil
-}
-
-func payloadValueContainsNull(value any) bool {
-	switch typed := value.(type) {
-	case nil:
-		return true
-	case map[string]any:
-		for _, item := range typed {
-			if payloadValueContainsNull(item) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range typed {
-			if payloadValueContainsNull(item) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (a PayloadAdmission) Payload() []byte               { return bytes.Clone(a.payload) }

@@ -5676,7 +5676,7 @@
     },
     {
       "name": "event.publish",
-      "description": "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger, and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. For create-new publication, an exact authored template-flow input pin may be admitted through typed public-input authority. Authored root event-catalog ownership takes precedence even when the root has no input pin; effective provider-trigger schema imports are visibility facts, not authored-root or provider-output authority. The exact template endpoint must lower through the canonical ConnectRoutePlan and template create/select/select-or-create lifecycle owner. Endpoint resolution returns one typed ordinary-root/static, exact-template-input, or invalid-template decision. Once template ownership is selected, a missing, ambiguous, or invalid exact input fails closed and cannot fall through to ordinary publication. Invalid or design-locked resolution, target failure, noncanonical route ownership, and zero durable deliveries also fail closed. Run, template instance, entity, route, event, delivery, replay-scope, and deterministic API idempotency completion writes commit through one typed selected-store API-event publication transaction or leave no residue. The operation preserves the generic #1214 short keyed lookup/lock contract and does not execute an arbitrary idempotency callback inside the publication transaction. A same-key replay with the same request body returns its durable completion before current bundle, endpoint, route, or runtime admission is re-evaluated. Once the transaction commits, process-local activation finalization or dispatch-admission failure is reported for durable recovery and cannot replace the committed API result with an error. The stored completion includes the deterministic initial selected-delivery snapshot from the canonical prepared routes; the first response and every replay return it directly without mutable post-commit operator readback. Existing-run publication must preflight the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED. Existing-run publication may provide `target` as the singular receiver route identity (`flow_instance` plus `entity_id`). When present, `target` is route authority and the server validates that the entity exists in the selected run, belongs to the selected target flow instance, and has a selected delivery route for the requested event before event/idempotency persistence. The API must not infer an entity target from run_id or payload.entity_id.\n\nOperator-reference provenance policy: source_event_id is an input selector for an optional operator reference. It MUST be supplied with run_id, the referenced event must exist in the same run, and the server persists it as events.operator_reference_event_id. It never populates events.source_event_id / ParentEventID and does not prove causal checkpoint or approval lineage. Omitted source_event_id means no operator reference provenance is recorded. source_event_id without run_id, malformed source_event_id, or a referenced event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API layer must not re-plan\nsubscribers. A successful event.publish response is a durable acceptance acknowledgment for the event record, selected delivery manifest, and committed replay scope; it MUST NOT wait for system-node handler completion, dynamic auto_emit_on_create side effects, agent processing, downstream event delivery, or downstream receipts. Delivery statuses in the response are a persisted snapshot and may remain pending. Post-commit runtime dispatch/recovery owns downstream completion. This is the canonical primitive; run.start remains only\nas a deprecated wrapper for older callers.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves flow-scoped references through the loaded contract catalog before declaration validation, payload validation, EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity is the only authority that materializes the canonical receiving-flow entity identity. Caller-supplied payload.entity_id on an event whose selected handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence. Composition owns the receiver key and resolution; payload.entity_id is not target or stateful-context authority.\n",
+      "description": "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger, and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. For create-new publication, an exact authored template-flow input pin may be admitted through typed public-input authority. Authored root event-catalog ownership takes precedence even when the root has no input pin; effective provider-trigger schema imports are visibility facts, not authored-root or provider-output authority. The exact template endpoint must lower through the canonical ConnectRoutePlan and template create/select/select-or-create lifecycle owner. Endpoint resolution returns one typed ordinary-root/static, exact-template-input, or invalid-template decision. Once template ownership is selected, a missing, ambiguous, or invalid exact input fails closed and cannot fall through to ordinary publication. Invalid or design-locked resolution, target failure, noncanonical route ownership, and zero durable deliveries also fail closed. Run, template instance, entity, route, event, delivery, replay-scope, and deterministic API idempotency completion writes commit through one typed selected-store API-event publication transaction or leave no residue. The operation preserves the generic #1214 short keyed lookup/lock contract and does not execute an arbitrary idempotency callback inside the publication transaction. A same-key replay with the same request body returns its durable completion before current bundle, endpoint, route, or runtime admission is re-evaluated. Once the transaction commits, process-local activation finalization or dispatch-admission failure is reported for durable recovery and cannot replace the committed API result with an error. The stored completion includes the deterministic initial selected-delivery snapshot from the canonical prepared routes; the first response and every replay return it directly without mutable post-commit operator readback. Existing-run publication must preflight the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED. Existing-run publication may provide `target` as the singular receiver route identity (`flow_instance` plus `entity_id`). When present, `target` is route authority and the server validates that the entity exists in the selected run, belongs to the selected target flow instance, and has a selected delivery route for the requested event before event/idempotency persistence. The API must not infer an entity target from run_id or payload.entity_id.\n\nOperator-reference provenance policy: source_event_id is an input selector for an optional operator reference. It MUST be supplied with run_id, the referenced event must exist in the same run, and the server persists it as events.operator_reference_event_id. It never populates events.source_event_id / ParentEventID and does not prove causal checkpoint or approval lineage. Omitted source_event_id means no operator reference provenance is recorded. source_event_id without run_id, malformed source_event_id, or a referenced event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\nowner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API layer must not re-plan\nsubscribers. A successful event.publish response is a durable acceptance acknowledgment for the event record, selected delivery manifest, and committed replay scope; it MUST NOT wait for system-node handler completion, dynamic auto_emit_on_create side effects, agent processing, downstream event delivery, or downstream receipts. Delivery statuses in the response are a persisted snapshot and may remain pending. Post-commit runtime dispatch/recovery owns downstream completion. `run.start` separately owns explicit event-only, feed-only,\n or combined run initiation; eventless deployment feeds do not pass through event.publish.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves flow-scoped references through the loaded contract catalog before declaration validation, payload validation, EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity is the only authority that materializes the canonical receiving-flow entity identity. Caller-supplied payload.entity_id on an event whose selected handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence. Composition owns the receiver key and resolution; payload.entity_id is not target or stateful-context authority.\n",
       "params": [
         {
           "name": "bundle_hash",
@@ -10378,8 +10378,7 @@
     },
     {
       "name": "run.start",
-      "deprecated": true,
-      "description": "Deprecated wrapper over event.publish retained for older API callers. New clients should call event.publish directly.\nStart a run by injecting an event into the runtime bus. Create-new-work admission follows event.publish bundle_hash semantics: if no existing run row provides bundle context, bundle_hash is required. If run_id is supplied but no run row exists, the call is still create-new-work and run_id alone is not bundle scope. If caller bundle_hash and existing run context disagree, the method fails closed with BUNDLE_MISMATCH. In DB-loaded RuntimeContextManager mode, the resolved bundle_hash must select a loaded BundleContext or the method fails closed with BUNDLE_UNAVAILABLE. No alternate bundle identity input is accepted.\n",
+      "description": "Starts a run with exactly one event, one or more selected data feeds, or both. Event-backed initiation requires event_name and payload together. Feed-only initiation requires data and a canonical run_id; it creates a deployment-origin run without a synthetic event. Every selected pin creates one feed obligation atomically with the run, imports, pins and permanent receipt. The selected bundle_hash must identify the exact admitted bundle source and, in RuntimeContextManager mode, a loaded BundleContext; an existing run cannot acquire new run-creation data.\n",
       "params": [
         {
           "name": "bundle_hash",
@@ -10391,14 +10390,16 @@
         },
         {
           "name": "event_name",
-          "required": true,
+          "required": false,
+          "description": "Required with payload for event-backed initiation; forbidden for feed-only initiation.",
           "schema": {
             "type": "string"
           }
         },
         {
           "name": "payload",
-          "required": true,
+          "required": false,
+          "description": "Required with event_name for event-backed initiation; forbidden for feed-only initiation.",
           "schema": {
             "additionalProperties": true,
             "type": "object"
@@ -20763,59 +20764,134 @@
         "type": "object"
       },
       "RunForkResult": {
-        "additionalProperties": false,
         "description": "Reports both the activated fork and the actual source lifecycle outcome. source_frozen is true exactly when source_run_status is forked; otherwise the source-advanced branch preserved the reported source status.",
-        "properties": {
-          "bundle_hash": {
-            "$ref": "#/components/schemas/BundleHash"
-          },
-          "data_pins": {
-            "items": {
-              "$ref": "#/components/schemas/ResourcePin"
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "bundle_hash": {
+                "$ref": "#/components/schemas/BundleHash"
+              },
+              "data_pins": {
+                "items": {
+                  "$ref": "#/components/schemas/ResourcePin"
+                },
+                "type": "array"
+              },
+              "executed_event_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "fork_event_id": {
+                "$ref": "#/components/schemas/OpaqueId",
+                "description": "Exact source event selected as this fork point."
+              },
+              "fork_point_kind": {
+                "const": "event",
+                "type": "string"
+              },
+              "fork_revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "fork_run_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "fork_run_status": {
+                "$ref": "#/components/schemas/RunStatus"
+              },
+              "owner": {
+                "description": "Canonical runtime/store owner that executed the selected-contract fork.",
+                "type": "string"
+              },
+              "source_frozen": {
+                "description": "True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.",
+                "type": "boolean"
+              },
+              "source_run_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "source_run_status": {
+                "$ref": "#/components/schemas/RunStatus"
+              }
             },
-            "type": "array"
+            "required": [
+              "owner",
+              "source_run_id",
+              "source_run_status",
+              "source_frozen",
+              "fork_run_id",
+              "fork_point_kind",
+              "fork_revision",
+              "fork_event_id",
+              "fork_run_status",
+              "bundle_hash",
+              "executed_event_count",
+              "data_pins"
+            ],
+            "type": "object"
           },
-          "executed_event_count": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "fork_event_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "fork_run_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "fork_run_status": {
-            "$ref": "#/components/schemas/RunStatus"
-          },
-          "owner": {
-            "description": "Canonical runtime/store owner that executed the selected-contract fork.",
-            "type": "string"
-          },
-          "source_frozen": {
-            "description": "True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.",
-            "type": "boolean"
-          },
-          "source_run_id": {
-            "$ref": "#/components/schemas/OpaqueId"
-          },
-          "source_run_status": {
-            "$ref": "#/components/schemas/RunStatus"
+          {
+            "additionalProperties": false,
+            "properties": {
+              "bundle_hash": {
+                "$ref": "#/components/schemas/BundleHash"
+              },
+              "data_pins": {
+                "items": {
+                  "$ref": "#/components/schemas/ResourcePin"
+                },
+                "type": "array"
+              },
+              "executed_event_count": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "fork_point_kind": {
+                "const": "deployment_revision",
+                "type": "string"
+              },
+              "fork_revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "fork_run_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "fork_run_status": {
+                "$ref": "#/components/schemas/RunStatus"
+              },
+              "owner": {
+                "description": "Canonical runtime/store owner that executed the selected-contract fork.",
+                "type": "string"
+              },
+              "source_frozen": {
+                "description": "True only when activation permanently froze the source; false when source advancement selected branch divergence and preserved the source.",
+                "type": "boolean"
+              },
+              "source_run_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "source_run_status": {
+                "$ref": "#/components/schemas/RunStatus"
+              }
+            },
+            "required": [
+              "owner",
+              "source_run_id",
+              "source_run_status",
+              "source_frozen",
+              "fork_run_id",
+              "fork_point_kind",
+              "fork_revision",
+              "fork_run_status",
+              "bundle_hash",
+              "executed_event_count",
+              "data_pins"
+            ],
+            "type": "object"
           }
-        },
-        "required": [
-          "owner",
-          "source_run_id",
-          "source_run_status",
-          "source_frozen",
-          "fork_run_id",
-          "fork_event_id",
-          "fork_run_status",
-          "bundle_hash",
-          "executed_event_count",
-          "data_pins"
-        ],
-        "type": "object"
+        ]
       },
       "RunHeader": {
         "additionalProperties": false,
@@ -20896,6 +20972,19 @@
             "additionalProperties": false,
             "properties": {
               "kind": {
+                "const": "deployment",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
                 "const": "scenario_setup",
                 "type": "string"
               }
@@ -20930,6 +21019,14 @@
           {
             "additionalProperties": false,
             "properties": {
+              "fork_point_kind": {
+                "const": "event",
+                "type": "string"
+              },
+              "fork_revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
               "kind": {
                 "const": "fork_materialization",
                 "type": "string"
@@ -20944,7 +21041,36 @@
             "required": [
               "kind",
               "source_run_id",
+              "fork_point_kind",
+              "fork_revision",
               "source_event_id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "fork_point_kind": {
+                "const": "deployment_revision",
+                "type": "string"
+              },
+              "fork_revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "kind": {
+                "const": "fork_materialization",
+                "type": "string"
+              },
+              "source_run_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              }
+            },
+            "required": [
+              "kind",
+              "source_run_id",
+              "fork_point_kind",
+              "fork_revision"
             ],
             "type": "object"
           }

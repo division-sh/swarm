@@ -65,6 +65,10 @@ type FanOutCompiledPlan struct {
 	Emit              EmitSpec             `json:"emit"`
 }
 
+func (p FanOutCompiledPlan) EmittedEventType() string {
+	return p.Emit.EventType()
+}
+
 type FanOutSiteKind string
 
 const (

@@ -3010,7 +3010,7 @@ rules:
 	if got := len(handler.Rules); got != 1 {
 		t.Fatalf("Rules len = %d, want 1", got)
 	}
-	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, []string{"rule.needs_human", "handler.succeeded"}) {
+	if got := HandlerEmitEvents(handler, nil); !reflect.DeepEqual(got, []string{"rule.needs_human", "handler.succeeded"}) {
 		t.Fatalf("HandlerEmitEvents = %#v", got)
 	}
 }
@@ -3042,7 +3042,7 @@ rules:
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, []string{"account.bucketed"}) {
+	if got := HandlerEmitEvents(handler, nil); !reflect.DeepEqual(got, []string{"account.bucketed"}) {
 		t.Fatalf("HandlerEmitEvents = %#v, want account.bucketed once", got)
 	}
 	sites := HandlerRuleEmitTemplateSites(handler)

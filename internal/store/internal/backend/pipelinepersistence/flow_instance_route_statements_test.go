@@ -82,3 +82,39 @@ func BenchmarkSQLiteRouteTopologyStatements(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkSQLiteRouteTopologyOneNew(b *testing.B) {
+	for _, newIndex := range []int{0, 63} {
+		b.Run(fmt.Sprintf("new_%d", newIndex), func(b *testing.B) {
+			db, sets := sqliteRouteStatementFixture(b, 64)
+			ctx := context.Background()
+			seed := make([]runtimebus.FlowInstanceRouteRecordSet, 0, len(sets)-1)
+			seed = append(seed, sets[:newIndex]...)
+			seed = append(seed, sets[newIndex+1:]...)
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := replaceFlowInstanceRouteTopologyTx(ctx, tx, false, seed); err != nil {
+				_ = tx.Rollback()
+				b.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_, replaceErr := replaceFlowInstanceRouteTopologyTx(ctx, tx, false, sets)
+				rollbackErr := tx.Rollback()
+				if replaceErr != nil || rollbackErr != nil {
+					b.Fatalf("replace=%v rollback=%v", replaceErr, rollbackErr)
+				}
+			}
+		})
+	}
+}

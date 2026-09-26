@@ -112,6 +112,11 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 }
 
 func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (connectRoutePlanDispatch, error) {
+	if evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
+		if err := runtimepinrouting.AdmitDeploymentFeedDeclaration(r.source, evt.Type(), evt.RoutingSource()); err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+	}
 	emptyEvaluation, err := events.NewConnectEvaluationLedger(nil)
 	if err != nil {
 		return connectRoutePlanDispatch{}, err

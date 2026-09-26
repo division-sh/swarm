@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -131,12 +134,18 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	if err != nil {
 		return blockClaim("create_executor", -1, err, nil)
 	}
-	if intent.Request.PlanRef.BundleHash != pc.sourceArtifactFact.BundleHash() {
+	if intent.Request.Deployment != nil {
+		if intent.Request.Deployment.BundleHash != pc.sourceArtifactFact.BundleHash() {
+			return blockClaim("validate_plan_source", -1, fmt.Errorf("deployment feed bundle disagrees with admitted runtime source"), nil)
+		}
+	} else if intent.Request.PlanRef.BundleHash != pc.sourceArtifactFact.BundleHash() {
 		return blockClaim("validate_plan_source", -1, fmt.Errorf("fan-out claimed plan bundle disagrees with admitted runtime source"), nil)
 	}
 	workCtx := runtimecorrelation.WithSourceArtifactFact(ctx, pc.sourceArtifactFact)
 	workCtx = runtimecorrelation.WithRunID(workCtx, intent.Request.Key.RunID)
-	workCtx = runtimecorrelation.WithInboundEvent(workCtx, input.Trigger)
+	if intent.Request.Deployment == nil {
+		workCtx = runtimecorrelation.WithInboundEvent(workCtx, input.Trigger)
+	}
 	group, err := owner.BeginFanOutPublicationGroup(workCtx, claim)
 	if group != nil {
 		defer func() { turnErr = errors.Join(turnErr, group.Close(context.WithoutCancel(workCtx))) }()
@@ -162,7 +171,11 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 	}
 
 	end := intent.ChunkEndOrdinal()
-	evaluation, preparationErr := executor.PrepareFanOutEvaluation(workCtx, intent, input.Trigger)
+	var evaluation *runtimeengine.FanOutEvaluation
+	var preparationErr error
+	if intent.Request.Deployment == nil {
+		evaluation, preparationErr = executor.PrepareFanOutEvaluation(workCtx, intent, input.Trigger)
+	}
 	outcomes := make([]FanOutChunkOutcome, end-intent.Cursor)
 	prepared := make([]runtimeengine.DurablePublicationPlan, 0, end-intent.Cursor)
 	requests := make([]FanOutPublicationRequest, 0, end-intent.Cursor)
@@ -171,7 +184,11 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 		var emit runtimeengine.EmitIntent
 		evalErr := preparationErr
 		if evalErr == nil {
-			emit, evalErr = evaluation.EvaluateOrdinal(workCtx, input.Items[ordinal-input.StartOrdinal], ordinal)
+			if intent.Request.Deployment != nil {
+				emit, evalErr = deploymentFeedEmitIntent(intent, input.Items[ordinal-input.StartOrdinal], ordinal, pc.executionPosture.RootMode())
+			} else {
+				emit, evalErr = evaluation.EvaluateOrdinal(workCtx, input.Items[ordinal-input.StartOrdinal], ordinal)
+			}
 		}
 		if evalErr != nil {
 			failure, disposition := fanOutPrecommitFailure(evalErr)
@@ -278,6 +295,24 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 		}
 	}
 	return fanOutTurnCommitted, committed.PostCommitFailure
+}
+
+func deploymentFeedEmitIntent(intent fanoutobligation.Intent, item any, ordinal int, mode executionmode.Mode) (runtimeengine.EmitIntent, error) {
+	projection, err := fanoutobligation.PrepareDeploymentOrdinalEmission(intent, ordinal)
+	if err != nil {
+		return runtimeengine.EmitIntent{}, err
+	}
+	payload, err := canonicaljson.MarshalPreservingNumberKinds(item)
+	if err != nil {
+		return runtimeengine.EmitIntent{}, err
+	}
+	event, err := projection.NewEvent(events.EventFacts{
+		Payload: payload, Envelope: events.EventEnvelope{Scope: events.EventScopeGlobal}, ExecutionMode: mode,
+	})
+	if err != nil {
+		return runtimeengine.EmitIntent{}, err
+	}
+	return runtimeengine.EmitIntent{Event: event}, nil
 }
 
 func releaseFanOutPrecommitRetry(

@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -39,7 +40,7 @@ func (s *topologyOperationDescriptors) ListActiveFlowInstanceDescriptors(context
 	return append([]ActiveFlowInstanceDescriptor(nil), s.rows...), nil
 }
 
-func topologyOperationFixture(t *testing.T) (*topologyOperationSource, *EventBus) {
+func topologyOperationFixture(t testing.TB) (*topologyOperationSource, *EventBus) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "internal/runtime/cataloge2e/testdata/scatter-gather-safety"), runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -119,6 +120,37 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	}
 }
 
+func BenchmarkFlowInstanceActivationRouteTopology64(b *testing.B) {
+	source, eb := topologyOperationFixture(b)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		b.Fatal(err)
+	}
+	eb.routeTable = table
+	lister := &topologyOperationDescriptors{}
+	for i := 0; i < 64; i++ {
+		id := fmt.Sprintf("worker-%03d", i)
+		route := runtimeflowidentity.Derive(source, "workers", id).Route()
+		lister.rows = append(lister.rows, ActiveFlowInstanceDescriptor{
+			RunID: busInternalTestRunID, InstanceID: route.InstanceID,
+			FlowInstance: route.InstancePath, FlowTemplate: "workers",
+			BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+		})
+	}
+	eb.durable.ActiveFlows = lister
+	plans := []runtimepipeline.FlowInstanceActivationPlan{{
+		Identity:  runtimeflowidentity.Derive(source, "workers", "new"),
+		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
+	}}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sets, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans)
+		if err != nil || len(sets) != 65 {
+			b.Fatalf("sets=%d err=%v", len(sets), err)
+		}
+	}
+}
+
 func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T) {
 	source, eb := topologyOperationFixture(t)
 	table, err := DeriveRouteTable(source)
@@ -181,6 +213,47 @@ func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T
 	}
 	if source.censuses.Load() != 1 || lister.calls != 2 || len(nextIDs) != 1 || nextIDs[0] != gamma || next.HasFlowInstanceRoute(alpha) || next.HasFlowInstanceRoute(beta) || !next.HasFlowInstanceRoute(gamma) {
 		t.Fatalf("next operation retained stale membership: censuses=%d reads=%d identities=%v", source.censuses.Load(), lister.calls, nextIDs)
+	}
+}
+
+func TestRouteTopologyRecordOnlyMatchesIndexedDerivation(t *testing.T) {
+	source, eb := topologyOperationFixture(t)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha := topologyOperationIdentity(t, "alpha")
+	beta := topologyOperationIdentity(t, "beta")
+	gamma := topologyOperationIdentity(t, "gamma")
+	descriptor := func(identity runtimeflowidentity.RunScopedFlowInstance) ActiveFlowInstanceDescriptor {
+		return ActiveFlowInstanceDescriptor{
+			RunID: identity.RunID, InstanceID: identity.Route.InstanceID,
+			FlowInstance: identity.Route.InstancePath, FlowTemplate: "workers",
+			BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+		}
+	}
+	lister := &topologyOperationDescriptors{rows: []ActiveFlowInstanceDescriptor{descriptor(beta), descriptor(alpha)}}
+	for _, tc := range []struct {
+		name    string
+		include *FlowInstanceRouteMaterializationRequest
+		exclude runtimeflowidentity.RunScopedFlowInstance
+	}{
+		{name: "activation", include: &FlowInstanceRouteMaterializationRequest{Identity: gamma}},
+		{name: "retirement", exclude: beta},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			indexed, indexedIDs, err := eb.deriveFlowInstanceRouteTopology(context.Background(), table, lister, busInternalTestRunID, tc.include, tc.exclude)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recordOnly, recordIDs, err := eb.deriveFlowInstanceRouteRecordTopology(context.Background(), table, lister, busInternalTestRunID, tc.include, tc.exclude)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(recordIDs, indexedIDs) || !reflect.DeepEqual(flowInstanceRouteTopologyRecordSets(recordOnly, recordIDs), flowInstanceRouteTopologyRecordSets(indexed, indexedIDs)) {
+				t.Fatalf("record-only topology differs from indexed topology for %s", tc.name)
+			}
+		})
 	}
 }
 

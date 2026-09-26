@@ -5,17 +5,54 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/google/uuid"
 )
 
 // OrdinalEmission owns the semantic relation between an immutable trigger and
 // newly executed work. It is not permission to write: the named chunk commit
 // must obtain the intent under its claim and prove the source's fork lineage.
 type OrdinalEmission struct {
-	lineage events.EventLineage
-	origin  *events.InheritedFanOutOrigin
-	node    string
-	source  events.RoutingSource
-	depth   int
+	lineage       events.EventLineage
+	origin        *events.InheritedFanOutOrigin
+	deployment    *DeploymentOrigin
+	deploymentKey IntentKey
+	ordinal       int
+	node          string
+	source        events.RoutingSource
+	depth         int
+}
+
+func deploymentOrdinalEventID(key IntentKey, ordinal int) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("swarm.deployment-ordinal.v1\x00%s\x00%d", key.DeploymentFeedID, ordinal))).String()
+}
+
+// ValidateCommittedDeploymentOrdinalEvent binds a historical publication to
+// the exact feed and ordinal that minted it; an outcome row alone is not enough.
+func ValidateCommittedDeploymentOrdinalEvent(intent Intent, ordinal int, eventID string) error {
+	if err := intent.Validate(); err != nil {
+		return err
+	}
+	if intent.Request.Deployment == nil || ordinal < 0 || ordinal >= intent.Cursor || eventID != deploymentOrdinalEventID(intent.Request.Key, ordinal) {
+		return fmt.Errorf("deployment outcome event differs from its exact feed ordinal")
+	}
+	return nil
+}
+
+// PrepareDeploymentOrdinalEmission preserves the feed/ordinal relation without
+// borrowing handler lineage. The row payload is read from the pinned source by
+// the serving owner; this projection fixes the event's durable identity.
+func PrepareDeploymentOrdinalEmission(intent Intent, ordinal int) (OrdinalEmission, error) {
+	if err := intent.Validate(); err != nil {
+		return OrdinalEmission{}, err
+	}
+	if intent.Request.Deployment == nil || ordinal < intent.Cursor || ordinal >= intent.Request.Cardinality {
+		return OrdinalEmission{}, fmt.Errorf("deployment ordinal is outside the exact claimed feed suffix")
+	}
+	source, err := events.NewDeploymentFeedRoutingSource(intent.Request.Deployment.Declaration.FlowPath)
+	if err != nil {
+		return OrdinalEmission{}, err
+	}
+	return OrdinalEmission{deployment: intent.Request.Deployment, deploymentKey: intent.Request.Key, ordinal: ordinal, source: source}, nil
 }
 
 func PrepareOrdinalEmission(intent Intent, trigger events.Event, ordinal int) (OrdinalEmission, error) {
@@ -73,6 +110,14 @@ func ordinalEmission(key IntentKey, plan contracts.FanOutPlanRef, capsule Capsul
 }
 
 func (p OrdinalEmission) NewEvent(facts events.EventFacts) (events.Event, error) {
+	if p.deployment != nil {
+		facts.ID = deploymentOrdinalEventID(p.deploymentKey, p.ordinal)
+		facts.Type = events.EventType(p.deployment.Declaration.EventName)
+		facts.Producer = events.ProducerClaim{Type: events.EventProducerExternal, ID: "deployment-feed"}
+		facts.ChainDepth = 0
+		facts.RoutingSource = p.source
+		return events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: p.deploymentKey.RunID})
+	}
 	if p.node == "" || facts.Producer.Type != events.EventProducerNode || facts.Producer.ID != p.node ||
 		facts.ChainDepth != p.depth || facts.RoutingSource != p.source {
 		var absent events.Event
@@ -86,6 +131,16 @@ func (p OrdinalEmission) NewEvent(facts events.EventFacts) (events.Event, error)
 }
 
 func (p OrdinalEmission) ValidateEvent(event events.Event) error {
+	if p.deployment != nil {
+		if event.ID() != deploymentOrdinalEventID(p.deploymentKey, p.ordinal) ||
+			event.RunID() != p.deploymentKey.RunID || event.Type() != events.EventType(p.deployment.Declaration.EventName) ||
+			event.AdmissionClass() != events.EventAdmissionRootIngress || event.ParentEventID() != "" ||
+			!events.ProducerIs(event, events.EventProducerExternal, "deployment-feed") || event.ChainDepth() != 0 ||
+			event.RoutingSource() != p.source {
+			return fmt.Errorf("deployment publication disagrees with exact feed ordinal and root ingress")
+		}
+		return events.ValidatePersistentEvent(event)
+	}
 	if p.node == "" || event.Producer().Type() != events.EventProducerNode || event.Producer().ID() != p.node ||
 		event.ChainDepth() != p.depth || event.RoutingSource() != p.source ||
 		event.TaskID() != p.lineage.TaskID || event.ExecutionMode() != p.lineage.ExecutionMode {

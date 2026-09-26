@@ -9,7 +9,28 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"gopkg.in/yaml.v3"
 )
+
+func TestRetiredDataFanOutSourceRejectedAtDecodeAndCompilation(t *testing.T) {
+	bundle := fanOutPlanRegistryTestBundle(t, SystemNodeEventHandler{})
+	node := identitytest.RootNode(t, "dispatcher")
+	for _, source := range []string{"data.score.available", "data."} {
+		t.Run(source, func(t *testing.T) {
+			for _, suffix := range []string{"", "as: row\n"} {
+				var spec FanOutSpec
+				err := yaml.Unmarshal([]byte("items_from: "+source+"\n"+suffix), &spec)
+				if err == nil {
+					t.Fatalf("retired source %q with %q decoded", source, suffix)
+				}
+			}
+			_, err := bundle.ResolveFanOutEffectiveSemantics(node, "batch.ready", FanOutSpec{ItemsFrom: source, As: "row"})
+			if err == nil || !strings.Contains(err.Error(), "payload.* or entity.*") {
+				t.Fatalf("retired source compile error = %v", err)
+			}
+		})
+	}
+}
 
 func TestResolveHandlerCollectionItemTypeOwnsDirectAndIntermediateSources(t *testing.T) {
 	bundle := &WorkflowContractBundle{

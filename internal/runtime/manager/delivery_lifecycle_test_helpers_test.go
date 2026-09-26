@@ -59,6 +59,20 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			fact TEXT,
 			present BOOLEAN
 		)`,
+		`CREATE TABLE run_fork_selected_contract_bindings (
+			binding_id TEXT PRIMARY KEY,
+			fork_run_id TEXT NOT NULL,
+			mode TEXT NOT NULL,
+			bundle_hash TEXT NOT NULL
+		)`,
+		`CREATE TABLE run_fork_selected_contract_runtime_executions (
+			execution_id TEXT PRIMARY KEY,
+			binding_id TEXT NOT NULL,
+			fork_run_id TEXT NOT NULL,
+			generation BIGINT NOT NULL,
+			state TEXT NOT NULL,
+			lease_expires_at TIMESTAMP
+		)`,
 		`CREATE TABLE events (
 			event_class TEXT NOT NULL,
 			event_id TEXT PRIMARY KEY,
@@ -301,6 +315,33 @@ func (s *managerDeliveryTestStore) ensureRun(ctx context.Context, runID string) 
 	return runlifecyclefixture.Materialize(ctx, s.db, runlifecyclefixture.DialectSQLite, runlifecyclefixture.Fixture{
 		RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Artifact: sourceartifactfixture.Artifact(),
 	})
+}
+
+func (s *managerDeliveryTestStore) seedSelectedExecution(t *testing.T, authority runtimedelivery.ExecutionAuthority) {
+	t.Helper()
+	if authority.Kind() != runtimedelivery.ExecutionAuthoritySelectedContractFork {
+		t.Fatal("selected execution fixture requires selected authority")
+	}
+	if authority.SourceArtifact().BundleHash() != sourceartifactfixture.BundleHash {
+		t.Fatalf("selected execution fixture bundle = %s, want persisted run bundle %s", authority.SourceArtifact().BundleHash(), sourceartifactfixture.BundleHash)
+	}
+	ctx := context.Background()
+	if err := s.ensureRun(ctx, authority.ForkRunID()); err != nil {
+		t.Fatalf("seed selected execution run: %v", err)
+	}
+	bindingID := uuid.NewString()
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO run_fork_selected_contract_bindings (binding_id, fork_run_id, mode, bundle_hash) VALUES ($1, $2, 'selected_contracts', $3)`,
+		bindingID, authority.ForkRunID(), authority.SourceArtifact().BundleHash(),
+	); err != nil {
+		t.Fatalf("seed selected execution binding: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO run_fork_selected_contract_runtime_executions (execution_id, binding_id, fork_run_id, generation, state, lease_expires_at) VALUES ($1, $2, $3, $4, 'running', $5)`,
+		authority.ExecutionID(), bindingID, authority.ForkRunID(), authority.Generation(), time.Now().UTC().Add(time.Hour),
+	); err != nil {
+		t.Fatalf("seed selected runtime execution: %v", err)
+	}
 }
 
 func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt) error) error {

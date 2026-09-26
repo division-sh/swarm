@@ -1844,7 +1844,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	}
 	frame.result.FanOutCount = len(items)
 	limit := plan.MaxItems
-	if len(items) > limit {
+	if frame.result.FanOutCount > limit {
 		return false, failures.Wrap(
 			failures.ClassFanOutBoundExceeded,
 			"fan_out_bound",
@@ -1853,7 +1853,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 			map[string]any{
 				"source":          active.Source,
 				"items_from":      plan.ItemsFrom,
-				"actual":          len(items),
+				"actual":          frame.result.FanOutCount,
 				"authored_limit":  plan.AuthoredMaxItems,
 				"effective_limit": limit,
 				"remediation":     "keep source cardinality within the effective max_items bound",
@@ -1862,7 +1862,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		)
 	}
 	if !frame.req.Preview {
-		intent, err := e.buildFanOutIntent(frame, plan, len(items))
+		intent, err := e.buildFanOutIntent(frame, plan, frame.result.FanOutCount)
 		if err != nil {
 			return false, err
 		}
@@ -1923,6 +1923,9 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out durable intent requires the exact inbound delivery claim")
 	}
 	ctx := e.currentContext(frame)
+	if len(plan.ItemsPath.Segments) == 0 {
+		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan-out compiled source %q has no field", plan.ItemsFrom)
+	}
 	source := fanoutobligation.SourceRef{Field: strings.TrimSpace(plan.ItemsPath.Segments[0])}
 	switch plan.ItemsPath.Root {
 	case paths.RootPayload:

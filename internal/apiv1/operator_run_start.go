@@ -10,9 +10,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 const runStartIDempotencyTTL = 24 * time.Hour
@@ -25,6 +29,13 @@ type runStartResult struct {
 
 type bundleIdentityParam struct {
 	BundleHash string
+}
+
+// The selected-store owner must commit the run, pins, feed obligations and
+// permanent run-creation receipt in one transaction. A transport cache is not
+// an implementation of this port.
+type deploymentRunStartOwner interface {
+	StartDeploymentRunAcknowledged(context.Context, durabledata.RunCreationCommand, apiidempotency.Request) (durabledata.RunCreationOperationRecord, error)
 }
 
 func OperatorRunStartHandlers(opts RunStartHandlerOptions) map[string]MethodHandler {
@@ -56,6 +67,11 @@ func runStartConfigured(opts RunStartHandlerOptions) bool {
 }
 
 func executeRunStart(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (any, error) {
+	_, eventPresent := req.Params["event_name"]
+	_, payloadPresent := req.Params["payload"]
+	if !eventPresent && !payloadPresent {
+		return executeDeploymentRunStart(ctx, req, opts, now)
+	}
 	cfg := eventPublicationConfig{
 		sourceAgent:                    func(Request) string { return "api.v1" },
 		rootInputOnly:                  true,
@@ -79,6 +95,102 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 		return nil, fmt.Errorf("decode run.start response: %w", err)
 	}
 	return stored, nil
+}
+
+func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (runStartResult, error) {
+	data, present, err := runCreationDataEnvelopeParam(req.Method, req.Params)
+	if err != nil {
+		return runStartResult{}, err
+	}
+	if !present || len(data.Imports)+len(data.Pins) == 0 {
+		return runStartResult{}, NewInvalidParamsError(map[string]any{"field": "data", "reason": "feed-only run creation requires at least one import or pin"})
+	}
+	rawRunID, provided, err := optionalStringParam(req.Params, "run_id")
+	if err != nil {
+		return runStartResult{}, err
+	}
+	parsedRunID, parseErr := uuid.Parse(rawRunID)
+	if !provided || parseErr != nil || parsedRunID == uuid.Nil || parsedRunID.String() != rawRunID {
+		return runStartResult{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "feed-only creation requires one canonical non-zero UUID"})
+	}
+	identity, err := bundleIdentityInputParam(req.Params)
+	if err != nil {
+		return runStartResult{}, err
+	}
+	params := eventPublicationParams{RunID: rawRunID, RunIDProvided: true, Data: data, DataPresent: true}
+	ctx, selectedOpts, params, err := resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{rootInputOnly: true})
+	if err != nil {
+		return runStartResult{}, err
+	}
+	if err := admitRunStartDeploymentFeeds(selectedOpts.Source, data); err != nil {
+		return runStartResult{}, err
+	}
+	selector, err := scenarioExecutionSelectorParam(req.Params)
+	if err != nil {
+		return runStartResult{}, err
+	}
+	ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, rawRunID, params.NewRunCreated, selector)
+	if err != nil {
+		return runStartResult{}, err
+	}
+	command := durabledata.RunCreationCommand{
+		RunID: rawRunID, Actor: req.ActorTokenID, BundleHash: params.SourceArtifactFact.BundleHash(), Data: data,
+	}
+	if _, _, command, err = command.RequestHash(); err != nil {
+		return runStartResult{}, NewInvalidParamsError(map[string]any{"field": "data", "reason": err.Error()})
+	}
+	owner, ok := selectedOpts.Acknowledged.(deploymentRunStartOwner)
+	if !ok || owner == nil {
+		return runStartResult{}, fmt.Errorf("selected store does not support atomic deployment run creation")
+	}
+	key, _, err := optionalStringParam(req.Params, "idempotency_key")
+	if err != nil {
+		return runStartResult{}, err
+	}
+	record, err := owner.StartDeploymentRunAcknowledged(ctx, command, apiidempotency.Request{
+		Method: req.Method, Actor: apiidempotency.BearerActor(req.ActorTokenID), IdempotencyKey: key,
+		RequestHash: req.RequestHash, TTL: runStartIDempotencyTTL, Now: now,
+	})
+	if err != nil {
+		return runStartResult{}, runStartIdempotencyError(dataApplicationError(err))
+	}
+	if err := durabledata.ValidateRunCreationReceiptForCommand(record, command); err != nil {
+		return runStartResult{}, fmt.Errorf("deployment run creation returned contradictory receipt: %w", err)
+	}
+	if record.Summary.Outcome != "created" {
+		code := durabledata.CodeRunDataRejected
+		if record.Summary.Outcome == "head_conflict" {
+			code = durabledata.CodeRunHeadConflict
+		}
+		return runStartResult{}, dataApplicationError(durabledata.NewDomainErrorWithDetails(code,
+			map[string]any{"run_id": record.Summary.RunID, "operation": record.Summary},
+			"run creation %s", record.Summary.Outcome))
+	}
+	return runStartResult{RunID: record.Summary.RunID, Status: record.Summary.Status, DataBinding: record.Binding}, nil
+}
+
+func admitRunStartDeploymentFeeds(source semanticview.Source, data durabledata.RunCreationDataEnvelope) error {
+	admit := func(ref durabledata.DeclarationRef) error {
+		routingSource, err := events.NewDeploymentFeedRoutingSource(ref.FlowPath)
+		if err == nil {
+			err = runtimepinrouting.AdmitDeploymentFeedDeclaration(source, events.EventType(ref.EventName), routingSource)
+		}
+		if err != nil {
+			return NewInvalidParamsError(map[string]any{"field": "data", "declaration": ref.EventName, "reason": err.Error()})
+		}
+		return nil
+	}
+	for _, item := range data.Imports {
+		if err := admit(item.Declaration); err != nil {
+			return err
+		}
+	}
+	for _, item := range data.Pins {
+		if err := admit(item.Declaration); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func bundleIdentityInputParam(params map[string]any) (bundleIdentityParam, error) {

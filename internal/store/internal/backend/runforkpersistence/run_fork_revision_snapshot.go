@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -202,12 +203,15 @@ type runForkRevisionReplyContext struct {
 type runForkRevisionFanOutFact struct {
 	runForkRevisionedFact
 	FactKind                    string          `json:"fact_kind"`
+	OriginKind                  string          `json:"origin_kind"`
 	TriggeringDeliveryID        string          `json:"triggering_delivery_id"`
+	DeploymentFeedID            string          `json:"deployment_feed_id"`
 	FlowPath                    string          `json:"flow_path"`
 	DeclarationFamily           string          `json:"declaration_family"`
 	SemanticPath                string          `json:"semantic_path"`
 	BundleHash                  string          `json:"bundle_hash"`
 	SemanticDigest              string          `json:"semantic_digest"`
+	DeploymentSchemaDigest      string          `json:"deployment_schema_digest"`
 	SourceKind                  string          `json:"source_kind"`
 	SourceEventID               string          `json:"source_event_id"`
 	SourceRunID                 string          `json:"source_run_id"`
@@ -276,6 +280,23 @@ func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at stri
 		return runForkEventCursor{}, fmt.Errorf("run fork revision point requires a database snapshot")
 	}
 	at = strings.TrimSpace(at)
+	if at == "" {
+		var originKind string
+		if err := tx.QueryRowContext(ctx, `SELECT origin_kind FROM runs WHERE run_id=$1`, runID).Scan(&originKind); err != nil {
+			return runForkEventCursor{}, fmt.Errorf("resolve fork source origin: %w", err)
+		}
+		if originKind == "deployment" {
+			var revision int64
+			err := tx.QueryRowContext(ctx, `
+				SELECT h.last_revision FROM run_fork_revision_heads h
+				JOIN run_fork_revisions r ON r.run_id=h.run_id AND r.revision=h.last_revision
+				WHERE h.run_id=$1 AND h.last_revision>0`, runID).Scan(&revision)
+			if err != nil {
+				return runForkEventCursor{}, fmt.Errorf("deployment source has no committed fork revision: %w", err)
+			}
+			return runForkEventCursor{Kind: runfork.RunForkPointDeploymentRevision, Revision: revision}, nil
+		}
+	}
 	where := ""
 	args := []any{runID}
 	if at != "" {
@@ -320,6 +341,7 @@ func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at stri
 	}
 	event := snapshot.Events[0]
 	return runForkEventCursor{
+		Kind:    runfork.RunForkPointEvent,
 		EventID: event.EventID, EventName: event.EventName, SourceEventID: event.SourceEventID,
 		ProducedBy: event.ProducedBy, ProducedByType: event.ProducedByType,
 		CreatedAt: event.CreatedAt.UTC(), Revision: fact.Revision,
@@ -367,9 +389,6 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read run fork revision snapshot: %w", err)
-	}
-	if len(snapshot.Events) == 0 {
-		return nil, fmt.Errorf("run fork revision %d has no revisioned events", revision)
 	}
 	snapshot.sort()
 	return snapshot, nil
@@ -555,8 +574,8 @@ func (s *runForkRevisionSnapshot) sort() {
 		return revisionFactLess(s.CommittedReplayScopes[i].FirstRevision, s.CommittedReplayScopes[i].EventID, s.CommittedReplayScopes[j].FirstRevision, s.CommittedReplayScopes[j].EventID)
 	})
 	sort.Slice(s.FanOutFacts, func(i, j int) bool {
-		left := strings.Join([]string{s.FanOutFacts[i].TriggeringDeliveryID, s.FanOutFacts[i].FlowPath, s.FanOutFacts[i].DeclarationFamily, s.FanOutFacts[i].SemanticPath, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[i]))}, "|")
-		right := strings.Join([]string{s.FanOutFacts[j].TriggeringDeliveryID, s.FanOutFacts[j].FlowPath, s.FanOutFacts[j].DeclarationFamily, s.FanOutFacts[j].SemanticPath, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[j]))}, "|")
+		left := strings.Join([]string{s.FanOutFacts[i].OriginKind, s.FanOutFacts[i].TriggeringDeliveryID, s.FanOutFacts[i].DeploymentFeedID, s.FanOutFacts[i].FlowPath, s.FanOutFacts[i].DeclarationFamily, s.FanOutFacts[i].SemanticPath, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[i]))}, "|")
+		right := strings.Join([]string{s.FanOutFacts[j].OriginKind, s.FanOutFacts[j].TriggeringDeliveryID, s.FanOutFacts[j].DeploymentFeedID, s.FanOutFacts[j].FlowPath, s.FanOutFacts[j].DeclarationFamily, s.FanOutFacts[j].SemanticPath, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[j]))}, "|")
 		return revisionFactLess(s.FanOutFacts[i].FirstRevision, left, s.FanOutFacts[j].FirstRevision, right)
 	})
 }

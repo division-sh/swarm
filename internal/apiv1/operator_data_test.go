@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -16,6 +17,54 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestDataShowReadsExpandedStoredCanonicalPayload(t *testing.T) {
+	store := newDataRuntimeProbeStore(t)
+	schema := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{
+			"slug":    map[string]any{"type": "string"},
+			"payload": map[string]any{"type": "string"},
+		},
+		"required": []string{"slug", "payload"},
+	}
+	var input strings.Builder
+	for index := 0; index < 100; index++ {
+		fmt.Fprintf(&input, "{\"slug\":\"row-%02d\",\"payload\":\"%s\"}\n", index, strings.Repeat("<", 1_300))
+	}
+	compiled, defects := durabledata.CompileJSONL(store.declaration.Ref, schema, "slug", []byte(input.String()))
+	if len(defects) != 0 || len(compiled.CanonicalJSONL) <= durabledata.MaxDecodedImportBytes {
+		t.Fatalf("admitted expanded payload bytes=%d, defects=%+v", len(compiled.CanonicalJSONL), defects)
+	}
+	store.declaration.BusinessKey = "slug"
+	store.declaration.SchemaDigest = compiled.Manifest.SchemaDigest
+	store.declaration.CanonicalSchema = compiled.CanonicalSchema
+	store.version = durabledata.Version{
+		VersionID: compiled.VersionID, SequenceAlias: 1, Manifest: compiled.Manifest,
+		BusinessKey: "slug", CanonicalSchema: compiled.CanonicalSchema, CanonicalJSONL: compiled.CanonicalJSONL,
+	}
+	params := map[string]any{
+		"view":         "row",
+		"declaration":  dataProbeDeclarationParams(),
+		"selector":     map[string]any{"kind": "version", "version_id": string(compiled.VersionID)},
+		"row_selector": map[string]any{"key": "row-00"},
+	}
+	result, err := executeDataShowResource(context.Background(), params, store, "row")
+	if err != nil {
+		t.Fatalf("read admitted expanded payload: %v", err)
+	}
+	row, ok := result.(durabledata.RowDTO)
+	if !ok || row.Ordinal != 1 || row.Value.(map[string]any)["payload"] != strings.Repeat("<", 1_300) {
+		t.Fatalf("expanded row = %#v", result)
+	}
+	store.version.CanonicalJSONL = bytes.Replace(compiled.CanonicalJSONL, []byte(`\u003c`), []byte(`<`), 1)
+	if bytes.Equal(store.version.CanonicalJSONL, compiled.CanonicalJSONL) {
+		t.Fatal("noncanonical probe did not change stored bytes")
+	}
+	if _, err := executeDataShowResource(context.Background(), params, store, "row"); err == nil {
+		t.Fatal("same-meaning noncanonical payload was accepted")
+	}
+}
 
 const (
 	dataProbeSourceInvocationID = "1c36924e-b33e-44e4-b228-73dfb4c9d52a"

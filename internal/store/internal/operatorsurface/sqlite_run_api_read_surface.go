@@ -269,6 +269,8 @@ SELECT
 	COALESCE(r.origin_service_id, ''),
 	COALESCE(r.origin_generation, 0),
 	COALESCE(r.forked_from_run_id, ''),
+	COALESCE(r.forked_from_point_kind, ''),
+	COALESCE(r.forked_from_revision, 0),
 	COALESCE(r.forked_from_event_id, ''),
 	(SELECT COUNT(*) FROM standing_service_generations ssg WHERE ssg.run_id = r.run_id),
 	(
@@ -295,8 +297,8 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	var startedRaw, endedRaw any
 	var failureRaw any
 	var bundleHash string
-	var originKind, eventID, eventType, serviceID, sourceRunID, sourceEventID string
-	var generation int64
+	var originKind, eventID, eventType, serviceID, sourceRunID, forkPointKind, sourceEventID string
+	var generation, forkRevision int64
 	var standingRelationCount, matchingStandingRelationCount int
 	if err := row.Scan(
 		&header.RunID,
@@ -308,6 +310,8 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		&serviceID,
 		&generation,
 		&sourceRunID,
+		&forkPointKind,
+		&forkRevision,
 		&sourceEventID,
 		&standingRelationCount,
 		&matchingStandingRelationCount,
@@ -335,7 +339,7 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	}
 	header.Status = strings.ToLower(strings.TrimSpace(header.Status))
 	header.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
+		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
 	if err != nil {
 		return operatorread.RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)

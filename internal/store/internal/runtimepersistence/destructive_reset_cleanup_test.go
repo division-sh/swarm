@@ -940,8 +940,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 		t.Fatalf("seed selected-contract event: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_event_id, mode)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'selected_contracts')
+		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, mode)
+		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'selected_contracts')
 	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
 		t.Fatalf("seed selected binding: %v", err)
 	}
@@ -953,11 +953,11 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_route_recoveries (
-			fork_run_id, source_run_id, fork_event_id, owner, runtime_recovery_owner, mode,
+			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, runtime_recovery_owner, mode,
 			route_topology_owner, recipient_planning_owner, frontier_evidence_fingerprint, route_topology_fingerprint,
 			recipient_planning_fingerprint, route_topology, recipient_planning
 		) VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 'test', 'test', 'selected_contracts',
+			$1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'test', 'selected_contracts',
 			'topology', 'recipients', 'frontier', 'route', 'recipient', '{}'::jsonb, '{}'::jsonb
 		)
 	`, cleanupRunID, preservedSourceRunID, cleanupEventID); err != nil {
@@ -1436,8 +1436,8 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed dead letters: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_event_id, mode)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'selected_contracts')
+		INSERT INTO run_fork_selected_contract_bindings (fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, mode)
+		VALUES ($1::uuid, $2::uuid, 'event', 1, $3::uuid, 'selected_contracts')
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected binding: %v", err)
 	}
@@ -1449,11 +1449,11 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_route_recoveries (
-			fork_run_id, source_run_id, fork_event_id, owner, runtime_recovery_owner, mode,
+			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id, owner, runtime_recovery_owner, mode,
 			route_topology_owner, recipient_planning_owner, frontier_evidence_fingerprint, route_topology_fingerprint,
 			recipient_planning_fingerprint, route_topology, recipient_planning
 		) VALUES (
-			$1::uuid, $2::uuid, $3::uuid, 'test', 'test', 'selected_contracts',
+			$1::uuid, $2::uuid, 'event', 1, $3::uuid, 'test', 'test', 'selected_contracts',
 			'topology', 'recipients', 'frontier', 'route', 'recipient', '{}'::jsonb, '{}'::jsonb
 		)
 	`, runB, runA, forkEvent); err != nil {

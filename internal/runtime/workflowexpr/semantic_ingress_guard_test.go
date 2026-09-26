@@ -19,7 +19,7 @@ var semanticExecutionExits = map[string][]string{
 	"internal/apiv1/operator_event_publish.go::eventPublicationPayload":                              {"FromGo", "ProjectSemanticValue", "MarshalPreservingNumberKinds"},
 	"internal/cliapp/test_command.go::materializeScenarioSemanticPayload":                            {"Decode", "ProjectSemanticValue"},
 	"internal/store/internal/backend/pipelinepersistence/scenario_setup.go::scenarioSetupEntityJSON": {"FromGo", "ProjectSemanticValue", "MarshalPreservingNumberKinds"},
-	"internal/store/internal/backend/pipelinepersistence/fan_out_owner.go::collectionRangeFromJSONL": {"Decode", "ProjectSemanticValue"},
+	"internal/store/internal/durabledata/pinned_source.go::decodeCanonicalRowsRange":                 {"Decode", "ProjectSemanticValue"},
 	"internal/runtime/engine/executor.go::decodeComputeModuleOutput":                                 {"Decode", "ProjectSemanticValue"},
 	"internal/runtime/pipeline/activity_engine.go::parseHTTPActivityResponse":                        {"Decode", "ProjectSemanticValue"},
 	"internal/runtime/pipeline/workflow_gate_decision.go::workflowGateOutcomeEvent":                  {"ProjectSemanticValue", "MarshalPreservingNumberKinds"},
@@ -69,7 +69,7 @@ func semanticBoundaryFindings(t *testing.T, overlay map[string][]byte) []string 
 	root := filepath.Clean(filepath.Join(workflowProjectionRuntimeRoot(t), "..", ".."))
 	pkgs, err := packages.Load(&packages.Config{Dir: root, Overlay: overlay,
 		Mode: packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports},
-		"./internal/apiv1", "./internal/cliapp", "./internal/runtime/workflowexpr", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/genericschedule", "./internal/store/internal/backend/pipelinepersistence")
+		"./internal/apiv1", "./internal/cliapp", "./internal/runtime/workflowexpr", "./internal/runtime/engine", "./internal/runtime/pipeline", "./internal/runtime/genericschedule", "./internal/store/internal/backend/pipelinepersistence", "./internal/store/internal/durabledata")
 	if err != nil {
 		t.Fatal(err)
 	}

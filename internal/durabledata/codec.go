@@ -24,10 +24,20 @@ type CompiledVersion struct {
 }
 
 func CompileJSONL(declaration DeclarationRef, schema map[string]any, businessKeyField string, input []byte) (CompiledVersion, []ValidationDefect) {
+	return compileJSONL(declaration, schema, businessKeyField, input, true)
+}
+
+// CompileStoredJSONL revalidates admitted canonical bytes. The import-wire
+// limit does not constrain canonical expansion after admission.
+func CompileStoredJSONL(declaration DeclarationRef, schema map[string]any, businessKeyField string, input []byte) (CompiledVersion, []ValidationDefect) {
+	return compileJSONL(declaration, schema, businessKeyField, input, false)
+}
+
+func compileJSONL(declaration DeclarationRef, schema map[string]any, businessKeyField string, input []byte, importWire bool) (CompiledVersion, []ValidationDefect) {
 	if err := declaration.Validate(); err != nil {
 		return CompiledVersion{}, []ValidationDefect{{Code: "invalid_declaration", Message: err.Error()}}
 	}
-	if len(input) > MaxDecodedImportBytes {
+	if importWire && len(input) > MaxDecodedImportBytes {
 		return CompiledVersion{}, []ValidationDefect{{Code: "decoded_import_too_large", Message: fmt.Sprintf("decoded input exceeds %d bytes", MaxDecodedImportBytes)}}
 	}
 	if !utf8.Valid(input) {

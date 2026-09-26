@@ -80,7 +80,7 @@ func handlerExecutionPlanFromNodeHandler(source interface {
 		DataAccumulation: handler.DataAccumulation,
 		Emit:             handler.Emit,
 		OnSuccess:        handler.OnSuccess,
-		EmitEvents:       runtimecontracts.HandlerEmitEvents(handler),
+		EmitEvents:       runtimecontracts.HandlerEmitEvents(handler, fanOutPlans),
 		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), handler.Rules...),
 		OnComplete:       append([]runtimecontracts.HandlerRuleEntry(nil), handler.OnComplete...),
 	}

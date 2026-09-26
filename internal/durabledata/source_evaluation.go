@@ -98,10 +98,11 @@ func (b SourceEvaluationBase) Validate(declaration DeclarationRef) ([]Row, error
 	if declared != b.BusinessKey {
 		return nil, fmt.Errorf("source evaluation base business key contradicts schema")
 	}
-	compiled, defects := CompileJSONL(declaration, schema, b.BusinessKey, b.CanonicalJSONL)
+	compiled, defects := CompileStoredJSONL(declaration, schema, b.BusinessKey, b.CanonicalJSONL)
 	versionID, err := b.Manifest.VersionID()
 	if err != nil || len(defects) != 0 || compiled.VersionID != versionID || versionID != b.Head.Before.VersionID ||
-		!reflect.DeepEqual(compiled.Manifest, *b.Manifest) || !bytes.Equal(compiled.CanonicalSchema, b.CanonicalSchema) {
+		!reflect.DeepEqual(compiled.Manifest, *b.Manifest) || !bytes.Equal(compiled.CanonicalSchema, b.CanonicalSchema) ||
+		!bytes.Equal(compiled.CanonicalJSONL, b.CanonicalJSONL) {
 		return nil, fmt.Errorf("source evaluation base payload contradicts immutable version facts")
 	}
 	return compiled.Rows, nil

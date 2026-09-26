@@ -166,17 +166,36 @@ func selectedProjectionQuery(spec projectionSpec, family Family, runID string, r
 			}
 			columns, values := fields[:1], []any{ref.coordinates.Key}
 			if family == FamilyFanOutObligations {
-				columns = fields[1:5]
-				values = []any{ref.coordinates.TriggeringDeliveryID, ref.coordinates.FlowPath, ref.coordinates.DeclarationFamily, ref.coordinates.SemanticPath}
+				originColumn := "origin_kind"
 				if part.kind == "outcome" {
-					columns = fields[1:]
+					originColumn = "i.origin_kind"
+				}
+				if ref.coordinates.OriginKind == "deployment" {
+					if part.kind == "barrier" {
+						continue
+					}
+					columns = []string{originColumn, "deployment_feed_id"}
+					values = []any{"deployment", ref.coordinates.DeploymentFeedID}
+				} else if part.kind == "barrier" {
+					columns = []string{"triggering_delivery_id", "flow_path", "declaration_family", "semantic_path"}
+					values = []any{ref.coordinates.TriggeringDeliveryID, ref.coordinates.FlowPath, ref.coordinates.DeclarationFamily, ref.coordinates.SemanticPath}
+				} else {
+					columns = []string{originColumn, "triggering_delivery_id", "flow_path", "declaration_family", "semantic_path"}
+					values = []any{"handler", ref.coordinates.TriggeringDeliveryID, ref.coordinates.FlowPath, ref.coordinates.DeclarationFamily, ref.coordinates.SemanticPath}
+				}
+				if part.kind == "outcome" {
+					columns = append(columns, "ordinal")
 					values = append(values, *ref.coordinates.Ordinal)
 				}
 			}
 			conditions := make([]string, len(columns))
 			for i, column := range columns {
 				args = append(args, values[i])
-				conditions[i] = fmt.Sprintf("%s.%s=$%d", part.alias, column, len(args))
+				if strings.Contains(column, ".") {
+					conditions[i] = fmt.Sprintf("%s=$%d", column, len(args))
+				} else {
+					conditions[i] = fmt.Sprintf("%s.%s=$%d", part.alias, column, len(args))
+				}
 			}
 			alternatives = append(alternatives, "("+strings.Join(conditions, " AND ")+")")
 		}
@@ -350,7 +369,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				d.agent_flow_scope_key, CAST(d.agent_flow_instance_id AS TEXT), d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context, d.delivery_payload_projection, d.connect_execution_claim, d.receiver_materialization_plan, d.status,
 				d.retry_count, d.max_retries, d.next_eligible_at, d.claim_version, current_attempt.lease_expires_at,
-				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.settled_at, d.created_at, d.updated_at,
+				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.continuation_handoff_at, d.settled_at, d.created_at, d.updated_at,
 				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label`,
 			source: `event_deliveries d
 			LEFT JOIN event_delivery_attempts current_attempt ON current_attempt.delivery_id = d.delivery_id AND current_attempt.claim_version = d.current_attempt_version AND current_attempt.open_marker = TRUE
@@ -358,8 +377,8 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			columns: typedColumns(map[string]valueKind{
 				"delivery_target_ownership": valueJSON, "delivery_context": valueJSON,
 				"delivery_payload_projection": valueJSON, "connect_execution_claim": valueJSON, "receiver_materialization_plan": valueJSON, "failure": valueJSON,
-				"next_eligible_at": valueTime, "claim_expires_at": valueTime, "started_at": valueTime, "settled_at": valueTime, "created_at": valueTime, "updated_at": valueTime,
-			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "claim_version", "claim_expires_at", "reason_code", "failure", "active_session_id", "started_at", "settled_at", "created_at", "updated_at", "selection_delivery_id", "selection_context", "selection_disposition", "selection_flow_path", "selection_declaration_family", "selection_semantic_path", "selection_display_label"),
+				"next_eligible_at": valueTime, "claim_expires_at": valueTime, "started_at": valueTime, "continuation_handoff_at": valueTime, "settled_at": valueTime, "created_at": valueTime, "updated_at": valueTime,
+			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "claim_version", "claim_expires_at", "reason_code", "failure", "active_session_id", "started_at", "continuation_handoff_at", "settled_at", "created_at", "updated_at", "selection_delivery_id", "selection_context", "selection_disposition", "selection_flow_path", "selection_declaration_family", "selection_semantic_path", "selection_display_label"),
 			build: func(values map[string]any) map[string]any {
 				selection := map[string]any{"kind": "absent"}
 				if values["selection_delivery_id"] != nil {
@@ -411,7 +430,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 	case FamilyFanOutObligations:
 		names := []string{
-			"fact_kind", "triggering_delivery_id", "flow_path", "declaration_family", "semantic_path", "bundle_hash", "semantic_digest",
+			"fact_kind", "origin_kind", "triggering_delivery_id", "deployment_feed_id", "flow_path", "declaration_family", "semantic_path", "bundle_hash", "semantic_digest", "deployment_schema_digest",
 			"source_kind", "source_event_id", "source_run_id", "source_entity_id", "source_field", "source_mutation_id",
 			"source_resource_flow_path", "source_resource_event_name", "source_resource_version_id",
 			"cardinality", "cursor", "status", "capsule", "blocked_reason",
@@ -423,7 +442,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		parts := []projectionPart{
 			{kind: "intent", alias: "i", query: `
 				SELECT
-					'intent', CAST(i.triggering_delivery_id AS TEXT), i.flow_path, i.declaration_family, i.semantic_path, i.bundle_hash, i.semantic_digest,
+					'intent', i.origin_kind, CAST(i.triggering_delivery_id AS TEXT), CAST(i.deployment_feed_id AS TEXT), i.flow_path, i.declaration_family, i.semantic_path, i.bundle_hash, i.semantic_digest, i.deployment_schema_digest,
 					i.source_kind, CAST(i.source_event_id AS TEXT), CAST(i.source_run_id AS TEXT), CAST(i.source_entity_id AS TEXT), i.source_field, CAST(i.source_mutation_id AS TEXT),
 					i.source_resource_flow_path, i.source_resource_event_name, i.source_resource_version_id,
 					i.cardinality, i.cursor, i.status, CAST(i.capsule AS TEXT), i.blocked_reason,
@@ -432,15 +451,19 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				FROM fan_out_intents i WHERE i.run_id=$1`},
 			{kind: "outcome", alias: "o", query: `
 				SELECT
-					'outcome', CAST(o.triggering_delivery_id AS TEXT), o.flow_path, o.declaration_family, o.semantic_path, NULL, NULL,
+					'outcome', COALESCE(i.origin_kind, 'missing'), CAST(o.triggering_delivery_id AS TEXT), CAST(o.deployment_feed_id AS TEXT), o.flow_path, o.declaration_family, o.semantic_path, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL,
 					CAST(o.created_at AS TEXT), o.ordinal, o.outcome_kind, CAST(o.event_id AS TEXT), CAST(o.source_event_id AS TEXT), o.inherited_disposition, CAST(o.failure AS TEXT),
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
-				FROM fan_out_outcomes o WHERE o.run_id=$1`},
+				FROM fan_out_outcomes o LEFT JOIN fan_out_intents i ON i.run_id=o.run_id AND
+					((i.origin_kind='deployment' AND i.deployment_feed_id=o.deployment_feed_id) OR
+					(i.origin_kind='handler' AND i.triggering_delivery_id=o.triggering_delivery_id AND
+					i.flow_path=o.flow_path AND i.declaration_family=o.declaration_family AND i.semantic_path=o.semantic_path))
+				WHERE o.run_id=$1`},
 			{kind: "barrier", alias: "b", query: `
 				SELECT
-					'barrier', CAST(b.triggering_delivery_id AS TEXT), b.flow_path, b.declaration_family, b.semantic_path, b.bundle_hash, b.semantic_digest,
+					'barrier', 'handler', CAST(b.triggering_delivery_id AS TEXT), NULL, b.flow_path, b.declaration_family, b.semantic_path, b.bundle_hash, b.semantic_digest, NULL,
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL,
 					CAST(b.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,

@@ -84,6 +84,10 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 		}},
 		{name: "durable source", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.SourceRunID = uuid.NewString() }},
 		{name: "durable event", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ForkEventID = uuid.NewString() }},
+		{name: "durable revision", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ForkPoint.Revision++ }},
+		{name: "mixed point arm", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) {
+			a.ForkPoint.Kind = runfork.RunForkPointDeploymentRevision
+		}},
 	}
 	for _, tc := range invalidAdmissions {
 		t.Run("reject admission "+tc.name, func(t *testing.T) {
@@ -135,6 +139,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 		{name: "executable coordinate", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ExecutableCoordinateFingerprint += ":stale" }},
 		{name: "generation", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.Generation++ }},
 		{name: "issue owner", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ExecutionOwner += ":stale" }},
+		{name: "fork revision", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ForkPoint.Revision++ }},
 	}
 	for _, tc := range claimMutations {
 		t.Run("reject claim "+tc.name, func(t *testing.T) {
@@ -1381,18 +1386,19 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 		t.Fatalf("seed selected event: %v", err)
 	}
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at) VALUES (?,?,?,?,'selected_contracts',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES (?,?,?,'event',1,?,'selected_contracts',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_event_id,mode,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'selected_contracts',$5)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,'event',1,$4::uuid,'selected_contracts',$5)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	}
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
-		NonMutating: true, ExecutionSupported: false, ForkRunID: forkRun, SourceRunID: sourceRun, ForkEventID: eventID,
+		NonMutating: true, ExecutionSupported: false, ForkRunID: forkRun, SourceRunID: sourceRun,
+		ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID}, ForkEventID: eventID,
 		ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
 		AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
