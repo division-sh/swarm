@@ -151,7 +151,7 @@ func executeDeploymentRunStart(ctx context.Context, req Request, opts EventPubli
 	if err != nil {
 		return runStartResult{}, runStartIdempotencyError(dataApplicationError(err))
 	}
-	if err := record.ValidateForCommand(command); err != nil {
+	if err := durabledata.ValidateRunCreationReceiptForCommand(record, command); err != nil {
 		return runStartResult{}, fmt.Errorf("deployment run creation returned contradictory receipt: %w", err)
 	}
 	if record.Summary.Outcome != "created" {
