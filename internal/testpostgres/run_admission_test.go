@@ -255,11 +255,6 @@ func TestRunAdmissionLateObserverDetectsRegistryRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	nextReport := output.NextReport()
-	select {
-	case <-nextReport:
-		t.Fatal("already-consumed reports satisfied a future-report barrier")
-	default:
-	}
 	// Model a buggy registry writer after the first snapshot, then observe a new poll.
 	changed := before.ModTime().Add(time.Second)
 	if err := os.Chtimes(statePath, changed, changed); err != nil {
@@ -276,6 +271,31 @@ func TestRunAdmissionLateObserverDetectsRegistryRewrite(t *testing.T) {
 	cancel()
 	if err := <-result; !errors.Is(err, context.Canceled) {
 		t.Fatalf("queued result = %v", err)
+	}
+}
+
+func TestObservedOutputNextReportRequiresFuturePublication(t *testing.T) {
+	output := newObservedOutput("Test capacity is busy.")
+	for range 2 {
+		if _, err := output.Write([]byte("Test capacity is busy.")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := output.ReportCount(); got != 2 {
+		t.Fatalf("reports before snapshot = %d, want 2", got)
+	}
+	nextReport := output.NextReport()
+	select {
+	case <-nextReport:
+		t.Fatal("past reports satisfied a future-report barrier")
+	default:
+	}
+	if _, err := output.Write([]byte("Test capacity is busy.")); err != nil {
+		t.Fatal(err)
+	}
+	output.WaitNext(t, nextReport)
+	if got := output.ReportCount(); got != 3 {
+		t.Fatalf("reports after publication = %d, want 3", got)
 	}
 }
 
