@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -21,6 +22,7 @@ import (
 // the selected-contract activation operation. Lifecycle meaning is owned by
 // activateRunForkForSelectedContractExecution below.
 type runForkSelectedContractActivationPort struct {
+	postgres       bool
 	requireCurrent func() error
 	runMutation    func(context.Context, func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error)
 	loadLineage    func(context.Context, *sql.Tx, string) (runForkActivationLineage, error)
@@ -65,7 +67,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			ForkRunID:               lineage.ForkRunID,
 			ForkRunStatus:           lineage.ForkStatus,
 			SourceRunStatus:         lineage.SourceRunStatus,
-			ForkPoint:               runfork.RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime.UTC(), Revision: lineage.ForkEventRevision},
+			ForkPoint:               lineage.ForkPoint,
 			ReplayResumeBlocked:     true,
 			MaterializedEntityCount: len(lineage.EntityIDs),
 		}
@@ -76,8 +78,8 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if !runForkSelectedContractBranchSourceStatusSupported(lineage.SourceRunStatus) {
 			return fmt.Errorf("selected-contract fork activation requires supported branch source status; got %q", lineage.SourceRunStatus)
 		}
-		if len(lineage.EntityIDs) == 0 {
-			return fmt.Errorf("selected-contract fork activation requires materialized fork entity_state rows")
+		if err := requireSelectedForkMaterializedWorkTx(txctx, tx, lineage.ForkRunID, len(lineage.EntityIDs)); err != nil {
+			return err
 		}
 		binding, err := loadRunForkSelectedContractBinding(txctx, tx, lineage.ForkRunID)
 		if err != nil {
@@ -87,11 +89,26 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			return fmt.Errorf("load selected contract binding: %w", err)
 		}
 		result.SelectedContractBinding = &binding
+		if binding.SourceRunID != lineage.SourceRunID || binding.ForkPoint != lineage.ForkPoint {
+			return fmt.Errorf("selected-contract fork activation binding differs from child origin")
+		}
 
-		plan, err := port.plan(txctx, tx, runfork.RunForkPlanRequest{SourceRunID: lineage.SourceRunID, At: lineage.ForkEventID})
+		planRequest := runfork.RunForkPlanRequest{SourceRunID: lineage.SourceRunID}
+		if lineage.ForkPoint.Kind == runfork.RunForkPointEvent {
+			planRequest.At = lineage.ForkPoint.EventID
+		} else {
+			planRequest.ResolvedPoint = &lineage.ForkPoint
+		}
+		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {
 			return err
 		}
+		if plan.ForkPoint.Kind != lineage.ForkPoint.Kind || plan.ForkPoint.Revision != lineage.ForkPoint.Revision ||
+			plan.ForkPoint.EventID != lineage.ForkPoint.EventID {
+			return fmt.Errorf("selected-contract fork activation plan differs from fixed child origin")
+		}
+		lineage.ForkPoint = plan.ForkPoint
+		result.ForkPoint = plan.ForkPoint
 		result.ReplayResumeAdmission = runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 		expectedRouteRecovery, routeResolved, err := prepareRunForkSelectedContractRouteResolution(
 			plan, lineage.ForkRunID, binding.ContractSelection,
@@ -126,6 +143,9 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		sourceAdvancedFacts = append(sourceAdvancedFacts, runfork.ActiveSourceDeliveryConversationCouplingFacts(result.ReplayResumeAdmission)...)
 		sourceAdvancedFacts = uniqueNonEmptyStrings(sourceAdvancedFacts)
 		result.SourceAdvancedAfterFork = len(sourceAdvancedFacts) > 0
+		if err := requireSelectedDeploymentDrainedTx(txctx, tx, lineage.ForkRunID); err != nil {
+			return addRunForkActivationBlocker(&result, err)
+		}
 		if err := port.ensureState(txctx, tx, lineage.ForkRunID, req.AllowedSourceEventIDs, req.ExecutionSource); err != nil {
 			return addRunForkActivationBlocker(&result, err)
 		}
@@ -154,9 +174,15 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 				return err
 			}
 			divergence = &value
+			if err := completeSelectedForkOperationAtActivation(txctx, tx, req, lineage, value.SourceRunStatusAfterActivation, false, port.postgres); err != nil {
+				return err
+			}
 			return nil
 		}
-		return port.freeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze)
+		if err := port.freeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze); err != nil {
+			return err
+		}
+		return completeSelectedForkOperationAtActivation(txctx, tx, req, lineage, runfork.RunForkSourceFrozenStatus, true, port.postgres)
 	})
 	if !committed {
 		return result, err
@@ -174,8 +200,71 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	return result, err
 }
 
+func completeSelectedForkOperationAtActivation(ctx context.Context, tx *sql.Tx, req runfork.RunForkSelectedContractExecutionActivateRequest, lineage runForkActivationLineage, sourceStatus string, frozen, postgres bool) error {
+	if req.ForkOperation == nil {
+		return nil
+	}
+	operation, err := resolvedForkOperationForActivationTx(ctx, tx, *req.ForkOperation, lineage, postgres)
+	if err != nil {
+		return err
+	}
+	executed, err := selectedForkDurableExecutedEventCountTx(ctx, tx, lineage.ForkRunID)
+	if err != nil {
+		return err
+	}
+	pins := append([]durabledata.Pin(nil), req.DataPins...)
+	for i := range pins {
+		pins[i].RunState = runfork.RunForkActivatedStatus
+	}
+	return completeForkOperationTx(ctx, tx, operation, runfork.ForkOperationResult{
+		SourceRunID: lineage.SourceRunID, SourceRunStatus: sourceStatus, SourceFrozen: frozen,
+		ForkRunID: lineage.ForkRunID, ForkEventID: lineage.ForkEventID, ForkPoint: *operation.ResolvedPoint,
+		ForkRunStatus: runfork.RunForkActivatedStatus, BundleHash: req.ForkOperation.TargetBundleHash,
+		ExecutedEventCount: executed, DataPins: pins,
+	}, postgres)
+}
+
+func selectedDeploymentFeedPresentTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	var present bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment')`, runID).Scan(&present)
+	return present, err
+}
+
+func requireSelectedForkMaterializedWorkTx(ctx context.Context, tx *sql.Tx, runID string, entityCount int) error {
+	if entityCount > 0 {
+		return nil
+	}
+	present, err := selectedDeploymentFeedPresentTx(ctx, tx, runID)
+	if err != nil {
+		return fmt.Errorf("check selected fork deployment work: %w", err)
+	}
+	if !present {
+		return fmt.Errorf("selected-contract fork activation requires materialized entity or deployment work")
+	}
+	return nil
+}
+
+func selectedForkDurableExecutedEventCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var total, distinct int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(DISTINCT event_id) FROM (
+		SELECT fork_event_id AS event_id FROM run_fork_selected_contract_executions WHERE fork_run_id=$1
+		UNION ALL
+		SELECT o.event_id FROM fan_out_outcomes o
+		JOIN fan_out_intents i ON i.run_id=o.run_id AND i.deployment_feed_id=o.deployment_feed_id
+		WHERE o.run_id=$1 AND i.origin_kind='deployment' AND o.outcome_kind='committed' AND o.event_id IS NOT NULL
+	) executed`, runID).Scan(&total, &distinct)
+	if err != nil {
+		return 0, fmt.Errorf("count durable selected-fork executions: %w", err)
+	}
+	if total != distinct {
+		return 0, fmt.Errorf("selected-fork execution evidence assigns one event to multiple origins")
+	}
+	return total, nil
+}
+
 func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runForkSelectedContractActivationPort {
 	return runForkSelectedContractActivationPort{
+		postgres:       true,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
 		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
 			result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
@@ -206,6 +295,7 @@ func postgresRunForkSelectedContractActivationPort(s *RunForkPostgresOwner) runF
 
 func sqliteRunForkSelectedContractActivationPort(s *RunForkSQLiteOwner) runForkSelectedContractActivationPort {
 	return runForkSelectedContractActivationPort{
+		postgres:       false,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
 		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *mutationprotocol.Attempt) error) (bool, error) {
 			if err := s.requireCurrentSchema(); err != nil {

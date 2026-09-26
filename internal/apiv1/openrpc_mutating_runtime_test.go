@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -43,6 +43,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 )
 
 const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
@@ -241,7 +242,7 @@ func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 }
 
 func mutatingProbeGenericIdempotencyCalls(methodName string, normal int) int {
-	if methodName == runtimeagentcontrol.DirectiveOperationMethod || methodName == "conversation.fork" {
+	if methodName == runtimeagentcontrol.DirectiveOperationMethod || methodName == "conversation.fork" || methodName == "run.fork" {
 		return 0
 	}
 	return normal
@@ -904,6 +905,7 @@ type mutatingRuntimeProbeState struct {
 	observability       *fakeObservabilityReadStore
 	events              *mutatingProbeEventPublisher
 	runFork             *mutatingProbeRunForkExecutor
+	runForkOperations   *recordingRunForkOperations
 	runForkAvailability *recordingRunForkAvailability
 	runControl          *mutatingProbeRunControl
 	agentControl        *mutatingProbeAgentControl
@@ -949,6 +951,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		state:              state,
 		sourceArtifactFact: mustAPITestPersistedSourceArtifactFact(runStartTestBundleHash),
 	}
+	state.runForkOperations = newRecordingRunForkOperations()
 	state.runFork = &mutatingProbeRunForkExecutor{state: state}
 	state.testSetup = &mutatingProbeTestSetupStore{state: state}
 	state.runForkAvailability = &recordingRunForkAvailability{
@@ -1092,6 +1095,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 		Events:              s.events,
 		RunBundleContext:    s.runForkAvailability,
 		RunForkAvailability: s.runForkAvailability,
+		RunForkOperations:   s.runForkOperations,
 		RunFork:             s.runFork,
 		RunControl:          s.runControl,
 		StandingServices:    s.standing,
@@ -1362,17 +1366,26 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 		return RunForkExecutionResult{}, e.err
 	}
 	e.state.recordEffect()
-	return RunForkExecutionResult{
+	result := RunForkExecutionResult{
 		Owner:              "runtime.run_fork.selected_contract_execution",
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
 		SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
 		SourceFrozen:       true,
 		ForkRunID:          runForkTestForkRunID,
+		ForkPointKind:      string(runfork.RunForkPointEvent),
+		ForkRevision:       1,
 		ForkEventID:        strings.TrimSpace(req.ForkEventID),
 		ForkRunStatus:      "running",
 		BundleHash:         strings.TrimSpace(req.BundleHash),
 		ExecutedEventCount: 1,
-	}, nil
+	}
+	if req.ForkOperation == nil {
+		return RunForkExecutionResult{}, fmt.Errorf("mock fork executor requires a durable operation request")
+	}
+	if err := e.state.runForkOperations.activate(*req.ForkOperation, result); err != nil {
+		return RunForkExecutionResult{}, err
+	}
+	return result, nil
 }
 
 func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []operatorread.OperatorEventDelivery) {

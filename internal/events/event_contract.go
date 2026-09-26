@@ -28,6 +28,24 @@ func ValidateEventContract(event Event) error {
 	} else if event.rootIntent != "" {
 		return fmt.Errorf("root ingress run intent is only valid for root-ingress events")
 	}
+	deploymentSource := event.RoutingSource().Kind() == RoutingSourceDeploymentFeed
+	deploymentProducer := producer.Type() == EventProducerExternal && producer.ID() == "deployment-feed"
+	if deploymentSource {
+		switch class {
+		case EventAdmissionRootIngress:
+			if !deploymentProducer || event.rootIntent != rootIngressExistingRun || event.ParentEventID() != "" {
+				return fmt.Errorf("deployment feed requires its external existing-run root ingress")
+			}
+		case EventAdmissionSelectedForkReplay:
+			if producer.Type() != EventProducerPlatform || event.ParentEventID() != "" {
+				return fmt.Errorf("selected deployment replay requires platform producer and no ordinary parent")
+			}
+		default:
+			return fmt.Errorf("deployment feed source is invalid for event class %q", class)
+		}
+	} else if deploymentProducer {
+		return fmt.Errorf("deployment feed producer requires typed source")
+	}
 
 	if class == EventAdmissionOperatorInjected {
 		if event.RunID() == "" {

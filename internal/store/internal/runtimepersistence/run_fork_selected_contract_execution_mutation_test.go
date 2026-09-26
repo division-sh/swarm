@@ -96,7 +96,7 @@ func TestRunForkSelectedContractBindingUsesPersistedPostgresTimestampPrecision(t
 	binding, err := normalizeRunForkSelectedContractBinding(runfork.RunForkSelectedContractBindingRequest{
 		ForkRunID:   uuid.NewString(),
 		SourceRunID: uuid.NewString(),
-		ForkEventID: uuid.NewString(),
+		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: uuid.NewString()},
 		ContractSelection: runfork.RunForkContractSelection{
 			Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 		},

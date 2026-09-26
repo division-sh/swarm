@@ -1,6 +1,7 @@
 package durabledata
 
 import (
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,6 +10,45 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestStoredCanonicalJSONLCanExceedImportWireLimitWithoutWeakeningValidation(t *testing.T) {
+	ref, err := ParseDeclarationRef(".", "items")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]any{"value": map[string]any{"type": "string"}},
+		"required":   []string{"value"},
+	}
+	input := []byte(strings.Repeat("{\"value\":\""+strings.Repeat("<", 16_000)+"\"}\n", 8))
+	compiled, defects := CompileJSONL(ref, schema, "", input)
+	if len(defects) != 0 || len(compiled.CanonicalJSONL) <= MaxDecodedImportBytes {
+		t.Fatalf("admitted input defects=%+v, canonical bytes=%d", defects, len(compiled.CanonicalJSONL))
+	}
+	if _, defects := CompileJSONL(ref, schema, "", compiled.CanonicalJSONL); len(defects) != 1 || defects[0].Code != "decoded_import_too_large" {
+		t.Fatalf("oversized import-wire defects = %+v", defects)
+	}
+	stored, defects := CompileStoredJSONL(ref, schema, "", compiled.CanonicalJSONL)
+	if len(defects) != 0 || stored.VersionID != compiled.VersionID || len(stored.Rows) != 8 || !bytes.Equal(stored.CanonicalJSONL, compiled.CanonicalJSONL) {
+		t.Fatalf("stored canonical validation = %+v, defects=%+v", stored.Manifest, defects)
+	}
+	head := VersionHead(compiled.VersionID)
+	base := SourceEvaluationBase{
+		State: "version", Head: HeadResult{Before: head, After: head, Revision: 1}, Manifest: &compiled.Manifest,
+		CanonicalSchema: compiled.CanonicalSchema, CanonicalJSONL: compiled.CanonicalJSONL,
+	}
+	if rows, err := base.Validate(ref); err != nil || len(rows) != 8 {
+		t.Fatalf("immutable source base rows=%d, err=%v", len(rows), err)
+	}
+	base.CanonicalJSONL = bytes.Replace(compiled.CanonicalJSONL, []byte(`\u003c`), []byte(`<`), 1)
+	if bytes.Equal(base.CanonicalJSONL, compiled.CanonicalJSONL) {
+		t.Fatal("noncanonical payload probe did not change stored bytes")
+	}
+	if _, err := base.Validate(ref); err == nil {
+		t.Fatal("same-meaning noncanonical source base was accepted")
+	}
+}
 
 func TestCompileJSONLKeylessBindingVectorPreservesOrderAndMultiplicity(t *testing.T) {
 	declaration, err := ParseDeclarationRef(".", "company.lead")

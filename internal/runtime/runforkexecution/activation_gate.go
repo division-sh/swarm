@@ -145,9 +145,24 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, fmt.Errorf("register selected-contract activation descriptors: %w", err)
 	}
 	resources.descriptorLease = lease
-	plan, err := req.Store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: binding.SourceRunID, At: binding.ForkEventID})
+	planRequest := runfork.RunForkPlanRequest{SourceRunID: binding.SourceRunID}
+	if err := binding.ForkPoint.Validate(); err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation binding fork point: %w", err)
+	}
+	if binding.ForkEventID != binding.ForkPoint.EventID {
+		return SelectedContractActivationGateResult{}, errors.New("selected-contract activation binding event differs from fork point")
+	}
+	if binding.ForkPoint.Kind == runfork.RunForkPointEvent {
+		planRequest.At = binding.ForkPoint.EventID
+	} else {
+		planRequest.ResolvedPoint = &binding.ForkPoint
+	}
+	plan, err := req.Store.PlanRunFork(ctx, planRequest)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("plan selected-contract activation gate: %w", err)
+	}
+	if !sameSelectedForkPointIdentity(plan.ForkPoint, binding.ForkPoint) {
+		return SelectedContractActivationGateResult{}, errors.New("selected-contract activation plan differs from durable fork point")
 	}
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
@@ -322,6 +337,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			SourceEvents:          sourceEventIDs,
 			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
+			SourcePlan:            plan,
 			AgentRuntime:          agentRuntime,
 		})
 		containerProof := container.Proof()
@@ -332,7 +348,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if container.authority.Valid() {
 				return result, err
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 		}
 		defer func() { finalErr = errors.Join(finalErr, container.diagnostics.err()) }()
 		ctx = operation.Context()
@@ -343,7 +359,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 				err = errors.Join(err, authorityErr)
 			} else {
-				err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
+				err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 			}
 			return result, err
 		}
@@ -351,7 +367,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 				return result, errors.Join(err, authorityErr)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 		}
 		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 			ExecutionSource:       loadedSource.Source,
@@ -368,7 +384,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if activation.Activated {
 			err = errors.Join(err, req.ExecutionOwner.retainPrepared(resources))
 		} else if err != nil && closeErr == nil {
-			err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
+			err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, nil, err)
 		}
 		return result, err
 	}

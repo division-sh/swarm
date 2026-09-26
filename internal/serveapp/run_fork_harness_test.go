@@ -205,7 +205,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			fmt.Fprintf(out, "fork failed: bind selected process: %v\n", err)
 			return 1
 		}
-		if _, err := runForkOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), posture)); err != nil {
+		if _, err := runForkOwner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), posture), runtimerunforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {
 			fmt.Fprintf(out, "fork failed: reconcile selected process: %v\n", err)
 			return 1
 		}

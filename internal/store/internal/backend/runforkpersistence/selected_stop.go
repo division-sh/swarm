@@ -79,7 +79,9 @@ func requireSelectedStopTx(ctx context.Context, tx *sql.Tx, req runcontrol.Selec
 		return fmt.Errorf("read selected stop binding: %w", err)
 	}
 	if binding.BindingID != req.Binding.BindingID || binding.ForkRunID != req.Binding.ForkRunID ||
-		binding.SourceRunID != req.Binding.SourceRunID || binding.ForkEventID != req.Binding.ForkEventID ||
+		binding.SourceRunID != req.Binding.SourceRunID ||
+		binding.ForkPoint.Kind != req.Binding.ForkPoint.Kind || binding.ForkPoint.Revision != req.Binding.ForkPoint.Revision ||
+		binding.ForkPoint.EventID != req.Binding.ForkPoint.EventID ||
 		binding.ContractSelection != req.Binding.ContractSelection || !binding.CreatedAt.Equal(req.Binding.CreatedAt) {
 		return fmt.Errorf("selected stop binding changed")
 	}

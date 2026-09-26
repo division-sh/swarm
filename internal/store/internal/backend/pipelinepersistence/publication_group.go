@@ -107,12 +107,23 @@ type publicationGroup struct {
 
 func (s *fanOutPostgresOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
 	g := &publicationGroup{postgres: s.PipelinePostgresOwner, admission: s.admission, grant: s.grant, registry: &s.publicationGroups, claim: claim}
-	if err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	load := func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		g.intent, err = observeFanOutClaim(ctx, tx, s.admission, s.grant, true, claim, time.Now)
+		if s.grant.SelectedFork != nil {
+			g.intent, err = admitAndLoadSelectedFanOutClaim(ctx, tx, s.admission, s.grant, true, claim, time.Now)
+		} else {
+			g.intent, err = observeFanOutClaim(ctx, tx, s.admission, s.grant, true, claim, time.Now)
+		}
 		return err
-	}); err != nil {
-		return nil, err
+	}
+	var loadErr error
+	if s.grant.SelectedFork != nil {
+		loadErr = s.backend.RunTransaction(ctx, load)
+	} else {
+		loadErr = s.backend.RunReadTransaction(ctx, load)
+	}
+	if loadErr != nil {
+		return nil, loadErr
 	}
 	var err error
 	g.session, g.releaseSession, err = s.reservePostgresPipelineClaimConnection(ctx)
@@ -132,12 +143,23 @@ func (s *fanOutPostgresOwner) BeginFanOutPublicationGroup(ctx context.Context, c
 
 func (s *fanOutSQLiteOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
 	g := &publicationGroup{sqlite: s.PipelineSQLiteOwner, admission: s.admission, grant: s.grant, registry: &s.publicationGroups, claim: claim}
-	if err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	load := func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		g.intent, err = observeFanOutClaim(ctx, tx, s.admission, s.grant, false, claim, s.now)
+		if s.grant.SelectedFork != nil {
+			g.intent, err = admitAndLoadSelectedFanOutClaim(ctx, tx, s.admission, s.grant, false, claim, s.now)
+		} else {
+			g.intent, err = observeFanOutClaim(ctx, tx, s.admission, s.grant, false, claim, s.now)
+		}
 		return err
-	}); err != nil {
-		return nil, err
+	}
+	var loadErr error
+	if s.grant.SelectedFork != nil {
+		loadErr = s.backend.RunTransaction(ctx, "admit selected fan-out publication group", load)
+	} else {
+		loadErr = s.backend.RunReadTransaction(ctx, load)
+	}
+	if loadErr != nil {
+		return nil, loadErr
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -177,8 +199,18 @@ func (g *publicationGroup) ClaimBatch(ctx context.Context, requests []pipelineob
 		if request.Ordinal < g.intent.Cursor || request.Ordinal >= g.intent.ChunkEndOrdinal() || ordinals[request.Ordinal] || eventIDs[request.Event.ID()] {
 			return nil, errors.New("publication claim batch contains duplicate or out-of-range identity")
 		}
-		if err := fanoutobligation.ValidateCommittedOrdinalEvent(g.claim.Key, g.intent.Request.PlanRef, g.intent.Request.Capsule, request.Ordinal, request.Event); err != nil {
-			return nil, err
+		if g.intent.Request.Deployment != nil {
+			projection, err := fanoutobligation.PrepareDeploymentOrdinalEmission(g.intent, request.Ordinal)
+			if err != nil {
+				return nil, err
+			}
+			if err := projection.ValidateEvent(request.Event); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := fanoutobligation.ValidateCommittedOrdinalEvent(g.claim.Key, g.intent.Request.PlanRef, g.intent.Request.Capsule, request.Ordinal, request.Event); err != nil {
+				return nil, err
+			}
 		}
 		ordinals[request.Ordinal], eventIDs[request.Event.ID()] = true, true
 	}
@@ -381,14 +413,20 @@ func (g *publicationGroup) ValidateCommitted(ctx context.Context, claims []pipel
 		}
 	}
 	operation := func(ctx context.Context, tx *sql.Tx) error {
-		owned, err := g.admission.ObserveFanOutRunTx(ctx, tx, g.grant, g.claim.Key.RunID)
+		var owned bool
+		var err error
+		if g.grant.SelectedFork != nil {
+			owned, err = g.admission.AdmitFanOutRunTx(ctx, tx, g.grant, g.claim.Key.RunID)
+		} else {
+			owned, err = g.admission.ObserveFanOutRunTx(ctx, tx, g.grant, g.claim.Key.RunID)
+		}
 		if err != nil {
 			return err
 		}
 		if !owned {
 			return pipelineobligation.ErrStaleClaim
 		}
-		ready, err := fanOutRunAcceptsTurnTx(ctx, tx, g.claim.Key.RunID, false)
+		ready, err := fanOutRunAcceptsTurnTx(ctx, tx, g.grant, g.claim.Key.RunID, false)
 		if err != nil {
 			return err
 		}
@@ -398,7 +436,13 @@ func (g *publicationGroup) ValidateCommitted(ctx context.Context, claims []pipel
 		return nil
 	}
 	if g.postgres != nil {
+		if g.grant.SelectedFork != nil {
+			return g.postgres.backend.RunTransaction(ctx, operation)
+		}
 		return g.postgres.backend.RunReadTransaction(ctx, operation)
+	}
+	if g.grant.SelectedFork != nil {
+		return g.sqlite.backend.RunTransaction(ctx, "admit selected fan-out publication group", operation)
 	}
 	return g.sqlite.backend.RunReadTransaction(ctx, operation)
 }
@@ -457,17 +501,34 @@ func (g *publicationGroup) Close(ctx context.Context) error {
 	return err
 }
 
+func fanOutOutcomeKeySelection(key fanoutobligation.IntentKey) (string, []any, error) {
+	if err := key.Validate(); err != nil {
+		return "", nil, err
+	}
+	if key.DeploymentFeedID != "" {
+		return "run_id=$1 AND deployment_feed_id=$2 AND triggering_delivery_id IS NULL", []any{key.RunID, key.DeploymentFeedID}, nil
+	}
+	return "run_id=$1 AND deployment_feed_id IS NULL AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5",
+		[]any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath}, nil
+}
+
 func (g *publicationGroup) validateCommittedMemberTx(ctx context.Context, tx pipelineQueryer, member *publicationGroupMember) error {
 	if !g.sealed || member.ordinal >= g.end {
 		return errors.New("publication group lacks exact sealed attempt evidence")
 	}
 	key := g.claim.Key
-	var kind, eventID string
-	query := `SELECT outcome_kind,COALESCE(event_id,'') FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal=$6`
-	if g.postgres != nil {
-		query = `SELECT outcome_kind,COALESCE(event_id::text,'') FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal=$6`
+	where, args, err := fanOutOutcomeKeySelection(key)
+	if err != nil {
+		return err
 	}
-	err := tx.QueryRowContext(ctx, query, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, member.ordinal).Scan(&kind, &eventID)
+	args = append(args, member.ordinal)
+	var kind, eventID string
+	eventIDColumn := "event_id"
+	if g.postgres != nil {
+		eventIDColumn = "event_id::text"
+	}
+	query := fmt.Sprintf("SELECT outcome_kind,COALESCE(%s,'') FROM fan_out_outcomes WHERE %s AND ordinal=$%d", eventIDColumn, where, len(args))
+	err = tx.QueryRowContext(ctx, query, args...).Scan(&kind, &eventID)
 	if err != nil {
 		return err
 	}
@@ -534,7 +595,10 @@ func (g *publicationGroup) validateCommittedMembersTx(ctx context.Context, tx pi
 		return fallback
 	}
 	key := g.claim.Key
-	args := []any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath}
+	where, args, err := fanOutOutcomeKeySelection(key)
+	if err != nil {
+		return err
+	}
 	placeholders := make([]string, len(members))
 	ids := make([]string, len(members))
 	wanted := make(map[int]bool, len(members))
@@ -554,7 +618,7 @@ func (g *publicationGroup) validateCommittedMembersTx(ctx context.Context, tx pi
 	if g.postgres != nil {
 		eventIDColumn = "event_id::text"
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT ordinal,outcome_kind,COALESCE(`+eventIDColumn+`,'') FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT ordinal,outcome_kind,COALESCE(`+eventIDColumn+`,'') FROM fan_out_outcomes WHERE `+where+` AND ordinal IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	if err != nil {
 		return err
 	}

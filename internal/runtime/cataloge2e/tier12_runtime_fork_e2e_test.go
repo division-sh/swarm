@@ -248,7 +248,7 @@ func bindCatalogSelectedOwner(t testing.TB, h *runtimeHarness, owner runtimerunf
 	if err := owner.BindSelectedProcess(h.ctx, h.processOwner, h.processTopology); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.RecoverSelectedForkContexts(h.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+	if _, err := owner.RecoverSelectedForkContexts(h.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runtimerunforkexecution.SelectedForkRecoveryEnvironment{}); err != nil {
 		t.Fatal(err)
 	}
 }

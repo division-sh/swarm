@@ -134,7 +134,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 							if err != nil {
 								t.Fatal(err)
 							}
-							readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", childID, plan, refs, original)
+							readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", childID, plan, refs, original, "", nil, nil)
 							if err := tx.Rollback(); err != nil {
 								t.Fatal(err)
 							}
@@ -170,7 +170,7 @@ func fanOutTimestampReaderDatabase(t *testing.T, backend string) *sql.DB {
 		t.Cleanup(func() { _ = db.Close() })
 	}
 	for _, query := range []string{
-		fmt.Sprintf(`CREATE TABLE fan_out_intents (run_id TEXT,triggering_delivery_id TEXT,flow_path TEXT,declaration_family TEXT,semantic_path TEXT,bundle_hash TEXT,semantic_digest TEXT,source_kind TEXT,source_event_id TEXT,source_run_id TEXT,source_entity_id TEXT,source_field TEXT,source_mutation_id TEXT,source_resource_flow_path TEXT,source_resource_event_name TEXT,source_resource_version_id TEXT,cardinality INTEGER,cursor INTEGER,status TEXT,next_chunk_size INTEGER,capsule TEXT,claim_owner TEXT,claim_generation BIGINT,lease_expires_at %s,last_served_at %s,blocked_reason TEXT,retry_ready_at TIMESTAMP,retry_failure TEXT)`, timestamp, timestamp),
+		fmt.Sprintf(`CREATE TABLE fan_out_intents (run_id TEXT,origin_kind TEXT NOT NULL DEFAULT 'handler',triggering_delivery_id TEXT,flow_path TEXT,declaration_family TEXT,semantic_path TEXT,bundle_hash TEXT,semantic_digest TEXT,source_kind TEXT,source_event_id TEXT,source_run_id TEXT,source_entity_id TEXT,source_field TEXT,source_mutation_id TEXT,source_resource_flow_path TEXT,source_resource_event_name TEXT,source_resource_version_id TEXT,cardinality INTEGER,cursor INTEGER,status TEXT,next_chunk_size INTEGER,capsule TEXT,claim_owner TEXT,claim_generation BIGINT,lease_expires_at %s,last_served_at %s,blocked_reason TEXT,retry_ready_at TIMESTAMP,retry_failure TEXT)`, timestamp, timestamp),
 		fmt.Sprintf(`CREATE TABLE fan_out_outcomes (run_id TEXT,triggering_delivery_id TEXT,flow_path TEXT,declaration_family TEXT,semantic_path TEXT,ordinal INTEGER,outcome_kind TEXT,event_id TEXT,source_event_id TEXT,inherited_disposition TEXT,failure TEXT,created_at %s)`, timestamp),
 	} {
 		if _, err := db.Exec(query); err != nil {

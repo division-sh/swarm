@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/accprojection"
 	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
@@ -1822,31 +1821,15 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, nil
 	}
 	plan := active.Plan
-	var pinnedSource *durabledata.PinnedSource
-	if plan.ResourceSource != nil {
-		if e.deps.ResourceSource == nil {
-			return false, fmt.Errorf("fan-out resource source reader is required")
-		}
-		source, err := e.deps.ResourceSource.LoadPinnedSource(frame.ctx, frame.req.Event.RunID(), plan.Ref.BundleHash, plan.ResourceSource.Declaration)
-		if err != nil {
-			return false, err
-		}
-		if source.SchemaDigest != plan.ResourceSource.SchemaDigest {
-			return false, fmt.Errorf("fan-out resource source schema disagrees with compiled declaration")
-		}
-		pinnedSource = &source
-	}
 	resolveItems := func() []any {
 		itemsValue, _ := resolveContractPath(e.currentContext(frame), frame.state, plan.ItemsPath, plan.ItemsFrom)
 		return sliceFromAny(itemsValue)
 	}
 	var items []any
 	if !plan.SourceAfterWrites {
-		if pinnedSource == nil {
-			items = resolveItems()
-		}
+		items = resolveItems()
 		frame.state.FanOut = map[string]any{}
-		frame.state.SetFanOut("count", fanOutSourceCount(items, pinnedSource))
+		frame.state.SetFanOut("count", len(items))
 	}
 	if err := e.stepDataWrites(frame); err != nil {
 		return false, err
@@ -1855,17 +1838,12 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, err
 	}
 	if plan.SourceAfterWrites {
-		if pinnedSource == nil {
-			items = resolveItems()
-		}
+		items = resolveItems()
 		frame.state.FanOut = map[string]any{}
-		frame.state.SetFanOut("count", fanOutSourceCount(items, pinnedSource))
+		frame.state.SetFanOut("count", len(items))
 	}
-	frame.result.FanOutCount = fanOutSourceCount(items, pinnedSource)
+	frame.result.FanOutCount = len(items)
 	limit := plan.MaxItems
-	if pinnedSource != nil {
-		limit = durabledata.MaxResourceRows
-	}
 	if frame.result.FanOutCount > limit {
 		return false, failures.Wrap(
 			failures.ClassFanOutBoundExceeded,
@@ -1884,7 +1862,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		)
 	}
 	if !frame.req.Preview {
-		intent, err := e.buildFanOutIntent(frame, plan, frame.result.FanOutCount, pinnedSource)
+		intent, err := e.buildFanOutIntent(frame, plan, frame.result.FanOutCount)
 		if err != nil {
 			return false, err
 		}
@@ -1927,13 +1905,6 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	return true, nil
 }
 
-func fanOutSourceCount(items []any, source *durabledata.PinnedSource) int {
-	if source != nil {
-		return source.RowCount
-	}
-	return len(items)
-}
-
 func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string) (events.RoutingSource, error) {
 	entityID = strings.TrimSpace(entityID)
 	if ref.FlowPath() == "." {
@@ -1946,34 +1917,26 @@ func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowiden
 	})
 }
 
-func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontracts.FanOutCompiledPlan, cardinality int, pinnedSource *durabledata.PinnedSource) (fanoutobligation.IntentRequest, error) {
+func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontracts.FanOutCompiledPlan, cardinality int) (fanoutobligation.IntentRequest, error) {
 	claim, claimed := runtimedelivery.ClaimFromContext(frame.ctx)
 	if !claimed {
 		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out durable intent requires the exact inbound delivery claim")
 	}
 	ctx := e.currentContext(frame)
-	var source fanoutobligation.SourceRef
-	if plan.ResourceSource != nil {
-		if pinnedSource == nil || pinnedSource.Declaration != plan.ResourceSource.Declaration {
-			return fanoutobligation.IntentRequest{}, fmt.Errorf("fan-out compiled resource source lacks exact pinned metadata")
-		}
-		source = fanoutobligation.SourceRef{Kind: fanoutobligation.SourceResourceVersion, Declaration: pinnedSource.Declaration, VersionID: pinnedSource.VersionID}
-	} else {
-		if len(plan.ItemsPath.Segments) == 0 {
-			return fanoutobligation.IntentRequest{}, fmt.Errorf("fan-out compiled source %q has no field", plan.ItemsFrom)
-		}
-		source.Field = strings.TrimSpace(plan.ItemsPath.Segments[0])
-		switch plan.ItemsPath.Root {
-		case paths.RootPayload:
-			source.Kind = fanoutobligation.SourceEventPayloadField
-			source.EventID = strings.TrimSpace(frame.req.Event.ID())
-		case paths.RootEntity:
-			source.Kind = fanoutobligation.SourceEntityField
-			source.RunID = strings.TrimSpace(frame.req.Event.RunID())
-			source.EntityID = strings.TrimSpace(frame.req.EntityID.String())
-		default:
-			return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out compiled source %q has no immutable adapter", plan.ItemsFrom)
-		}
+	if len(plan.ItemsPath.Segments) == 0 {
+		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan-out compiled source %q has no field", plan.ItemsFrom)
+	}
+	source := fanoutobligation.SourceRef{Field: strings.TrimSpace(plan.ItemsPath.Segments[0])}
+	switch plan.ItemsPath.Root {
+	case paths.RootPayload:
+		source.Kind = fanoutobligation.SourceEventPayloadField
+		source.EventID = strings.TrimSpace(frame.req.Event.ID())
+	case paths.RootEntity:
+		source.Kind = fanoutobligation.SourceEntityField
+		source.RunID = strings.TrimSpace(frame.req.Event.RunID())
+		source.EntityID = strings.TrimSpace(frame.req.EntityID.String())
+	default:
+		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out compiled source %q has no immutable adapter", plan.ItemsFrom)
 	}
 	entity := cloneStringAnyMap(ctx.Entity.Raw())
 	stateFields := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)

@@ -33,6 +33,7 @@ type testOperatorCapabilities struct {
 	ForkChatExecutor          ForkChatExecutor
 	RunBundleContext          RunBundleContextStore
 	RunForkAvailability       RunForkAvailabilityStore
+	RunForkOperations         RunForkOperationReader
 	RunFork                   RunForkExecutor
 	SelectedForkControls      SelectedForkControlAdmission
 	AgentControl              AgentControlController
@@ -187,5 +188,5 @@ func testOperatorEventReplayHandlers(c testOperatorCapabilities) map[string]Meth
 }
 
 func testOperatorRunForkHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	return OperatorRunForkHandlers(RunForkHandlerOptions{Now: c.Now, Availability: c.RunForkAvailability, Executor: c.RunFork, Idempotency: c.Idempotency})
+	return OperatorRunForkHandlers(RunForkHandlerOptions{Now: c.Now, Availability: c.RunForkAvailability, Operations: c.RunForkOperations, Executor: c.RunFork})
 }

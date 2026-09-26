@@ -38,10 +38,12 @@ type selectedAPICapabilities struct {
 	ConversationForks         apiv1.ConversationForkReadStore
 	ConversationForkLifecycle apiv1.ConversationForkLifecycleStore
 	RunForkAvailability       apiv1.RunForkAvailabilityStore
+	RunForkOperations         apiv1.RunForkOperationReader
 	RunFork                   apiv1.RunForkExecutor
 	SelectedForkControls      apiv1.SelectedForkControlAdmission
 	SelectedForkRetirement    selectedForkContextRetirement
 	SelectedForkProcess       selectedForkProcessOwner
+	SelectedForkRecovery      runtimerunforkexecution.SelectedForkRecoveryEnvironment
 	RuntimeContexts           *runtime.RuntimeContextManager
 	ResetCoordinator          apiv1.DestructiveResetCoordinator
 }
@@ -114,7 +116,11 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 				ProviderCredentials: req.ProviderCredentials, ProcessCapability: req.ProcessCapability,
 			},
 		}
+		caps.SelectedForkRecovery = runtimerunforkexecution.SelectedForkRecoveryEnvironment{
+			SourceLoader: loader, AgentRuntime: executor.AgentRuntime,
+		}
 		caps.RunForkAvailability = family.Availability()
+		caps.RunForkOperations = family.Operations()
 		caps.RunFork = executor
 		caps.SelectedForkControls = family
 		caps.SelectedForkRetirement = family
@@ -142,5 +148,5 @@ func buildSelectedResetCoordinator(owner *storeselected.Owner, capability runtim
 type selectedForkProcessOwner interface {
 	apiv1.SelectedForkStopOwner
 	BindSelectedProcess(context.Context, *worklifetime.Process, runtimestartupownership.ProcessCapability) error
-	RecoverSelectedForkContexts(context.Context, effects.RecoveryRequest) ([]runfork.SelectedForkRecoveryResult, error)
+	RecoverSelectedForkContexts(context.Context, effects.RecoveryRequest, runtimerunforkexecution.SelectedForkRecoveryEnvironment) ([]runfork.SelectedForkRecoveryResult, error)
 }

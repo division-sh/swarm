@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,7 +28,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestFanOutIntentSQLArgsEncodeClosedSourceUnionWithExplicitAbsence(t *testing.T) {
+func TestFanOutHandlerIntentSQLArgsEncodeSupportedSourcesWithExplicitAbsence(t *testing.T) {
 	request := fanoutobligation.IntentRequest{
 		PlanRef: runtimecontracts.FanOutPlanRef{BundleHash: "bundle", SemanticDigest: "digest"},
 	}
@@ -44,27 +43,18 @@ func TestFanOutIntentSQLArgsEncodeClosedSourceUnionWithExplicitAbsence(t *testin
 			source: fanoutobligation.SourceRef{
 				Kind: fanoutobligation.SourceEventPayloadField, EventID: "event-id", Field: "items",
 			},
-			want: []any{"event_payload_field", "event-id", nil, nil, "items", nil, nil, nil, nil},
+			want: []any{"event_payload_field", "event-id", nil, nil, "items", nil},
 		},
 		{
 			name: "entity field revision",
 			source: fanoutobligation.SourceRef{
 				Kind: fanoutobligation.SourceEntityField, RunID: "run-id", EntityID: "entity-id", Field: "items", MutationID: "mutation-id",
 			},
-			want: []any{"entity_field_revision", nil, "run-id", "entity-id", "items", "mutation-id", nil, nil, nil},
-		},
-		{
-			name: "resource version",
-			source: fanoutobligation.SourceRef{
-				Kind:        fanoutobligation.SourceResourceVersion,
-				Declaration: durabledata.DeclarationRef{FlowPath: "root", EventName: "records"},
-				VersionID:   durabledata.VersionID("resource-version"),
-			},
-			want: []any{"resource_version", nil, nil, nil, nil, nil, "root", "records", "resource-version"},
+			want: []any{"entity_field_revision", nil, "run-id", "entity-id", "items", "mutation-id"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got := fanOutIntentSQLArgs(request, test.source, []byte(`{}`), fanoutobligation.StatusOpen, now)[7:16]
+			got := fanOutIntentSQLArgs(request, test.source, []byte(`{}`), fanoutobligation.StatusOpen, now)[7:13]
 			if !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("source SQL args = %#v, want %#v", got, test.want)
 			}
@@ -206,19 +196,22 @@ func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 	}
 	statements := []string{
 		`CREATE TABLE fan_out_intents (
-			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, flow_path TEXT NOT NULL, declaration_family TEXT NOT NULL, semantic_path TEXT NOT NULL,
-			bundle_hash TEXT NOT NULL, semantic_digest TEXT NOT NULL, source_kind TEXT NOT NULL,
+			run_id TEXT NOT NULL, origin_kind TEXT NOT NULL DEFAULT 'handler', deployment_feed_id TEXT, deployment_schema_digest TEXT,
+			triggering_delivery_id TEXT, flow_path TEXT, declaration_family TEXT, semantic_path TEXT,
+			bundle_hash TEXT NOT NULL, semantic_digest TEXT, source_kind TEXT NOT NULL,
 			source_event_id TEXT, source_run_id TEXT, source_entity_id TEXT, source_field TEXT, source_mutation_id TEXT,
 			source_resource_flow_path TEXT, source_resource_event_name TEXT, source_resource_version_id TEXT,
 			cardinality INTEGER NOT NULL, cursor INTEGER NOT NULL, status TEXT NOT NULL, next_chunk_size INTEGER NOT NULL,
 			last_served_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
-			claim_owner TEXT, claim_generation BIGINT NOT NULL DEFAULT 0, lease_expires_at TIMESTAMP, blocked_reason TEXT, capsule TEXT NOT NULL,
+			claim_owner TEXT, claim_generation BIGINT NOT NULL DEFAULT 0, lease_expires_at TIMESTAMP, blocked_reason TEXT, capsule TEXT,
 			retry_ready_at TIMESTAMP, retry_failure TEXT,
-			PRIMARY KEY (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path))`,
+			UNIQUE (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path),
+			UNIQUE (run_id,deployment_feed_id))`,
 		`CREATE TABLE fan_out_outcomes (
-			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, flow_path TEXT NOT NULL, declaration_family TEXT NOT NULL, semantic_path TEXT NOT NULL,
+			run_id TEXT NOT NULL, deployment_feed_id TEXT, triggering_delivery_id TEXT, flow_path TEXT, declaration_family TEXT, semantic_path TEXT,
 			ordinal INTEGER NOT NULL, outcome_kind TEXT NOT NULL, event_id TEXT, source_event_id TEXT, inherited_disposition TEXT, failure TEXT, created_at TIMESTAMP NOT NULL,
-			PRIMARY KEY (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal))`,
+			UNIQUE (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,ordinal),
+			UNIQUE (run_id,deployment_feed_id,ordinal))`,
 	}
 	if backend == "postgres" {
 		statements[1] = strings.ReplaceAll(statements[1], "event_id TEXT", "event_id UUID")

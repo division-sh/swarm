@@ -155,6 +155,7 @@ func TestActivateSelectedContractRunForkRequiresExecutionOwnerBeforeReplayAdmiss
 			RuntimeRecoveryOwner:   runfork.RunForkSelectedContractRouteRecoveryOwner,
 			ForkRunID:              binding.ForkRunID,
 			SourceRunID:            binding.SourceRunID,
+			ForkPoint:              binding.ForkPoint,
 			ForkEventID:            binding.ForkEventID,
 			ContractSelection:      binding.ContractSelection,
 			RouteTopologyOwner:     runfork.RunForkSelectedContractRouteTopologyOwner,
@@ -190,6 +191,7 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 		RuntimeRecoveryOwner:   runfork.RunForkSelectedContractRouteRecoveryOwner,
 		ForkRunID:              binding.ForkRunID,
 		SourceRunID:            binding.SourceRunID,
+		ForkPoint:              binding.ForkPoint,
 		ForkEventID:            binding.ForkEventID,
 		ContractSelection:      binding.ContractSelection,
 		RouteTopologyOwner:     runfork.RunForkSelectedContractRouteTopologyOwner,
@@ -473,7 +475,7 @@ func testSelectedContractStateOnlyPlan(binding runfork.RunForkSelectedContractBi
 	return runfork.RunForkPlan{
 		SourceRunID:      binding.SourceRunID,
 		SourceRunStatus:  "running",
-		ForkPoint:        runfork.RunForkPoint{Input: binding.ForkEventID, EventID: binding.ForkEventID, EventName: "work.ready", Timestamp: binding.CreatedAt},
+		ForkPoint:        runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Input: binding.ForkEventID, EventID: binding.ForkEventID, EventName: "work.ready", Timestamp: binding.CreatedAt, Revision: binding.ForkPoint.Revision},
 		EventCountAtFork: 1,
 		ExecutionReady:   true,
 		ReplayResumeAdmission: runfork.RunForkReplayResumeAdmission{

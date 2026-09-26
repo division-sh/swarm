@@ -377,11 +377,12 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 	if err != nil {
 		return nil, err
 	}
+	ordered := newOrderedActiveTargetDescriptors(descriptors)
 	for _, descriptor := range activeTargetDescriptorsFromAgents(agents) {
-		descriptors = appendActiveTargetDescriptor(descriptors, descriptor)
+		ordered.add(descriptor)
 	}
-	out := make([]runtimepinrouting.Descriptor, 0, len(descriptors))
-	for _, descriptor := range descriptors {
+	out := make([]runtimepinrouting.Descriptor, 0, len(ordered.descriptors))
+	for _, descriptor := range ordered.descriptors {
 		descriptor = descriptor.Normalized()
 		if descriptor.FlowInstance == "" && descriptor.EntityID == "" {
 			continue
@@ -402,7 +403,7 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 		return nil, false, errors.New("active target descriptors require exact inbound run identity")
 	}
 	runID := inbound.RunID()
-	out := []ActiveTargetDescriptor{}
+	ordered := newOrderedActiveTargetDescriptors([]ActiveTargetDescriptor{})
 	available := false
 	targetOwners := eb.durable.TargetOwners
 	if targetOwners != nil {
@@ -412,12 +413,12 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 			return nil, true, err
 		}
 		for _, owner := range owners {
-			out = appendActiveTargetDescriptor(out, owner)
+			ordered.add(owner)
 		}
 	}
 	lister := eb.durable.ActiveFlows
 	if lister == nil {
-		return out, available, nil
+		return ordered.descriptors, available, nil
 	}
 	available = true
 	flowDescriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
@@ -426,49 +427,70 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 	}
 	for _, descriptor := range flowDescriptors {
 		if descriptor.RunID == runID {
-			out = appendActiveFlowInstanceTargetDescriptors(out, []ActiveFlowInstanceDescriptor{descriptor})
+			ordered.add(descriptor.TargetDescriptor())
 		}
 	}
-	return out, available, nil
+	return ordered.descriptors, available, nil
 }
 
 func activeTargetDescriptorsFromAgents(descriptors map[agentidentity.Identity]ActiveAgentDescriptor) []ActiveTargetDescriptor {
 	if len(descriptors) == 0 {
 		return nil
 	}
-	out := make([]ActiveTargetDescriptor, 0, len(descriptors))
+	ordered := newOrderedActiveTargetDescriptors(make([]ActiveTargetDescriptor, 0, len(descriptors)))
 	for _, descriptor := range descriptors {
 		target := descriptor.TargetDescriptor()
 		if target.EntityID == "" {
 			continue
 		}
-		out = appendActiveTargetDescriptor(out, target)
+		ordered.add(target)
 	}
-	return out
+	return ordered.descriptors
 }
 
-func appendActiveFlowInstanceTargetDescriptors(out []ActiveTargetDescriptor, descriptors []ActiveFlowInstanceDescriptor) []ActiveTargetDescriptor {
-	if len(descriptors) == 0 {
-		return out
-	}
-	for _, descriptor := range descriptors {
-		out = appendActiveTargetDescriptor(out, descriptor.TargetDescriptor())
-	}
-	return out
+type activeTargetDescriptorKey struct {
+	id            string
+	entityID      string
+	flowInstance  string
+	materializing bool
+	availability  runtimepipeline.DeliveryTargetAvailability
 }
 
-func appendActiveTargetDescriptor(out []ActiveTargetDescriptor, descriptor ActiveTargetDescriptor) []ActiveTargetDescriptor {
+type orderedActiveTargetDescriptors struct {
+	descriptors []ActiveTargetDescriptor
+	seen        map[activeTargetDescriptorKey]struct{}
+}
+
+func newOrderedActiveTargetDescriptors(initial []ActiveTargetDescriptor) orderedActiveTargetDescriptors {
+	ordered := orderedActiveTargetDescriptors{
+		descriptors: initial,
+		seen:        make(map[activeTargetDescriptorKey]struct{}, len(initial)),
+	}
+	for _, descriptor := range initial {
+		ordered.seen[activeTargetDescriptorKeyFor(descriptor)] = struct{}{}
+	}
+	return ordered
+}
+
+func activeTargetDescriptorKeyFor(descriptor ActiveTargetDescriptor) activeTargetDescriptorKey {
+	return activeTargetDescriptorKey{
+		id: strings.TrimSpace(descriptor.ID), entityID: strings.TrimSpace(descriptor.EntityID),
+		flowInstance:  strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/"),
+		materializing: descriptor.Materializing, availability: descriptor.Availability,
+	}
+}
+
+func (o *orderedActiveTargetDescriptors) add(descriptor ActiveTargetDescriptor) {
 	descriptor = descriptor.Normalized()
 	if descriptor.FlowInstance == "" && descriptor.EntityID == "" {
-		return out
+		return
 	}
-	for _, existing := range out {
-		existing = existing.Normalized()
-		if existing.ID == descriptor.ID && existing.EntityID == descriptor.EntityID && existing.FlowInstance == descriptor.FlowInstance && existing.Materializing == descriptor.Materializing && existing.Availability == descriptor.Availability {
-			return out
-		}
+	key := activeTargetDescriptorKeyFor(descriptor)
+	if _, exists := o.seen[key]; exists {
+		return
 	}
-	return append(out, descriptor)
+	o.seen[key] = struct{}{}
+	o.descriptors = append(o.descriptors, descriptor)
 }
 
 // RegisterRuntimeActiveAgentDescriptor adds in-memory active-agent metadata for
@@ -767,7 +789,7 @@ func (eb *EventBus) dispatchLiveRecipientsWithRoutes(ctx context.Context, evt ev
 }
 
 // DispatchDeliveryContinuation re-enters one exact persisted route. It is used
-// only by the normal generation coordinator after a selected-store scan.
+// by the execution-generation coordinator after a selected-store scan.
 func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events.Event, route events.DeliveryRoute) (result runtimedeliverycontinuation.DispatchResult) {
 	if eb == nil {
 		return runtimedeliverycontinuation.Fatal(errors.New("event bus is required"))

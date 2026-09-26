@@ -581,6 +581,8 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id IN (target.source_event_id, target.fork_event_id) AND e.run_id IN %[1]s) OR EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id IN (target.source_delivery_id, target.fork_delivery_id) AND (d.run_id IN %[1]s OR e.run_id IN %[1]s))"
 	case "run_fork_selected_contract_executions":
 		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id IN (target.source_event_id, target.fork_event_id) AND e.run_id IN %[1]s)"
+	case "run_fork_operations":
+		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s"
 	case "run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries", "run_fork_selected_contract_bindings":
 		predicate = "target.fork_run_id IN %[1]s OR target.source_run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.fork_event_id AND e.run_id IN %[1]s)"
 	case "timers":

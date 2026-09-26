@@ -31,10 +31,12 @@ func isolatedSelectedForkMaterializationCommit(err error) (runfork.RunForkMateri
 
 func requireExactSelectedForkMaterialization(req runforkreadiness.MaterializeRequest, result runfork.RunForkMaterialization) error {
 	binding := result.SelectedContractBinding
+	point := req.Preparation.ForkPoint
 	if binding == nil || binding.BindingID == "" || result.ForkRunID == "" ||
 		binding.ForkRunID != result.ForkRunID ||
-		result.SourceRunID != req.SourceRunID || result.ForkPoint.EventID != req.At ||
-		binding.SourceRunID != req.SourceRunID || binding.ForkEventID != req.At ||
+		result.SourceRunID != req.SourceRunID || point.Validate() != nil || req.At != point.EventID ||
+		!sameSelectedForkPointIdentity(result.ForkPoint, point) ||
+		binding.SourceRunID != req.SourceRunID || !sameSelectedForkPointIdentity(binding.ForkPoint, point) || binding.ForkEventID != point.EventID ||
 		binding.ContractSelection != req.ContractSelection {
 		return fmt.Errorf("selected materialization returned no exact admitted binding")
 	}

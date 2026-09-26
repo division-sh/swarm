@@ -51,6 +51,16 @@ func (a *fanOutAdmission) AdmitFanOutCleanupTx(ctx context.Context, tx *sql.Tx, 
 	if err := grant.Validate(); err != nil {
 		return err
 	}
+	if grant.SelectedFork != nil {
+		owned, err := a.AdmitFanOutRunTx(ctx, tx, grant, grant.SelectedFork.ForkRunID)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return errors.New("selected fan-out cleanup no longer owns its fork run")
+		}
+		return nil
+	}
 	authority, err := a.admitProcess(ctx, tx)
 	if err != nil {
 		return err
@@ -98,7 +108,7 @@ func (a *fanOutAdmission) proveSource(ctx context.Context, tx *sql.Tx, authority
 		return errors.New("fan-out grant differs from the retained process authority")
 	}
 	if grant.SelectedFork != nil {
-		return errors.New("fan-out serving does not admit selected-fork grants")
+		return nil
 	}
 	plan, exists, err := loadSourceSetModeTx(ctx, tx, a.sqlite, lock)
 	if err != nil {
@@ -259,6 +269,9 @@ func currentFanOutGrantsTx(ctx context.Context, tx *sql.Tx, sqlite bool) ([]runt
 }
 
 func (a *fanOutAdmission) ObserveFanOutRunTx(ctx context.Context, tx *sql.Tx, grant runtimeownership.GrantEvidence, runID string) (bool, error) {
+	if grant.SelectedFork != nil {
+		return false, errors.New("selected deployment serving requires mutation-time execution proof")
+	}
 	authority, err := a.proveProcess(ctx, tx, false)
 	if err != nil {
 		return false, err
@@ -284,12 +297,16 @@ func (a *fanOutAdmission) AdmitFanOutRunTx(ctx context.Context, tx *sql.Tx, gran
 	if err := a.admitSource(ctx, tx, authority, grant); err != nil {
 		return false, err
 	}
-	if _, _, err := observeFanOutGrantFamilyTx(ctx, tx, authority, a.sqlite); err != nil {
-		return false, err
+	if grant.SelectedFork == nil {
+		if _, _, err := observeFanOutGrantFamilyTx(ctx, tx, authority, a.sqlite); err != nil {
+			return false, err
+		}
+	} else if runID != grant.SelectedFork.ForkRunID {
+		return false, nil
 	}
 	ownership, err := agentpersistence.InspectRunExecutionOwnershipTx(ctx, tx, grant, runID, a.sqlite)
 	if err != nil {
 		return false, fmt.Errorf("admit fan-out run execution: %w", err)
 	}
-	return ownership == manager.RunExecutionOwned && grant.SelectedFork == nil, nil
+	return ownership == manager.RunExecutionOwned, nil
 }

@@ -48,6 +48,19 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodeHistoricalSnapshotRetainsContinuationHandoff(t *testing.T) {
+	fact := historicalRouteFact(t, historicalRouteFixtures(t)[0].route, deliverylifecycle.StatusPending)
+	handoff := time.Now().UTC().Truncate(time.Microsecond)
+	fact["continuation_handoff_at"] = handoff.Format(time.RFC3339Nano)
+	decoded, err := deliverylifecycle.DecodeHistoricalSnapshot(historicalJSON(t, fact))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.ContinuationHandoffAt.Equal(handoff) {
+		t.Fatalf("historical handoff = %s, want %s", decoded.ContinuationHandoffAt, handoff)
+	}
+}
+
 func TestDecodeHistoricalSnapshotNonConnectPreservesEmptyClaim(t *testing.T) {
 	for _, fixture := range historicalRouteFixtures(t) {
 		if !fixture.route.ConnectClaim.Empty() {

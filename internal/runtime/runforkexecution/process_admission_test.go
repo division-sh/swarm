@@ -61,7 +61,7 @@ func TestSelectedForkProcessAdmissionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			requireRefusal(ctx)
-			if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly)); err != nil {
+			if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{}); err != nil {
 				t.Fatal(err)
 			}
 			foreign := worklifetime.NewProcess()

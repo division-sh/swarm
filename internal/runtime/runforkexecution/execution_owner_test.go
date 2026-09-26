@@ -117,7 +117,7 @@ func selectedForkBoundOwnerWithProcessForTest(t testing.TB, selected startupowne
 	if err := owner.BindSelectedProcess(ctx, fixture.process, capability); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live)); err != nil {
+	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), SelectedForkRecoveryEnvironment{}); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.owners == nil {

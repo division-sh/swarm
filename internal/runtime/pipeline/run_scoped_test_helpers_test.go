@@ -95,7 +95,6 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	store := &workflowInstanceStore{
 		runLifecycle:      runner,
 		fanOutObligations: unavailablePipelineTestFanOutOwner{},
-		resourceSource:    unavailablePipelineTestResourceSource{},
 	}
 	if owner, ok := any(runner).(entityquery.Reader); ok {
 		store.entityQuery = owner

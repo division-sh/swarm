@@ -828,7 +828,19 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	exclude runtimeflowidentity.RunScopedFlowInstance,
 ) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
 	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
-	return eb.deriveFlowInstanceRouteTopologyWithInputProducers(ctx, table, lister, runID, include, exclude, graph, inputProducers)
+	return eb.deriveFlowInstanceRouteTopologyWithInputProducers(ctx, table, lister, runID, include, exclude, graph, inputProducers, false)
+}
+
+func (eb *EventBus) deriveFlowInstanceRouteRecordTopology(
+	ctx context.Context,
+	table *RouteTable,
+	lister ActiveFlowInstanceDescriptorLister,
+	runID string,
+	include *FlowInstanceRouteMaterializationRequest,
+	exclude runtimeflowidentity.RunScopedFlowInstance,
+) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
+	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+	return eb.deriveFlowInstanceRouteTopologyWithInputProducers(ctx, table, lister, runID, include, exclude, graph, inputProducers, true)
 }
 
 func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
@@ -840,6 +852,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
 	exclude runtimeflowidentity.RunScopedFlowInstance,
 	graph runtimepinrouting.CompiledConnectGraph,
 	inputProducers runtimepinrouting.FlowInputProducerResolver,
+	deferRebuild bool,
 ) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
 	staged, err := deriveRouteTableWithInputProducers(table.source, graph, inputProducers)
 	if err != nil {
@@ -850,6 +863,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
 		return nil, nil, fmt.Errorf("list active flow-instance route topology: %w", err)
 	}
 	identities := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(descriptors)+1)
+	changed := false
 	exclude = exclude.Normalize()
 	if exclude.Validate() == nil {
 		if err := staged.removeFlowInstanceRouteForContext(ctx, exclude); err != nil {
@@ -878,20 +892,27 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
 				identity.Route.ScopeKey,
 			)
 		}
-		if err := staged.addFlowInstanceRouteForContextWithInputProducers(ctx, FlowInstanceRouteMaterializationRequest{
+		added, err := staged.addFlowInstanceRouteForTopology(FlowInstanceRouteMaterializationRequest{
 			Identity:            identity,
 			ActivationVariables: descriptor.AddressFields,
-		}, &inputProducers); err != nil {
+		}, &inputProducers)
+		if err != nil {
 			return nil, nil, fmt.Errorf("derive active flow-instance route %s: %w", identity.Key(), err)
 		}
+		changed = changed || added
 		identities[identity] = struct{}{}
 	}
 	if include != nil {
 		req := include.Normalized()
-		if err := staged.addFlowInstanceRouteForContextWithInputProducers(ctx, req, &inputProducers); err != nil {
+		added, err := staged.addFlowInstanceRouteForTopology(req, &inputProducers)
+		if err != nil {
 			return nil, nil, err
 		}
+		changed = changed || added
 		identities[req.Identity] = struct{}{}
+	}
+	if changed && !deferRebuild {
+		staged.rebuildStagedFlowInstanceRoutes()
 	}
 	out := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(identities))
 	for identity := range identities {
@@ -902,14 +923,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
 }
 
 func flowInstanceRouteTopologyRecordSets(table *RouteTable, identities []runtimeflowidentity.RunScopedFlowInstance) []FlowInstanceRouteRecordSet {
-	sets := make([]FlowInstanceRouteRecordSet, 0, len(identities))
-	for _, identity := range identities {
-		sets = append(sets, FlowInstanceRouteRecordSet{
-			Identity: identity,
-			Routes:   table.MaterializedRoutes(identity),
-		})
-	}
-	return sets
+	return table.materializedRouteRecordSets(identities)
 }
 
 func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
@@ -975,7 +989,7 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 		return FlowInstanceRouteTopologyResult{}, errors.New("flow-instance route staging requires active flow-instance descriptors")
 	}
 	req = req.Normalized()
-	staged, identities, err := eb.deriveFlowInstanceRouteTopology(
+	staged, identities, err := eb.deriveFlowInstanceRouteRecordTopology(
 		ctx,
 		table,
 		descriptorLister,
@@ -1052,7 +1066,7 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 	if descriptorLister == nil {
 		return errors.New("flow-instance route removal requires active flow-instance descriptors")
 	}
-	staged, identities, err := eb.deriveFlowInstanceRouteTopology(ctx, table, descriptorLister, owner.RunID, nil, owner)
+	staged, identities, err := eb.deriveFlowInstanceRouteRecordTopology(ctx, table, descriptorLister, owner.RunID, nil, owner)
 	if err != nil {
 		return err
 	}

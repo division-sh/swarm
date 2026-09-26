@@ -949,7 +949,7 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	forkOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, eventID)
+	forkOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, storerunlifecycle.ForkOriginPointEvent, materialized.ForkPoint.Revision, eventID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1816,9 +1816,9 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	orphanEntityID := uuid.NewString()
 	orphanEventID := uuid.NewString()
 	seedActivationReadySourceRun(t, db, orphanSourceRunID, orphanEntityID, orphanEventID, at.Add(time.Minute))
-	captureRunForkTestRevision(t, db, orphanSourceRunID)
+	orphanRevision := captureRunForkTestRevision(t, db, orphanSourceRunID)
 	orphanRunID := uuid.NewString()
-	orphanOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(orphanSourceRunID, orphanEventID)
+	orphanOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(orphanSourceRunID, storerunlifecycle.ForkOriginPointEvent, orphanRevision, orphanEventID)
 	if err != nil {
 		t.Fatalf("construct orphan fork origin: %v", err)
 	}

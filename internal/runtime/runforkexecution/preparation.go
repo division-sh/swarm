@@ -35,42 +35,104 @@ import (
 // PreparedSelectedFork has no executable method, actor, grant or occurrence.
 // Only the selected orchestration owner can consume it with real materialization.
 type PreparedSelectedFork struct {
-	owner                 SelectedContractExecutionOwner
-	bindMu                sync.Mutex
-	closed                bool
-	cleanupComplete       bool
-	closeErr              error
-	loadedSource          LoadedSelectedContractSource
-	originalSource        LoadedSelectedContractSource
-	originalLoopCarriage  semanticview.OriginalLoopCarriage
-	plan                  runfork.RunForkPlan
-	frontier              runfork.RunForkContractFrontierAdmission
-	routeAdmission        runfork.RunForkSelectedContractRouteAdmission
-	routeTopology         runfork.RunForkSelectedContractRouteTopology
-	model                 runfork.RunForkSelectedContractExecution
-	agentRuntime          selectedContractAgentRuntimePlan
-	readiness             runforkreadiness.Admission
-	deferredWorkAdmission selectedContractDeferredWorkAdmission
-	dataPinOverrides      []durabledata.ExplicitPin
-	descriptorLease       *runtimeauthoractivity.EventCatalogLease
-	operation             *selectedContractOperation
-	coordinates           managedcapabilities.SelectedForkPreparationCoordinates
-	preparationID         string
-	processGeneration     uint64
-	sourceRunID           string
-	forkEventID           string
-	declarationRevision   string
-	actors                []runfork.SelectedForkPreparedActor
-	catalog               *runtimepkg.PreparedSelectedForkProviderCatalog
-	bound                 bool
-	bindingFingerprint    string
-	inputs                map[string]runtimebus.SelectedInputValidation
-	inputCoordinates      map[string]string
+	owner                   SelectedContractExecutionOwner
+	bindMu                  sync.Mutex
+	closed                  bool
+	cleanupComplete         bool
+	closeErr                error
+	loadedSource            LoadedSelectedContractSource
+	originalSource          LoadedSelectedContractSource
+	originalLoopCarriage    semanticview.OriginalLoopCarriage
+	plan                    runfork.RunForkPlan
+	frontier                runfork.RunForkContractFrontierAdmission
+	routeAdmission          runfork.RunForkSelectedContractRouteAdmission
+	routeTopology           runfork.RunForkSelectedContractRouteTopology
+	model                   runfork.RunForkSelectedContractExecution
+	agentRuntime            selectedContractAgentRuntimePlan
+	readiness               runforkreadiness.Admission
+	deferredWorkAdmission   selectedContractDeferredWorkAdmission
+	dataPinOverrides        []durabledata.ExplicitPin
+	forkOperation           *runfork.ForkOperationRequest
+	recoveryFromExecutionID string
+	descriptorLease         *runtimeauthoractivity.EventCatalogLease
+	operation               *selectedContractOperation
+	coordinates             managedcapabilities.SelectedForkPreparationCoordinates
+	preparationID           string
+	processGeneration       uint64
+	sourceRunID             string
+	forkPoint               runfork.RunForkPoint
+	declarationRevision     string
+	actors                  []runfork.SelectedForkPreparedActor
+	catalog                 *runtimepkg.PreparedSelectedForkProviderCatalog
+	bound                   bool
+	bindingFingerprint      string
+	inputs                  map[string]runtimebus.SelectedInputValidation
+	inputCoordinates        map[string]string
+}
+
+func validateSelectedFiniteFeedRecoveryRequest(req SelectedContractExecutionRequest) error {
+	if req.Recovery == nil {
+		return nil
+	}
+	result := req.Recovery
+	if result.Disposition != runfork.SelectedForkRecoveryResumeFiniteFeed || result.Resume == nil || req.ForkOperation == nil {
+		return fmt.Errorf("selected finite-feed resume requires its exact permanent operation")
+	}
+	for _, id := range []string{result.RunID, result.ExecutionID} {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed == uuid.Nil || parsed.String() != id {
+			return fmt.Errorf("selected finite-feed resume requires canonical child and predecessor identities")
+		}
+	}
+	op, _, err := result.Resume.Operation.Canonical()
+	if err != nil || op.ResolvedPoint == nil || op.ResolvedPoint.Kind != runfork.RunForkPointDeploymentRevision || result.RunID == op.SourceRunID {
+		return fmt.Errorf("selected finite-feed resume operation is not an exact deployment revision: %v", err)
+	}
+	provided, _, err := req.ForkOperation.Canonical()
+	if err != nil {
+		return fmt.Errorf("selected finite-feed resume request: %w", err)
+	}
+	opHash, err := canonicaljson.Hash(op)
+	if err != nil {
+		return err
+	}
+	providedHash, err := canonicaljson.Hash(provided)
+	if err != nil {
+		return err
+	}
+	pins, err := durabledata.CanonicalExplicitPins(req.DataPinOverrides)
+	if err != nil {
+		return err
+	}
+	pinHash, err := canonicaljson.Hash(pins)
+	if err != nil {
+		return err
+	}
+	opPinHash, err := canonicaljson.Hash(op.DataPinOverrides)
+	if err != nil {
+		return err
+	}
+	if opHash != providedHash || pinHash != opPinHash || req.SourceRunID != op.SourceRunID ||
+		req.At != op.ResolvedPoint.Input || req.ExpectedBundleHash != op.TargetBundleHash ||
+		req.ContractSelection != op.ContractSelection || req.AllowSourceFreeze != op.AllowSourceFreeze {
+		return fmt.Errorf("selected finite-feed resume request differs from permanent operation")
+	}
+	seen := make(map[durabledata.DeclarationRef]bool, len(result.Resume.Pins))
+	for _, pin := range result.Resume.Pins {
+		if err := pin.Validate(); err != nil || pin.RunID != result.RunID || seen[pin.Declaration] {
+			return fmt.Errorf("selected finite-feed resume carries invalid child pin: %v", err)
+		}
+		seen[pin.Declaration] = true
+	}
+	return nil
 }
 
 // Prepare admits process-owned, non-executable selected work. The caller must
 // Close it on every path; only the execution owner can bind it to concrete work.
 func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req SelectedContractExecutionRequest) (_ *PreparedSelectedFork, finalErr error) {
+	if err := validateSelectedFiniteFeedRecoveryRequest(req); err != nil {
+		return nil, err
+	}
 	ports, err := o.require()
 	if err != nil {
 		return nil, err
@@ -152,10 +214,14 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 		return nil, fmt.Errorf("register selected-contract author activity descriptors: %w", err)
 	}
 	owned.descriptorLease = descriptorLease
-	plan, err := ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{
+	planRequest := runfork.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
 		At:          strings.TrimSpace(req.At),
-	})
+	}
+	if req.ForkOperation != nil && req.ForkOperation.ResolvedPoint != nil {
+		planRequest.ResolvedPoint = req.ForkOperation.ResolvedPoint
+	}
+	plan, err := ports.fork.PlanRunFork(ctx, planRequest)
 	if err != nil {
 		return nil, fmt.Errorf("plan selected-contract execution: %w", err)
 	}
@@ -223,6 +289,9 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	prepared.agentRuntime, prepared.readiness = agentRuntime, readiness
 	prepared.deferredWorkAdmission = deferredWorkAdmission
 	prepared.dataPinOverrides = append([]durabledata.ExplicitPin(nil), req.DataPinOverrides...)
+	if req.Recovery != nil {
+		prepared.recoveryFromExecutionID = req.Recovery.ExecutionID
+	}
 	transferred = true
 	return prepared, nil
 }
@@ -237,6 +306,9 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 	defer p.bindMu.Unlock()
 	if p.closed || p.bound || p.operation == nil {
 		return runforkreadiness.MaterializeRequest{}, errors.New("selected preparation is closed or already bound")
+	}
+	if p.recoveryFromExecutionID != "" {
+		return runforkreadiness.MaterializeRequest{}, errors.New("recovered selected execution cannot rematerialize its child")
 	}
 	if err := p.operation.PreparationContext().Err(); err != nil {
 		return runforkreadiness.MaterializeRequest{}, err
@@ -260,6 +332,7 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 		return runforkreadiness.MaterializeRequest{}, err
 	}
 	return runforkreadiness.MaterializeRequest{
+		ForkOperation:        p.forkOperation,
 		OriginalLoopCarriage: p.originalLoopCarriage,
 		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.EventID,
 		ContractSelection: p.loadedSource.Selection, SourceArtifactFact: p.loadedSource.SourceArtifactFact,
@@ -359,7 +432,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 	}
 	p := &PreparedSelectedFork{
 		declarationRevision: agentPlan.Declarations.Revision,
-		operation:           operation, preparationID: uuid.NewString(), processGeneration: process.AuthorityGeneration, sourceRunID: plan.SourceRunID, forkEventID: plan.ForkPoint.EventID,
+		operation:           operation, preparationID: uuid.NewString(), processGeneration: process.AuthorityGeneration, sourceRunID: plan.SourceRunID, forkPoint: plan.ForkPoint,
 		coordinates: managedcapabilities.SelectedForkPreparationCoordinates{
 			ProcessAuthorityID: process.AuthorityID, ProcessOwnerID: process.OwnerID, ProcessBootID: process.BootID,
 			BundleHash: loaded.SourceArtifactFact.BundleHash(), SourceFingerprint: sourceFingerprint,
@@ -598,7 +671,7 @@ func (p *PreparedSelectedFork) bind(ctx context.Context, forkRunID string, loade
 func (p *PreparedSelectedFork) evidence() runfork.SelectedForkPreparation {
 	return runfork.SelectedForkPreparation{PreparationID: p.preparationID, ProcessGeneration: p.processGeneration, Coordinates: p.coordinates,
 		DeclarationPlanFingerprint: p.declarationRevision,
-		SourceRunID:                p.sourceRunID, ForkEventID: p.forkEventID,
+		SourceRunID:                p.sourceRunID, ForkPoint: p.forkPoint, ForkEventID: p.forkPoint.EventID,
 		Actors: append(make([]runfork.SelectedForkPreparedActor, 0, len(p.actors)), p.actors...)}
 }
 

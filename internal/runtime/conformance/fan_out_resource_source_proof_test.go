@@ -2,86 +2,117 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
+	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/durabledata"
-	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
-func (f *semanticProofFixture) installPinnedResourceSource(t *testing.T, rows []map[string]any) fanoutobligation.SourceRef {
+// Keep the real parent-to-template connect route. The imported document is an
+// optional event field so ordinary authored account.registered producers remain
+// valid, while deployment feeds can carry the full nested source document.
+func deploymentResourceSource(t *testing.T) semanticview.Source {
+	return deploymentResourceSourceWithAgent(t, true)
+}
+
+func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semanticview.Source {
 	t.Helper()
-	owner, ok := f.selected.(interface {
-		ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
-	})
-	if !ok {
-		t.Fatal("selected fixture lacks its real durable-data owner")
+	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{})
+	if !includeAgent {
+		if err := os.Remove(filepath.Join(root, notifyallchildren.ChildFlowID, "agents.yaml")); err != nil {
+			t.Fatal(err)
+		}
 	}
-	bundle, ok := semanticview.Bundle(f.source)
-	if !ok {
-		t.Fatal("resource fixture requires the exact admitted bundle")
-	}
-	ref, err := durabledata.ParseDeclarationRef("portfolio", "portfolio/account.registered")
+	path := filepath.Join(root, notifyallchildren.OwnerFlowID, "events.yaml")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := bundle.DurableDataDeclarationByRef(ref); !ok {
-		t.Fatal("compiled source event declaration is missing")
+	const old = "account.registered:\n  key: account_id\n  account_id: text\n"
+	if strings.Count(string(raw), old) != 1 {
+		t.Fatalf("account.registered fixture changed: %s", raw)
 	}
-	encode := func(values []map[string]any) []byte {
-		t.Helper()
-		var raw strings.Builder
-		// Import order is deliberately the reverse of canonical business-key order.
-		for i := len(values) - 1; i >= 0; i-- {
-			value, err := json.Marshal(values[i])
-			if err != nil {
-				t.Fatal(err)
-			}
-			raw.Write(value)
-			raw.WriteByte('\n')
-		}
-		return []byte(raw.String())
+	updated := strings.Replace(string(raw), old, old+"  document: json?\n", 1)
+	if err := os.WriteFile(path, []byte(updated), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	input := encode(rows)
-	command := durabledata.SourceCommand{Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: bundle.SourceArtifact.BundleHash(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: input}
-	imported, err := owner.ExecuteDataSourceOperation(f.ctx, command)
+	repo := conformanceRepoRoot(t)
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("load deployment resource bundle: %v", err)
 	}
-	now := time.Now().UTC()
-	if _, err := f.db.ExecContext(f.ctx, `INSERT INTO resource_version_pins (run_id,flow_path,event_name,schema_digest,version_id,selection,pinned_at) VALUES ($1,$2,$3,$4,$5,'explicit',$6)`, f.runID, ref.FlowPath, ref.EventName, imported.SchemaDigest, imported.Candidate.VersionID, now); err != nil {
-		t.Fatal(err)
+	return semanticview.Wrap(bundle)
+}
+
+type deploymentResourceFixture struct {
+	selected notifyAllChildrenStore
+	db       *sql.DB
+	source   semanticview.Source
+	runtime  notifyAllChildrenRuntime
+	topology *notifyAllChildrenProcessTopology
+	ctx      context.Context
+}
+
+type deploymentFanOutDiagnostic struct {
+	startupownership.FanOutExecutor
+	t *testing.T
+}
+
+func (d deploymentFanOutDiagnostic) ReportFanOutServingError(ctx context.Context, err error) {
+	d.t.Logf("deployment fan-out serving error: %v", err)
+	d.FanOutExecutor.ReportFanOutServingError(ctx, err)
+}
+
+func newDeploymentResourceFixture(t *testing.T, backend string) *deploymentResourceFixture {
+	return newDeploymentResourceFixtureWithAgent(t, backend, true)
+}
+
+func newDeploymentResourceFixtureWithAgent(t *testing.T, backend string, includeAgent bool) *deploymentResourceFixture {
+	t.Helper()
+	return newDeploymentResourceFixtureWithSource(t, backend, deploymentResourceSourceWithAgent(t, includeAgent))
+}
+
+func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source semanticview.Source) *deploymentResourceFixture {
+	t.Helper()
+	f := &deploymentResourceFixture{source: source}
+	switch backend {
+	case "sqlite":
+		selected := storetest.StartSQLiteRuntimeStore(t)
+		f.selected, f.db = selected, storetest.DatabaseForTest(selected)
+	case "postgres":
+		_, db, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		f.selected, f.db = storetest.AdmitPostgresRuntimeStore(t, db), db
+	default:
+		t.Fatalf("unknown selected backend %q", backend)
 	}
-	reader, ok := f.selected.(interface {
-		LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
+	fact := conformanceSourceArtifactFact(t, f.source)
+	f.ctx = testAuthorActivityContextForBundle(context.Background(), fact)
+	f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
+	f.boot(t)
+	return f
+}
+
+func (f *deploymentResourceFixture) boot(t *testing.T) {
+	t.Helper()
+	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: f.topology,
+		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
+			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}
+		},
 	})
-	if !ok {
-		t.Fatal("selected store lacks pinned source admission")
+	if err := f.runtime.manager.Run(managedConformanceExecutionContextForBundle(t, f.ctx, fmt.Sprintf("deployment-resource-%d", time.Now().UnixNano()), f.runtime.sourceArtifactFact)); err != nil {
+		t.Fatalf("normal deployment resource boot: %v", err)
 	}
-	if pinned, err := reader.LoadPinnedSource(f.ctx, f.runID, command.BundleHash, ref); err != nil || pinned.VersionID != imported.Candidate.VersionID || pinned.RowCount != len(rows) {
-		t.Fatalf("admit exact imported source: %+v err=%v", pinned, err)
-	}
-	// A new resource head must not replace the run's exact pinned version.
-	next := make([]map[string]any, len(rows))
-	for i := range rows {
-		next[i] = make(map[string]any, len(rows[i]))
-		for key, value := range rows[i] {
-			next[i][key] = value
-		}
-		next[i]["account_id"] = fmt.Sprintf("new-head-%02d", i)
-		next[i]["gem_score"] = float64(99)
-	}
-	command.SourceInvocationID = uuid.NewString()
-	command.ExpectedHead = durabledata.VersionHead(imported.Candidate.VersionID)
-	command.Input = encode(next)
-	replaced, err := owner.ExecuteDataSourceOperation(f.ctx, command)
-	if err != nil || replaced.Candidate.VersionID == imported.Candidate.VersionID {
-		t.Fatalf("resource head did not advance independently of pin: %+v err=%v", replaced, err)
-	}
-	return fanoutobligation.SourceRef{Kind: fanoutobligation.SourceResourceVersion, Declaration: ref, VersionID: imported.Candidate.VersionID}
 }

@@ -195,45 +195,12 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 		return errors.New("selected-fork grant proof requires a transaction and live selected evidence")
 	}
 	binding := evidence.SelectedFork
-	query := `SELECT execution.binding_id, execution.fork_run_id,
-		execution.generation, execution.fence_generation, execution.execution_owner,
-		execution.admission_fingerprint, execution.container_plan_fingerprint,
-		execution.actor_census_fingerprint, execution.effective_config_fingerprint,
-		execution.declaration_plan_fingerprint, execution.declaration_plan,
-		execution.preparation_fingerprint, execution.preparation_binding,
-		run.bundle_hash
-		FROM run_fork_selected_contract_runtime_executions AS execution
-		JOIN run_fork_selected_contract_bindings AS binding ON binding.binding_id = execution.binding_id
-		JOIN runs AS run ON run.run_id = binding.fork_run_id
-		WHERE execution.execution_id = $1
-		AND execution.fork_run_id = binding.fork_run_id
-		AND execution.source_run_id = binding.source_run_id
-		AND execution.fork_event_id = binding.fork_event_id
-		AND execution.state = 'running'
-		AND (binding.mode = 'selected_contracts' OR (binding.mode = 'bundle_hash' AND binding.bundle_hash = run.bundle_hash))`
-	args := []any{binding.ExecutionID}
-	if sqlite {
-		query += ` AND execution.lease_expires_at > $2`
-		args = append(args, time.Now().UTC())
-	} else {
-		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP FOR UPDATE OF execution, binding, run`
-	}
-	actual := startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}
-	var bundleHash string
-	var declarationRaw []byte
-	var preparationRaw []byte
-	err := tx.QueryRowContext(ctx, query, args...).Scan(
-		&actual.BindingID, &actual.ForkRunID, &actual.ExecutionGeneration,
-		&actual.FenceGeneration, &actual.ExecutionOwner, &actual.AdmissionFingerprint,
-		&actual.ContainerPlanFingerprint, &actual.ActorCensusFingerprint,
-		&actual.EffectiveConfigFingerprint, &actual.DeclarationPlanFingerprint, &declarationRaw,
-		&actual.PreparationFingerprint, &preparationRaw, &bundleHash)
-	if err == sql.ErrNoRows {
-		return errors.New("selected-fork grant execution is absent, expired, terminal or inconsistent with its binding")
-	}
+	row, err := loadSelectedForkGrantExecutionTx(ctx, tx, *binding, sqlite)
 	if err != nil {
-		return fmt.Errorf("prove selected-fork grant execution: %w", err)
+		return err
 	}
+	actual, bundleHash := row.Binding, row.BundleHash
+	declarationRaw, preparationRaw := row.Declaration, row.Preparation
 	if actual != *binding || bundleHash != evidence.BundleHash {
 		return errors.New("selected-fork grant binding, execution fence or fingerprints changed")
 	}
@@ -273,4 +240,54 @@ func ProveSelectedForkGenerationGrantTx(ctx context.Context, tx *sql.Tx, evidenc
 		return errors.New("issued selected generation cannot pre-settle probe receipts")
 	}
 	return nil
+}
+
+type selectedForkGrantExecutionRow struct {
+	Binding     startupownership.SelectedForkGrantBinding
+	BundleHash  string
+	Declaration []byte
+	Preparation []byte
+}
+
+func loadSelectedForkGrantExecutionTx(ctx context.Context, tx *sql.Tx, binding startupownership.SelectedForkGrantBinding, sqlite bool) (selectedForkGrantExecutionRow, error) {
+	query := `SELECT execution.binding_id, execution.fork_run_id,
+		execution.generation, execution.fence_generation, execution.execution_owner,
+		execution.admission_fingerprint, execution.container_plan_fingerprint,
+		execution.actor_census_fingerprint, execution.effective_config_fingerprint,
+		execution.declaration_plan_fingerprint, execution.declaration_plan,
+		execution.preparation_fingerprint, execution.preparation_binding,
+		run.bundle_hash
+		FROM run_fork_selected_contract_runtime_executions AS execution
+		JOIN run_fork_selected_contract_bindings AS binding ON binding.binding_id = execution.binding_id
+		JOIN runs AS run ON run.run_id = binding.fork_run_id
+		WHERE execution.execution_id = $1
+		AND execution.fork_run_id = binding.fork_run_id
+		AND execution.source_run_id = binding.source_run_id
+		AND execution.fork_point_kind = binding.fork_point_kind
+		AND execution.fork_revision = binding.fork_revision
+		AND (execution.fork_event_id = binding.fork_event_id
+		     OR (execution.fork_event_id IS NULL AND binding.fork_event_id IS NULL))
+		AND execution.state = 'running'
+		AND (binding.mode = 'selected_contracts' OR (binding.mode = 'bundle_hash' AND binding.bundle_hash = run.bundle_hash))`
+	args := []any{binding.ExecutionID}
+	if sqlite {
+		query += ` AND execution.lease_expires_at > $2`
+		args = append(args, time.Now().UTC())
+	} else {
+		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP FOR UPDATE OF execution, binding, run`
+	}
+	row := selectedForkGrantExecutionRow{Binding: startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}}
+	err := tx.QueryRowContext(ctx, query, args...).Scan(
+		&row.Binding.BindingID, &row.Binding.ForkRunID, &row.Binding.ExecutionGeneration,
+		&row.Binding.FenceGeneration, &row.Binding.ExecutionOwner, &row.Binding.AdmissionFingerprint,
+		&row.Binding.ContainerPlanFingerprint, &row.Binding.ActorCensusFingerprint,
+		&row.Binding.EffectiveConfigFingerprint, &row.Binding.DeclarationPlanFingerprint, &row.Declaration,
+		&row.Binding.PreparationFingerprint, &row.Preparation, &row.BundleHash)
+	if err == sql.ErrNoRows {
+		return selectedForkGrantExecutionRow{}, errors.New("selected-fork grant execution is absent, expired, terminal or inconsistent with its binding")
+	}
+	if err != nil {
+		return selectedForkGrantExecutionRow{}, fmt.Errorf("prove selected-fork grant execution: %w", err)
+	}
+	return row, nil
 }

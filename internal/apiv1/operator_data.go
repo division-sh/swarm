@@ -306,8 +306,8 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 	if version.PrunedAt != nil {
 		return nil, NewApplicationError(string(durabledata.CodePayloadPruned), false, map[string]any{"version_id": version.VersionID})
 	}
-	rows, defects := durabledata.CompileJSONL(ref, mustDataSchema(version.CanonicalSchema), version.BusinessKey, version.CanonicalJSONL)
-	if len(defects) != 0 || rows.VersionID != version.VersionID {
+	rows, defects := durabledata.CompileStoredJSONL(ref, mustDataSchema(version.CanonicalSchema), version.BusinessKey, version.CanonicalJSONL)
+	if len(defects) != 0 || rows.VersionID != version.VersionID || !bytes.Equal(rows.CanonicalJSONL, version.CanonicalJSONL) {
 		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"version_id": version.VersionID})
 	}
 	if view == "export_chunk" {

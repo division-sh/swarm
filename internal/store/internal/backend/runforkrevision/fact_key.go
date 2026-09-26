@@ -60,7 +60,7 @@ func factKeyFields(family Family) ([]string, error) {
 	case FamilyReplyContexts:
 		field = "reply_context_id"
 	case FamilyFanOutObligations:
-		return []string{"fact_kind", "triggering_delivery_id", "flow_path", "declaration_family", "semantic_path", "ordinal"}, nil
+		return []string{"fact_kind", "origin_kind", "triggering_delivery_id", "deployment_feed_id", "flow_path", "declaration_family", "semantic_path", "ordinal"}, nil
 	default:
 		return nil, fmt.Errorf("unsupported run fork revision fact family %q", family)
 	}
@@ -85,7 +85,7 @@ func projectionFactKey(family Family, values map[string]any) (string, error) {
 	if family != FamilyFanOutObligations {
 		body.Key, err = projectionKeyString(values[fields[0]])
 	} else {
-		for i, target := range []*string{&body.Kind, &body.TriggeringDeliveryID, &body.FlowPath, &body.DeclarationFamily, &body.SemanticPath} {
+		for i, target := range []*string{&body.Kind, &body.OriginKind, &body.TriggeringDeliveryID, &body.DeploymentFeedID, &body.FlowPath, &body.DeclarationFamily, &body.SemanticPath} {
 			*target, err = projectionKeyString(values[fields[i]])
 			if err != nil {
 				return "", fmt.Errorf("decode fan-out fact key: %w", err)
@@ -130,7 +130,9 @@ func decodeProjectionKeyValue(value, target any) error {
 type factKeyCoordinates struct {
 	Key                  string `json:"-"`
 	Kind                 string `json:"fact_kind"`
+	OriginKind           string `json:"origin_kind"`
 	TriggeringDeliveryID string `json:"triggering_delivery_id"`
+	DeploymentFeedID     string `json:"deployment_feed_id"`
 	FlowPath             string `json:"flow_path"`
 	DeclarationFamily    string `json:"declaration_family"`
 	SemanticPath         string `json:"semantic_path"`
@@ -171,6 +173,26 @@ func admitFactKeyCoordinates(family Family, body factKeyCoordinates) (string, er
 	case "intent", "outcome", "barrier":
 	default:
 		return "", fmt.Errorf("unsupported fan-out fact kind %q", body.Kind)
+	}
+	if body.DeploymentFeedID != "" || body.OriginKind == "deployment" {
+		if body.OriginKind != "deployment" || body.Kind == "barrier" || body.TriggeringDeliveryID != "" || body.FlowPath != "" || body.DeclarationFamily != "" || body.SemanticPath != "" {
+			return "", fmt.Errorf("deployment fan-out fact has contradictory handler coordinates")
+		}
+		id, err := uuid.Parse(body.DeploymentFeedID)
+		if err != nil || id == uuid.Nil || id.String() != body.DeploymentFeedID {
+			return "", fmt.Errorf("deployment fan-out fact requires canonical deployment_feed_id")
+		}
+		key := strings.Join([]string{body.Kind, "deployment", body.DeploymentFeedID}, "|")
+		if body.Kind == "outcome" {
+			if body.Ordinal == nil || *body.Ordinal < 0 {
+				return "", fmt.Errorf("fan-out outcome fact key requires a non-negative ordinal")
+			}
+			key += "|" + strconv.FormatInt(*body.Ordinal, 10)
+		}
+		return key, nil
+	}
+	if body.OriginKind != "" && body.OriginKind != "handler" {
+		return "", fmt.Errorf("unsupported fan-out origin kind %q", body.OriginKind)
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(body.TriggeringDeliveryID)); err != nil {
 		return "", fmt.Errorf("fan-out fact key requires UUID triggering_delivery_id: %w", err)

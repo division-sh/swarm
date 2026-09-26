@@ -63,7 +63,7 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	}
 	if admission.ForkRunID != forkRunID ||
 		admission.SourceRunID != binding.SourceRunID ||
-		admission.ForkEventID != binding.ForkEventID ||
+		admission.ForkPoint != binding.ForkPoint || admission.ForkEventID != binding.ForkEventID ||
 		admission.ContractBindingOwner != runfork.RunForkSelectedContractBindingOwner {
 		t.Fatalf("admission binding lineage = %#v", admission)
 	}
@@ -1100,11 +1100,13 @@ func writeRunForkExecutionPlatformSpecVersion(t *testing.T, repoRoot, version st
 }
 
 func testSelectedContractBinding(forkRunID string) runfork.RunForkSelectedContractBinding {
+	eventID := uuid.NewString()
 	return runfork.RunForkSelectedContractBinding{
 		Owner:       runfork.RunForkSelectedContractBindingOwner,
 		ForkRunID:   forkRunID,
 		SourceRunID: uuid.NewString(),
-		ForkEventID: uuid.NewString(),
+		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: eventID, Revision: 1},
+		ForkEventID: eventID,
 		ContractSelection: runfork.RunForkContractSelection{
 			Mode: "selected_contracts",
 		},
@@ -1163,7 +1165,7 @@ func selectedContractDeferredWorkAdmissionForTest(t testing.TB, sourceRunID, for
 	t.Helper()
 	admission, err := admitSelectedContractDeferredWork(runfork.RunForkPlan{
 		SourceRunID: sourceRunID,
-		ForkPoint:   runfork.RunForkPoint{EventID: forkEventID},
+		ForkPoint:   runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: forkEventID, Revision: 1},
 	}, source)
 	if err != nil {
 		t.Fatalf("admit selected-contract deferred work: %v", err)
