@@ -2,6 +2,7 @@ package runstart
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -79,7 +80,7 @@ func scanRootInputConsumers(repoRoot string) (map[string]map[string]bool, error)
 		"testdata": true,
 		"vendor":   true,
 	}
-	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

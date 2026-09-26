@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -261,12 +262,12 @@ func TestRetiredDynamicAgentToolTokensRemainOnlyInRetirementEvidence(t *testing.
 		"platform-spec.yaml": {},
 	}
 	pattern := regexp.MustCompile(`\bagent_(hire|fire|reconfigure)\b`)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "test-results" {
+			if entry.Name() == "test-results" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -310,14 +311,11 @@ func TestRetiredDynamicAgentMutationSymbolsAreAbsent(t *testing.T) {
 		"AuthorizeRouting":          {},
 	}
 	fset := token.NewFileSet()
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 		if filepath.Ext(path) != ".go" || path == filepath.Join(root, "internal/runtime/tools/retired_dynamic_agent_tools_test.go") {

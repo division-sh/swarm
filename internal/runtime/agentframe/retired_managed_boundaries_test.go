@@ -1,6 +1,7 @@
 package agentframe
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -28,12 +29,12 @@ func TestRetiredManagedTurnOwnersAreAbsentFromProduction(t *testing.T) {
 		"cliExecution" + "ToolSurfaceForActor": "retired CLI capability owner",
 	}
 	violations := make([]string, 0)
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" {
+			if entry.Name() == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil

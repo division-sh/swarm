@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -362,7 +363,7 @@ func assertOwnershipSourceExcludes(t *testing.T, source string, forbidden ...str
 
 func assertProductionTreeExcludes(t *testing.T, root string, forbidden ...string) {
 	t.Helper()
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(persistenceOwnershipRepoRoot(t), root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -407,7 +408,7 @@ func assertNoProductionImportsWithPrefix(t *testing.T, root string, forbidden []
 
 func assertProductionImports(t *testing.T, root string, inspect func(string, string)) {
 	t.Helper()
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(persistenceOwnershipRepoRoot(t), root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -434,7 +435,7 @@ func assertProductionImports(t *testing.T, root string, inspect func(string, str
 
 func assertNoAliasesToRuntimeModels(t *testing.T, root string) {
 	t.Helper()
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(persistenceOwnershipRepoRoot(t), root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

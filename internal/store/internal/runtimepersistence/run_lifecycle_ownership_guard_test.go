@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -30,7 +31,7 @@ func TestRunLifecycleOwnershipBoundaryGuard(t *testing.T) {
 	}
 	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
 	var violations []string
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -125,7 +126,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	runWrite := regexp.MustCompile(`(?is)\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+runs\b`)
 	var violations []string
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

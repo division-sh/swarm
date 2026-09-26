@@ -2,6 +2,7 @@ package userfacing
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -76,7 +77,7 @@ func forbiddenProductionStringLiterals(repoRoot string, relativeRoots []string) 
 	var failures []string
 	for _, relativeRoot := range relativeRoots {
 		root := filepath.Join(repoRoot, relativeRoot)
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

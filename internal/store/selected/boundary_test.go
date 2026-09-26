@@ -1,6 +1,7 @@
 package selected
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,8 +12,18 @@ import (
 
 func TestProductionSelectedStoreBoundaryIsClosed(t *testing.T) {
 	root := selectedStoreRepoRoot(t)
+	failures, err := selectedStoreBoundaryFailures(root)
+	if err != nil {
+		t.Fatalf("scan production selected-store boundary: %v", err)
+	}
+	if len(failures) != 0 {
+		t.Fatalf("production selected-store boundary violations:\n%s", strings.Join(failures, "\n"))
+	}
+}
+
+func selectedStoreBoundaryFailures(root string) ([]string, error) {
 	var failures []string
-	err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -34,12 +45,38 @@ func TestProductionSelectedStoreBoundaryIsClosed(t *testing.T) {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("scan production selected-store boundary: %v", err)
+		return nil, err
 	}
 	sort.Strings(failures)
-	if len(failures) != 0 {
-		t.Fatalf("production selected-store boundary violations:\n%s", strings.Join(failures, "\n"))
+	return failures, nil
+}
+
+func TestSelectedStoreBoundaryIgnoresNestedCheckoutAndRejectsCurrentSource(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "internal", "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(foreign, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := []byte("package probe\nfunc probe(value *store.PostgresStore) {}\n")
+	if err := os.WriteFile(filepath.Join(foreign, "stale.go"), stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		failures, err := selectedStoreBoundaryFailures(root)
+		if err != nil || (len(failures) > 0) != want {
+			t.Fatalf("selected-store guard = %v, %v; want violation %v", failures, err, want)
+		}
+	}
+	check(false)
+	current := filepath.Join(root, "internal", "current.go")
+	if err := os.WriteFile(current, stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
 }
 
 func TestProductionSelectedStoreBoundaryGuardRejectsOldInterpreters(t *testing.T) {

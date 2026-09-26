@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +58,7 @@ func assertProductionSymbolsAbsent(t *testing.T, forbidden []string) {
 
 func assertSymbolsAbsentUnder(t *testing.T, searchRoot, reportRoot string, forbidden []string) {
 	t.Helper()
-	err := filepath.WalkDir(searchRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(reportRoot, searchRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

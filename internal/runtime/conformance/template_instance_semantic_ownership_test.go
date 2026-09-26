@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -491,7 +492,7 @@ func assertProductionIdentifiersConfined(t testing.TB, names map[string]struct{}
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
 	allowedFile = filepath.ToSlash(allowedFile)
-	err := filepath.WalkDir(filepath.Join(repoRoot, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -548,7 +549,7 @@ func assertProductionSelectorCallsConfined(t testing.TB, names, allowedFiles map
 func scanProductionGoFiles(t testing.TB, visit func(string, *ast.File)) {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
-	err := filepath.WalkDir(filepath.Join(repoRoot, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, "internal"), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

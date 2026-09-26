@@ -1,6 +1,7 @@
 package deliverycontinuation
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -33,13 +34,13 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 	scanConsumers := map[string]int{}
 	unqueuedCompletionConsumers := map[string]int{}
 	pipelineSettlementConsumers := map[string]int{}
-	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", "vendor":
+			case "vendor":
 				return filepath.SkipDir
 			}
 			return nil

@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/token"
 	"os"
@@ -157,7 +158,7 @@ func validateRevisionProtocolFreshBaseline(source string) error {
 
 func revisionCallCensus(root, name string) (map[string]int, error) {
 	result := map[string]int{}
-	err := filepath.WalkDir(filepath.Join(root, "internal/store"), func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/store"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
 		}

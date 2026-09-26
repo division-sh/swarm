@@ -1,6 +1,7 @@
 package apispec
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,13 +25,13 @@ func TestDecisionCardMigrationHasNoRetiredPublicSurfaceSurvivors(t *testing.T) {
 		"DecideV1" + "MailboxItem",
 	}
 	var survivors []string
-	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", ".swarm", "vendor", "node_modules":
+			case ".swarm", "vendor", "node_modules":
 				return filepath.SkipDir
 			}
 			return nil

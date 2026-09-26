@@ -3,6 +3,7 @@ package apiv1
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -725,7 +726,7 @@ func loadGoFunctionSymbols(root string) (goFunctionSymbols, error) {
 	}
 	for _, dir := range []string{"internal/apispec", "internal/apiv1"} {
 		base := filepath.Join(root, dir)
-		err := filepath.WalkDir(base, func(path string, entry os.DirEntry, err error) error {
+		err := checkoutsource.WalkDir(root, base, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -758,6 +759,46 @@ func loadGoFunctionSymbols(root string) (goFunctionSymbols, error) {
 		}
 	}
 	return symbols, nil
+}
+
+func TestOpenRPCProofCensusRejectsForeignOnlyDeclaration(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{"internal/apispec", "internal/apiv1"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreign := filepath.Join(root, "internal", "apiv1", "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	proof := []byte("package apiv1\nimport \"testing\"\nfunc TestOpenRPCBoundaryProof(t *testing.T) {}\n")
+	if err := os.WriteFile(filepath.Join(foreign, "foreign_test.go"), proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		symbols, err := loadGoFunctionSymbols(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, found := symbols.tests["TestOpenRPCBoundaryProof"]; found != want {
+			t.Fatalf("OpenRPC proof credited = %v, want %v; census = %#v", found, want, symbols.tests)
+		}
+	}
+	check(false)
+	current := filepath.Join(root, "internal", "apiv1", "current_test.go")
+	if err := os.WriteFile(current, proof, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	if err := os.Remove(current); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
 }
 
 func trackerKey(issue int, watchlist string) string {

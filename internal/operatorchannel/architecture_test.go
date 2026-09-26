@@ -1,6 +1,7 @@
 package operatorchannel
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,14 +12,11 @@ import (
 func TestOperatorChannelV1IsFullyRetired(t *testing.T) {
 	repo := filepath.Clean(filepath.Join("..", ".."))
 	retired := "swarm.hitl-channel/" + "v1"
-	err := filepath.WalkDir(repo, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repo, repo, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 		ext := strings.ToLower(filepath.Ext(path))
@@ -46,7 +44,7 @@ func TestOperatorChannelIdentityZoneHasNoProviderNativeInterpreter(t *testing.T)
 		filepath.Join(repo, "internal", "store", "internal", "backend", "operatorchannel"),
 	}
 	for _, zone := range zones {
-		err := filepath.WalkDir(zone, func(path string, entry fs.DirEntry, err error) error {
+		err := checkoutsource.WalkDir(repo, zone, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

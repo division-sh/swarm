@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -39,7 +40,7 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 		"ChannelActivityTools":         {},
 		"compiledChannelActivityTools": {},
 	}
-	err := filepath.WalkDir(filepath.Join(repoRoot, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

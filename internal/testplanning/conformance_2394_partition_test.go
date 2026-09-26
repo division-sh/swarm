@@ -126,8 +126,9 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	// #2307 adds these eight general roots to the reviewed 113-root census.
-	// The generated-results guard adds one more. No prior root, backend, or
-	// command envelope moves between partitions.
+	// The generated-results guard, #2323 proof-census regression, and two
+	// #2300 decode-site roots add four more. No prior root, backend, or
+	// command envelope moves partitions.
 	actionRetirementRoots := []string{
 		"TestActionRetirementCorpusLedgerIsComplete",
 		"TestActionRetirementCorpusHasNoLiveAuthoredActions",
@@ -138,8 +139,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration",
 		"TestCanonicalFormsRegistryPinsHandlerActionRetirement",
 	}
-	// #2300 adds two census/ratchet roots without moving existing proof units.
-	want := []int{124, 14, 5, 1}
+	want := []int{125, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -149,6 +149,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		}
 	}
 	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
+	const checkoutProof = "TestProducerRoutingProofCensusRejectsForeignOnlyEntrypoint"
+	if i := sort.SearchStrings(groups[0], checkoutProof); i == len(groups[0]) || groups[0][i] != checkoutProof {
+		t.Fatalf("#2323 checkout proof is missing from conformance-2: %v", groups[0])
+	}
 	if i := sort.SearchStrings(groups[0], preparedFaultProof); i == len(groups[0]) || groups[0][i] != preparedFaultProof {
 		t.Fatalf("general conformance partition omitted %s", preparedFaultProof)
 	}
@@ -170,7 +174,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:144 =124 general +14 core +5 pressure +1 reporter")
+	t.Log("complete disjoint census:145 =125 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {

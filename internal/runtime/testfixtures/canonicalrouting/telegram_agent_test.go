@@ -1,6 +1,7 @@
 package canonicalrouting
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -23,7 +24,7 @@ func TestTelegramAgentConsumesEmbeddedPackInventory(t *testing.T) {
 func TestTelegramAgentHasNoGeneratedPositiveOwner(t *testing.T) {
 	repoRoot := RepoRoot(t)
 	retired := "CopyStanding" + "Telegram"
-	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

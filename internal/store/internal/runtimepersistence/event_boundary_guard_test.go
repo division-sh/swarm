@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -214,7 +215,7 @@ func TestEventAdmittedPersistenceBoundaryGuard(t *testing.T) {
 		} else if err != nil {
 			t.Fatalf("stat %s: %v", root, err)
 		}
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -281,7 +282,7 @@ func TestUnrevisionedEventFixtureHasOnlyStoretestConsumers(t *testing.T) {
 	found := map[eventBoundaryCallsite]int{}
 	for _, rootName := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, rootName)
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -360,7 +361,7 @@ func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
 		} else if err != nil {
 			t.Fatalf("stat %s: %v", root, err)
 		}
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}

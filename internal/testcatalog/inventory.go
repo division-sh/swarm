@@ -3,6 +3,7 @@ package testcatalog
 import (
 	"bytes"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"slices"
@@ -137,7 +138,7 @@ func (i *Inventory) PublicCompanions() []Fixture {
 
 func discoverFixtures(repoRoot string) ([]Fixture, error) {
 	testsRoot := filepath.Join(repoRoot, "tests")
-	tiers, err := os.ReadDir(testsRoot)
+	tiers, err := checkoutsource.ReadDir(repoRoot, testsRoot)
 	if err != nil {
 		return nil, fmt.Errorf("read catalog root: %w", err)
 	}
@@ -146,7 +147,7 @@ func discoverFixtures(repoRoot string) ([]Fixture, error) {
 		if !tier.IsDir() || !strings.HasPrefix(tier.Name(), "tier") {
 			continue
 		}
-		entries, err := os.ReadDir(filepath.Join(testsRoot, tier.Name()))
+		entries, err := checkoutsource.ReadDir(repoRoot, filepath.Join(testsRoot, tier.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read catalog tier %s: %w", tier.Name(), err)
 		}

@@ -1,6 +1,7 @@
 package runtime_test
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"os"
 	"path/filepath"
@@ -138,12 +139,12 @@ func TestPackPublishingSurfacesCarryExplicitBaseAndAdmissionOwners(t *testing.T)
 func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	var bodyEmbeds []string
-	err := filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "vendor" {
+			if entry.Name() == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -174,7 +175,7 @@ func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testin
 	}
 
 	for _, root := range []string{".github", "examples"} {
-		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, walkErr error) error {
+		err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, root), func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}

@@ -1,6 +1,7 @@
 package publicingress
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -49,7 +50,7 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 		filepath.Join(repo, "internal", "store", "migrations"),
 		filepath.Join(repo, "internal", "store", "internal"),
 	} {
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		err := checkoutsource.WalkDir(repo, root, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}

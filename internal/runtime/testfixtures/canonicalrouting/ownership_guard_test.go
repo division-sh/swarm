@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/constant"
 	"go/importer"
@@ -1207,7 +1208,7 @@ func canonicalRoutingExternalSource(source string) bool {
 }
 
 func walkRepositoryGoFiles(repo string, visit func(path string, raw []byte) error) error {
-	return filepath.Walk(repo, func(path string, info os.FileInfo, err error) error {
+	return checkoutsource.Walk(repo, repo, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1261,7 +1262,7 @@ func liveCheckedYAMLRoutingRoots(t testing.TB, repo string) map[ArtifactID]artif
 	t.Helper()
 	live := map[ArtifactID]artifactRegistryEntry{}
 	for _, bundleRoot := range outerManifestRoots(t, repo) {
-		err := filepath.Walk(filepath.Join(repo, filepath.FromSlash(bundleRoot)), func(path string, info os.FileInfo, err error) error {
+		err := checkoutsource.Walk(repo, filepath.Join(repo, filepath.FromSlash(bundleRoot)), func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -1284,7 +1285,7 @@ func liveCheckedYAMLRoutingRoots(t testing.TB, repo string) map[ArtifactID]artif
 func outerManifestRoots(t testing.TB, repo string) []string {
 	t.Helper()
 	manifestDirs := map[string]struct{}{}
-	err := filepath.Walk(repo, func(path string, info os.FileInfo, err error) error {
+	err := checkoutsource.Walk(repo, repo, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1336,7 +1337,7 @@ func repositoryGeneratedDir(repo, path string) bool {
 		return false
 	}
 	switch filepath.ToSlash(filepath.Clean(rel)) {
-	case ".git", "vendor", "node_modules", ".swarm", "data":
+	case "vendor", "node_modules", ".swarm", "data":
 		return true
 	default:
 		return false

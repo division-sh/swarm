@@ -3,6 +3,7 @@ package conformance
 import (
 	"bytes"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -647,7 +648,7 @@ func TestCanonicalFormsRegistryWave2ProductionConsumersUseCompiledPins(t *testin
 		"internal/runtime/contracts/workflow_contract_semantics.go": {},
 	}
 	var bypasses []string
-	err := filepath.WalkDir(filepath.Join(root, "internal", "runtime"), func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "runtime"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -869,7 +870,7 @@ func validateDecodeBypassMonotone(base, current canonicalDecodeBypassInventory) 
 
 func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 	out := make(map[string]string)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

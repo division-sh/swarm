@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -162,7 +163,7 @@ func corpusFilesNamed(t testing.TB, repo string, roots []string, name string) []
 	var files []string
 	for _, root := range roots {
 		base := filepath.Join(repo, filepath.FromSlash(root))
-		if err := filepath.WalkDir(base, func(path string, entry fs.DirEntry, err error) error {
+		if err := checkoutsource.WalkDir(repo, base, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -183,7 +184,7 @@ func corpusMarkdownUnderPrompts(t testing.TB, repo string, roots []string) []str
 	var files []string
 	for _, root := range roots {
 		base := filepath.Join(repo, filepath.FromSlash(root))
-		if err := filepath.WalkDir(base, func(path string, entry fs.DirEntry, err error) error {
+		if err := checkoutsource.WalkDir(repo, base, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

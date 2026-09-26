@@ -3,6 +3,7 @@ package cliapp
 import (
 	"bytes"
 	"context"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -457,9 +458,9 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	scan := retiredTopologySpellingScanner(t)
 
 	root := driftTestRepoRoot(t)
-	skipDirs := map[string]bool{".git": true, "worktrees": true, ".swarm": true, "coverage": true, "data": true}
+	skipDirs := map[string]bool{".swarm": true, "coverage": true, "data": true}
 	var targets []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

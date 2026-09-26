@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,7 +190,7 @@ func walkProductionGo(t *testing.T, root, relative string, visit func(path, sour
 		}
 		t.Fatalf("stat %s: %v", relative, err)
 	}
-	err := filepath.WalkDir(base, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, base, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

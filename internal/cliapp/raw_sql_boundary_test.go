@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,13 +137,13 @@ func repoRootForRawSQLBoundaryGuard(t *testing.T) string {
 
 func collectRawSQLBoundaryMatches(root string) (map[string][]string, error) {
 	sources := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", ".swarm", "node_modules", "vendor":
+			case ".swarm", "node_modules", "vendor":
 				return filepath.SkipDir
 			}
 			return nil

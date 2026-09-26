@@ -2,6 +2,7 @@ package canonicalrouting
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"sort"
@@ -233,7 +234,7 @@ func TestCanonicalRoutingDocumentationRejectsRetiredInstanceIdentitySyntax(t *te
 		"mint: uuid",
 		"mint: event_id",
 	}
-	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	if err := checkoutsource.WalkDir(RepoRoot(t), root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -328,7 +329,7 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 				want = append(want, name)
 			}
 			sort.Strings(want)
-			entries, err := os.ReadDir(filepath.Join(RepoRoot(t), "examples", "routing"))
+			entries, err := checkoutsource.ReadDir(RepoRoot(t), filepath.Join(RepoRoot(t), "examples", "routing"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -386,7 +387,7 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 						}
 					}
 
-					err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+					err = checkoutsource.Walk(RepoRoot(t), root, func(path string, info os.FileInfo, err error) error {
 						if err != nil {
 							return err
 						}

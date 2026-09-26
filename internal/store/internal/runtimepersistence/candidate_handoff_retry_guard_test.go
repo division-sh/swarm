@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -48,7 +49,7 @@ func forbiddenDomainHandoffCall(file *ast.File) string {
 func TestCandidateHandoffRetryProtocolIsSoleAssembler(t *testing.T) {
 	root := filepath.Join(repoRootForRuntimeWriterGuard(t), "internal/store/internal/backend")
 	var protocol *ast.FuncDecl
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(repoRootForRuntimeWriterGuard(t), root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
 		}

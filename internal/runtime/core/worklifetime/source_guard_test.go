@@ -2,6 +2,7 @@ package worklifetime
 
 import (
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -138,7 +139,7 @@ func walkProductionWorkLifetimeFiles(t *testing.T, visit func(path, relative str
 	repoRoot := workLifetimeRepositoryRoot(t)
 	for _, rootName := range []string{"cmd", "internal/runtime", "internal/serveapp", "internal/apiv1", "internal/cliapp"} {
 		root := filepath.Join(repoRoot, rootName)
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -24,7 +25,7 @@ func TestHITLSourceBoundaryRetiresOldInterpreters(t *testing.T) {
 	runtimeRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), ".."))
 	const lifecycleOwnerFile = "hitl_tools.go"
 
-	err := filepath.WalkDir(runtimeRoot, func(path string, entry os.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(filepath.Clean(filepath.Join(runtimeRoot, "..", "..")), runtimeRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

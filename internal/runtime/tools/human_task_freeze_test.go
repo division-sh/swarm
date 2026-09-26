@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ func TestRetiredHumanTaskInterpreterHasNoProductionSurvivors(t *testing.T) {
 		`json:"deadline_hours"`,
 	}
 	for _, root := range []string{"cmd", "internal"} {
-		err := filepath.WalkDir(filepath.Join(repoRoot, root), func(path string, entry fs.DirEntry, err error) error {
+		err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, root), func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

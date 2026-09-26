@@ -2,6 +2,7 @@ package testtiming
 
 import (
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -498,7 +499,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	}
 
 	used := map[string]bool{}
-	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+	err = checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

@@ -5,6 +5,7 @@ package startupownership
 import (
 	"bytes"
 	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -46,7 +47,7 @@ func TestProductionAdvisoryLocksHaveNamedNonEngineTargets(t *testing.T) {
 		},
 	}
 	found := map[string]int{}
-	err := filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(repoRoot, repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

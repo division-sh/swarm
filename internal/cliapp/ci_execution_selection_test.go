@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,7 +18,7 @@ func TestCIExecutionSelectionConsumers(t *testing.T) {
 		t.Fatal("resolve repository root")
 	}
 	root := filepath.Join(filepath.Dir(source), "..", "..", ".github")
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	err := checkoutsource.WalkDir(filepath.Clean(filepath.Join(root, "..")), root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || (!strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".yml")) {
 			return err
 		}

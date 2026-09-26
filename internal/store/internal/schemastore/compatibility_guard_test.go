@@ -1,6 +1,8 @@
 package schemastore
 
 import (
+	"fmt"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +22,17 @@ func TestSelectedStoreLegacySchemaInterpretersAreAbsent(t *testing.T) {
 			t.Errorf("retired schema owner still exists: %s", name)
 		}
 	}
+	violations, err := legacySchemaInterpreterViolations(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+}
 
+func legacySchemaInterpreterViolations(root string) ([]string, error) {
+	var violations []string
 	forbiddenSymbols := []string{
 		"BindSchemaCapabilities",
 		"CanonicalEventReceiptsCapability",
@@ -51,7 +63,7 @@ func TestSelectedStoreLegacySchemaInterpretersAreAbsent(t *testing.T) {
 		"pragma table_info",
 		"sqlite_master",
 	}
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -70,7 +82,7 @@ func TestSelectedStoreLegacySchemaInterpretersAreAbsent(t *testing.T) {
 		text := string(source)
 		for _, symbol := range forbiddenSymbols {
 			if strings.Contains(text, symbol) {
-				t.Errorf("retired schema symbol %s remains in %s", symbol, relative)
+				violations = append(violations, fmt.Sprintf("retired schema symbol %s remains in %s", symbol, relative))
 			}
 		}
 		if _, allowed := allowedCatalogOwners[relative]; allowed {
@@ -79,14 +91,40 @@ func TestSelectedStoreLegacySchemaInterpretersAreAbsent(t *testing.T) {
 		lower := strings.ToLower(text)
 		for _, evidence := range catalogEvidence {
 			if strings.Contains(lower, evidence) {
-				t.Errorf("post-admission catalog interpreter %q remains in %s", evidence, relative)
+				violations = append(violations, fmt.Sprintf("post-admission catalog interpreter %q remains in %s", evidence, relative))
 			}
 		}
 		return nil
 	})
-	if err != nil {
+	return violations, err
+}
+
+func TestLegacySchemaGuardIgnoresNestedCheckoutAndRejectsCurrentSource(t *testing.T) {
+	root := t.TempDir()
+	foreign := filepath.Join(root, "internal", "review-nested")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(foreign, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := []byte("package probe\nconst query = `information_schema.columns`\n")
+	if err := os.WriteFile(filepath.Join(foreign, "stale.go"), stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		violations, err := legacySchemaInterpreterViolations(root)
+		if err != nil || (len(violations) > 0) != want {
+			t.Fatalf("schema guard = %v, %v; want violation %v", violations, err, want)
+		}
+	}
+	check(false)
+	current := filepath.Join(root, "internal", "current.go")
+	if err := os.WriteFile(current, stale, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
 }
 
 func TestNormalizeConstraintTreatsPostgresBooleanDeparseAsEquivalent(t *testing.T) {

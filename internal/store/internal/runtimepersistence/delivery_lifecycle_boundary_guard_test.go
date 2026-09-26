@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -88,7 +89,7 @@ func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
 	retired := []string{"SnapshotsForRun", "SnapshotsForAgent", "EligibleAgentSnapshots"}
 	for _, rootName := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, rootName)
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
@@ -121,7 +122,7 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 	fixtureFound := map[string]int{}
 	for _, rootName := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, rootName)
-		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
