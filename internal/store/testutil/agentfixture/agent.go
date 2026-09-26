@@ -88,10 +88,17 @@ var fixtureSessions sync.Map
 func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixtureSession, error) {
 	t.Helper()
 	key := fmt.Sprintf("%p:%p", t, selected)
+	runtimeInstanceID, hasRuntimeInstanceID := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
 	if existing, ok := fixtureSessions.Load(key); ok {
-		return existing.(*fixtureSession), nil
+		session := existing.(*fixtureSession)
+		if hasRuntimeInstanceID && session.runtimeInstanceID != runtimeInstanceID {
+			return nil, errors.New("agent fixture session runtime differs from caller runtime")
+		}
+		return session, nil
 	}
-	runtimeInstanceID := uuid.NewString()
+	if !hasRuntimeInstanceID {
+		runtimeInstanceID = uuid.NewString()
+	}
 	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "storetest-agent-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})

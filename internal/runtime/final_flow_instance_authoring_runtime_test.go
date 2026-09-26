@@ -48,6 +48,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		t.Fatal(err)
 	}
 	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), fact), templateInstanceDeliveryRunID)
+	ctx = correlation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -128,6 +129,12 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
 		t.Fatal(err)
 	}
 	installExternalManagerTestGeneration(t, ctx, manager, grant)

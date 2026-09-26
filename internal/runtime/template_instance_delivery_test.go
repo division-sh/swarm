@@ -915,7 +915,8 @@ func (s routeMaterializationDBProofStore) ListActiveFlowInstanceDescriptors(ctx 
 
 func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
+	ctx = runtimecorrelation.WithRunID(ctx, templateInstanceDeliveryRunID)
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
 	return ctx
 }

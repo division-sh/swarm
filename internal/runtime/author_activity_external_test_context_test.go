@@ -450,6 +450,12 @@ func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selec
 	if err != nil {
 		t.Fatalf("admit external manager fixture generation: %v", err)
 	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle external manager fixture probes: %v", err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("admit external manager fixture execution: %v", err)
+	}
 	installExternalManagerTestGeneration(t, ctx, manager, grant)
 }
 
