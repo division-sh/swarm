@@ -482,6 +482,16 @@ func TestCLIOutputConformanceMigratedDisplayWritersConsumeSharedRenderer(t *test
 }
 
 func TestCLIOutputConformanceNoRawCobraArgCountValidators(t *testing.T) {
+	violations, err := rawCobraArgValidatorViolations(driftTestRepoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+}
+
+func rawCobraArgValidatorViolations(root string) ([]string, error) {
 	rawValidators := map[string]bool{
 		"ExactArgs":    true,
 		"MaximumNArgs": true,
@@ -489,7 +499,7 @@ func TestCLIOutputConformanceNoRawCobraArgCountValidators(t *testing.T) {
 		"RangeArgs":    true,
 	}
 	fset := token.NewFileSet()
-	root := driftTestRepoRoot(t)
+	var violations []string
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "cliapp"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -511,19 +521,27 @@ func TestCLIOutputConformanceNoRawCobraArgCountValidators(t *testing.T) {
 				return true
 			}
 			pos := fset.Position(sel.Pos())
-			t.Errorf("%s: raw cobra.%s is not allowed for promoted CLI arg-count diagnostics; use argcount.ExactArgs/argcount.MaximumNArgs", pos, sel.Sel.Name)
+			violations = append(violations, pos.String()+": raw cobra."+sel.Sel.Name+" is not allowed for promoted CLI arg-count diagnostics; use argcount.ExactArgs/argcount.MaximumNArgs")
 			return true
 		})
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk internal/cliapp: %v", err)
-	}
+	return violations, err
 }
 
 func TestCLIOutputConformanceNoRawCobraArgCountExpectations(t *testing.T) {
+	violations, err := rawCobraArgExpectationViolations(driftTestRepoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+}
+
+func rawCobraArgExpectationViolations(root string) ([]string, error) {
 	rawExpectation := regexp.MustCompile(`accepts (?:at most )?\d+ arg\(s\)`)
-	root := driftTestRepoRoot(t)
+	var violations []string
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "cliapp"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -536,12 +554,53 @@ func TestCLIOutputConformanceNoRawCobraArgCountExpectations(t *testing.T) {
 			return err
 		}
 		if match := rawExpectation.Find(content); match != nil {
-			t.Errorf("%s: raw Cobra arg-count expectation %q is no longer authoritative", path, string(match))
+			violations = append(violations, path+": raw Cobra arg-count expectation "+string(match)+" is no longer authoritative")
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk internal/cliapp tests: %v", err)
+	return violations, err
+}
+
+func TestCLIOutputArgCountCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, "internal", "cliapp")
+	foreign := filepath.Join(root, "foreign")
+	for _, dir := range []string{filepath.Join(root, "current"), foreign} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range map[string]string{
+			"hostile.go":      "package hostile\nvar _ = cobra.ExactArgs\n",
+			"hostile_test.go": "package hostile\n// accepts 2 " + "arg(s)\n",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	validators, err := rawCobraArgValidatorViolations(repo)
+	if err != nil || len(validators) != 1 || !strings.Contains(validators[0], "current/hostile.go") {
+		t.Fatalf("raw validator violations = %v, %v; want current-local source", validators, err)
+	}
+	expectations, err := rawCobraArgExpectationViolations(repo)
+	if err != nil || len(expectations) != 1 || !strings.Contains(expectations[0], "current/hostile_test.go") {
+		t.Fatalf("raw expectation violations = %v, %v; want current-local test", expectations, err)
+	}
+	for _, name := range []string{"hostile.go", "hostile_test.go"} {
+		if err := os.Remove(filepath.Join(root, "current", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	validators, err = rawCobraArgValidatorViolations(repo)
+	if err != nil || len(validators) != 0 {
+		t.Fatalf("foreign-only raw validator was rejected: %v, %v", validators, err)
+	}
+	expectations, err = rawCobraArgExpectationViolations(repo)
+	if err != nil || len(expectations) != 0 {
+		t.Fatalf("foreign-only raw expectation was rejected: %v, %v", expectations, err)
 	}
 }
 

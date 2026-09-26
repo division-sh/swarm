@@ -218,6 +218,37 @@ func discoverRequiredExampleBundles(corpusRoot, configPath string) ([]requiredCo
 	return bundles, err
 }
 
+func TestCatalogExampleDiscoveryExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	local := filepath.Join(repo, "examples", "local")
+	foreign := filepath.Join(repo, "examples", "foreign")
+	for _, dir := range []string{local, foreign} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("source"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundles, err := discoverRequiredExampleBundles(repo, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundles) != 1 || bundles[0].ID != "examples/local" || bundles[0].Root != local {
+		t.Fatalf("example bundles = %#v, want only current-local example", bundles)
+	}
+	if err := os.Remove(filepath.Join(local, "manifest.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	bundles, err = discoverRequiredExampleBundles(repo, "")
+	if err != nil || len(bundles) != 0 {
+		t.Fatalf("foreign-only example received catalog credit: %#v, %v", bundles, err)
+	}
+}
+
 func materializeRequiredArchetypeBundles(t testing.TB) []requiredConformanceBundle {
 	t.Helper()
 	ids := make([]string, 0, len(admittedArchetypes))

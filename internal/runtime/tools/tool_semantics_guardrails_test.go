@@ -23,9 +23,49 @@ func TestHITLSourceBoundaryRetiresOldInterpreters(t *testing.T) {
 		t.Fatal("resolve current test file")
 	}
 	runtimeRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), ".."))
-	const lifecycleOwnerFile = "hitl_tools.go"
+	repo := filepath.Clean(filepath.Join(runtimeRoot, "..", ".."))
+	violations, err := hitlSourceViolations(repo, runtimeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+}
 
-	err := checkoutsource.WalkDir(filepath.Clean(filepath.Join(runtimeRoot, "..", "..")), runtimeRoot, func(path string, entry os.DirEntry, err error) error {
+func TestHITLSourceCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	runtimeRoot := filepath.Join(repo, "internal", "runtime")
+	local := filepath.Join(runtimeRoot, "tools", "current", "hostile.go")
+	foreign := filepath.Join(runtimeRoot, "tools", "foreign")
+	for _, path := range []string{local, filepath.Join(foreign, "hostile.go")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("package hostile\nfunc execAgentMessage() {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	violations, err := hitlSourceViolations(repo, runtimeRoot)
+	if err != nil || len(violations) != 1 || !strings.Contains(violations[0], local) {
+		t.Fatalf("HITL violations = %v, %v; want current-local interpreter", violations, err)
+	}
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	violations, err = hitlSourceViolations(repo, runtimeRoot)
+	if err != nil || len(violations) != 0 {
+		t.Fatalf("foreign-only HITL interpreter was rejected: %v, %v", violations, err)
+	}
+}
+
+func hitlSourceViolations(repo, runtimeRoot string) ([]string, error) {
+	const lifecycleOwnerFile = "hitl_tools.go"
+	var violations []string
+	err := checkoutsource.WalkDir(repo, runtimeRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -44,27 +84,25 @@ func TestHITLSourceBoundaryRetiresOldInterpreters(t *testing.T) {
 				}
 				literal, unquoteErr := strconv.Unquote(typed.Value)
 				if unquoteErr != nil {
-					t.Errorf("unquote %s: %v", path, unquoteErr)
+					violations = append(violations, path+": unquote string literal failed: "+unquoteErr.Error())
 					return true
 				}
 				canonical := normalizeNativeToolName(literal)
 				if canonical == "mailbox_send" || canonical == "human_task_request" || canonical == "agent_message" {
 					if filepath.Base(path) != lifecycleOwnerFile {
-						t.Errorf("%s restores HITL identity %q outside the lifecycle owner", path, literal)
+						violations = append(violations, path+" restores HITL identity "+literal+" outside the lifecycle owner")
 					}
 				}
 			case *ast.FuncDecl:
 				if strings.EqualFold(typed.Name.Name, "execAgentMessage") {
-					t.Errorf("%s restores executable agent_message interpreter %s", path, typed.Name.Name)
+					violations = append(violations, path+" restores executable agent_message interpreter "+typed.Name.Name)
 				}
 			}
 			return true
 		})
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("scan runtime sources: %v", err)
-	}
+	return violations, err
 }
 
 func TestNormalizeNativeToolNameCanonicalAliases(t *testing.T) {

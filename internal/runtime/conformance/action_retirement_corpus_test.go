@@ -322,9 +322,25 @@ func TestActionRetirementCorpusExcludesGeneratedTestResults(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "source.md"), []byte("ActionRunner"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	foreign := filepath.Join(root, "nested", "foreign")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, "source.md"), []byte("ActionRunner"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	current := actionRetirementCurrentCorpus(t, root)
 	if len(current) != 1 || current["source.md"] == nil {
-		t.Fatalf("generated test results must not enter the source corpus: %v", current)
+		t.Fatalf("generated results or foreign checkout entered the source corpus: %v", current)
+	}
+	if err := os.Remove(filepath.Join(root, "source.md")); err != nil {
+		t.Fatal(err)
+	}
+	if current := actionRetirementCurrentCorpus(t, root); len(current) != 0 {
+		t.Fatalf("foreign-only authored source received corpus credit: %v", current)
 	}
 }
 

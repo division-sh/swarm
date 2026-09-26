@@ -47,6 +47,66 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 		}
 	}
 
+	violations, err := publicIngressSQLViolations(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, violation := range violations {
+		t.Error(violation)
+	}
+
+	spec, err := os.ReadFile(filepath.Join(repo, "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	for _, required := range []string{
+		"provider_registration may allocate the next ordinal only after the preceding attempt settled terminal_failure with exact launch_rejected=true and zero provider dispatch",
+		"Mismatch or unavailable readback terminalizes that same attempt as outcome_uncertain",
+		"A live predecessor attempt or handle is never",
+	} {
+		if !strings.Contains(string(spec), required) {
+			t.Fatalf("authoritative provider-registration contract is missing %q", required)
+		}
+	}
+}
+
+func TestPublicIngressSQLCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	var locals []string
+	for _, zone := range []string{"migrations", "internal"} {
+		root := filepath.Join(repo, "internal", "store", zone)
+		local := filepath.Join(root, "current", "hostile.sql")
+		foreign := filepath.Join(root, "foreign")
+		for _, path := range []string{local, filepath.Join(foreign, "hostile.sql")} {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("create table public_ingress (id text);\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		locals = append(locals, local)
+	}
+	violations, err := publicIngressSQLViolations(repo)
+	if err != nil || len(violations) != len(locals) {
+		t.Fatalf("SQL violations = %v, %v; want %d current-local files", violations, err, len(locals))
+	}
+	for _, path := range locals {
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	violations, err = publicIngressSQLViolations(repo)
+	if err != nil || len(violations) != 0 {
+		t.Fatalf("foreign-only SQL was rejected: %v, %v", violations, err)
+	}
+}
+
+func publicIngressSQLViolations(repo string) ([]string, error) {
+	var violations []string
 	for _, root := range []string{
 		filepath.Join(repo, "internal", "store", "migrations"),
 		filepath.Join(repo, "internal", "store", "internal"),
@@ -70,27 +130,14 @@ func TestPublicIngressArchitectureRatchets(t *testing.T) {
 				"create table registration_evidence",
 			} {
 				if strings.Contains(lower, forbidden) {
-					t.Errorf("%s persists process-local observation via %q", path, forbidden)
+					violations = append(violations, path+" persists process-local observation via "+forbidden)
 				}
 			}
 			return nil
 		})
 		if err != nil && !os.IsNotExist(err) {
-			t.Fatalf("scan persistence tree %s: %v", root, err)
+			return nil, err
 		}
 	}
-
-	spec, err := os.ReadFile(filepath.Join(repo, "platform-spec.yaml"))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	for _, required := range []string{
-		"provider_registration may allocate the next ordinal only after the preceding attempt settled terminal_failure with exact launch_rejected=true and zero provider dispatch",
-		"Mismatch or unavailable readback terminalizes that same attempt as outcome_uncertain",
-		"A live predecessor attempt or handle is never",
-	} {
-		if !strings.Contains(string(spec), required) {
-			t.Fatalf("authoritative provider-registration contract is missing %q", required)
-		}
-	}
+	return violations, nil
 }

@@ -140,6 +140,15 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 			if _, ok := live[want]; !ok {
 				t.Fatalf("repo-wide structural census missed %s: %#v", want, live)
 			}
+			if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if live := liveCheckedYAMLRoutingRoots(t, repo); len(live) != 0 {
+				t.Fatalf("foreign-only routing root received live census credit: %#v", live)
+			}
+			if roots := outerManifestRoots(t, repo); len(roots) != 0 {
+				t.Fatalf("foreign-only manifest received corpus credit: %v", roots)
+			}
 		})
 	}
 	t.Run("nested-data-directory", func(t *testing.T) {
@@ -157,6 +166,12 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 		live := liveCheckedYAMLRoutingRoots(t, repo)
 		if _, ok := live[ArtifactID("cmd/hidden/data/routing")]; !ok {
 			t.Fatalf("repo-wide structural census skipped nested data directory: %#v", live)
+		}
+		if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if live := liveCheckedYAMLRoutingRoots(t, repo); len(live) != 0 {
+			t.Fatalf("foreign-only data routing root received live census credit: %#v", live)
 		}
 	})
 }
