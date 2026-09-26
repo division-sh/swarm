@@ -314,16 +314,6 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		t.Fatalf("fingerprint readiness owner: %v", err)
 	}
 	seedLifecycleReadinessOwner(t, ctx, store, runID, readinessPlan.Identity.InstancePath, readinessPlanJSON, now)
-	if _, err := readinessGrant.MarkProbesSettled(ctx, nil); err != nil {
-		t.Fatalf("settle readiness grant probes: %v", err)
-	}
-	if _, err := readinessGrant.AdmitExecution(ctx); err != nil {
-		t.Fatalf("admit readiness grant: %v", err)
-	}
-	readinessBinding, err := readinessGrant.ProcessExecutionBinding()
-	if err != nil {
-		t.Fatal(err)
-	}
 	activationStore, ok := store.(interface {
 		LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 		BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimemanager.ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
@@ -334,6 +324,70 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	readiness, found, err := activationStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, readinessPlan.Identity.Route())
 	if err != nil || !found {
 		t.Fatalf("load readiness for lifecycle seed: found=%v err=%v", found, err)
+	}
+	preparedTopology, err := runtimeagenttopology.FlowReadinessAdmission(runID, readinessPlan.Identity.InstancePath, readinessFingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedTopology, err = preparedTopology.WithFlowPreparationRevision(readiness.PlanRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readinessRecord.Topology = preparedTopology
+	preparation := runtimemanager.AgentLifecycleTransition{
+		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		OperationID:      uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(),
+		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_preparation_fixture",
+		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
+		ConfigRevision: readinessRevision, RunMode: runtimemanager.AgentRunModeStopped,
+		Agent: &readinessRecord, Topology: preparedTopology, Now: time.Now().UTC(),
+	}
+	staleTopology, err := preparedTopology.WithFlowPreparationRevision(readiness.PlanRevision + 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stalePreparation := preparation
+	stalePreparation.OperationID = uuid.NewString()
+	stalePreparation.RequestHash = uuid.NewString()
+	stalePreparation.Topology = staleTopology
+	staleRecord := readinessRecord
+	staleRecord.Topology = staleTopology
+	stalePreparation.Agent = &staleRecord
+	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, stalePreparation); err == nil || !strings.Contains(err.Error(), "readiness_preparation_plan_not_current") {
+		t.Fatalf("stale preparation revision admitted topology: %v", err)
+	}
+	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, preparation); err != nil {
+		t.Fatalf("prepare stopped readiness agent before execution admission: %v", err)
+	}
+	preparedState, found, err := store.LoadAgentLifecycleState(ctx, readinessIdentity)
+	if err != nil || !found || preparedState.Phase != runtimemanager.AgentLifecycleRegistered || preparedState.RunMode != runtimemanager.AgentRunModeStopped || !preparedState.Topology.Equal(preparedTopology) {
+		t.Fatalf("prepared topology readback: state=%+v found=%v err=%v", preparedState, found, err)
+	}
+	forgedPreparation := preparation
+	forgedPreparation.OperationID = uuid.NewString()
+	forgedPreparation.RequestHash = uuid.NewString()
+	forgedPreparation.OperationKind = "reconfigure"
+	forgedPreparation.ExpectedEpoch = preparedState.RuntimeEpoch
+	forgedPreparation.ExpectedGeneration = preparedState.Generation
+	forgedPreparation.ExpectedPhase = preparedState.Phase
+	forgedPreparation.TargetGeneration = preparedState.Generation + 1
+	forgedPreparation.TargetPhase = runtimemanager.AgentLifecycleRunning
+	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, forgedPreparation); err == nil || !strings.Contains(err.Error(), "readiness_preparation_must_remain_non_executable") {
+		t.Fatalf("prepared grant launched agent: %v", err)
+	}
+	if _, err := readinessGrant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle readiness grant probes: %v", err)
+	}
+	if _, err := readinessGrant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("admit readiness grant: %v", err)
+	}
+	readinessBinding, err := readinessGrant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedPreparation.TargetPhase = runtimemanager.AgentLifecycleRegistered
+	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, forgedPreparation); err == nil || !strings.Contains(err.Error(), "flow topology preparation requires a current pre-admission") {
+		t.Fatalf("admitted grant reused preparation authority: %v", err)
 	}
 	admitted, err := activationStore.BeginDynamicFlowRuntimeActivation(ctx, readinessPlan, readiness.PlanRevision, readinessBinding)
 	if err != nil || !admitted.Acknowledged {
@@ -352,9 +406,10 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	readinessRecord.Topology = readinessTopology
 	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
-		OperationID:      uuid.NewString(), OperationKind: "spawn", RequestHash: uuid.NewString(),
+		OperationID:      uuid.NewString(), OperationKind: "reconfigure", RequestHash: uuid.NewString(),
 		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "readiness_fixture",
-		TargetEpoch: 1, TargetGeneration: 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
+		ExpectedEpoch: preparedState.RuntimeEpoch, ExpectedGeneration: preparedState.Generation, ExpectedPhase: preparedState.Phase,
+		TargetEpoch: preparedState.RuntimeEpoch, TargetGeneration: preparedState.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleRegistered,
 		ConfigRevision: readinessRevision, RunMode: runtimemanager.AgentRunModeStopped,
 		Agent: &readinessRecord, Topology: readinessTopology, Now: time.Now().UTC(),
 	}); err != nil {

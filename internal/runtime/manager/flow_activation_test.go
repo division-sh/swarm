@@ -4905,6 +4905,75 @@ func TestStandingActivatedFlowAgentsAreOwnedOnlyByFlowInstanceActivation(t *test
 	}
 }
 
+func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	agents := &flowActivationTestStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances, agents)
+	bundle := testFlowBundleWithTwoAgents(t, "")
+	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	ctx := testAuthorActivityContext(context.Background())
+	created, finish, err := am.PrepareStandingFlowInstance(ctx, req)
+	if err != nil || !created || finish == nil {
+		t.Fatalf("prepare standing flow: created=%t finish=%t err=%v", created, finish != nil, err)
+	}
+	for _, name := range []string{"reviewer", "writer"} {
+		cfg, ok := testFlowActivationAgentConfig(t, am, name, req.Instance.InstancePath)
+		if !ok {
+			t.Fatalf("prepared agent %s missing", name)
+		}
+		identity, err := cfg.ConcreteIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+		if err != nil || readiness.Kind != executableAgentPreparedBeforeRun || readiness.State.Topology.Authority.Readiness.AttemptID != "" || readiness.State.Topology.Authority.Readiness.PlanRevision == 0 {
+			t.Fatalf("agent %s pre-admission readiness = %+v err=%v", name, readiness, err)
+		}
+	}
+	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) || len(instances.armedEntries) != 0 {
+		t.Fatal("pre-admission preparation published executable flow work")
+	}
+	if err := am.PrepareAdmittedDynamicFlowAgentsForStart(ctx); err != nil {
+		t.Fatalf("bind admitted attempts before Manager.Run: %v", err)
+	}
+	for _, name := range []string{"reviewer", "writer"} {
+		cfg, _ := testFlowActivationAgentConfig(t, am, name, req.Instance.InstancePath)
+		identity, _ := cfg.ConcreteIdentity()
+		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+		if err != nil || readiness.Kind != executableAgentPreparedBeforeRun || readiness.State.Topology.Authority.Readiness.AttemptID == "" {
+			t.Fatalf("agent %s admitted pre-run readiness = %+v err=%v", name, readiness, err)
+		}
+	}
+	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) || len(instances.armedEntries) != 0 {
+		t.Fatal("admitted pre-run preparation published route or timer work")
+	}
+	runCtx, cancelRun := context.WithCancel(ctx)
+	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+		cancelRun()
+		t.Fatalf("run attempt-bound standing agents: %v", err)
+	}
+	t.Cleanup(func() {
+		cancelRun()
+		_ = am.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
+	})
+	if err := finish(); err != nil {
+		t.Fatalf("finish standing flow after Manager.Run: %v", err)
+	}
+	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
+		t.Fatal("standing route was not published after Manager.Run")
+	}
+	for _, name := range []string{"reviewer", "writer"} {
+		cfg, _ := testFlowActivationAgentConfig(t, am, name, req.Instance.InstancePath)
+		identity, _ := cfg.ConcreteIdentity()
+		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+		if err != nil || readiness.Kind != executableAgentRunnableCurrentOccurrence || readiness.State.Topology.Authority.Readiness.AttemptID == "" {
+			t.Fatalf("agent %s post-run readiness = %+v err=%v", name, readiness, err)
+		}
+	}
+}
+
 func TestStaticAgentMaterializationKeepsDistinctSameIDPhysicalDeclarations(t *testing.T) {
 	projectOwner := "test://agent-name/packages/support-extension/worker"
 	flowOwner := "test://agent-name/support/worker"

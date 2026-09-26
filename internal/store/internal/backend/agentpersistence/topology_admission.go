@@ -130,7 +130,19 @@ func authorizeStaticDeclarationMutation(ctx context.Context, tx *sql.Tx, req run
 func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, sqlite bool) error {
 	authority := req.Topology.Authority.Readiness
 	present := req.TargetPhase != runtimemanager.AgentLifecycleTerminated
-	takeover := req.OperationKind == "process_takeover"
+	preparation := authority.AttemptID == "" && authority.PlanRevision != 0
+	takeover := !preparation && req.OperationKind == "process_takeover"
+	if preparation {
+		switch req.OperationKind {
+		case "spawn", "reconfigure", "process_takeover":
+		default:
+			return topologyConflict(req, "readiness_preparation_operation_not_admitted")
+		}
+		if !present || req.TargetPhase != runtimemanager.AgentLifecycleRegistered || req.RunMode != runtimemanager.AgentRunModeStopped ||
+			req.Subordinate.Action != runtimesessions.LifecycleMutationNone {
+			return topologyConflict(req, "readiness_preparation_must_remain_non_executable")
+		}
+	}
 	if takeover && (req.Agent != nil || req.Subordinate.Action != runtimesessions.LifecycleMutationNone ||
 		req.TargetPhase != req.ExpectedPhase || req.TargetEpoch != req.ExpectedEpoch+1 ||
 		req.TargetGeneration != req.ExpectedGeneration+1) {
@@ -138,7 +150,9 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 	}
 	if present {
 		var err error
-		if takeover {
+		if preparation {
+			err = AuthorizeDynamicFlowTopologyPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
+		} else if takeover {
 			err = AuthorizeDynamicFlowTakeoverPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
 		} else {
 			err = AuthorizeDynamicFlowActivationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
@@ -205,7 +219,22 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 		if plan.BundleHash != req.ProcessBinding.BundleHash {
 			return topologyConflict(req, "readiness_generation_source_mismatch")
 		}
-		if !takeover && (authority.AttemptID == "" || authority.PlanRevision == 0 ||
+		if preparation && planRevision != int64(authority.PlanRevision) {
+			return topologyConflict(req, "readiness_preparation_plan_not_current")
+		}
+		if preparation && attemptID.Valid {
+			if !grantID.Valid {
+				return topologyConflict(req, "readiness_preparation_predecessor_grant_missing")
+			}
+			foreign, err := FlowActivationPredecessorIsFromAnotherProcessTx(ctx, tx, grantID.String, req.ProcessBinding)
+			if err != nil {
+				return err
+			}
+			if !foreign {
+				return topologyConflict(req, "readiness_preparation_predecessor_not_joined")
+			}
+		}
+		if !preparation && !takeover && (authority.AttemptID == "" || authority.PlanRevision == 0 ||
 			!attemptID.Valid || attemptID.String != authority.AttemptID ||
 			!grantID.Valid || grantID.String != req.ProcessBinding.GenerationGrantID ||
 			!attemptRevision.Valid || attemptRevision.Int64 != int64(authority.PlanRevision) ||

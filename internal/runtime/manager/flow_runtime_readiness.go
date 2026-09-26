@@ -118,6 +118,8 @@ type dynamicFlowRuntimeReadinessAdmission struct {
 	source              dynamicFlowRuntimeReadinessSource
 	topologyDurable     bool
 	processOnly         bool
+	preAdmission        bool
+	admittedPreRun      bool
 	previouslyCompleted bool
 	processPrepared     bool
 }
@@ -309,6 +311,84 @@ func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx conte
 	am.dynamicFlowStartupTopologyPending = true
 	am.dynamicFlowReadinessMu.Unlock()
 	return startup, nil
+}
+
+// PrepareAdmittedDynamicFlowAgentsForStart transfers pre-run declarations to
+// the exact admitted attempt before Manager.Run upgrades their lifecycle cells.
+// Route publication and durable topology completion remain post-Run work.
+func (am *AgentManager) PrepareAdmittedDynamicFlowAgentsForStart(ctx context.Context) error {
+	if am == nil || am.workflowInstances == nil || am.lifecycle == nil {
+		return errors.New("admitted dynamic flow preparation requires manager and workflow store")
+	}
+	if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
+		return errors.New("admitted dynamic flow preparation requires a stopped manager")
+	}
+	prepared := make(map[dynamicFlowRuntimeReadinessKey]uint64)
+	for _, identity := range am.lifecycle.executionIdentities() {
+		state, found := am.lifecycle.stateByIdentity(identity)
+		if !found {
+			return fmt.Errorf("prepared dynamic flow agent %s has no lifecycle cell", identity.Description())
+		}
+		authority := state.Topology.Authority
+		if authority.Kind != runtimeagenttopology.AuthorityFlowReadinessPlan || authority.Readiness == nil || authority.Readiness.AttemptID != "" || authority.Readiness.PlanRevision == 0 {
+			continue
+		}
+		if authority.Readiness.RunID != identity.RunID || authority.Readiness.InstancePath != identity.FlowInstance() ||
+			state.Phase != AgentLifecycleRegistered || state.RunMode != AgentRunModeStopped {
+			return fmt.Errorf("dynamic flow agent %s is not an exact stopped preparation", identity.Description())
+		}
+		key, err := newDynamicFlowRuntimeReadinessKey(authority.Readiness.RunID, authority.Readiness.InstancePath)
+		if err != nil {
+			return err
+		}
+		if revision, exists := prepared[key]; exists && revision != authority.Readiness.PlanRevision {
+			return fmt.Errorf("dynamic flow %s has mixed preparation revisions", key.instancePath)
+		}
+		prepared[key] = authority.Readiness.PlanRevision
+	}
+	if len(prepared) == 0 {
+		return nil
+	}
+	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
+	if err != nil {
+		return err
+	}
+	keys := make([]dynamicFlowRuntimeReadinessKey, 0, len(prepared))
+	for key := range prepared {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].runID != keys[j].runID {
+			return keys[i].runID < keys[j].runID
+		}
+		return keys[i].instancePath < keys[j].instancePath
+	})
+	for _, key := range keys {
+		readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
+		if err != nil {
+			return err
+		}
+		if !found || !readiness.Eligible() || readiness.PlanRevision != prepared[key] {
+			return fmt.Errorf("dynamic flow %s preparation is no longer current", key.instancePath)
+		}
+		plan, err := readiness.Plan.Normalized()
+		if err != nil {
+			return err
+		}
+		if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, source); err != nil {
+			return err
+		}
+		if err := am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
+			ctx: ctx, key: key, plan: plan, planRevision: readiness.PlanRevision, source: source,
+			processOnly: true, admittedPreRun: true,
+		}); err != nil {
+			return fmt.Errorf("admit prepared dynamic flow %s before manager run: %w", key.instancePath, err)
+		}
+	}
+	if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
+		return errors.New("admitted dynamic flow preparation crossed manager run admission")
+	}
+	return nil
 }
 
 func (am *AgentManager) CompleteDynamicFlowRuntimeStartupTopology(ctx context.Context, startup DynamicFlowRuntimeStartupReadiness) error {
@@ -862,7 +942,18 @@ func (am *AgentManager) PreparePersistedDynamicFlowRuntimeProcessTopology(
 	if err != nil {
 		return err
 	}
-	return am.reconcileDynamicFlowRuntimeReadinessItem(ctx, readiness, source, true, false)
+	plan, err := readiness.Plan.Normalized()
+	if err != nil {
+		return err
+	}
+	key, err := newDynamicFlowRuntimeReadinessKey(plan.RunID, readiness.InstancePath)
+	if err != nil {
+		return err
+	}
+	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
+		ctx: ctx, key: key, plan: plan, planRevision: readiness.PlanRevision, source: source,
+		processOnly: true, preAdmission: true, previouslyCompleted: !readiness.TopologyReadyAt.IsZero(),
+	})
 }
 
 func (am *AgentManager) dynamicFlowRuntimeReadinessSource(
@@ -1178,6 +1269,30 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := verifyDynamicFlowAgentExpectations(records, plan.Agents); err != nil {
 		return fmt.Errorf("dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
 	}
+	if admission.preAdmission {
+		if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
+			return fmt.Errorf("standing flow topology preparation requires a stopped manager")
+		}
+		topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
+		if err != nil {
+			return err
+		}
+		topologyAuthority, err = topologyAuthority.WithFlowPreparationRevision(admission.planRevision)
+		if err != nil {
+			return err
+		}
+		persistedAgents, err := am.loadDynamicFlowPersistedAgents(ctx, flowIdentity)
+		if err != nil {
+			return fmt.Errorf("load standing flow agents for %s: %w", readiness.InstancePath, err)
+		}
+		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, false); err != nil {
+			return fmt.Errorf("prepare standing flow agents for %s: %w", readiness.InstancePath, err)
+		}
+		if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
+			return fmt.Errorf("standing flow topology preparation crossed manager run admission")
+		}
+		return nil
+	}
 	active, _, beginErr := am.beginDynamicFlowActiveAttempt(ctx, key, plan, admission.planRevision)
 	if active == nil {
 		return beginErr
@@ -1227,7 +1342,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if err != nil {
 			return fmt.Errorf("load dynamic flow agents for %s: %w", readiness.InstancePath, err)
 		}
-		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority); err != nil {
+		if err := am.reconcileDynamicFlowAgentSet(ctx, source, flowIdentity, records, persistedAgents, topologyAuthority, true); err != nil {
 			return fmt.Errorf("reconcile dynamic flow agent set for %s: %w", readiness.InstancePath, err)
 		}
 	}
@@ -1237,6 +1352,13 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if eligible, err := verifyAttempt(); err != nil {
 		return err
 	} else if !eligible {
+		return nil
+	}
+	if admission.admittedPreRun {
+		if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
+			return errors.New("admitted flow preparation crossed manager run admission")
+		}
+		activationAccepted = true
 		return nil
 	}
 	if !admission.processPrepared {
@@ -1476,61 +1598,64 @@ func (am *AgentManager) reconcileDynamicFlowAgentSet(
 	expected []PersistedAgent,
 	persisted map[runtimeagentidentity.Identity]PersistedAgent,
 	topologyAuthority runtimeagenttopology.Admission,
+	retireRemoved bool,
 ) error {
 	flowIdentity = flowIdentity.Normalize()
 	if err := flowIdentity.Validate(); err != nil {
 		return err
 	}
-	expectedIdentities := make(map[runtimeagentidentity.Identity]struct{}, len(expected))
-	for _, rec := range expected {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		expectedIdentities[identity] = struct{}{}
-	}
-	removedIdentities := make(map[runtimeagentidentity.Identity]struct{})
-	for identity := range persisted {
-		if _, ok := expectedIdentities[identity]; !ok {
-			removedIdentities[identity] = struct{}{}
-		}
-	}
-	for _, cfg := range am.ListAgentConfigs() {
-		identity, err := cfg.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		if identity.RunID != flowIdentity.RunID || identity.FlowInstance() != flowIdentity.Route.InstancePath {
-			continue
-		}
-		if _, ok := expectedIdentities[identity]; !ok {
-			removedIdentities[identity] = struct{}{}
-		}
-	}
-	orderedRemoved := make([]runtimeagentidentity.Identity, 0, len(removedIdentities))
-	for identity := range removedIdentities {
-		orderedRemoved = append(orderedRemoved, identity)
-	}
-	sort.Slice(orderedRemoved, func(i, j int) bool {
-		return runtimeagentidentity.Less(orderedRemoved[i], orderedRemoved[j])
-	})
-	for _, identity := range orderedRemoved {
-		if _, live := am.getAgentConfigIdentity(identity); !live {
-			stored, found := persisted[identity]
-			if !found {
-				return fmt.Errorf(
-					"removed dynamic flow agent %s has neither process nor durable lifecycle owner",
-					identity.Description(),
-				)
+	if retireRemoved {
+		expectedIdentities := make(map[runtimeagentidentity.Identity]struct{}, len(expected))
+		for _, rec := range expected {
+			identity, err := rec.Config.ConcreteIdentity()
+			if err != nil {
+				return err
 			}
-			if err := am.adoptPersistedAgentLifecycleOnly(ctx, stored); err != nil {
-				return fmt.Errorf("adopt removed dynamic flow agent %s: %w", identity.Description(), err)
+			expectedIdentities[identity] = struct{}{}
+		}
+		removedIdentities := make(map[runtimeagentidentity.Identity]struct{})
+		for identity := range persisted {
+			if _, ok := expectedIdentities[identity]; !ok {
+				removedIdentities[identity] = struct{}{}
 			}
 		}
-		if err := am.teardownIdentityWithTopology(ctx, identity, "teardown", &topologyAuthority); err != nil {
-			return fmt.Errorf("retire removed dynamic flow agent %s: %w", identity.Description(), err)
+		for _, cfg := range am.ListAgentConfigs() {
+			identity, err := cfg.ConcreteIdentity()
+			if err != nil {
+				return err
+			}
+			if identity.RunID != flowIdentity.RunID || identity.FlowInstance() != flowIdentity.Route.InstancePath {
+				continue
+			}
+			if _, ok := expectedIdentities[identity]; !ok {
+				removedIdentities[identity] = struct{}{}
+			}
 		}
-		delete(persisted, identity)
+		orderedRemoved := make([]runtimeagentidentity.Identity, 0, len(removedIdentities))
+		for identity := range removedIdentities {
+			orderedRemoved = append(orderedRemoved, identity)
+		}
+		sort.Slice(orderedRemoved, func(i, j int) bool {
+			return runtimeagentidentity.Less(orderedRemoved[i], orderedRemoved[j])
+		})
+		for _, identity := range orderedRemoved {
+			if _, live := am.getAgentConfigIdentity(identity); !live {
+				stored, found := persisted[identity]
+				if !found {
+					return fmt.Errorf(
+						"removed dynamic flow agent %s has neither process nor durable lifecycle owner",
+						identity.Description(),
+					)
+				}
+				if err := am.adoptPersistedAgentLifecycleOnly(ctx, stored); err != nil {
+					return fmt.Errorf("adopt removed dynamic flow agent %s: %w", identity.Description(), err)
+				}
+			}
+			if err := am.teardownIdentityWithTopology(ctx, identity, "teardown", &topologyAuthority); err != nil {
+				return fmt.Errorf("retire removed dynamic flow agent %s: %w", identity.Description(), err)
+			}
+			delete(persisted, identity)
+		}
 	}
 	for _, rec := range expected {
 		identity, err := rec.Config.ConcreteIdentity()

@@ -71,11 +71,18 @@ func AuthorizeDynamicFlowTakeoverPreparationTx(ctx context.Context, tx *sql.Tx, 
 	return authorizeDynamicFlowGrantTx(ctx, tx, binding, runID, sqlite, flowGrantTakeoverPreparation)
 }
 
+// AuthorizeDynamicFlowTopologyPreparationTx admits only pre-run agent
+// registration under the current ordinary grant, before execution admission.
+func AuthorizeDynamicFlowTopologyPreparationTx(ctx context.Context, tx *sql.Tx, binding runtimeprocessbinding.Binding, runID string, sqlite bool) error {
+	return authorizeDynamicFlowGrantTx(ctx, tx, binding, runID, sqlite, flowGrantTopologyPreparation)
+}
+
 type flowGrantUse uint8
 
 const (
 	flowGrantExecution flowGrantUse = iota + 1
 	flowGrantTakeoverPreparation
+	flowGrantTopologyPreparation
 )
 
 func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtimeprocessbinding.Binding, runID string, sqlite bool, use flowGrantUse) error {
@@ -107,6 +114,10 @@ func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtim
 	case flowGrantTakeoverPreparation:
 		if evidence.SelectedFork != nil || (evidence.State != startupownership.GrantPrepared && evidence.State != startupownership.GrantProbeSettled && evidence.State != startupownership.GrantAdmitted) {
 			return errors.New("flow readiness process takeover requires a live ordinary generation grant")
+		}
+	case flowGrantTopologyPreparation:
+		if evidence.SelectedFork != nil || (evidence.State != startupownership.GrantPrepared && evidence.State != startupownership.GrantProbeSettled) {
+			return errors.New("flow topology preparation requires a current pre-admission ordinary generation grant")
 		}
 	default:
 		return errors.New("unknown flow generation grant use")

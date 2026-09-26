@@ -1815,6 +1815,10 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 				return fmt.Errorf("activate managed execution: %w", activateErr)
 			}
 			startCtx = managedexecution.WithAdmission(startCtx, activation.Admission)
+			if err := rt.Manager.PrepareAdmittedDynamicFlowAgentsForStart(startCtx); err != nil {
+				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+				return fmt.Errorf("admit prepared dynamic flow agents before manager run: %w", err)
+			}
 			if err := rt.Manager.Run(startCtx); err != nil {
 				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 				return fmt.Errorf("start managed execution loops: %w", err)
