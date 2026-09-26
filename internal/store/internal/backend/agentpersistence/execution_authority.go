@@ -62,6 +62,23 @@ func AuthorizeGenerationMutationTx(ctx context.Context, tx *sql.Tx, req manager.
 // AuthorizeDynamicFlowActivationTx admits forward progress only under the
 // exact currently admitted generation and run binding in the mutation TX.
 func AuthorizeDynamicFlowActivationTx(ctx context.Context, tx *sql.Tx, binding runtimeprocessbinding.Binding, runID string, sqlite bool) error {
+	return authorizeDynamicFlowGrantTx(ctx, tx, binding, runID, sqlite, flowGrantExecution)
+}
+
+// AuthorizeDynamicFlowTakeoverPreparationTx permits only a non-executable
+// lifecycle rebind before the replacement grant is admitted for execution.
+func AuthorizeDynamicFlowTakeoverPreparationTx(ctx context.Context, tx *sql.Tx, binding runtimeprocessbinding.Binding, runID string, sqlite bool) error {
+	return authorizeDynamicFlowGrantTx(ctx, tx, binding, runID, sqlite, flowGrantTakeoverPreparation)
+}
+
+type flowGrantUse uint8
+
+const (
+	flowGrantExecution flowGrantUse = iota + 1
+	flowGrantTakeoverPreparation
+)
+
+func authorizeDynamicFlowGrantTx(ctx context.Context, tx *sql.Tx, binding runtimeprocessbinding.Binding, runID string, sqlite bool, use flowGrantUse) error {
 	if err := binding.Validate(); err != nil {
 		return err
 	}
@@ -79,8 +96,20 @@ func AuthorizeDynamicFlowActivationTx(ctx context.Context, tx *sql.Tx, binding r
 	if err := evidence.Validate(); err != nil {
 		return err
 	}
-	if evidence.State != startupownership.GrantAdmitted || !binding.Equal(processBindingForGrant(evidence)) {
-		return errors.New("flow activation requires the exact admitted generation grant")
+	if !binding.Equal(processBindingForGrant(evidence)) {
+		return errors.New("flow activation requires the exact generation grant binding")
+	}
+	switch use {
+	case flowGrantExecution:
+		if evidence.State != startupownership.GrantAdmitted {
+			return errors.New("flow activation requires the exact admitted generation grant")
+		}
+	case flowGrantTakeoverPreparation:
+		if evidence.SelectedFork != nil || (evidence.State != startupownership.GrantPrepared && evidence.State != startupownership.GrantProbeSettled && evidence.State != startupownership.GrantAdmitted) {
+			return errors.New("flow readiness process takeover requires a live ordinary generation grant")
+		}
+	default:
+		return errors.New("unknown flow generation grant use")
 	}
 	if evidence.SelectedFork == nil {
 		query := `SELECT revision FROM agent_topology_source_set_head WHERE singleton_id=1`
