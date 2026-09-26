@@ -3,7 +3,6 @@ package conformance
 import (
 	"bytes"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -17,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"gopkg.in/yaml.v3"

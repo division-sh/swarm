@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"

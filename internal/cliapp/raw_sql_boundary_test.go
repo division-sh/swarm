@@ -1,13 +1,14 @@
 package cliapp
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 type rawSQLBoundaryClassification string

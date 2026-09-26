@@ -1,13 +1,14 @@
 package runtime_test
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testing.T) {

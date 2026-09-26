@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"gopkg.in/yaml.v3"
 )

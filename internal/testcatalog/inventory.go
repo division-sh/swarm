@@ -3,13 +3,13 @@ package testcatalog
 import (
 	"bytes"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"gopkg.in/yaml.v3"
 )

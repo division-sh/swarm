@@ -1,13 +1,14 @@
 package cliapp
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 
 	"gopkg.in/yaml.v3"
 )

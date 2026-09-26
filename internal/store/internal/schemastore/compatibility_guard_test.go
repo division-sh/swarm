@@ -2,11 +2,12 @@ package schemastore
 
 import (
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestSelectedStoreLegacySchemaInterpretersAreAbsent(t *testing.T) {

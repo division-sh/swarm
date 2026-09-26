@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/constant"
 	"go/importer"
@@ -22,6 +21,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
@@ -222,6 +222,22 @@ func TestWrongHandle(t *testing.T) {
 	}
 	if _, ok := proofs["fixture/fixture_test.go:TestExact"][rootIngress]; !ok {
 		t.Fatal("direct executable proof declaration was not indexed")
+	}
+	foreign := filepath.Join(root, "foreign")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, "fixture_test.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "fixture_test.go")); err != nil {
+		t.Fatal(err)
+	}
+	if got := directExecutableArtifactProofs(t, repo); len(got) != 0 {
+		t.Fatalf("foreign-only artifact declaration received local proof credit: %#v", got)
 	}
 }
 

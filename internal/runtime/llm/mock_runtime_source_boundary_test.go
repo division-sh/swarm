@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -10,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestProductionDoesNotImportCatalogOrFixtureRuntimeOwners(t *testing.T) {

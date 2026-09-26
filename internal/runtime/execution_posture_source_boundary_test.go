@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T) {

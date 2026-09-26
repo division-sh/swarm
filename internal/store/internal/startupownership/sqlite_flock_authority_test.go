@@ -5,7 +5,6 @@ package startupownership
 import (
 	"bytes"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -14,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestProductionAdvisoryLocksHaveNamedNonEngineTargets(t *testing.T) {

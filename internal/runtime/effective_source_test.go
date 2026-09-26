@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"

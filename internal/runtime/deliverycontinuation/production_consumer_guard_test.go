@@ -1,7 +1,6 @@
 package deliverycontinuation
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T) {

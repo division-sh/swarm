@@ -1,11 +1,12 @@
 package pipeline
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestWorkflowTimerLegacyInterpreterStaticAbsence(t *testing.T) {

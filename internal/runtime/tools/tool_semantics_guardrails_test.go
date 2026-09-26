@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )

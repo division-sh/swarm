@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 
 	"gopkg.in/yaml.v3"
 )

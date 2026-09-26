@@ -1,11 +1,12 @@
 package store_test
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestPublicReadModelsAreConsumerOwned(t *testing.T) {

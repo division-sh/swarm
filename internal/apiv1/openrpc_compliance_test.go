@@ -3,7 +3,6 @@ package apiv1
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -19,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/platform"
 )
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/testcatalog"

@@ -3,7 +3,6 @@ package runforkpersistence
 import (
 	"bytes"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/constant"
 	"go/parser"
@@ -17,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"golang.org/x/tools/go/packages"
 )

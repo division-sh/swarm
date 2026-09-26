@@ -2,13 +2,13 @@ package canonicalrouting
 
 import (
 	"context"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -329,18 +329,10 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 				want = append(want, name)
 			}
 			sort.Strings(want)
-			entries, err := checkoutsource.ReadDir(RepoRoot(t), filepath.Join(RepoRoot(t), "examples", "routing"))
+			got, err := canonicalRoutingExampleDirectories(RepoRoot(t))
 			if err != nil {
 				t.Fatal(err)
 			}
-			var got []string
-			for _, entry := range entries {
-				if !entry.IsDir() || entry.Name() == "notify-all-children" {
-					continue
-				}
-				got = append(got, entry.Name())
-			}
-			sort.Strings(got)
 			if strings.Join(got, "\n") != strings.Join(want, "\n") {
 				t.Fatalf("canonical routing inventory = %v, want %v", got, want)
 			}
@@ -411,6 +403,41 @@ func canonicalRoutingTeachingContractSource(t *testing.T) SourceToken {
 				})
 			}
 		})
+}
+
+func TestCanonicalRoutingExampleCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, "examples", "routing")
+	for _, name := range []string{"current", "foreign"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "foreign", ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := canonicalRoutingExampleDirectories(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "current" {
+		t.Fatalf("routing examples = %v, want only current-local example", got)
+	}
+}
+
+func canonicalRoutingExampleDirectories(repo string) ([]string, error) {
+	entries, err := checkoutsource.ReadDir(repo, filepath.Join(repo, "examples", "routing"))
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != "notify-all-children" {
+			dirs = append(dirs, entry.Name())
+		}
+	}
+	sort.Strings(dirs)
+	return dirs, nil
 }
 
 func validateCanonicalPublishCommands(t *testing.T, readme string) {

@@ -2,7 +2,6 @@ package testtiming
 
 import (
 	"encoding/json"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"gopkg.in/yaml.v3"
 )

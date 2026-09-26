@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	platformpacks "github.com/division-sh/swarm/packs"
@@ -1602,9 +1602,39 @@ func acceptInstalled(snapshot *CatalogSnapshot, req Request) (Delivery, error) {
 func testPlatformPackDirs(t *testing.T) []string {
 	t.Helper()
 	root := testPlatformPackRoot()
-	entries, err := checkoutsource.ReadDir(filepath.Clean(filepath.Join("..", "..")), root)
+	dirs, err := platformPackDirs(filepath.Clean(filepath.Join("..", "..")), root)
 	if err != nil {
 		t.Fatalf("read platform pack root: %v", err)
+	}
+	return dirs
+}
+
+func TestPlatformPackDirectoryCensusExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, "packs", "provider-triggers")
+	local := filepath.Join(root, "local")
+	foreign := filepath.Join(root, "foreign")
+	for _, dir := range []string{local, foreign} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(foreign, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirs, err := platformPackDirs(repo, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 1 || dirs[0] != local {
+		t.Fatalf("platform pack directories = %v, want only current-local %s", dirs, local)
+	}
+}
+
+func platformPackDirs(repo, root string) ([]string, error) {
+	entries, err := checkoutsource.ReadDir(repo, root)
+	if err != nil {
+		return nil, err
 	}
 	dirs := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -1613,7 +1643,7 @@ func testPlatformPackDirs(t *testing.T) []string {
 		}
 	}
 	sort.Strings(dirs)
-	return dirs
+	return dirs, nil
 }
 
 func testPlatformPackRoot() string {

@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/token"
 	"os"
@@ -10,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 const revisionProtocolPath = "internal/store/internal/backend/mutationprotocol/protocol.go"

@@ -2,11 +2,12 @@ package contracts
 
 import (
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 type optionalDeclarationRoleTestCase struct {
