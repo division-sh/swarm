@@ -436,6 +436,16 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	}
 	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
+	afterStartup := loadStandingMemorySessions(t, backend, storeLocation)
+	if len(afterStartup) != len(before) {
+		t.Fatalf("memory owners changed during restart: before=%#v after=%#v", before, afterStartup)
+	}
+	for key, prior := range before {
+		current, ok := afterStartup[key]
+		if !ok || current.SessionID != prior.SessionID || current.TurnCount != prior.TurnCount {
+			t.Fatalf("memory owner %q changed before new input: before=%#v after=%#v", key, prior, current)
+		}
+	}
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
 	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, secondURL, 101, 42), firstMatched)
 	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)

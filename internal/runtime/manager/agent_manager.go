@@ -564,7 +564,6 @@ func (am *AgentManager) adoptPersistedAgentLifecycleOnly(ctx context.Context, re
 	// successor source. Register only its durable lifecycle identity so teardown
 	// or replacement can fence it; never construct a provider agent or install
 	// executable subscriptions.
-	rec.Config.Subscriptions = nil
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:  rec.Config.ID,
 		FlowID:   rec.Config.FlowID,

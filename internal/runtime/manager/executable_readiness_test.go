@@ -536,13 +536,25 @@ func TestLifecycleOnlyAdoptionNeverStartsObsoleteAgent(t *testing.T) {
 	if _, ok := bus.current(agentID); ok {
 		t.Fatal("lifecycle-only adoption installed an executable route")
 	}
+	wantRevision, err := lifecycleConfigRevision(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, ok := am.lifecycle.stateByIdentity(identity)
+	if !ok || state.ConfigRevision != wantRevision {
+		t.Fatalf("lifecycle-only revision = %#v found=%t, want %s", state, ok, wantRevision)
+	}
+	projection, ok := am.lifecycle.executionSnapshotByIdentity(identity)
+	if !ok || len(projection.Subscriptions) != 0 || len(projection.Config.Subscriptions) != 1 || projection.Config.Subscriptions[0] != "test.old" {
+		t.Fatalf("lifecycle-only projection lost durable config or admitted executable subscriptions: %#v found=%t", projection, ok)
+	}
 	if readiness, err := am.lifecycle.executableReadinessByIdentity(identity); err == nil {
 		t.Fatalf("lifecycle-only projection accepted as %#v", readiness)
 	}
 	if err := am.teardownIdentityWithTopology(testAuthorActivityContext(context.Background()), identity, "teardown", &rec.Topology); err != nil {
 		t.Fatalf("teardown lifecycle-only identity: %v", err)
 	}
-	state, ok := am.lifecycle.stateByIdentity(identity)
+	state, ok = am.lifecycle.stateByIdentity(identity)
 	if !ok || state.Phase != AgentLifecycleTerminated {
 		t.Fatalf("teardown state = %#v found=%t", state, ok)
 	}
