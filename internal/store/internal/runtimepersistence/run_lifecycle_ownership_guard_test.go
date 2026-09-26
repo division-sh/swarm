@@ -155,6 +155,10 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 		if err != nil {
 			violations = append(violations, relative+": "+err.Error())
 		}
+		minimalProjection, err := classifyBackendMinimalRunLiterals(relative, file)
+		if err != nil {
+			violations = append(violations, relative+": "+err.Error())
+		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			literal, ok := node.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
@@ -164,7 +168,7 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 			if err != nil || !runWrite.MatchString(value) {
 				return true
 			}
-			if hostile[literal.Pos()] || minimalHistory[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
+			if hostile[literal.Pos()] || minimalHistory[literal.Pos()] || minimalProjection[literal.Pos()] || allowedSemanticRunFixtureLiteral(relative, value) {
 				return true
 			}
 			violations = append(violations, relative+": "+compactSQLForLifecycleGuard(value))
@@ -179,6 +183,63 @@ func TestSemanticRunFixturesUseLifecycleOwner(t *testing.T) {
 	if len(violations) > 0 {
 		t.Fatalf("semantic run fixtures bypass the lifecycle owner:\n%s", strings.Join(violations, "\n"))
 	}
+}
+
+func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
+	type fixtureShape struct {
+		schema string
+		writes []string
+	}
+	shapes := map[string]fixtureShape{
+		"internal/store/internal/backend/agentpersistence/selected_grant_point_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)"}},
+		"internal/store/internal/backend/delivery/selected_execution_fence_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)", "UPDATE runs SET bundle_hash=$1"}},
+		"internal/store/internal/backend/delivery/selected_successor_handoff_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY,bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)"}},
+		"internal/store/internal/backend/pipelinepersistence/fan_out_deployment_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, status TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2,'running')"}},
+		"internal/store/internal/backend/pipelinepersistence/fan_out_selected_successor_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL, status TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2,'running')"}},
+		"internal/store/internal/backend/runforkpersistence/deployment_revision_point_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT NOT NULL)", []string{"INSERT INTO runs VALUES($1,'deployment')"}},
+		"internal/store/internal/backend/runforkpersistence/historical_snapshot_race_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT NOT NULL)", []string{"INSERT INTO runs VALUES($1,'event')"}},
+		"internal/store/internal/backend/runforkpersistence/lifecycle_diagnostic_point_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,$2)"}},
+		"internal/store/internal/backend/runforkpersistence/selected_finite_feed_operation_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY,status TEXT NOT NULL)", []string{"INSERT INTO runs VALUES ($1,'paused')"}},
+	}
+	shape, ok := shapes[path]
+	if !ok {
+		return nil, nil
+	}
+	schemaFound := false
+	approved := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		compact := compactSQLForLifecycleGuard(value)
+		if compact == shape.schema {
+			schemaFound = true
+		}
+		for _, write := range shape.writes {
+			if compact == write {
+				approved[literal.Pos()] = true
+			}
+		}
+		return true
+	})
+	if !schemaFound {
+		return nil, fmt.Errorf("minimal backend runs schema is missing")
+	}
+	return approved, nil
 }
 
 func classifyReceiverHistoryMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
@@ -370,6 +431,10 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 	case "internal/store/internal/runtimepersistence/run_lifecycle_candidate_parity_test.go":
 		return compact == "UPDATE runs SET completion_revision = 1, completion_due_at = ? WHERE run_id = ?" ||
 			compact == "UPDATE runs SET completion_revision = 1, completion_due_at = $1 WHERE run_id = $2::uuid"
+	case "internal/store/internal/schemastore/fork_point_schema_test.go":
+		// This test exercises physical CHECK and FK constraints on the real schema.
+		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')" ||
+			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6)"
 	}
 	return false
 }

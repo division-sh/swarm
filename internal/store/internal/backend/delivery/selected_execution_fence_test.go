@@ -103,7 +103,7 @@ func TestSelectedDeliveryExecutionFenceBothStores(t *testing.T) {
 			if _, err := db.Exec(`UPDATE run_fork_selected_contract_runtime_executions SET fork_run_id=$1`, runID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`UPDATE runs SET bundle_hash='bundle-v2:sha256:` + strings.Repeat("b", 64) + `'`); err != nil {
+			if _, err := db.Exec(`UPDATE runs SET bundle_hash=$1`, "bundle-v2:sha256:"+strings.Repeat("b", 64)); err != nil {
 				t.Fatal(err)
 			}
 			check(authority, false)

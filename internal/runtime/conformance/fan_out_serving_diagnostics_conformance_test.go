@@ -2,7 +2,9 @@ package conformance
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/lib/pq"
 )
 
 const servingD3Code = "fan_out_claim_opportunity_missed"
@@ -553,7 +556,7 @@ func injectServingD3HeaderCorruption(t *testing.T, f *servingMatrixFixture, back
 	}
 	args := []any{runID, time.Now().UTC().Add(-time.Minute)}
 	_, updateErr := f.db.ExecContext(ctx, update, args...)
-	var constraint string
+	var constraint, constraintName string
 	if corruption == "orphan_lease" {
 		if updateErr == nil {
 			t.Fatal("DDL accepted an orphan lease instead of requiring isolated corruption injection")
@@ -561,10 +564,15 @@ func injectServingD3HeaderCorruption(t *testing.T, f *servingMatrixFixture, back
 		// Reuse the store agent's proven corruption, bypassing constraints only
 		// inside this ephemeral fixture. Restore both data and DDL before release.
 		if backend == "postgres" {
-			if err := f.db.QueryRowContext(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='fan_out_intents'::regclass AND conname='fan_out_intents_check2'`).Scan(&constraint); err != nil {
+			var violation *pq.Error
+			if !errors.As(updateErr, &violation) || !strings.HasPrefix(violation.Constraint, "fan_out_intents_check") {
+				t.Fatalf("unexpected fan-out header constraint refusal: %v", updateErr)
+			}
+			constraintName = violation.Constraint
+			if err := f.db.QueryRowContext(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='fan_out_intents'::regclass AND conname=$1`, constraintName).Scan(&constraint); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := f.db.ExecContext(ctx, `ALTER TABLE fan_out_intents DROP CONSTRAINT fan_out_intents_check2`); err != nil {
+			if _, err := f.db.ExecContext(ctx, `ALTER TABLE fan_out_intents DROP CONSTRAINT `+pq.QuoteIdentifier(constraintName)); err != nil {
 				t.Fatal(err)
 			}
 			_, updateErr = f.db.ExecContext(ctx, update, args...)
@@ -596,7 +604,7 @@ func injectServingD3HeaderCorruption(t *testing.T, f *servingMatrixFixture, back
 			return
 		}
 		if constraint != "" {
-			if _, err := f.db.ExecContext(ctx, `ALTER TABLE fan_out_intents ADD CONSTRAINT fan_out_intents_check2 `+constraint); err != nil {
+			if _, err := f.db.ExecContext(ctx, `ALTER TABLE fan_out_intents ADD CONSTRAINT `+pq.QuoteIdentifier(constraintName)+` `+constraint); err != nil {
 				t.Error(err)
 				return
 			}

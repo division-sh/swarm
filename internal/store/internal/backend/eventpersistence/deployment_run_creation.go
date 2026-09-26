@@ -23,8 +23,31 @@ import (
 
 type deploymentRunCreationWriter interface {
 	CreateRunTx(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
-	storedurabledata.DeploymentFeedWriterTx
+	deploymentFeedWriterTx
 	mutationprotocol.CandidateWriter
+}
+
+type deploymentFeedWriterTx interface {
+	CreateDeploymentFeedTx(context.Context, *sql.Tx, runtimedata.DeploymentFeed) error
+}
+
+func commitRunCreationFeedsTx(ctx context.Context, tx *sql.Tx, plan *storedurabledata.RunCreationPlan, writer deploymentFeedWriterTx) error {
+	if tx == nil || plan == nil {
+		return fmt.Errorf("deployment feed commit requires transaction and run-creation plan")
+	}
+	if len(plan.DeploymentFeeds()) != 0 && writer == nil {
+		return fmt.Errorf("deployment feed owner is required for pinned run creation")
+	}
+	feeds, err := plan.ConsumeDeploymentFeeds()
+	if err != nil {
+		return err
+	}
+	for _, feed := range feeds {
+		if err := writer.CreateDeploymentFeedTx(ctx, tx, feed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateDeploymentRunCreation(ctx context.Context, command runtimedata.RunCreationCommand, request apiidempotency.Request) (runtimedata.RunCreationCommand, runtimecorrelation.SourceArtifactFact, error) {
@@ -88,7 +111,7 @@ func commitDeploymentRunCreationTx(
 		if err != nil {
 			return err
 		}
-		if err := storedurabledata.CommitRunCreationFeedsTx(ctx, tx, &plan, writer); err != nil {
+		if err := commitRunCreationFeedsTx(ctx, tx, &plan, writer); err != nil {
 			return err
 		}
 		if err := recordDeploymentRunFeedFactsTx(ctx, tx, attempt, plan.DeploymentFeeds()); err != nil {

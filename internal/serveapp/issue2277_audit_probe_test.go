@@ -52,8 +52,8 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("AFTER LOSS response=%+v error=%+v forks=%d completions=%d", first, first.Error, forks, completions)
-			if first.Error == nil || forks != 1 || completions != 0 {
-				t.Fatal("probe did not reach post-domain completion-loss cut")
+			if first.Error != nil || forks != 1 || completions != 0 {
+				t.Fatal("durable fork result depended on expiring API completion")
 			}
 			var forkID, forkStatus, executionState string
 			if err := rt.DB.QueryRow(`SELECT run_id,status FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forkID, &forkStatus); err != nil {
@@ -87,8 +87,8 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 			if !reflect.DeepEqual(before, repeatedStaticRunSnapshot(t, rt.DB, forkID)) {
 				t.Fatal("same-key retry changed fork domain evidence")
 			}
-			if retry.Error == nil || forks != 1 || completions != 0 {
-				t.Fatal("completion-loss baseline disposition changed; reclassify")
+			if retry.Error != nil || forks != 1 || completions != 0 || !reflect.DeepEqual(first.Result, retry.Result) {
+				t.Fatal("durable same-key fork replay lost its original result or changed domain state")
 			}
 		})
 	}

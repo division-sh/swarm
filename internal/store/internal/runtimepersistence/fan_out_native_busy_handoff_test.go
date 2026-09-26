@@ -104,7 +104,7 @@ func TestSQLiteFanOutChunkNativeCommitBusyRetry(t *testing.T) {
 				// Admission's first intent read precedes the callback reset.
 				// Once cancellation has happened this is lockClaimedFanOutIntent;
 				// any later matching read after refusal would be stale reconciliation.
-				if abortRetry && phase == "before_query" && sink.oldCanceled.Load() && strings.Contains(query, " FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2") {
+				if abortRetry && phase == "before_query" && sink.oldCanceled.Load() && strings.Contains(query, " FROM fan_out_intents WHERE run_id=$1 AND origin_kind='handler' AND triggering_delivery_id=$2") {
 					afterResetIntentReads.Add(1)
 					return injected
 				}

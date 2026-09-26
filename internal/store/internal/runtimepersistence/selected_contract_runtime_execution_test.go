@@ -1360,6 +1360,10 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	forkRun := uuid.NewString()
 	eventID := uuid.NewString()
 	bindingID := uuid.NewString()
+	forkOrigin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRun, runtimerunlifecycle.ForkOriginPointEvent, 1, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	registrar, ok := any(store).(testAuthorActivityCatalogRegistrar)
 	if !ok {
 		t.Fatal("selected completion fixture store has no author activity catalog")
@@ -1369,10 +1373,10 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 		artifact := sourceArtifacts[0]
 		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
-		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, State: runtimerunlifecycle.StatePaused, StartedAt: now})
+		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: forkOrigin, Artifact: artifact, State: runtimerunlifecycle.StatePaused, StartedAt: now})
 	} else {
 		requireRunningRunForTest(t, ctx, store, sourceRun, now)
-		requirePausedRunForTest(t, ctx, store, forkRun, now)
+		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: forkOrigin, State: runtimerunlifecycle.StatePaused, StartedAt: now})
 	}
 	seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	eventStore, ok := any(store).(semanticEventFixtureStore)
