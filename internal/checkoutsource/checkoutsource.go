@@ -62,6 +62,9 @@ func WalkDir(checkoutRoot, scanRoot string, fn fs.WalkDirFunc) error {
 			return walkErr
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
+			if err := checkDiscoveredSymlink(path); err != nil {
+				return err
+			}
 			return nil
 		}
 		if entry.Name() == ".git" {
@@ -111,6 +114,9 @@ func ReadDir(checkoutRoot, dir string) ([]os.DirEntry, error) {
 	out := make([]os.DirEntry, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Type()&os.ModeSymlink != 0 {
+			if err := checkDiscoveredSymlink(filepath.Join(dir, entry.Name())); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		member, err := Member(checkoutRoot, filepath.Join(dir, entry.Name()))
@@ -122,6 +128,17 @@ func ReadDir(checkoutRoot, dir string) ([]os.DirEntry, error) {
 		}
 	}
 	return out, nil
+}
+
+func checkDiscoveredSymlink(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("inspect checkout symlink %s: %w", path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("checkout source symlink %s is not a directory", path)
+	}
+	return nil
 }
 
 func paths(checkoutRoot, path string) (string, string, []string, error) {

@@ -103,6 +103,45 @@ func TestCheckoutMembershipFailsClosedOnInvalidRoots(t *testing.T) {
 	}
 }
 
+func TestCheckoutDiscoveredSourceSymlinkFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "current.go"))
+	leaf := filepath.Join(root, "linked.go")
+	if err := os.Symlink("current.go", leaf); err != nil {
+		t.Fatal(err)
+	}
+	if err := WalkDir(root, root, func(string, fs.DirEntry, error) error { return nil }); err == nil || !strings.Contains(err.Error(), leaf) {
+		t.Fatalf("WalkDir with source symlink = %v, want path-specific failure", err)
+	}
+	if _, err := ReadDir(root, root); err == nil || !strings.Contains(err.Error(), leaf) {
+		t.Fatalf("ReadDir with source symlink = %v, want path-specific failure", err)
+	}
+	if err := os.Remove(leaf); err != nil {
+		t.Fatal(err)
+	}
+
+	foreign := t.TempDir()
+	write(t, filepath.Join(foreign, "stale.go"))
+	dirLink := filepath.Join(root, "linked-directory")
+	if err := os.Symlink(foreign, dirLink); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := WalkDir(root, root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		got = append(got, filepath.Base(path))
+		return nil
+	}); err != nil || !slices.Equal(got, []string{filepath.Base(root), "current.go"}) {
+		t.Fatalf("WalkDir with directory symlink = %v, %v; want current source only", got, err)
+	}
+	entries, err := ReadDir(root, root)
+	if err != nil || !slices.Equal(names(entries), []string{"current.go"}) {
+		t.Fatalf("ReadDir with directory symlink = %v, %v; want current source only", names(entries), err)
+	}
+}
+
 func marker(t *testing.T, dir, shape string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
