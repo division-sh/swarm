@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func TestRunForkProfileInheritanceRequiresExactEffectiveSourceBeforeMutation(t *testing.T) {
@@ -821,16 +822,17 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
-			fork_run_id, source_run_id, fork_event_id,
+			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id,
 			mode, bundle_hash
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3::uuid,
+			$1::uuid, $2::uuid, 'event', 1, $3::uuid,
 			'selected_contracts', NULL
 		)
 	`, materialized.ForkRunID, sourceRunID, eventID)
-	if err == nil {
-		t.Fatalf("duplicate selected contract binding insert succeeded, want unique failure")
+	var pqErr *pq.Error
+	if !errors.As(err, &pqErr) || string(pqErr.Code) != "23505" {
+		t.Fatalf("duplicate selected contract binding error = %v, want unique failure", err)
 	}
 }
 
