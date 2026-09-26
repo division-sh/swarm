@@ -561,6 +561,8 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 				origin_service_id TEXT,
 				origin_generation INTEGER,
 				forked_from_run_id TEXT,
+				forked_from_point_kind TEXT,
+				forked_from_revision INTEGER,
 				forked_from_event_id TEXT,
 				continued_as_run_id TEXT,
 				event_count INTEGER NOT NULL DEFAULT 0,
