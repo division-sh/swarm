@@ -324,55 +324,77 @@ func TestRunStartInitiationRequiresEventPairOrData(t *testing.T) {
 }
 
 func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
-	setCLIAPITestToken(t, "test-token")
-	root := t.TempDir()
-	input := filepath.Join(root, "rows.jsonl")
-	if err := os.WriteFile(input, []byte(""), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			switch req.Method {
-			case "health.check":
-				return runCommandHealthResult()
-			case "data.show":
-				return map[string]any{
-					"items": []any{map[string]any{
-						"declaration": map[string]any{"flow_path": ".", "event": "records.loaded"},
-						"local_name":  "records.loaded",
-						"head":        map[string]any{"state": "absent"},
-					}},
-					"item_count":   1,
-					"continuation": map[string]any{"state": "end"},
-				}
-			case "run.start":
-				if _, found := req.Params["event_name"]; found {
-					t.Fatal("feed-only run.start sent event_name")
-				}
-				if _, found := req.Params["payload"]; found {
-					t.Fatal("feed-only run.start sent payload")
-				}
-				if req.Params["run_id"] == "" || req.Params["data"] == nil {
-					t.Fatalf("feed-only run.start omitted durable run identity or data: %#v", req.Params)
-				}
-				return runStartCommandResult(req.Params["run_id"].(string), "completed")
-			default:
-				t.Fatalf("unexpected method %q", req.Method)
-				return nil
+	for _, tc := range []struct {
+		name  string
+		flag  string
+		value func(string) string
+		field string
+	}{
+		{"import", "--data", func(path string) string { return "records.loaded=" + path }, "imports"},
+		{"pin", "--pin", func(string) string { return "records.loaded@head" }, "pins"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			root := t.TempDir()
+			input := filepath.Join(root, "rows.jsonl")
+			if err := os.WriteFile(input, []byte(""), 0o600); err != nil {
+				t.Fatal(err)
 			}
-		},
-	})
-	defer server.Close()
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), root,
-		[]string{"run", "start", "--connect", server.URL, "--data", "records.loaded=" + input, "--no-follow"},
-		&stdout, &stderr, testRunCommandOptions(server))
-	if code != 0 {
-		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "data.show", "run.start"})
-	if len(*wsRequests) != 0 {
-		t.Fatalf("feed-only --no-follow opened websocket: %#v", *wsRequests)
+			declaration := map[string]any{"flow_path": ".", "event": "records.loaded"}
+			versionID := "resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+				rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+					switch req.Method {
+					case "health.check":
+						return runCommandHealthResult()
+					case "data.show":
+						if req.Params["view"] == "version" {
+							return map[string]any{"declaration": declaration, "version_id": versionID}
+						}
+						return map[string]any{
+							"items": []any{map[string]any{
+								"declaration": declaration,
+								"local_name":  "records.loaded",
+								"head":        map[string]any{"state": "version", "version_id": versionID},
+							}},
+							"item_count":   1,
+							"continuation": map[string]any{"state": "end"},
+						}
+					case "run.start":
+						if _, found := req.Params["event_name"]; found {
+							t.Fatal("feed-only run.start sent event_name")
+						}
+						if _, found := req.Params["payload"]; found {
+							t.Fatal("feed-only run.start sent payload")
+						}
+						data, ok := req.Params["data"].(map[string]any)
+						if req.Params["run_id"] == "" || !ok || len(data[tc.field].([]any)) != 1 {
+							t.Fatalf("feed-only run.start omitted durable run identity or %s: %#v", tc.field, req.Params)
+						}
+						return runStartCommandResult(req.Params["run_id"].(string), "completed")
+					default:
+						t.Fatalf("unexpected method %q", req.Method)
+						return nil
+					}
+				},
+			})
+			defer server.Close()
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), root,
+				[]string{"run", "start", "--connect", server.URL, tc.flag, tc.value(input), "--no-follow"},
+				&stdout, &stderr, testRunCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			want := []string{"health.check", "data.show", "run.start"}
+			if tc.name == "pin" {
+				want = []string{"health.check", "data.show", "data.show", "run.start"}
+			}
+			assertRunCommandMethods(t, calls, want)
+			if len(*wsRequests) != 0 {
+				t.Fatalf("feed-only --no-follow opened websocket: %#v", *wsRequests)
+			}
+		})
 	}
 }
 
