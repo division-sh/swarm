@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -83,12 +84,21 @@ func (p FlowRoutePublication) Retire() error {
 	return rt.removeFlowInstanceRoute(p.identity)
 }
 
-func (eb *EventBus) PublishPersistedFlowInstanceRouteForAttempt(req FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (FlowRoutePublication, error) {
+func (eb *EventBus) PublishPersistedFlowInstanceRouteForAttempt(ctx context.Context, req FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (FlowRoutePublication, error) {
 	if eb == nil {
 		return FlowRoutePublication{}, errors.New("event bus is required")
 	}
-	if _, err := eb.admitSourceArtifactFact(context.Background()); err != nil {
+	admittedCtx, err := eb.admitSourceArtifactFact(ctx)
+	if err != nil {
 		return FlowRoutePublication{}, err
+	}
+	source, ok := runtimecorrelation.SourceArtifactFactFromContext(admittedCtx)
+	if !ok || source.BundleHash() != attempt.ProcessBinding().BundleHash {
+		return FlowRoutePublication{}, errors.New("flow route publication source differs from activation attempt")
+	}
+	runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(admittedCtx)
+	if !ok || runtimeID != attempt.ProcessBinding().RuntimeInstanceID {
+		return FlowRoutePublication{}, errors.New("flow route publication runtime differs from activation attempt")
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
