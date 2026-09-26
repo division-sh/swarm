@@ -64,7 +64,7 @@ store_parity:
       parent: RuntimeDeps.ManagerPersistenceRoles
       role_source_path: internal/runtime/manager/types.go
       role_type: PersistenceRoles
-      different_construction: [AgentRoutes, FlowActivation, RouteInstaller, RouteVerifier, RouteRestorer, RouteRetirer, RouteRemover, FlowTermination, CreationPublisher, DeliveryRuntime]
+      different_construction: [AgentRoutes, FlowActivation, RouteInstaller, RouteVerifier, RouteRestorer, FlowTermination, CreationPublisher, DeliveryRuntime]
     - {id: runtime_workflow, parent: RuntimeDeps.WorkflowPersistence, role_source_path: internal/runtime/pipeline/workflow_instance_store.go, role_type: WorkflowPersistenceOwner, interface_members: true, projection_constructor: NewWorkflowPersistence}
     - {id: product_conversation_fork, parent: productPorts.conversationFork, role_source_path: internal/store/selected/selected.go, role_type: ConversationFork}
     - {id: product_run_fork, parent: productPorts.runFork, role_source_path: internal/store/selected/selected.go, role_type: RunFork}

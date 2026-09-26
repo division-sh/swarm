@@ -129,26 +129,36 @@ func FlowActivationPredecessorIsFromAnotherProcessTx(ctx context.Context, tx *sq
 	return predecessor.ProcessAuthorityID != current.ProcessAuthorityID || predecessor.ProcessBootID != current.ProcessBootID, nil
 }
 
-// FlowActivationRetirementHasForeignSuccessorTx permits a joined predecessor
-// to finish after takeover without treating an invented binding as ownership.
-func FlowActivationRetirementHasForeignSuccessorTx(ctx context.Context, tx *sql.Tx, successorGrantID string, retired runtimeprocessbinding.Binding) (bool, error) {
+// VerifyFlowActivationRetirementBindingTx retains exact settlement authority
+// for a retired grant without permitting new forward progress under it.
+func VerifyFlowActivationRetirementBindingTx(ctx context.Context, tx *sql.Tx, retired runtimeprocessbinding.Binding) error {
 	if err := retired.Validate(); err != nil {
-		return false, err
+		return err
 	}
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, retired.GenerationGrantID).Scan(&raw); err != nil {
-		return false, fmt.Errorf("load retiring flow activation grant: %w", err)
+		return fmt.Errorf("load retiring flow activation grant: %w", err)
 	}
 	var retiredGrant startupownership.GrantEvidence
 	if err := canonicaljson.DecodeInto(raw, &retiredGrant); err != nil {
-		return false, err
+		return err
 	}
 	if err := retiredGrant.Validate(); err != nil {
-		return false, err
+		return err
 	}
 	if !retired.Equal(processBindingForGrant(retiredGrant)) {
-		return false, errors.New("flow activation retirement binding differs from its generation grant")
+		return errors.New("flow activation retirement binding differs from its generation grant")
 	}
+	return nil
+}
+
+// FlowActivationRetirementHasForeignSuccessorTx permits a joined predecessor
+// to finish after takeover without treating an invented binding as ownership.
+func FlowActivationRetirementHasForeignSuccessorTx(ctx context.Context, tx *sql.Tx, successorGrantID string, retired runtimeprocessbinding.Binding) (bool, error) {
+	if err := VerifyFlowActivationRetirementBindingTx(ctx, tx, retired); err != nil {
+		return false, err
+	}
+	var raw []byte
 	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, successorGrantID).Scan(&raw); err != nil {
 		return false, fmt.Errorf("load successor flow activation grant: %w", err)
 	}
@@ -159,7 +169,7 @@ func FlowActivationRetirementHasForeignSuccessorTx(ctx context.Context, tx *sql.
 	if err := successor.Validate(); err != nil {
 		return false, err
 	}
-	return successor.ProcessAuthorityID != retiredGrant.ProcessAuthorityID || successor.ProcessBootID != retiredGrant.ProcessBootID, nil
+	return successor.ProcessAuthorityID != retired.ProcessAuthorityID || successor.ProcessBootID != retired.ProcessBootID, nil
 }
 
 func processBindingForGrant(evidence startupownership.GrantEvidence) manager.ProcessExecutionBinding {
