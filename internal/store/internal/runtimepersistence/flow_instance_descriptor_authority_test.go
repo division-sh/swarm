@@ -274,6 +274,66 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 	}
 }
 
+func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool)
+	}{
+		{"postgres", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		}},
+		{"sqlite", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
+			selected := storetest.StartSQLiteRuntimeStore(t)
+			return selected, storetest.Database(selected), true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db, sqlite := tc.open(t)
+			source := mustExternalStoreTestSourceArtifactFact()
+			runID := uuid.NewString()
+			path := "account/aba-" + uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+			requireReadinessRun(t, ctx, db, sqlite, runID, source.BundleHash())
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, source.BundleHash())
+			load := func() runtimepipeline.DynamicFlowRuntimeReadiness {
+				t.Helper()
+				item, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+				if err != nil || !found {
+					t.Fatalf("load readiness: found=%v err=%v", found, err)
+				}
+				return item
+			}
+			original := load()
+			if original.PlanRevision != 1 {
+				t.Fatalf("initial revision = %d, want 1", original.PlanRevision)
+			}
+			advance := func(observed runtimepipeline.DynamicFlowRuntimeReadiness, version string) {
+				t.Helper()
+				expected := observed.Plan
+				expected.WorkflowVersion = version
+				result, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: observed, Expected: expected}}, time.Now().UTC())
+				if err != nil || len(result) != 1 || !result[0].Changed || result[0].PlanRevision != observed.PlanRevision+1 {
+					t.Fatalf("advance to %s: result=%#v err=%v", version, result, err)
+				}
+			}
+			advance(original, "2.0.0")
+			advance(load(), original.Plan.WorkflowVersion)
+			staleDesired := original.Plan
+			staleDesired.WorkflowVersion = "3.0.0"
+			result, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: original, Expected: staleDesired}}, time.Now().UTC())
+			if len(result) != 0 || !runtimepipeline.IsDynamicFlowRuntimeReadinessObservationConflict(err) {
+				t.Fatalf("stale A observation after A-B-A: result=%#v err=%v", result, err)
+			}
+			current := load()
+			if current.PlanRevision != 3 || current.Plan.WorkflowVersion != original.Plan.WorkflowVersion {
+				t.Fatalf("stale observation changed current row: revision=%d plan=%#v", current.PlanRevision, current.Plan)
+			}
+		})
+	}
+}
+
 func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string

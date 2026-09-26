@@ -105,6 +105,7 @@ type DynamicFlowRuntimeReadinessPlan struct {
 type DynamicFlowRuntimeReadiness struct {
 	InstancePath           string
 	Plan                   DynamicFlowRuntimeReadinessPlan
+	PlanRevision           uint64
 	OwningRunSource        runtimecorrelation.SourceArtifactFact
 	RunStatus              string
 	InstanceStatus         string
@@ -135,6 +136,7 @@ type DynamicFlowRuntimeReadinessPlanReconciliationResult struct {
 	RunID        string
 	InstancePath string
 	Changed      bool
+	PlanRevision uint64
 }
 
 var ErrDynamicFlowRuntimeReadinessObservationStale = errors.New("dynamic flow runtime readiness observation is stale")
@@ -185,6 +187,7 @@ type DynamicFlowRuntimeReadinessPersistenceRecord struct {
 	RunID                     string
 	InstancePath              string
 	Plan                      []byte
+	PlanRevision              uint64
 	OwningRunBundleHash       string
 	RunStatus                 string
 	InstanceStatus            string
@@ -210,6 +213,10 @@ func DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record DynamicFlowRuntim
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, err
 	}
+	if record.PlanRevision == 0 {
+		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s has no plan revision", record.InstancePath)
+	}
+	item.PlanRevision = record.PlanRevision
 	item.OwningRunSource, err = runtimecorrelation.DecodeSourceArtifactFact(record.OwningRunBundleHash)
 	if err != nil {
 		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s owning run source: %w", record.InstancePath, err)

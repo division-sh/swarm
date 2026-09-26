@@ -45,7 +45,13 @@ func commitFlowInstanceActivations(
 			if err != nil {
 				return fmt.Errorf("commit flow activation %s: %w", record.Identity.Route.InstancePath, err)
 			}
-			committed = append(committed, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: created, Lifecycle: lifecycle})
+			readiness, found, err := loadDynamicFlowRuntimeReadiness(ctx, tx, postgres, record.Identity.RunID, record.Identity.Route, false)
+			if err != nil || !found {
+				return errors.Join(err, fmt.Errorf("committed flow activation %s has no readiness owner", record.Identity.Route.InstancePath))
+			}
+			committed = append(committed, runtimepipeline.CommittedFlowInstanceActivation{
+				Plan: plan, Created: created, Lifecycle: lifecycle, ReadinessRevision: readiness.PlanRevision,
+			})
 		}
 		return nil
 	})
@@ -360,8 +366,8 @@ func insertFlowInstanceActivation(
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
+				run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+			) VALUES ($1::uuid, $2, $3::jsonb, 1, NULL, NULL, $4, $4)
 		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow runtime readiness: %w", err)
 		}
@@ -375,8 +381,8 @@ func insertFlowInstanceActivation(
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES (?, ?, ?, NULL, NULL, ?, ?)
+				run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+			) VALUES (?, ?, ?, 1, NULL, NULL, ?, ?)
 		`, record.Identity.RunID, record.Identity.Route.InstancePath, record.Readiness, record.CreatedAt, record.CreatedAt); err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow runtime readiness: %w", err)
 		}
