@@ -16512,8 +16512,10 @@ platform_tables:
         an attempt only after the preceding same-process attempt has settled; a different process may reconstruct
         after exact possession takeover. A new attempt clears physical topology readiness. Changed plans supersede
         the prior attempt without conferring permission to dispose its process resources; their exact owner settles
-        before a same-process successor begins. Retirement after a verified different-process takeover is a no-op
-        against the successor's slot, but a same-process identity mismatch remains an error. Only the accepted current attempt may commit topology readiness,
+        before a same-process successor begins. Retirement validates the retained binding against its original
+        generation-grant snapshot inside the settlement transaction, including when that grant is retired. Retirement
+        after a verified different-process takeover is a no-op against the successor's slot, but a same-process
+        identity mismatch remains an error. Only the accepted current attempt may commit topology readiness,
         and an acknowledged same-attempt commit is idempotent. Exact predecessor retirement clears readiness for
         its still-current plan but cannot clear a successor plan or attempt. Durable attempt state is not evidence that
         local goroutines, routes or provider resources have joined. The current-format plan requires exact normalized

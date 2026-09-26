@@ -255,6 +255,9 @@ func retireDynamicFlowRuntimeActivationAttempt(
 	}
 	outcome := run(ctx, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			if err := agentpersistence.VerifyFlowActivationRetirementBindingTx(txctx, tx, attempt.ProcessBinding()); err != nil {
+				return err
+			}
 			query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', updated_at=$1 WHERE run_id=$2::uuid AND instance_path=$3 AND activation_attempt_id=$4::uuid AND activation_attempt_grant_id=$5::uuid AND activation_attempt_revision=$6 AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`
 			if !postgres {
 				query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_revision=? AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`

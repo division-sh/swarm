@@ -88,6 +88,18 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if err != nil || !admitted.Acknowledged || admitted.Reused || admitted.Attempt.Validate() != nil {
 				t.Fatalf("begin exact attempt: result=%+v err=%v", admitted, err)
 			}
+			forgedCurrentBinding := binding
+			forgedCurrentBinding.ProcessBootID = uuid.NewString()
+			forgedCurrent, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(admitted.Attempt.ID(), admitted.Attempt.RunID(), admitted.Attempt.InstancePath(), admitted.Attempt.PlanRevision(), forgedCurrentBinding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, forgedCurrent); err == nil {
+				t.Fatal("invented current binding settled the exact attempt")
+			}
+			if err := selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
+				t.Fatalf("invented retirement affected current attempt: %v", err)
+			}
 			if again, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.PlanRevision, binding); err == nil || again.Acknowledged || !strings.Contains(err.Error(), "unsettled") {
 				t.Fatalf("unsettled same-process retry: result=%+v err=%v", again, err)
 			}
