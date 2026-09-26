@@ -57,12 +57,14 @@ func (m testRunLifecycleMutation) Create(
 		INSERT INTO runs (
 			run_id, status, bundle_hash, origin_kind,
 			trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
-			forked_from_run_id, forked_from_event_id, started_at
+			forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
+			started_at
 		)
 		VALUES (
 			?, 'running', ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0),
-			NULLIF(?, ''), NULLIF(?, ''), ?
+			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, 0), NULLIF(?, ''),
+			?
 		)
 		ON CONFLICT (run_id) DO NOTHING
 	`
@@ -71,19 +73,22 @@ func (m testRunLifecycleMutation) Create(
 			INSERT INTO runs (
 				run_id, status, bundle_hash, origin_kind,
 				trigger_event_id, trigger_event_type, origin_service_id, origin_generation,
-				forked_from_run_id, forked_from_event_id, started_at
+				forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
+				started_at
 			)
 			VALUES (
 				$1::uuid, 'running', $2, $3,
 				NULLIF($4, '')::uuid, NULLIF($5, ''), NULLIF($6, '')::uuid, NULLIF($7, 0),
-				NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, $10
+				NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, 0), NULLIF($11, '')::uuid,
+				$12
 			)
 			ON CONFLICT (run_id) DO NOTHING
 		`
 	}
 	result, err := m.tx.ExecContext(ctx, query, request.RunID, bundleHash,
 		origin.Kind(), origin.EventID(), origin.EventType(), origin.ServiceID(), origin.Generation(),
-		origin.SourceRunID(), origin.SourceEventID(), request.StartedAt.UTC())
+		origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
+		request.StartedAt.UTC())
 	if err != nil {
 		return "", err
 	}
@@ -331,7 +336,8 @@ func (m testRunLifecycleMutation) loadSnapshot(
 		SELECT run_id, status, bundle_hash,
 		       origin_kind, COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
-		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_event_id, ''),
+		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
+		       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id, ''),
 		       COALESCE(event_count, 0), COALESCE(entity_count, 0),
 		       COALESCE(failure, ''), COALESCE(continued_as_run_id, ''),
 		       started_at, ended_at
@@ -342,7 +348,8 @@ func (m testRunLifecycleMutation) loadSnapshot(
 			SELECT run_id::text, status, bundle_hash,
 			       origin_kind, COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 			       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
-			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_event_id::text, ''),
+			       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
+			       COALESCE(forked_from_revision, 0), COALESCE(forked_from_event_id::text, ''),
 			       COALESCE(event_count, 0), COALESCE(entity_count, 0),
 			       COALESCE(failure::text, ''), COALESCE(continued_as_run_id::text, ''),
 			       started_at, ended_at
@@ -359,13 +366,15 @@ func (m testRunLifecycleMutation) loadSnapshot(
 		serviceID   string
 		generation  int64
 		sourceRun   string
+		pointKind   string
+		revision    int64
 		sourceEvent string
 		startedAt   sql.NullTime
 		endedAt     sql.NullTime
 	)
 	if err := m.tx.QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(
 		&snapshot.RunID, &stateRaw, &snapshot.BundleHash,
-		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRun, &sourceEvent,
+		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRun, &pointKind, &revision, &sourceEvent,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID,
 		&startedAt, &endedAt,
 	); err != nil {
@@ -380,7 +389,7 @@ func (m testRunLifecycleMutation) loadSnapshot(
 		return runtimerunlifecycle.Snapshot{}, err
 	}
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
-		originKind, eventID, eventType, serviceID, generation, sourceRun, sourceEvent,
+		originKind, eventID, eventType, serviceID, generation, sourceRun, pointKind, revision, sourceEvent,
 	)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, err
