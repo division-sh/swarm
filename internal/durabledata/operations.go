@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -673,6 +674,119 @@ type RunCreationOperationRecord struct {
 	Summary  RunCreationOperationSummary `json:"summary"`
 	Binding  DataBinding                 `json:"data_binding"`
 	Evidence RunCreationEvidence         `json:"evidence"`
+}
+
+// ValidateRunCreationReceiptForCommand admits the closed event-backed and
+// deployment-origin forms without inventing an event for the latter.
+func ValidateRunCreationReceiptForCommand(record RunCreationOperationRecord, command RunCreationCommand) error {
+	_, _, canonical, err := command.RequestHash()
+	if err != nil {
+		return err
+	}
+	initiation, err := canonical.Initiation()
+	if err != nil {
+		return err
+	}
+	if initiation != RunCreationFeedOnly {
+		return record.ValidateForCommand(canonical)
+	}
+	return validateFeedOnlyRunCreationReceipt(record, canonical)
+}
+
+func validateFeedOnlyRunCreationReceipt(record RunCreationOperationRecord, command RunCreationCommand) error {
+	summary := record.Summary
+	if summary.Kind != "run_creation" || summary.RunID != command.RunID || summary.BundleHash != command.BundleHash || summary.EventID != "" ||
+		summary.ImportCount != len(command.Data.Imports) || summary.PinCount < 0 || summary.PinCount > MaxDataDeclarationsPerBundle ||
+		summary.ImportCount > MaxDataDeclarationsPerBundle {
+		return fmt.Errorf("feed-only run-creation summary contradicts its request")
+	}
+	if err := runtimebundleidentity.ValidateCanonicalHash(summary.BundleHash); err != nil {
+		return err
+	}
+	if err := validateCompletedAt(summary.CompletedAt); err != nil {
+		return err
+	}
+	if err := summary.Rejection.ValidateForOutcome(summary.Outcome); err != nil {
+		return err
+	}
+	if err := record.Binding.Validate(); err != nil {
+		return err
+	}
+	for _, item := range record.Evidence.RunBinding {
+		if err := item.Validate(); err != nil {
+			return err
+		}
+	}
+	if summary.Outcome == "created" {
+		if summary.PinCount != len(command.Data.Imports)+len(command.Data.Pins) ||
+			validateCanonicalRunState(summary.Status, "run-creation summary status") != nil ||
+			len(record.Evidence.ChildEvaluations) != 0 || len(record.Evidence.ChildDefects) != 0 {
+			return fmt.Errorf("created feed-only run has contradictory status, selection, or child evidence")
+		}
+		if record.Binding.State != "bound" || record.Binding.RunID != summary.RunID || record.Binding.PinCount != summary.PinCount ||
+			record.Binding.ImportCount != summary.ImportCount || record.Binding.Evidence == nil ||
+			!reflect.DeepEqual(*record.Binding.Evidence, FirstEvidencePage(record.Evidence.RunBinding)) {
+			return fmt.Errorf("created feed-only run binding contradicts its summary")
+		}
+		if err := validateCreatedRunBinding(record); err != nil {
+			return err
+		}
+		return validateCreatedRunRequest(record, command)
+	}
+	if (summary.Outcome != "data_rejected" && summary.Outcome != "head_conflict") || summary.Status != "" || summary.PinCount != 0 ||
+		record.Binding.State != "none" || len(record.Evidence.RunBinding) != 0 ||
+		len(record.Evidence.ChildEvaluations) != len(command.Data.Imports) {
+		return fmt.Errorf("rejected feed-only run has contradictory committed facts")
+	}
+	children := make(map[string]FusedChildEvaluation, len(record.Evidence.ChildEvaluations))
+	declarations := make(map[string]struct{}, len(record.Evidence.ChildEvaluations))
+	for index, child := range record.Evidence.ChildEvaluations {
+		if err := child.Validate(); err != nil {
+			return err
+		}
+		if _, duplicate := children[child.SourceInvocationID]; duplicate {
+			return fmt.Errorf("feed-only run repeats fused child %s", child.SourceInvocationID)
+		}
+		if _, duplicate := declarations[child.Declaration.Key()]; duplicate ||
+			(index > 0 && CompareDeclarationRef(record.Evidence.ChildEvaluations[index-1].Declaration, child.Declaration) >= 0) {
+			return fmt.Errorf("feed-only fused child declarations are repeated or unordered")
+		}
+		requested := command.Data.Imports[index]
+		if child.SourceInvocationID != requested.SourceInvocationID || child.BundleHash != command.BundleHash ||
+			child.Declaration != requested.Declaration || child.ExpectedHead != requested.ExpectedHead {
+			return fmt.Errorf("feed-only fused child contradicts requested import")
+		}
+		children[child.SourceInvocationID] = child
+		declarations[child.Declaration.Key()] = struct{}{}
+	}
+	defectCounts := make(map[string]int, len(children))
+	for _, defect := range record.Evidence.ChildDefects {
+		if err := defect.Validate(); err != nil {
+			return err
+		}
+		if _, found := children[defect.SourceInvocationID]; !found {
+			return fmt.Errorf("feed-only defect references unknown fused child")
+		}
+		defectCounts[defect.SourceInvocationID]++
+	}
+	for id, child := range children {
+		if defectCounts[id] != child.DefectCount {
+			return fmt.Errorf("feed-only fused child defect count contradicts evidence")
+		}
+	}
+	if err := validateRejectedChildren(record); err != nil {
+		return err
+	}
+	if target := summary.Rejection.Declaration; target != nil {
+		found := false
+		for _, pin := range command.Data.Pins {
+			found = found || (pin.Declaration == *target && pin.VersionID == summary.Rejection.VersionID)
+		}
+		if !found {
+			return fmt.Errorf("feed-only rejection target contradicts requested pin")
+		}
+	}
+	return nil
 }
 
 type PruneDefect struct {

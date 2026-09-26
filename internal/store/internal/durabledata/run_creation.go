@@ -382,7 +382,7 @@ func pageRunCreationItems(all []runtimedata.RunCreationDataItem) runtimedata.Pag
 }
 
 func (o *Owner) insertRunCreationReceiptTx(ctx context.Context, tx *sql.Tx, plan RunCreationPlan, record runtimedata.RunCreationOperationRecord) error {
-	if err := record.ValidateForCommand(plan.command); err != nil {
+	if err := runtimedata.ValidateRunCreationReceiptForCommand(record, plan.command); err != nil {
 		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s is contradictory: %v", plan.command.RunID, err)
 	}
 	if err := validatePlannedSourceEvaluations(plan, record); err != nil {
@@ -481,7 +481,7 @@ func decodeRunCreationReceipt(runID, storedHash string, requestJSON, summaryJSON
 	if err := json.Unmarshal(evidenceJSON, &record.Evidence); err != nil {
 		return runtimedata.RunCreationOperationRecord{}, runtimedata.RunCreationCommand{}, err
 	}
-	if err := record.ValidateForCommand(canonical); err != nil {
+	if err := runtimedata.ValidateRunCreationReceiptForCommand(record, canonical); err != nil {
 		return runtimedata.RunCreationOperationRecord{}, runtimedata.RunCreationCommand{}, err
 	}
 	return record, canonical, nil
