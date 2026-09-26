@@ -203,12 +203,12 @@ func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	output.WaitRefresh(t)
+	output.WaitNext(t, output.NextReport())
 	after, err := os.Stat(statePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !before.ModTime().Equal(after.ModTime()) {
+	if !registrySnapshotUnchanged(before, after) {
 		t.Fatalf("polling rewrote registry: before=%s after=%s", before.ModTime(), after.ModTime())
 	}
 	cancel()
@@ -227,6 +227,60 @@ func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.
 	if strings.Count(text, "Test capacity is busy.") < 2 {
 		t.Fatalf("queue status did not refresh:\n%s", text)
 	}
+}
+
+func TestRunAdmissionLateObserverDetectsRegistryRewrite(t *testing.T) {
+	root := t.TempDir()
+	admission := testRunAdmission(root, nil)
+	active := acquireTestRun(t, admission, context.Background(), "active", 1)
+	defer active.Complete(context.Background(), false)
+
+	output := newObservedOutput("Test capacity is busy.")
+	waiting := testRunAdmission(root, nil)
+	waiting.Output = output
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := waiting.Acquire(ctx, testRunCommand("waiting"), 1)
+		result <- err
+	}()
+	waitForWaitingRuns(t, admission, 1)
+	for output.ReportCount() < 2 {
+		output.WaitNext(t, output.NextReport())
+	}
+	statePath := filepath.Join(root, "runs-v1.json")
+	before, err := os.Stat(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextReport := output.NextReport()
+	select {
+	case <-nextReport:
+		t.Fatal("already-consumed reports satisfied a future-report barrier")
+	default:
+	}
+	// Model a buggy registry writer after the first snapshot, then observe a new poll.
+	changed := before.ModTime().Add(time.Second)
+	if err := os.Chtimes(statePath, changed, changed); err != nil {
+		t.Fatal(err)
+	}
+	output.WaitNext(t, nextReport)
+	after, err := os.Stat(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registrySnapshotUnchanged(before, after) {
+		t.Fatal("registry rewrite escaped the late-observer assertion")
+	}
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued result = %v", err)
+	}
+}
+
+func registrySnapshotUnchanged(before, after os.FileInfo) bool {
+	return before.ModTime().Equal(after.ModTime()) && os.SameFile(before, after)
 }
 
 func TestRunAdmissionCancellationBeforeFirstReport(t *testing.T) {
@@ -333,31 +387,45 @@ func TestRunAdmissionReportsUnknownETAWhenEvidenceIsMissing(t *testing.T) {
 }
 
 type observedOutput struct {
-	mu        sync.Mutex
-	buffer    bytes.Buffer
-	needle    []byte
-	observed  chan struct{}
-	refreshed chan struct{}
-	once      sync.Once
-	refresh   sync.Once
+	mu       sync.Mutex
+	buffer   bytes.Buffer
+	needle   []byte
+	observed chan struct{}
+	next     chan struct{}
+	reports  int
+	once     sync.Once
 }
 
 func newObservedOutput(needle string) *observedOutput {
-	return &observedOutput{needle: []byte(needle), observed: make(chan struct{}), refreshed: make(chan struct{})}
+	return &observedOutput{needle: []byte(needle), observed: make(chan struct{}), next: make(chan struct{})}
 }
 
 func (o *observedOutput) Write(p []byte) (int, error) {
 	o.mu.Lock()
 	n, err := o.buffer.Write(p)
 	matches := bytes.Count(o.buffer.Bytes(), o.needle)
+	if matches > o.reports {
+		o.reports = matches
+		close(o.next)
+		o.next = make(chan struct{})
+	}
 	o.mu.Unlock()
 	if matches > 0 {
 		o.once.Do(func() { close(o.observed) })
 	}
-	if matches > 1 {
-		o.refresh.Do(func() { close(o.refreshed) })
-	}
 	return n, err
+}
+
+func (o *observedOutput) ReportCount() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.reports
+}
+
+func (o *observedOutput) NextReport() <-chan struct{} {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.next
 }
 
 func (o *observedOutput) String() string {
@@ -375,12 +443,12 @@ func (o *observedOutput) Wait(t *testing.T) {
 	}
 }
 
-func (o *observedOutput) WaitRefresh(t *testing.T) {
+func (o *observedOutput) WaitNext(t *testing.T, next <-chan struct{}) {
 	t.Helper()
 	select {
-	case <-o.refreshed:
+	case <-next:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for second queue report")
+		t.Fatal("timed out waiting for a new queue report")
 	}
 }
 
