@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"strings"
 	"time"
@@ -14,8 +13,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -29,7 +28,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/google/uuid"
 )
 
 type Agent interface {
@@ -73,59 +71,7 @@ type PersistedAgent struct {
 	ProcessBinding      ProcessExecutionBinding
 }
 
-// ProcessExecutionBinding seals a durable lifecycle cell to the exact
-// selected-store process and generation grant allowed to execute it.
-type ProcessExecutionBinding struct {
-	ProcessAuthorityID string `json:"process_authority_id"`
-	ProcessOwnerID     string `json:"process_owner_id"`
-	ProcessBootID      string `json:"process_boot_id"`
-	GenerationGrantID  string `json:"generation_grant_id"`
-	BundleHash         string `json:"bundle_hash"`
-	RuntimeInstanceID  string `json:"runtime_instance_id"`
-	RuntimeGeneration  uint64 `json:"runtime_generation"`
-}
-
-func (b ProcessExecutionBinding) IsZero() bool {
-	return strings.TrimSpace(b.ProcessAuthorityID) == "" && strings.TrimSpace(b.ProcessOwnerID) == "" &&
-		strings.TrimSpace(b.ProcessBootID) == "" && strings.TrimSpace(b.GenerationGrantID) == "" &&
-		strings.TrimSpace(b.BundleHash) == "" &&
-		strings.TrimSpace(b.RuntimeInstanceID) == "" && b.RuntimeGeneration == 0
-}
-
-func (b ProcessExecutionBinding) Validate() error {
-	if _, err := uuid.Parse(strings.TrimSpace(b.ProcessAuthorityID)); err != nil {
-		return fmt.Errorf("process execution authority is invalid: %w", err)
-	}
-	if strings.TrimSpace(b.ProcessOwnerID) == "" {
-		return fmt.Errorf("process execution owner is required")
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(b.ProcessBootID)); err != nil {
-		return fmt.Errorf("process execution boot is invalid: %w", err)
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(b.GenerationGrantID)); err != nil {
-		return fmt.Errorf("process execution generation grant is invalid: %w", err)
-	}
-	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(b.BundleHash)); err != nil {
-		return fmt.Errorf("process execution bundle hash is invalid: %w", err)
-	}
-	if _, err := uuid.Parse(strings.TrimSpace(b.RuntimeInstanceID)); err != nil {
-		return fmt.Errorf("process execution runtime instance is invalid: %w", err)
-	}
-	if b.RuntimeGeneration == 0 {
-		return fmt.Errorf("process execution runtime generation is required")
-	}
-	return nil
-}
-
-func (b ProcessExecutionBinding) Equal(other ProcessExecutionBinding) bool {
-	return strings.TrimSpace(b.ProcessAuthorityID) == strings.TrimSpace(other.ProcessAuthorityID) &&
-		strings.TrimSpace(b.ProcessOwnerID) == strings.TrimSpace(other.ProcessOwnerID) &&
-		strings.TrimSpace(b.ProcessBootID) == strings.TrimSpace(other.ProcessBootID) &&
-		strings.TrimSpace(b.GenerationGrantID) == strings.TrimSpace(other.GenerationGrantID) &&
-		strings.TrimSpace(b.BundleHash) == strings.TrimSpace(other.BundleHash) &&
-		strings.TrimSpace(b.RuntimeInstanceID) == strings.TrimSpace(other.RuntimeInstanceID) &&
-		b.RuntimeGeneration == other.RuntimeGeneration
-}
+type ProcessExecutionBinding = runtimeprocessbinding.Binding
 
 type PersistedRoutingRule struct {
 	EntityID         string

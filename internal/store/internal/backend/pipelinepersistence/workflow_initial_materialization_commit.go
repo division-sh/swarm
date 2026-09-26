@@ -318,14 +318,14 @@ func insertWorkflowInitialReadinessRecord(ctx context.Context, tx *sql.Tx, postg
 	}
 	query := `
 		INSERT INTO flow_instance_runtime_readiness (
-			run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-		) VALUES (?, ?, ?, NULL, NULL, ?, ?)
+			run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+		) VALUES (?, ?, ?, 1, NULL, NULL, ?, ?)
 	`
 	if postgres {
 		query = `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
+				run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+			) VALUES ($1::uuid, $2, $3::jsonb, 1, NULL, NULL, $4, $4)
 		`
 		if _, err := tx.ExecContext(ctx, query, record.State.Identity.RunID, record.State.Identity.Route.InstancePath, record.Readiness, record.OccurredAt); err != nil {
 			return fmt.Errorf("insert workflow initial readiness: %w", err)

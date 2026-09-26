@@ -57,7 +57,7 @@ func inspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, db dynamic
 	}
 	bundleHash := source.BundleHash()
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan, readiness.plan_revision,
 		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
@@ -70,7 +70,7 @@ func inspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, db dynamic
 		ORDER BY readiness.run_id, readiness.instance_path`
 	if !postgres {
 		query = `
-			SELECT readiness.run_id, readiness.instance_path, readiness.plan,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan, readiness.plan_revision,
 			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
@@ -155,7 +155,7 @@ func inspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, db dynamicFlo
 	}
 	bundleHash := source.BundleHash()
 	query := `
-		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan,
+		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan, readiness.plan_revision,
 		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
@@ -169,7 +169,7 @@ func inspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, db dynamicFlo
 		ORDER BY readiness.instance_path`
 	if !postgres {
 		query = `
-			SELECT readiness.run_id, readiness.instance_path, readiness.plan,
+			SELECT readiness.run_id, readiness.instance_path, readiness.plan, readiness.plan_revision,
 			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
@@ -200,7 +200,7 @@ func queryDynamicFlowRuntimeReadiness(ctx context.Context, db dynamicFlowReadine
 		var record runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord
 		var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt any
 		if err := rows.Scan(
-			&record.RunID, &record.InstancePath, &record.Plan,
+			&record.RunID, &record.InstancePath, &record.Plan, &record.PlanRevision,
 			&topologyReadyAt, &creationEventEmittedAt,
 			&record.OwningRunBundleHash, &record.RunStatus,
 			&record.InstanceStatus, &instanceTerminatedAt,
@@ -360,17 +360,22 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 				}
 				attemptResults[index] = runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult{
 					RunID: request.expected.RunID, InstancePath: instancePath, Changed: changed,
+					PlanRevision: loaded.PlanRevision,
+				}
+				if changed {
+					attemptResults[index].PlanRevision++
 				}
 			}
 			for index, request := range prepared {
 				if !attemptResults[index].Changed {
 					continue
 				}
-				query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4`
+				query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, plan_revision = plan_revision + 1, activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'topology_committed') THEN 'superseded' ELSE activation_attempt_state END, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4 AND plan_revision = $5`
 				args := []any{request.expectedJSON, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
 				if !postgres {
-					query = `UPDATE flow_instance_runtime_readiness SET plan = ?, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_path = ?`
+					query = `UPDATE flow_instance_runtime_readiness SET plan = ?, plan_revision = plan_revision + 1, activation_attempt_state = CASE WHEN activation_attempt_state IN ('accepted', 'topology_committed') THEN 'superseded' ELSE activation_attempt_state END, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_path = ? AND plan_revision = ?`
 				}
+				args = append(args, request.observed.PlanRevision)
 				result, err := tx.ExecContext(txctx, query, args...)
 				if err != nil {
 					return err
@@ -397,6 +402,9 @@ func reconcileDynamicFlowRuntimeReadinessPlans(
 }
 
 func changedDynamicFlowRuntimeReadinessObservationCoordinate(observed, current runtimepipeline.DynamicFlowRuntimeReadiness) (string, error) {
+	if observed.PlanRevision != current.PlanRevision {
+		return "plan_revision", nil
+	}
 	observedPlan, err := observed.Plan.Normalized()
 	if err != nil {
 		return "", fmt.Errorf("normalize observed dynamic flow readiness plan: %w", err)
@@ -473,7 +481,7 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("dynamic flow runtime readiness requires an exact instance route")
 	}
 	query := `
-		SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		SELECT readiness.plan, readiness.plan_revision, readiness.topology_ready_at, readiness.creation_event_emitted_at,
 		       run.bundle_hash, run.status,
 		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
@@ -485,7 +493,7 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 	}
 	if !postgres {
 		query = `
-			SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			SELECT readiness.plan, readiness.plan_revision, readiness.topology_ready_at, readiness.creation_event_emitted_at,
 			       run.bundle_hash, run.status,
 			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
@@ -496,7 +504,7 @@ func loadDynamicFlowRuntimeReadiness(ctx context.Context, queryer dynamicFlowRea
 	record := runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{RunID: runID, InstancePath: route.InstancePath}
 	var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt any
 	err := queryer.QueryRowContext(ctx, query, runID, route.InstancePath).Scan(
-		&record.Plan, &topologyReadyAt, &creationEventEmittedAt,
+		&record.Plan, &record.PlanRevision, &topologyReadyAt, &creationEventEmittedAt,
 		&record.OwningRunBundleHash, &record.RunStatus,
 		&record.InstanceStatus, &instanceTerminatedAt,
 	)

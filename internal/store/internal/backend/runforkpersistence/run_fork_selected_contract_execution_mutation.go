@@ -340,15 +340,15 @@ func materializeSelectedContractWorkflowReadiness(ctx context.Context, tx *sql.T
 	}
 	query := `
 		INSERT INTO flow_instance_runtime_readiness (
-			run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-		) VALUES (?, ?, ?, NULL, NULL, ?, ?)
+			run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+		) VALUES (?, ?, ?, 1, NULL, NULL, ?, ?)
 		ON CONFLICT (run_id, instance_path) DO NOTHING`
 	args := []any{state.RunID, state.Route, encoded, now, now}
 	if postgres {
 		query = `
 			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_path, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
+				run_id, instance_path, plan, plan_revision, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+			) VALUES ($1::uuid, $2, $3::jsonb, 1, NULL, NULL, $4, $4)
 			ON CONFLICT (run_id, instance_path) DO NOTHING`
 		args = []any{state.RunID, state.Route, encoded, now}
 	}

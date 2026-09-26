@@ -107,6 +107,8 @@ type RouteTable struct {
 	authoredScopes    map[string]struct{}
 	templates         map[string]routeFlowTemplate
 	instanceOwners    map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance
+	publications      map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord
+	nextPublication   uint64
 	instanceEventPath map[runtimeflowidentity.RunScopedFlowInstance][]string
 	templateObservers map[string][]routeTemplateSourceObserver
 	connectGraph      runtimepinrouting.CompiledConnectGraph
@@ -557,6 +559,7 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 	}
 	instancePath := owner.Route.InstancePath
 	delete(rt.instanceOwners, owner)
+	delete(rt.publications, owner)
 	delete(rt.instanceEventPath, owner)
 	filtered := rt.patterns[:0]
 	for _, pattern := range rt.patterns {
@@ -666,6 +669,7 @@ func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.
 		authoredScopes:    make(map[string]struct{}),
 		templates:         make(map[string]routeFlowTemplate),
 		instanceOwners:    make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance),
+		publications:      make(map[runtimeflowidentity.RunScopedFlowInstance]flowRoutePublicationRecord),
 		instanceEventPath: make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
 		templateObservers: make(map[string][]routeTemplateSourceObserver),
 		connectGraph:      graph,

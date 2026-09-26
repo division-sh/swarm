@@ -350,8 +350,13 @@ func (o flowActivationTestCommitter) CommitFlowInstanceActivation(
 	if !staged.Acknowledged || err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
+	readiness, found, err := o.instances.LoadDynamicFlowRuntimeReadiness(ctx, flowOwner.RunID, flowOwner.Route)
+	if err != nil || !found {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.Join(err, errors.New("test activation has no readiness row"))
+	}
 	return runtimepipeline.CommittedFlowInstanceActivation{
 		Plan: plan, Created: result == runtimepipeline.WorkflowInitialMaterializationCreated, Acknowledged: true,
+		ReadinessRevision: readiness.PlanRevision,
 	}, nil
 }
 
@@ -536,6 +541,7 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 		s.readiness[flowActivationReadinessKey(plan.RunID, instance.StorageRef)] = runtimepipeline.DynamicFlowRuntimeReadiness{
 			InstancePath:    instance.StorageRef,
 			Plan:            plan,
+			PlanRevision:    1,
 			OwningRunSource: owningSource,
 			RunStatus:       "running",
 			InstanceStatus:  "active",
@@ -668,6 +674,7 @@ func reconcileFlowActivationTestReadinessPlan(readiness map[string]runtimepipeli
 		}
 	}
 	current.Plan = normalized
+	current.PlanRevision++
 	current.TopologyReadyAt = time.Time{}
 	readiness[key] = current
 	return true, nil
@@ -692,6 +699,7 @@ func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPl
 		}
 		results = append(results, runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult{
 			RunID: request.Expected.RunID, InstancePath: request.Expected.Identity.InstancePath, Changed: changed,
+			PlanRevision: next[flowActivationReadinessKey(request.Expected.RunID, request.Expected.Identity.InstancePath)].PlanRevision,
 		})
 	}
 	s.readiness = next
@@ -2105,6 +2113,59 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 	}
 }
 
+func TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle(t, "")
+	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	ctx := testAuthorActivityContext(context.Background())
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+
+	admitted := make(chan struct{})
+	release := make(chan struct{})
+	am.testAfterDynamicFlowReadinessAdmission = func() {
+		close(admitted)
+		<-release
+	}
+	reconciled := make(chan error, 1)
+	go func() {
+		reconciled <- am.reconcileDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.InstancePath)
+	}()
+	<-admitted
+
+	original, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found {
+		t.Fatalf("load admitted readiness: found=%v err=%v", found, err)
+	}
+	revised := original.Plan
+	revised.WorkflowVersion = "v-temporary"
+	if changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, original, revised, time.Now().UTC()); err != nil || !changed {
+		t.Fatalf("revise admitted readiness: changed=%v err=%v", changed, err)
+	}
+	intermediate, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found {
+		t.Fatalf("load intermediate readiness: found=%v err=%v", found, err)
+	}
+	if changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, intermediate, original.Plan, time.Now().UTC()); err != nil || !changed {
+		t.Fatalf("restore original plan: changed=%v err=%v", changed, err)
+	}
+	current, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || current.PlanRevision != original.PlanRevision+2 {
+		t.Fatalf("ABA revision: found=%v revision=%d err=%v, want %d", found, current.PlanRevision, err, original.PlanRevision+2)
+	}
+	close(release)
+	if err := <-reconciled; !errors.Is(err, errDynamicFlowRuntimeReadinessPlanStale) {
+		t.Fatalf("post-ABA callback error = %v, want stale-plan rejection", err)
+	}
+	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
+		t.Fatal("stale admitted callback retired the already-published route")
+	}
+}
+
 func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
@@ -2137,7 +2198,7 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	if err != nil || !found {
 		t.Fatalf("load current readiness: found=%v err=%v", found, err)
 	}
-	err = am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readiness.Plan, oldSource)
+	err = am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readiness.Plan, readiness.PlanRevision, oldSource)
 	if !errors.Is(err, errDynamicFlowRuntimeReadinessSourceStale) {
 		t.Fatalf("old semantic source error = %v, want stale-source rejection", err)
 	}
@@ -2317,11 +2378,14 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			revisionErr = errors.New("post-CAS readiness plan was not revised")
 			return
 		}
+		intermediateRevision := observed.PlanRevision
+		revisedRevision := intermediateRevision + 1
 		setFlowActivationManagerSemanticSource(am, revisedSource, revisedFact)
 		go func() {
 			successorErr <- am.reconcileDynamicFlowRuntimeReadinessPlan(
 				successorCtx,
 				revised,
+				revisedRevision,
 				revisedSource,
 			)
 		}()
@@ -2332,7 +2396,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			successorQueued := attempt != nil &&
 				attempt.successorRequired &&
 				attempt.successor != nil &&
-				attempt.successor.planCoordinate != attempt.planCoordinate
+				attempt.successor.planRevision != attempt.planRevision
 			am.dynamicFlowReadinessMu.Unlock()
 			if successorQueued {
 				break
@@ -2346,11 +2410,13 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		staleSourceErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
 			intermediateCtx,
 			revised,
+			revisedRevision,
 			revisedSource,
 		)
 		staleErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
 			intermediateCtx,
 			intermediate,
+			intermediateRevision,
 			intermediateSource,
 		)
 		cancelActivation()

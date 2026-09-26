@@ -43,9 +43,10 @@ type FlowInstanceActivationPlan struct {
 // planned activation is durable. Process-local topology and readiness may be
 // published only after this value is returned.
 type CommittedFlowInstanceActivation struct {
-	Plan      FlowInstanceActivationPlan
-	Created   bool
-	Lifecycle CommittedWorkflowLifecycleMutation
+	Plan              FlowInstanceActivationPlan
+	Created           bool
+	Lifecycle         CommittedWorkflowLifecycleMutation
+	ReadinessRevision uint64
 	// Acknowledged is set only after the selected-store commit is acknowledged.
 	Acknowledged bool
 }
@@ -53,6 +54,9 @@ type CommittedFlowInstanceActivation struct {
 func (a CommittedFlowInstanceActivation) Validate() error {
 	if err := a.Plan.Validate(); err != nil {
 		return err
+	}
+	if a.ReadinessRevision == 0 {
+		return fmt.Errorf("committed flow instance activation requires exact readiness revision")
 	}
 	if err := a.Lifecycle.Validate(); err != nil {
 		return fmt.Errorf("committed flow instance activation lifecycle: %w", err)

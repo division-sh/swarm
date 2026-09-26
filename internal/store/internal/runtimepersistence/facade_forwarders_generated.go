@@ -24,6 +24,7 @@ import (
 	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	identity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	managedcapabilities "github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	processbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	correlation "github.com/division-sh/swarm/internal/runtime/correlation"
 	deadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -148,6 +149,10 @@ func (s *PostgresStore) AuthorizeExternalAttempt(ctx context.Context, authority 
 
 func (s *PostgresStore) BeginChannelBinding(ctx context.Context, req operatorchannel.BeginRequest) (operatorchannel.Operation, error) {
 	return s.operatorChannelPostgresOwner.BeginChannelBinding(ctx, req)
+}
+
+func (s *PostgresStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan pipeline.DynamicFlowRuntimeReadinessPlan, revision uint64, binding processbinding.Binding) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return s.pipelinePostgresOwner.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
 }
 
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
@@ -846,6 +851,10 @@ func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context,
 	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 
+func (s *PostgresStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
+	return s.pipelinePostgresOwner.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, expected, readyAt)
+}
+
 func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {
 	return s.effectPostgresOwner.MarkExternalAttemptLaunched(ctx, attempt, now)
 }
@@ -1122,6 +1131,10 @@ func (s *PostgresStore) RetireConnectedChannelActivation(ctx context.Context, re
 	return s.channelOnboardingPostgresOwner.RetireConnectedChannelActivation(ctx, req)
 }
 
+func (s *PostgresStore) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelinePostgresOwner.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+}
+
 func (s *PostgresStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.ReviseRunSource(ctx, request)
 }
@@ -1352,6 +1365,10 @@ func (s *SQLiteRuntimeStore) AuthorizeExternalAttempt(ctx context.Context, autho
 
 func (s *SQLiteRuntimeStore) BeginChannelBinding(ctx context.Context, req operatorchannel.BeginRequest) (operatorchannel.Operation, error) {
 	return s.operatorChannelSQLiteOwner.BeginChannelBinding(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) BeginDynamicFlowRuntimeActivation(ctx context.Context, plan pipeline.DynamicFlowRuntimeReadinessPlan, revision uint64, binding processbinding.Binding) (pipeline.DynamicFlowRuntimeActivationAdmissionResult, error) {
+	return s.pipelineSQLiteOwner.BeginDynamicFlowRuntimeActivation(ctx, plan, revision, binding)
 }
 
 func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.ClaimCommit, error) {
@@ -2022,6 +2039,10 @@ func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Con
 	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 
+func (s *SQLiteRuntimeStore) MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt, expected pipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (pipeline.DynamicFlowRuntimeTopologyReadyResult, error) {
+	return s.pipelineSQLiteOwner.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, attempt, expected, readyAt)
+}
+
 func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt effects.Attempt, now time.Time) error {
 	return s.effectSQLiteOwner.MarkExternalAttemptLaunched(ctx, attempt, now)
 }
@@ -2296,6 +2317,10 @@ func (s *SQLiteRuntimeStore) RetireChannelTeardownAuthority(ctx context.Context,
 
 func (s *SQLiteRuntimeStore) RetireConnectedChannelActivation(ctx context.Context, req channelonboarding.RetireActivationRequest) (channelonboarding.ConnectedChannelActivation, error) {
 	return s.channelOnboardingSQLiteOwner.RetireConnectedChannelActivation(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelineSQLiteOwner.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
 func (s *SQLiteRuntimeStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {
