@@ -1,12 +1,13 @@
 package runtime
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	stdruntime "runtime"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestRunScopedLiveIdentityStructuralRatchet(t *testing.T) {

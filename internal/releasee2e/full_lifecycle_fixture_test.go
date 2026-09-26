@@ -1,11 +1,12 @@
 package releasee2e
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 const fullLifecycleFixtureSource = "standing_telegram"

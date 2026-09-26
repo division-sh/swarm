@@ -1,6 +1,7 @@
 package checkoutsource
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -81,6 +82,21 @@ func TestCheckoutMembershipFailsClosedOnInvalidRoots(t *testing.T) {
 	}
 	if _, err := ReadDir(root, link); err == nil {
 		t.Fatal("symlink directory accepted")
+	}
+	if _, err := ReadDir(root, filepath.Join(root, "current.go")); err == nil {
+		t.Fatal("regular file was accepted as a directory")
+	}
+	if _, err := Member(root, filepath.Join(root, "current.go", "child")); err == nil {
+		t.Fatal("inspection failure below a regular file was hidden")
+	}
+	want := errors.New("consumer read failed")
+	if err := WalkDir(root, root, func(path string, _ fs.DirEntry, _ error) error {
+		if path == filepath.Join(root, "current.go") {
+			return want
+		}
+		return nil
+	}); !errors.Is(err, want) {
+		t.Fatalf("consumer error = %v, want %v", err, want)
 	}
 	if err := Walk(root, root, func(_ string, _ os.FileInfo, err error) error { return err }); err != nil {
 		t.Fatal(err)

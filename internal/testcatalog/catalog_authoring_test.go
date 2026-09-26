@@ -1,28 +1,26 @@
 package testcatalog
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
 func TestCatalogFixturesUseCanonicalCreateFlowInstanceAuthoring(t *testing.T) {
 	repoRoot := catalogRepoRoot(t)
-	err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, "tests"), func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() || filepath.Base(path) != "nodes.yaml" {
-			return nil
-		}
+	paths, err := catalogNodesFiles(repoRoot)
+	if err != nil {
+		t.Fatalf("walk catalog nodes.yaml: %v", err)
+	}
+	for _, path := range paths {
 		relativePath, err := filepath.Rel(repoRoot, path)
 		if err != nil {
-			return err
+			t.Fatal(err)
 		}
 		t.Run(filepath.ToSlash(relativePath), func(t *testing.T) {
 			source, err := yamlsource.LoadFile(path)
@@ -32,11 +30,49 @@ func TestCatalogFixturesUseCanonicalCreateFlowInstanceAuthoring(t *testing.T) {
 			root := source.NodeCopy()
 			assertCanonicalCreateFlowInstanceAuthoring(t, path, &root)
 		})
+	}
+}
+
+func TestCatalogAuthoringExcludesNestedCheckout(t *testing.T) {
+	repo := t.TempDir()
+	local := filepath.Join(repo, "tests", "tier1", "local", "nodes.yaml")
+	foreign := filepath.Join(repo, "tests", "tier1", "foreign", "nodes.yaml")
+	for _, path := range []string{local, foreign} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("event_handlers: ["), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(foreign), ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := catalogNodesFiles(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != local {
+		t.Fatalf("catalog nodes = %v, want only %s", paths, local)
+	}
+	if _, err := yamlsource.LoadFile(local); err == nil {
+		t.Fatal("invalid current-checkout nodes.yaml was admitted")
+	}
+}
+
+func catalogNodesFiles(repoRoot string) ([]string, error) {
+	var paths []string
+	err := checkoutsource.WalkDir(repoRoot, filepath.Join(repoRoot, "tests"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Base(path) != "nodes.yaml" {
+			return nil
+		}
+		paths = append(paths, path)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("walk catalog nodes.yaml: %v", err)
-	}
+	return paths, err
 }
 
 func assertCanonicalCreateFlowInstanceAuthoring(t *testing.T, path string, node *yaml.Node) {

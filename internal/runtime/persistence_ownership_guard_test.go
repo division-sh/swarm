@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestRuntimeCorePersistenceRolesAreConstructorInputs(t *testing.T) {

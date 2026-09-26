@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 
 	"gopkg.in/yaml.v3"
 )

@@ -3,13 +3,13 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/spf13/cobra"

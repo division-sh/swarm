@@ -1,12 +1,13 @@
 package operatorchannel
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestOperatorChannelV1IsFullyRetired(t *testing.T) {

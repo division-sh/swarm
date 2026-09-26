@@ -1,13 +1,14 @@
 package selected
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestProductionSelectedStoreBoundaryIsClosed(t *testing.T) {

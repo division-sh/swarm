@@ -3,7 +3,6 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

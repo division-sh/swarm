@@ -1,13 +1,14 @@
 package agentframe
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestRetiredManagedTurnOwnersAreAbsentFromProduction(t *testing.T) {

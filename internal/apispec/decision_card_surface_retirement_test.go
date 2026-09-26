@@ -1,12 +1,13 @@
 package apispec
 
 import (
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func TestDecisionCardMigrationHasNoRetiredPublicSurfaceSurvivors(t *testing.T) {

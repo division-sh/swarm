@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"gopkg.in/yaml.v3"
 )
