@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -56,6 +57,76 @@ func AuthorizeGenerationMutationTx(ctx context.Context, tx *sql.Tx, req manager.
 		return fmt.Errorf("%w: %s", manager.ErrRunExecutionNotOwned, req.Identity.RunID)
 	}
 	return nil
+}
+
+// AuthorizeDynamicFlowActivationTx admits forward progress only under the
+// exact currently admitted generation and run binding in the mutation TX.
+func AuthorizeDynamicFlowActivationTx(ctx context.Context, tx *sql.Tx, binding runtimeprocessbinding.Binding, runID string, sqlite bool) error {
+	if err := binding.Validate(); err != nil {
+		return err
+	}
+	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		return err
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, binding.GenerationGrantID).Scan(&raw); err != nil {
+		return fmt.Errorf("load flow activation generation grant: %w", err)
+	}
+	var evidence startupownership.GrantEvidence
+	if err := canonicaljson.DecodeInto(raw, &evidence); err != nil {
+		return err
+	}
+	if err := evidence.Validate(); err != nil {
+		return err
+	}
+	if evidence.State != startupownership.GrantAdmitted || !binding.Equal(processBindingForGrant(evidence)) {
+		return errors.New("flow activation requires the exact admitted generation grant")
+	}
+	if evidence.SelectedFork == nil {
+		query := `SELECT revision FROM agent_topology_source_set_head WHERE singleton_id=1`
+		if !sqlite {
+			query += ` FOR UPDATE`
+		}
+		var revision string
+		if err := tx.QueryRowContext(ctx, query).Scan(&revision); err != nil {
+			return fmt.Errorf("load flow activation source-set head: %w", err)
+		}
+		if revision != evidence.SourceSetRevision {
+			return errors.New("flow activation generation grant source-set revision is not current")
+		}
+	}
+	ownership, err := inspectRunExecutionOwnershipTx(ctx, tx, evidence, runID, sqlite)
+	if err != nil {
+		return err
+	}
+	if ownership != manager.RunExecutionOwned {
+		return fmt.Errorf("%w: %s", manager.ErrRunExecutionNotOwned, runID)
+	}
+	return nil
+}
+
+// FlowActivationPredecessorIsFromAnotherProcessTx permits reconstruction after
+// process replacement, never same-process replacement of unsettled resources.
+// The caller must first authorize the current binding in this transaction.
+func FlowActivationPredecessorIsFromAnotherProcessTx(ctx context.Context, tx *sql.Tx, predecessorGrantID string, current runtimeprocessbinding.Binding) (bool, error) {
+	if err := current.Validate(); err != nil {
+		return false, err
+	}
+	if predecessorGrantID == current.GenerationGrantID {
+		return false, nil
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, predecessorGrantID).Scan(&raw); err != nil {
+		return false, fmt.Errorf("load predecessor flow activation grant: %w", err)
+	}
+	var predecessor startupownership.GrantEvidence
+	if err := canonicaljson.DecodeInto(raw, &predecessor); err != nil {
+		return false, err
+	}
+	if err := predecessor.Validate(); err != nil {
+		return false, err
+	}
+	return predecessor.ProcessAuthorityID != current.ProcessAuthorityID || predecessor.ProcessBootID != current.ProcessBootID, nil
 }
 
 func processBindingForGrant(evidence startupownership.GrantEvidence) manager.ProcessExecutionBinding {

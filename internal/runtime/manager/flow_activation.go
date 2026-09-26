@@ -162,7 +162,7 @@ func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 			return fmt.Errorf("finalize flow instance initial lifecycle: %w", err)
 		}
 	}
-	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, am.semanticReadinessSource.source)
+	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, committed.ReadinessRevision, am.semanticReadinessSource.source)
 	if err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 	}
@@ -433,11 +433,11 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 		return false, fmt.Errorf("standing flow instance %s belongs to template %s, not %s; run `swarm standing reset %s`",
 			instance.InstancePath, stored.WorkflowName, instance.TemplateID, instance.InstanceID)
 	}
-	readinessPlan, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID)
+	readinessPlan, planRevision, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID)
 	if err != nil {
 		return false, err
 	}
-	if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
+	if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, planRevision, req.ContractBundle); err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 		return false, err
 	}
