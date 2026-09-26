@@ -63,10 +63,10 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 }
 
 var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{
-	{Path: "internal/apiv1/operator_event_publish.go", Scope: "eventPublicationEvent", Constructor: "NewRunCreatingRootIngressEvent"}: 1,
-	{Path: "internal/runtime/inbound.go", Scope: "projectInboundPublication", Constructor: "NewExistingRunRootIngressEvent"}:          1,
+	{Path: "internal/apiv1/operator_event_publish.go", Scope: "eventPublicationEvent", Constructor: "NewRunCreatingRootIngressEvent"}:                 1,
+	{Path: "internal/runtime/inbound.go", Scope: "projectInboundPublication", Constructor: "NewExistingRunRootIngressEvent"}:                          1,
 	{Path: "internal/runtime/fanoutobligation/ordinal_emission.go", Scope: "OrdinalEmission.NewEvent", Constructor: "NewExistingRunRootIngressEvent"}: 1,
-	{Path: "internal/store/eventfixture/event.go", Scope: "ExistingRunRoot", Constructor: "NewExistingRunRootIngressEvent"}:           1,
+	{Path: "internal/store/eventfixture/event.go", Scope: "ExistingRunRoot", Constructor: "NewExistingRunRootIngressEvent"}:                           1,
 }
 
 func TestProductionEventConstructionUsesPublicAPI(t *testing.T) {
