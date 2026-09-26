@@ -72,6 +72,16 @@ func syntheticCommandConsumer() { runstart.ValidateInputEvents() }
 	if err == nil || !strings.Contains(err.Error(), "internal/cliapp/synthetic.go:syntheticCommandConsumer") {
 		t.Fatalf("guard error = %v, want unregistered command consumer", err)
 	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "internal", "cliapp", ".git"), []byte("gitdir: elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	consumerCalls, err = scanRootInputConsumers(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkRootInputConsumerAudit(consumerCalls); err != nil {
+		t.Fatalf("foreign command caller received local census credit: %v", err)
+	}
 }
 
 func scanRootInputConsumers(repoRoot string) (map[string]map[string]bool, error) {
