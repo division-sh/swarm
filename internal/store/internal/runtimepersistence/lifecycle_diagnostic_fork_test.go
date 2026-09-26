@@ -104,7 +104,7 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 					projector := selected.(diagnosticProjectionTestStore)
 					origin := runtimemanager.LifecycleDiagnosticOrigin{
 						Owner: runtimemanager.LifecycleDiagnosticSelectedFork, Causality: runtimemanager.LifecycleDiagnosticObservation,
-						SelectedFork: authority.SelectedFork, SourceRunID: fixture.sourceRun, ForkEventID: fixture.eventID,
+						SelectedFork: authority.SelectedFork, SourceRunID: fixture.sourceRun, ForkPoint: binding.ForkPoint, ForkEventID: fixture.eventID,
 					}
 					if strings.HasPrefix(scenario, "causal_") {
 						parent := uuid.NewString()

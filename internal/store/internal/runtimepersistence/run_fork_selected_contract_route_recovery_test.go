@@ -28,6 +28,7 @@ type selectedRouteRecoveryStore interface {
 	RecordRunForkSelectedContractRouteRecovery(context.Context, runfork.RunForkSelectedContractRouteRecoveryRequest) (runfork.RunForkSelectedContractRouteRecovery, error)
 	LoadRunForkSelectedContractRouteRecovery(context.Context, string) (runfork.RunForkSelectedContractRouteRecovery, bool, error)
 	ListRunForkSelectedContractRouteRecoveries(context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error)
+	ListSelectedContractRouteRecoveryRecords(context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error)
 }
 
 type selectedRouteRecoveryProof struct {
@@ -73,6 +74,7 @@ func TestRunForkSelectedContractRouteRecoverySelectedStoreParity(t *testing.T) {
 			selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 			req := runfork.RunForkSelectedContractRouteRecoveryRequest{
 				ForkRunID: forkRunID, SourceRunID: sourceRunID, ForkEventID: eventID,
+				ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
 				ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
 			}
 			cancelled, cancel := context.WithCancel(ctx)
@@ -99,6 +101,10 @@ func TestRunForkSelectedContractRouteRecoverySelectedStoreParity(t *testing.T) {
 			rows, err := selected.ListRunForkSelectedContractRouteRecoveries(ctx)
 			if err != nil {
 				t.Fatalf("list selected-contract route recoveries: %v", err)
+			}
+			projected, err := selected.ListSelectedContractRouteRecoveryRecords(ctx)
+			if err != nil || len(projected) != 1 || projected[0].ForkPoint != req.ForkPoint || projected[0].ForkEventID != eventID {
+				t.Fatalf("manager route-recovery point projection = %+v, err=%v; want %+v", projected, err, req.ForkPoint)
 			}
 			proofs[backend] = selectedRouteRecoveryProof{
 				Owner:                       loaded.Owner,
@@ -138,10 +144,12 @@ func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t
 	selection := runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	}
+	eventID := uuid.NewString()
 	_, err := normalizeRunForkSelectedContractRouteRecovery(runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         uuid.NewString(),
 		SourceRunID:       uuid.NewString(),
-		ForkEventID:       uuid.NewString(),
+		ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
+		ForkEventID:       eventID,
 		ContractSelection: selection,
 		RouteTopology: runfork.RunForkSelectedContractRouteTopology{
 			Owner:                         "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
@@ -182,6 +190,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
+		ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
 		ForkEventID:       eventID,
 		ContractSelection: selection,
 		RouteTopology:     topology,
@@ -236,6 +245,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
+		ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
 		ForkEventID:       eventID,
 		ContractSelection: selection,
 		RouteTopology:     topology,
@@ -277,6 +287,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
+		ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
 		ForkEventID:       eventID,
 		ContractSelection: selection,
 		RouteTopology:     topology,
@@ -329,6 +340,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
+		ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
 		ForkEventID:       eventID,
 		ContractSelection: selection,
 		RouteTopology:     topology,
@@ -374,6 +386,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
+		ForkPoint:         runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID},
 		ForkEventID:       eventID,
 		ContractSelection: selection,
 		RouteTopology:     topology,

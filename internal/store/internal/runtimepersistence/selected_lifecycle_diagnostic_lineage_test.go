@@ -130,7 +130,7 @@ func selectedDiagnosticOriginForTest(t *testing.T, ctx context.Context, selected
 	}
 	origin := manager.LifecycleDiagnosticOrigin{
 		Owner: manager.LifecycleDiagnosticSelectedFork, Causality: manager.LifecycleDiagnosticObservation,
-		SourceRunID: binding.SourceRunID, ForkEventID: binding.ForkEventID,
+		SourceRunID: binding.SourceRunID, ForkPoint: binding.ForkPoint, ForkEventID: binding.ForkEventID,
 		SelectedFork: effects.SelectedContractForkAuthority{
 			ExecutionID: fork.ExecutionID, ForkRunID: fork.ForkRunID, Generation: fork.ExecutionGeneration,
 			AdmissionFingerprint: fork.AdmissionFingerprint, ContainerPlanFingerprint: fork.ContainerPlanFingerprint,

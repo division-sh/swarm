@@ -202,10 +202,12 @@ func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContract
 	}
 	createdAt = createdAt.UTC().Round(time.Microsecond)
 	return runfork.RunForkSelectedContractBinding{
-		Owner:             runfork.RunForkSelectedContractBindingOwner,
-		ForkRunID:         forkRunID,
-		SourceRunID:       sourceRunID,
-		ForkPoint:         req.ForkPoint,
+		Owner:       runfork.RunForkSelectedContractBindingOwner,
+		ForkRunID:   forkRunID,
+		SourceRunID: sourceRunID,
+		ForkPoint: runfork.RunForkPoint{
+			Kind: req.ForkPoint.Kind, Revision: req.ForkPoint.Revision, EventID: req.ForkPoint.EventID,
+		},
 		ForkEventID:       req.ForkPoint.EventID,
 		ContractSelection: selection,
 		CreatedAt:         createdAt,
