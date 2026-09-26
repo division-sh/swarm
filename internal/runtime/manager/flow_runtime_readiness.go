@@ -317,8 +317,8 @@ func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx conte
 // the exact admitted attempt before Manager.Run upgrades their lifecycle cells.
 // Route publication and durable topology completion remain post-Run work.
 func (am *AgentManager) PrepareAdmittedDynamicFlowAgentsForStart(ctx context.Context) error {
-	if am == nil || am.workflowInstances == nil || am.lifecycle == nil {
-		return errors.New("admitted dynamic flow preparation requires manager and workflow store")
+	if am == nil || am.lifecycle == nil {
+		return errors.New("admitted dynamic flow preparation requires manager lifecycle")
 	}
 	if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
 		return errors.New("admitted dynamic flow preparation requires a stopped manager")
@@ -348,6 +348,9 @@ func (am *AgentManager) PrepareAdmittedDynamicFlowAgentsForStart(ctx context.Con
 	}
 	if len(prepared) == 0 {
 		return nil
+	}
+	if am.workflowInstances == nil {
+		return errors.New("admitted dynamic flow preparation requires workflow store")
 	}
 	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
 	if err != nil {
