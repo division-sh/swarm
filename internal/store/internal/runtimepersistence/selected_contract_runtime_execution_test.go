@@ -85,7 +85,9 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 		{name: "durable source", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.SourceRunID = uuid.NewString() }},
 		{name: "durable event", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ForkEventID = uuid.NewString() }},
 		{name: "durable revision", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ForkPoint.Revision++ }},
-		{name: "mixed point arm", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ForkPoint.Kind = runfork.RunForkPointDeploymentRevision }},
+		{name: "mixed point arm", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) {
+			a.ForkPoint.Kind = runfork.RunForkPointDeploymentRevision
+		}},
 	}
 	for _, tc := range invalidAdmissions {
 		t.Run("reject admission "+tc.name, func(t *testing.T) {
