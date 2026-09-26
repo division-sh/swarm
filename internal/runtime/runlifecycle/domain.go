@@ -31,6 +31,7 @@ type OriginKind string
 
 const (
 	OriginEvent               OriginKind = "event"
+	OriginDeployment          OriginKind = "deployment"
 	OriginScenarioSetup       OriginKind = "scenario_setup"
 	OriginStandingGeneration  OriginKind = "standing_generation"
 	OriginForkMaterialization OriginKind = "fork_materialization"
@@ -66,6 +67,10 @@ func EventRunOrigin(eventID, eventType string) (RunOrigin, error) {
 
 func ScenarioSetupRunOrigin() RunOrigin {
 	return RunOrigin{kind: OriginScenarioSetup}
+}
+
+func DeploymentRunOrigin() RunOrigin {
+	return RunOrigin{kind: OriginDeployment}
 }
 
 func StandingGenerationRunOrigin(serviceID string, generation int64) (RunOrigin, error) {
@@ -121,9 +126,9 @@ func (o RunOrigin) Validate() error {
 		if o.serviceID != "" || o.generation != 0 || o.sourceRunID != "" || o.sourceEventID != "" {
 			return errors.New("event run origin forbids standing and fork identity")
 		}
-	case OriginScenarioSetup:
+	case OriginDeployment, OriginScenarioSetup:
 		if o.eventID != "" || o.eventType != "" || o.serviceID != "" || o.generation != 0 || o.sourceRunID != "" || o.sourceEventID != "" {
-			return errors.New("scenario setup run origin forbids event, standing, and fork identity")
+			return fmt.Errorf("%s run origin forbids event, standing, and fork identity", o.kind)
 		}
 	case OriginStandingGeneration:
 		if o.serviceID == "" || o.generation <= 0 {
@@ -158,6 +163,8 @@ func (o RunOrigin) ActivityTriggerType() string {
 	switch o.kind {
 	case OriginEvent:
 		return o.eventType
+	case OriginDeployment:
+		return "run.start"
 	case OriginScenarioSetup:
 		return ScenarioSetupOriginType
 	case OriginStandingGeneration:

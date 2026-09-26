@@ -29,9 +29,29 @@ func TestEntityWorkBlocksCompletionValidatesExactOwnerSummary(t *testing.T) {
 		{"overcount", runtimeentity.RunSummary{RunID: "run", Total: 1, Terminal: 1, Nonterminal: 1}, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pending, err := entityWorkBlocksCompletion("run", tc.summary)
+			pending, err := entityWorkBlocksCompletion("run", tc.summary, false)
 			if pending != tc.pending || (err != nil) != tc.wantError {
 				t.Fatalf("entity preflight pending=%v err=%v want pending=%v error=%v", pending, err, tc.pending, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestDeploymentCompletionAllowsOnlyValidEmptyEntitySummary(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		summary runtimeentity.RunSummary
+		blocks  bool
+	}{
+		{name: "no_entities", summary: runtimeentity.RunSummary{RunID: "run"}},
+		{name: "nonterminal", summary: runtimeentity.RunSummary{RunID: "run", Total: 1, Nonterminal: 1}, blocks: true},
+		{name: "malformed", summary: runtimeentity.RunSummary{RunID: "run", Total: 1, Malformed: 1}, blocks: true},
+		{name: "terminal", summary: runtimeentity.RunSummary{RunID: "run", Total: 1, Terminal: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blocks, err := entityWorkBlocksCompletion("run", tc.summary, true)
+			if err != nil || blocks != tc.blocks {
+				t.Fatalf("deployment entity preflight blocks=%v err=%v, want %v", blocks, err, tc.blocks)
 			}
 		})
 	}

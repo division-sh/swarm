@@ -273,8 +273,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if _, ok := methods["runtime.nuke"]; !ok {
 		t.Fatal("generated OpenRPC missing runtime.nuke")
 	}
-	if !methods["run.start"].Deprecated {
-		t.Fatal("generated OpenRPC run.start deprecated flag = false, want true")
+	if methods["run.start"].Deprecated {
+		t.Fatal("generated OpenRPC run.start deprecated flag = true, want false")
 	}
 	expectedNotifications := map[string]string{
 		"event.subscribe":        "#/components/schemas/EventFull",
