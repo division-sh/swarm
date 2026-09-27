@@ -246,6 +246,14 @@ func validateInterfaceDefinition(identity string, definition runtimecontracts.Pa
 				return err
 			}
 		}
+		for fieldName, field := range event.OptionalFields {
+			if _, exists := event.RequiredFields[fieldName]; exists {
+				return fmt.Errorf("platform interface %q event %q field %q is both required and optional", identity, name, fieldName)
+			}
+			if err := validateInterfaceField(identity+" event "+name+" optional_fields."+fieldName, field, definition.Schemas); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -758,44 +766,9 @@ func (p SatisfactionPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity
 // ProjectTextFact is the sole provider-neutral projection from one current,
 // satisfier-authenticated normalized event into operator-channel identity.
 func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtimeprovideroutput.Authorization, payload any) (operatorchannel.TextFact, bool, error) {
-	if p.interfaceRef.String() != operatorchannel.InterfaceHITLChannelV2 {
-		return operatorchannel.TextFact{}, false, nil
-	}
-	event, ok := p.events["text"]
-	if !ok || event.event.String() != strings.TrimSpace(eventName) {
-		return operatorchannel.TextFact{}, false, nil
-	}
-	if !authorization.Valid() || authorization.Provider() != p.provider.String() || authorization.Event() != event.event.String() ||
-		authorization.PackID() != p.trigger.ID() || authorization.PackVersion() != p.trigger.Version() ||
-		authorization.ManifestHash() != p.trigger.ManifestHash() || !authorization.Generation().Equal(p.triggerGeneration) {
-		return operatorchannel.TextFact{}, false, nil
-	}
-	object, ok := payload.(map[string]any)
-	if !ok {
-		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q payload must be an object", eventName)
-	}
-	projected := make(map[string]any, len(event.fields))
-	for target, source := range event.fields {
-		fieldName := strings.TrimPrefix(source.String(), "event.")
-		if fieldName == source.String() || strings.Contains(fieldName, ".") {
-			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event source %q is not a normalized field", source.String())
-		}
-		value, exists := object[fieldName]
-		if !exists {
-			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q is missing required field %q", eventName, fieldName)
-		}
-		if schema, exists := event.fieldSchema[fieldName]; exists {
-			if err := schema.Validate(value); err != nil {
-				return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event field %q: %w", fieldName, err)
-			}
-		}
-		targetPath, err := compileChannelPath(target)
-		if err != nil {
-			return operatorchannel.TextFact{}, false, err
-		}
-		if err := targetPath.set(projected, value); err != nil {
-			return operatorchannel.TextFact{}, false, err
-		}
+	projected, matched, err := p.projectOperatorEvent("text", eventName, authorization, payload)
+	if err != nil || !matched {
+		return operatorchannel.TextFact{}, matched, err
 	}
 	text, textOK := projected["text"].(string)
 	account, accountOK, err := operatorChannelOpaqueReference(projected["external_account_reference"])
@@ -810,6 +783,21 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 	if !textOK || !accountOK || !conversationOK || !scopeOK {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q does not project admitted identity fields", eventName)
 	}
+	message, messageOK, err := operatorChannelOpaqueReference(projected["provider_message_reference"])
+	if err != nil {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q provider_message_reference: %w", eventName, err)
+	}
+	if !messageOK {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q does not project a message reference", eventName)
+	}
+	var replyTo string
+	if value, exists := projected["reply_to_message_reference"]; exists {
+		var ok bool
+		replyTo, ok, err = operatorChannelOpaqueReference(value)
+		if err != nil || !ok {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has invalid reply_to_message_reference: %v", eventName, err)
+		}
+	}
 	identity, err := p.InterfaceIdentity()
 	if err != nil {
 		return operatorchannel.TextFact{}, false, err
@@ -817,11 +805,101 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 	fact := operatorchannel.TextFact{
 		Interface: identity, ExternalAccountRef: account, ConversationRef: conversation,
 		ConversationScope: operatorchannel.ConversationScope(scope), Text: text,
+		MessageReference: message, ReplyToReference: replyTo,
 	}
 	if err := fact.Validate(); err != nil {
 		return operatorchannel.TextFact{}, false, err
 	}
 	return fact, true, nil
+}
+
+// ProjectActionFact uses the same admitted mapping and authorization boundary
+// as text, without assigning provider callback data any verdict authority.
+func (p SatisfactionPlan) ProjectActionFact(eventName string, authorization runtimeprovideroutput.Authorization, payload any) (operatorchannel.ActionFact, bool, error) {
+	projected, matched, err := p.projectOperatorEvent("action", eventName, authorization, payload)
+	if err != nil || !matched {
+		return operatorchannel.ActionFact{}, matched, err
+	}
+	account, accountOK, err := operatorChannelOpaqueReference(projected["external_account_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q external_account_reference: %w", eventName, err)
+	}
+	conversation, conversationOK, err := operatorChannelOpaqueReference(projected["conversation_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q conversation_reference: %w", eventName, err)
+	}
+	message, messageOK, err := operatorChannelOpaqueReference(projected["provider_message_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q provider_message_reference: %w", eventName, err)
+	}
+	interaction, interactionOK, err := operatorChannelOpaqueReference(projected["interaction_reference"])
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q interaction_reference: %w", eventName, err)
+	}
+	scope, scopeOK := projected["conversation_scope"].(string)
+	token, tokenOK := projected["token"].(string)
+	if !accountOK || !conversationOK || !messageOK || !interactionOK || !scopeOK || !tokenOK {
+		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q does not project admitted action fields", eventName)
+	}
+	identity, err := p.InterfaceIdentity()
+	if err != nil {
+		return operatorchannel.ActionFact{}, false, err
+	}
+	fact := operatorchannel.ActionFact{
+		Interface: identity, ExternalAccountRef: account, ConversationRef: conversation,
+		ConversationScope: operatorchannel.ConversationScope(scope), MessageReference: message,
+		InteractionRef: interaction, Token: token,
+	}
+	if err := fact.Validate(); err != nil {
+		return operatorchannel.ActionFact{}, false, err
+	}
+	return fact, true, nil
+}
+
+func (p SatisfactionPlan) projectOperatorEvent(kind, eventName string, authorization runtimeprovideroutput.Authorization, payload any) (map[string]any, bool, error) {
+	if p.interfaceRef.String() != operatorchannel.InterfaceHITLChannelV2 {
+		return nil, false, nil
+	}
+	event, ok := p.events[kind]
+	if !ok || event.event.String() != strings.TrimSpace(eventName) {
+		return nil, false, nil
+	}
+	if !authorization.Valid() || authorization.Provider() != p.provider.String() || authorization.Event() != event.event.String() ||
+		authorization.PackID() != p.trigger.ID() || authorization.PackVersion() != p.trigger.Version() ||
+		authorization.ManifestHash() != p.trigger.ManifestHash() || !authorization.Generation().Equal(p.triggerGeneration) {
+		return nil, false, nil
+	}
+	object, ok := payload.(map[string]any)
+	if !ok {
+		return nil, false, fmt.Errorf("channel %s event %q payload must be an object", kind, eventName)
+	}
+	projected := make(map[string]any, len(event.fields))
+	for target, source := range event.fields {
+		fieldName := strings.TrimPrefix(source.String(), "event.")
+		if fieldName == source.String() || strings.Contains(fieldName, ".") {
+			return nil, false, fmt.Errorf("channel %s event source %q is not a normalized field", kind, source.String())
+		}
+		value, exists := object[fieldName]
+		if !exists {
+			if event.required[fieldName] {
+				return nil, false, fmt.Errorf("channel %s event %q is missing required field %q", kind, eventName, fieldName)
+			}
+			continue
+		}
+		if schema, exists := event.fieldSchema[fieldName]; exists {
+			if err := schema.Validate(value); err != nil {
+				return nil, false, fmt.Errorf("channel %s event field %q: %w", kind, fieldName, err)
+			}
+		}
+		targetPath, err := compileChannelPath(target)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := targetPath.set(projected, value); err != nil {
+			return nil, false, err
+		}
+	}
+	return projected, true, nil
 }
 
 func operatorChannelOpaqueReference(value any) (string, bool, error) {
@@ -1820,7 +1898,14 @@ func validateEachItem(name string, mapping ChannelMapping, itemTargets []string,
 }
 
 func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent, binding ChannelEventBinding, schemas, opaque map[string]runtimecontracts.ToolInputSchema, descriptor TriggerEvent) error {
-	if err := exactKeySet("channel event "+name+" fields", binding.Fields, requiredInterfaceFieldPaths(event.RequiredFields, opaque)); err != nil {
+	fields := make(map[string]runtimecontracts.PackInterfaceField, len(event.RequiredFields)+len(event.OptionalFields))
+	for fieldName, field := range event.RequiredFields {
+		fields[fieldName] = field
+	}
+	for fieldName, field := range event.OptionalFields {
+		fields[fieldName] = field
+	}
+	if err := exactKeySet("channel event "+name+" fields", binding.Fields, interfaceFieldPaths(fields, opaque)); err != nil {
 		return err
 	}
 	targets := newChannelPathCardinality("channel event " + name + " target")
@@ -1833,7 +1918,7 @@ func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent
 		if err := sources.add(source); err != nil {
 			return err
 		}
-		targetSchema, err := interfaceFieldPathSchema(event.RequiredFields, target, schemas, opaque)
+		targetSchema, err := interfaceFieldPathSchema(fields, target, schemas, opaque)
 		if err != nil {
 			return fmt.Errorf("channel event %q: %w", name, err)
 		}
@@ -1842,7 +1927,10 @@ func validateEventBinding(name string, event runtimecontracts.PackInterfaceEvent
 			return fmt.Errorf("channel event %q source %q must name one normalized event field", name, source)
 		}
 		field, ok := descriptor.Fields[fieldName]
-		if !ok || !field.Required {
+		if !ok {
+			return fmt.Errorf("channel event %q source %q is not an accepted trigger field", name, source)
+		}
+		if _, required := event.RequiredFields[strings.Split(target, ".")[0]]; required && !field.Required {
 			return fmt.Errorf("channel event %q source %q is not a required accepted trigger field", name, source)
 		}
 		if err := validateDirectionalRelation(name+" event "+source+" -> "+target, &field.Schema, targetSchema); err != nil {
@@ -2058,7 +2146,7 @@ func requiredSchemaPathsMapped(subject string, schema runtimecontracts.ToolInput
 	return validateRequiredPathCardinality(subject, required, mapped)
 }
 
-func requiredInterfaceFieldPaths(fields map[string]runtimecontracts.PackInterfaceField, opaque map[string]runtimecontracts.ToolInputSchema) []string {
+func interfaceFieldPaths(fields map[string]runtimecontracts.PackInterfaceField, opaque map[string]runtimecontracts.ToolInputSchema) []string {
 	var out []string
 	for name, field := range fields {
 		if field.Opaque == "" {
@@ -2114,6 +2202,7 @@ func interfaceOpaqueSlots(definition runtimecontracts.PackInterfaceDefinition) [
 	}
 	for _, event := range definition.Events {
 		add(event.RequiredFields)
+		add(event.OptionalFields)
 	}
 	out := make([]string, 0, len(set))
 	for name := range set {
@@ -2180,6 +2269,7 @@ func cloneInterfaceDefinition(in runtimecontracts.PackInterfaceDefinition) runti
 	out.Events = make(map[string]runtimecontracts.PackInterfaceEvent, len(in.Events))
 	for name, event := range in.Events {
 		event.RequiredFields = cloneInterfaceFields(event.RequiredFields)
+		event.OptionalFields = cloneInterfaceFields(event.OptionalFields)
 		out.Events[name] = event
 	}
 	return out

@@ -526,8 +526,35 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	if err != nil || !matched {
 		t.Fatalf("ProjectTextFact(mock) = %#v matched=%v err=%v", fact, matched, err)
 	}
-	if fact.ExternalAccountRef != `{"principal":"operator-a"}` || fact.ConversationRef != `{"room":"ops-room"}` || fact.ConversationScope != operatorchannel.ConversationScopeShared {
+	if fact.ExternalAccountRef != `{"principal":"operator-a"}` || fact.ConversationRef != `{"room":"ops-room"}` || fact.ConversationScope != operatorchannel.ConversationScopeShared || fact.MessageReference != "mock-delivery:12345678" || fact.ReplyToReference != "" {
 		t.Fatalf("mock operator-channel fact = %#v", fact)
+	}
+	reply, matched, err := plan.ProjectTextFact("mock.text", authorization, map[string]any{
+		"text": "reason", "principal": "operator-a", "room": "ops-room", "scope": "shared",
+		"message_ref": "mock-delivery:12345678", "reply_ref": "mock-delivery:87654321",
+	})
+	if err != nil || !matched || reply.ReplyToReference != "mock-delivery:87654321" {
+		t.Fatalf("mock reply projection = %#v matched=%v err=%v", reply, matched, err)
+	}
+	if _, _, err := plan.ProjectTextFact("mock.text", authorization, map[string]any{
+		"text": "reason", "principal": "operator-a", "room": "ops-room", "scope": "shared",
+		"message_ref": "mock-delivery:12345678", "reply_ref": "invalid",
+	}); err == nil {
+		t.Fatal("malformed present reply reference was admitted")
+	}
+	actionAuthorization := runtimeprovideroutput.MustAuthorization(
+		"mock", "mock.action", trigger.Identity.ID(), trigger.Identity.Version(), trigger.Identity.ManifestHash(), trigger.Generation,
+	)
+	action, matched, err := plan.ProjectActionFact("mock.action", actionAuthorization, map[string]any{
+		"token": "approve", "cursor": "callback-1", "principal": "operator-a", "room": "ops-room",
+		"scope": "shared", "message_ref": "mock-delivery:12345678",
+	})
+	if err != nil || !matched || action.Token != "approve" || action.InteractionRef != `{"cursor":"callback-1"}` ||
+		action.MessageReference != "mock-delivery:12345678" || action.ConversationRef != `{"room":"ops-room"}` {
+		t.Fatalf("mock action projection = %#v matched=%v err=%v", action, matched, err)
+	}
+	if _, matched, err := plan.ProjectActionFact("mock.action", authorization, map[string]any{}); err != nil || matched {
+		t.Fatalf("wrong-event authorization matched action: matched=%v err=%v", matched, err)
 	}
 	wantMax := map[string]int{
 		"presentation.text": 128,
@@ -563,6 +590,86 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	}
 	if _, hasDestination := prepared["destination"]; hasDestination {
 		t.Fatalf("acknowledgment gained ambient destination context: %#v", prepared)
+	}
+}
+
+func TestChannelDeliveryReplyProjectionTelegram(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	_, _, trigger, _ := loadTelegramChannelCompilerInputs(t)
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram.text_message", trigger.Identity.ID(), trigger.Identity.Version(), trigger.Identity.ManifestHash(), trigger.Generation,
+	)
+	base := map[string]any{
+		"text": "reason", "external_account_reference": "12345", "conversation_reference": "-100123",
+		"conversation_scope": "shared", "provider_message_reference": json.Number("17"),
+	}
+	fact, matched, err := plan.ProjectTextFact("inbound.telegram.text_message", authorization, base)
+	if err != nil || !matched || fact.MessageReference != `{"id":17}` || fact.ReplyToReference != "" {
+		t.Fatalf("unquoted Telegram fact = %#v matched=%v err=%v", fact, matched, err)
+	}
+	base["reply_to_message_reference"] = json.Number("11")
+	fact, matched, err = plan.ProjectTextFact("inbound.telegram.text_message", authorization, base)
+	if err != nil || !matched || fact.ReplyToReference != `{"id":11}` {
+		t.Fatalf("quoted Telegram fact = %#v matched=%v err=%v", fact, matched, err)
+	}
+	base["reply_to_message_reference"] = json.Number("2147483648")
+	if _, _, err := plan.ProjectTextFact("inbound.telegram.text_message", authorization, base); err == nil {
+		t.Fatal("out-of-range present Telegram reply reference was admitted")
+	}
+	delete(base, "reply_to_message_reference")
+	delete(base, "provider_message_reference")
+	if _, _, err := plan.ProjectTextFact("inbound.telegram.text_message", authorization, base); err == nil {
+		t.Fatal("missing required Telegram message reference was admitted")
+	}
+	actionAuthorization := runtimeprovideroutput.MustAuthorization(
+		"telegram", "inbound.telegram.callback_action", trigger.Identity.ID(), trigger.Identity.Version(), trigger.Identity.ManifestHash(), trigger.Generation,
+	)
+	action, matched, err := plan.ProjectActionFact("inbound.telegram.callback_action", actionAuthorization, map[string]any{
+		"token": "approve_1", "interaction_reference": "callback-1", "external_account_reference": "12345",
+		"conversation_reference": "-100123", "conversation_scope": "shared", "provider_message_reference": json.Number("11"),
+	})
+	if err != nil || !matched || action.Token != "approve_1" || action.InteractionRef != "callback-1" || action.MessageReference != `{"id":11}` {
+		t.Fatalf("Telegram action projection = %#v matched=%v err=%v", action, matched, err)
+	}
+}
+
+func TestChannelDeliveryOptionalEventBindingAdmission(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	tests := []struct {
+		name   string
+		mutate func(*packs.LoadedChannelPack, *packs.TriggerPackDescriptor)
+		want   string
+	}{
+		{
+			name: "missing optional mapping",
+			mutate: func(channel *packs.LoadedChannelPack, _ *packs.TriggerPackDescriptor) {
+				binding := channel.Manifest.Events["text"]
+				delete(binding.Fields, "reply_to_message_reference")
+				channel.Manifest.Events["text"] = binding
+			},
+			want: "reply_to_message_reference",
+		},
+		{
+			name: "required target from optional source",
+			mutate: func(_ *packs.LoadedChannelPack, trigger *packs.TriggerPackDescriptor) {
+				event := trigger.Events["mock.text"]
+				field := event.Fields["message_ref"]
+				field.Required = false
+				event.Fields["message_ref"] = field
+				trigger.Events["mock.text"] = event
+			},
+			want: "not a required accepted trigger field",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			channel, trigger, connector := mockChannelSatisfier()
+			tc.mutate(&channel, &trigger)
+			_, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CompileChannel error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -1668,7 +1775,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				"conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref",
 			}},
 			"text": {Event: "mock.text", Fields: map[string]string{
-				"text": "event.text", "external_account_reference.principal": "event.principal", "conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref",
+				"text": "event.text", "external_account_reference.principal": "event.principal", "conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref", "reply_to_message_reference": "event.reply_ref",
 			}},
 		},
 	}
@@ -1693,14 +1800,14 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				schema = mockStringSchema(1, 20, "")
 			case "scope":
 				schema = runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"), runtimecontracts.ToolSchemaEnum("direct", "shared"))
-			case "message_ref":
+			case "message_ref", "reply_ref":
 				schema = deliveryReference
 			case "text":
 				schema = text128
 			default:
 				panic("missing mock trigger field schema for " + name)
 			}
-			fields[name] = packs.TriggerEventField{Schema: schema, Required: true}
+			fields[name] = packs.TriggerEventField{Schema: schema, Required: name != "reply_ref"}
 		}
 		return fields
 	}
@@ -1709,7 +1816,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
 			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "scope", "message_ref")},
-			"mock.text":   {Name: "mock.text", Fields: triggerFields("text", "principal", "room", "scope", "message_ref")},
+			"mock.text":   {Name: "mock.text", Fields: triggerFields("text", "principal", "room", "scope", "message_ref", "reply_ref")},
 		},
 	}
 	connector := packs.ConnectorPackDescriptor{
