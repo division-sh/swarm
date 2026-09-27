@@ -102,6 +102,9 @@ type RouteTable struct {
 	routes                      map[routeResolutionKey][]Subscriber
 	rootInputRoutes             map[string][]Subscriber
 	patterns                    []routePattern
+	exactPatternIndexes         map[string][]int
+	wildcardPatternIndexes      []int
+	resolutionIndexDirty        bool
 	eventPath                   map[string]struct{}
 	authoredEventPath           map[string]struct{}
 	authoredScopes              map[string]struct{}
@@ -355,7 +358,15 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 	if _, active := rt.eventPath[eventType]; !active {
 		return projectSubscriberEvents(out, eventType)
 	}
-	for _, pattern := range rt.patterns {
+	indexes := rt.wildcardPatternIndexes
+	if rt.resolutionIndexDirty {
+		indexes = make([]int, len(rt.patterns))
+		for index := range rt.patterns {
+			indexes[index] = index
+		}
+	}
+	for _, index := range indexes {
+		pattern := rt.patterns[index]
 		if pattern.RunID != "" && pattern.RunID != runID {
 			continue
 		}
@@ -510,12 +521,26 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) error {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	changed, err := rt.addFlowInstanceRouteLocked(req, inputProducers)
+	priorPatterns := len(rt.patterns)
+	changed, newEventPaths, err := rt.addFlowInstanceRouteLocked(req, inputProducers)
 	if err != nil {
 		return err
 	}
 	if changed {
-		rt.rebuildLocked()
+		if rt.resolutionIndexDirty {
+			rt.rebuildLocked()
+		} else {
+			for _, eventType := range newEventPaths {
+				rt.resolveNewEventPathLocked(eventType)
+			}
+			var eventTypes []string
+			for index := priorPatterns; index < len(rt.patterns); index++ {
+				if eventTypes == nil && strings.Contains(rt.patterns[index].EventPattern, "*") {
+					eventTypes = sortedStringKeys(rt.eventPath)
+				}
+				rt.indexPatternLocked(index, eventTypes)
+			}
+		}
 		rt.generation++
 	}
 	return nil
@@ -526,8 +551,9 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 func (rt *RouteTable) addFlowInstanceRouteForTopology(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) (bool, error) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	added, err := rt.addFlowInstanceRouteLocked(req, inputProducers)
+	added, _, err := rt.addFlowInstanceRouteLocked(req, inputProducers)
 	if added {
+		rt.resolutionIndexDirty = true
 		rt.generation++
 	}
 	return added, err
@@ -539,15 +565,15 @@ func (rt *RouteTable) rebuildStagedFlowInstanceRoutes() {
 	rt.rebuildLocked()
 }
 
-func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) (bool, error) {
+func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializationRequest, inputProducers *runtimepinrouting.FlowInputProducerResolver) (bool, []string, error) {
 	req = req.Normalized()
 
 	identity, replay, err := rt.admitFlowInstanceRouteIdentityLocked(req.Identity)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if replay {
-		return false, nil
+		return false, nil, nil
 	}
 	req.Identity = identity
 	instancePath := identity.Route.InstancePath
@@ -555,14 +581,15 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 
 	templateDef, ok := rt.templates[templateScope]
 	if !ok {
-		return false, fmt.Errorf("route template %q not found", templateScope)
+		return false, nil, fmt.Errorf("route template %q not found", templateScope)
 	}
 	if inputProducers == nil {
 		_, prepared := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(rt.source)
 		inputProducers = &prepared
 	}
 	rt.instanceOwners[identity] = identity
-	rt.instanceEventPath[identity] = rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
+	allEventPaths, newEventPaths := rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
+	rt.instanceEventPath[identity] = allEventPaths
 	rt.materializeTemplateSourceObserversLocked(identity)
 	for _, subscriberTemplate := range templateDef.Subscribers {
 		subscriberID := ""
@@ -571,13 +598,13 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 		if subscriberTemplate.Kind == subscriberAgent {
 			name, err = subscriberTemplate.AgentNamePlan.Materialize()
 			if err != nil {
-				return false, fmt.Errorf("materialize route subscriber agent name: %w", err)
+				return false, nil, fmt.Errorf("materialize route subscriber agent name: %w", err)
 			}
 			subscriberID = name.AgentID
 		}
 		recipient, err := subscriberRecipient(subscriberTemplate.Kind, subscriberID, subscriberTemplate.HandlerNode)
 		if err != nil {
-			return false, fmt.Errorf("materialize route subscriber: %w", err)
+			return false, nil, fmt.Errorf("materialize route subscriber: %w", err)
 		}
 		subscriber := Subscriber{
 			Recipient: recipient, Path: instancePath,
@@ -586,11 +613,11 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 		if subscriber.Recipient.IsAgent() {
 			agentRoute, err := identity.Route.AgentIdentityRoute()
 			if err != nil {
-				return false, fmt.Errorf("materialize route subscriber flow identity: %w", err)
+				return false, nil, fmt.Errorf("materialize route subscriber flow identity: %w", err)
 			}
 			subscriber.AgentPlan, err = agentidentity.NewPlan(name, agentRoute)
 			if err != nil {
-				return false, fmt.Errorf("materialize route subscriber concrete identity: %w", err)
+				return false, nil, fmt.Errorf("materialize route subscriber concrete identity: %w", err)
 			}
 		}
 		for _, pattern := range subscriberTemplate.Patterns {
@@ -599,7 +626,7 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 				admittedSubscriber.targetHandler = subscriberTemplate.TargetHandler
 			}
 			if err := rt.addConnectRecipientLocked(templateDef.FlowID, templateDef.InputEvents, pattern.raw, admittedSubscriber, identity.RunID, instancePath); err != nil {
-				return false, err
+				return false, nil, err
 			}
 			resolvedPatterns := routeProjectAdmittedSubscriberPatterns(pattern.admission, templateDef.FlowID, instancePath, pattern.inputEvent, *inputProducers)
 			for _, resolved := range resolvedPatterns {
@@ -610,7 +637,7 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 			}
 		}
 	}
-	return true, nil
+	return true, newEventPaths, nil
 }
 
 func (rt *RouteTable) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
@@ -819,6 +846,7 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
 	return &RouteTable{
 		generation:                  1,
+		resolutionIndexDirty:        true,
 		source:                      source,
 		routes:                      make(map[routeResolutionKey][]Subscriber),
 		rootInputRoutes:             make(map[string][]Subscriber),
@@ -1006,22 +1034,26 @@ func routeNodeSubscribesToLocalExact(source semanticview.Source, node runtimeide
 	return false
 }
 
-func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) []string {
+func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) ([]string, []string) {
 	added := make([]string, 0, len(localEvents))
+	newPaths := make([]string, 0, len(localEvents))
 	scope := routeEventIdentityScope(basePath, localEvents, nil)
 	for _, eventType := range sortedStringKeys(localEvents) {
 		absolute := scope.ResolveEvent(eventType, nil)
 		if absolute == "" || strings.Contains(absolute, "*") {
 			continue
 		}
+		if _, exists := rt.eventPath[absolute]; !exists {
+			newPaths = append(newPaths, absolute)
+		}
 		rt.eventPath[absolute] = struct{}{}
 		added = append(added, absolute)
 	}
-	return added
+	return added, newPaths
 }
 
 func (rt *RouteTable) addAuthoredEventPathsLocked(basePath string, localEvents map[string]struct{}) []string {
-	added := rt.addEventPathsLocked(basePath, localEvents)
+	added, _ := rt.addEventPathsLocked(basePath, localEvents)
 	for _, eventType := range added {
 		rt.authoredEventPath[eventType] = struct{}{}
 	}
@@ -1433,28 +1465,57 @@ func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPatt
 
 func (rt *RouteTable) rebuildLocked() {
 	rt.routes = make(map[routeResolutionKey][]Subscriber)
+	rt.exactPatternIndexes = make(map[string][]int)
+	rt.wildcardPatternIndexes = nil
 	eventTypes := sortedStringKeys(rt.eventPath)
-	for _, pattern := range rt.patterns {
-		runID := strings.TrimSpace(pattern.RunID)
-		if strings.Contains(pattern.EventPattern, "*") {
-			for _, eventType := range eventTypes {
-				if RouteMatches(pattern.EventPattern, eventType) {
-					subscriber := pattern.Subscriber
-					if strings.TrimSpace(subscriber.MatchPattern) == "" {
-						subscriber.MatchPattern = pattern.EventPattern
-					}
-					key := routeResolutionKey{runID: runID, eventType: eventType}
-					rt.routes[key] = appendUniqueSubscriber(rt.routes[key], subscriber)
-				}
-			}
-			continue
+	for index := range rt.patterns {
+		rt.indexPatternLocked(index, eventTypes)
+	}
+	rt.resolutionIndexDirty = false
+}
+
+func (rt *RouteTable) indexPatternLocked(index int, eventTypes []string) {
+	pattern := rt.patterns[index]
+	if strings.Contains(pattern.EventPattern, "*") {
+		rt.wildcardPatternIndexes = append(rt.wildcardPatternIndexes, index)
+		for _, eventType := range eventTypes {
+			rt.resolvePatternForEventLocked(pattern, eventType)
 		}
-		subscriber := pattern.Subscriber
-		if strings.TrimSpace(subscriber.MatchPattern) == "" {
-			subscriber.MatchPattern = pattern.EventPattern
+		return
+	}
+	rt.exactPatternIndexes[pattern.EventPattern] = append(rt.exactPatternIndexes[pattern.EventPattern], index)
+	rt.resolvePatternForEventLocked(pattern, pattern.EventPattern)
+}
+
+func (rt *RouteTable) resolvePatternForEventLocked(pattern routePattern, eventType string) {
+	if strings.Contains(pattern.EventPattern, "*") && !RouteMatches(pattern.EventPattern, eventType) {
+		return
+	}
+	subscriber := pattern.Subscriber
+	if strings.TrimSpace(subscriber.MatchPattern) == "" {
+		subscriber.MatchPattern = pattern.EventPattern
+	}
+	key := routeResolutionKey{runID: strings.TrimSpace(pattern.RunID), eventType: eventType}
+	rt.routes[key] = appendUniqueSubscriber(rt.routes[key], subscriber)
+}
+
+// A newly admitted event can already have exact subscribers. Re-evaluate only
+// its indexed patterns in their original order so wildcard observers do not
+// move behind those subscribers.
+func (rt *RouteTable) resolveNewEventPathLocked(eventType string) {
+	exact := rt.exactPatternIndexes[eventType]
+	for _, index := range exact {
+		delete(rt.routes, routeResolutionKey{runID: strings.TrimSpace(rt.patterns[index].RunID), eventType: eventType})
+	}
+	wildcard := rt.wildcardPatternIndexes
+	for len(exact) > 0 || len(wildcard) > 0 {
+		var index int
+		if len(wildcard) == 0 || len(exact) > 0 && exact[0] < wildcard[0] {
+			index, exact = exact[0], exact[1:]
+		} else {
+			index, wildcard = wildcard[0], wildcard[1:]
 		}
-		key := routeResolutionKey{runID: runID, eventType: pattern.EventPattern}
-		rt.routes[key] = appendUniqueSubscriber(rt.routes[key], subscriber)
+		rt.resolvePatternForEventLocked(rt.patterns[index], eventType)
 	}
 }
 
