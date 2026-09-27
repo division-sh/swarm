@@ -1660,6 +1660,50 @@ func TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePer
 	}
 }
 
+func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) (canonicalEventPublishProofStore, *sql.DB)
+	}{
+		{"sqlite", func(t *testing.T) (canonicalEventPublishProofStore, *sql.DB) {
+			selected := storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
+			return selected, storetest.DatabaseForTest(selected)
+		}},
+		{"postgres", func(t *testing.T) (canonicalEventPublishProofStore, *sql.DB) {
+			_, db, _ := testutil.StartPostgres(t)
+			return storetest.AdmitPostgresRuntimeStore(t, db), db
+		}},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			selected, db := backend.open(t)
+			source := semanticview.Wrap(eventPublishRenamedConnectedCreateEntityTestBundle())
+			bus, err := newScopedAPITestEventBus(t, selected, runStartTestEventBusOptions(source))
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
+			response := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "thing.requested", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`, "", "renamed-create-entity"))
+			if response.Error == nil {
+				t.Fatal("renamed create-entity receiver accepted caller-supplied entity_id")
+			}
+			data := asMap(t, response.Error.Data)
+			if data["code"] != PayloadValidationFailedCode {
+				t.Fatalf("renamed create-entity rejection = %#v", response.Error)
+			}
+			violations := asSlice(t, asMap(t, data["details"])["violations"])
+			if len(violations) != 1 || asMap(t, violations[0])["rule"] != "create_entity_mints_entity_id" {
+				t.Fatalf("renamed create-entity violations = %#v", violations)
+			}
+			for _, table := range []string{"runs", "events", "event_deliveries", "api_idempotency"} {
+				var count int
+				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("%s rows after rejection = %d, err=%v", table, count, err)
+				}
+			}
+		})
+	}
+}
+
 func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -2526,9 +2570,9 @@ func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBund
 			eventName: handler,
 		},
 	}
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "factory"},
-		Path:  "factory",
+	root := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Path:  ".",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
@@ -2541,28 +2585,60 @@ func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBund
 			"thing-writer": node,
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "factory", Version: "1.0.0"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"thing-writer": node,
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"factory": flow.Schema,
-		},
+		Semantics:  runtimecontracts.WorkflowSemanticView{Name: "factory", Version: "1.0.0"},
+		Events:     root.Events,
+		Nodes:      root.Nodes,
+		RootSchema: &root.Schema,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
-				"factory": &root.Children[0],
+				".": &root,
 			},
+		},
+	}
+	return mustCompileEventPublishTestBundle(bundle)
+}
+
+func eventPublishRenamedConnectedCreateEntityTestBundle() *runtimecontracts.WorkflowContractBundle {
+	const rootEvent, receiverEvent = "thing.requested", "thing.created"
+	payload := runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+		"entity_id": {Type: "uuid"}, "amount": {Type: "integer"},
+	}}
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "factory"}, Path: "factory",
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: receiverEvent}}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{receiverEvent: {Payload: payload}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"thing-writer": {
+			ExecutionType: "system_node", SubscribesTo: []string{receiverEvent},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{receiverEvent: {CreateEntity: true}},
+		}},
+	}
+	root := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: rootEvent}}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: rootEvent}}},
+			},
+			Connect: []runtimecontracts.FlowConnect{{Event: rootEvent, From: ".", To: "factory", Rename: receiverEvent, SourceFile: "schema.yaml", SourceLine: 1}},
+		},
+		Events:   map[string]runtimecontracts.EventCatalogEntry{rootEvent: {Payload: payload}},
+		Children: []runtimecontracts.FlowContractView{child},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		SourceArtifact: authorActivityTestSourceArtifact,
+		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "factory", Version: "1.0.0"},
+		Events:         root.Events, RootSchema: &root.Schema,
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"factory": child.Schema},
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":       {FlowPath: ".", Schema: "schema.yaml", Events: "events.yaml"},
+			"factory": {FlowPath: "factory", Schema: "factory/schema.yaml", Events: "factory/events.yaml", Nodes: "factory/nodes.yaml"},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "factory": &root.Children[0]},
 		},
 	}
 	return mustCompileEventPublishTestBundle(bundle)
@@ -3103,7 +3179,7 @@ func assertEventPublishDeliveryIdentity(t *testing.T, delivery map[string]any, w
 
 func eventPublishScanNodeID(t testing.TB) string {
 	t.Helper()
-	return identitytest.FlowNode(t, ".", "scan-orchestrator").Key()
+	return identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key()
 }
 
 func eventPublishRepoObserverNodeID(t testing.TB) string {

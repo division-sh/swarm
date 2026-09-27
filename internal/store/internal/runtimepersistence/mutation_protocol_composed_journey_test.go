@@ -64,7 +64,7 @@ func mutationProtocolFanOutRoot(t *testing.T) string {
 	for _, edit := range []struct {
 		file, old, replacement string
 	}{
-		{"schema.yaml", "      - {event: start.closed, source: external}\n", "      - {event: start.closed, source: external}\n      - {event: fanout.requested, source: external}\n"},
+		{"schema.yaml", "      - start.closed\n", "      - start.closed\n      - fanout.requested\n"},
 		{"schema.yaml", "events: [work.requested", "events: [fanout.child, work.requested"},
 		{"nodes.yaml", "subscribes_to: [start.seeded, start.requested, start.closed]", "subscribes_to: [start.seeded, start.requested, start.closed, fanout.requested]"},
 	} {
@@ -81,7 +81,7 @@ func mutationProtocolFanOutRoot(t *testing.T) string {
 		}
 	}
 	for _, addition := range []struct{ file, content string }{
-		{"events.yaml", "fanout.requested:\n  items: '[text]'\nfanout.child:\n  value: text\n  swarm:\n    consumer: external\n"},
+		{"events.yaml", "fanout.requested:\n  items: '[text]'\nfanout.child:\n  value: text\n"},
 		{"nodes.yaml", "    fanout.requested:\n      fan_out:\n        items_from: payload.items\n        as: entry\n        identity: entry\n        max_items: 2\n        emit:\n          event: fanout.child\n          fields:\n            value: \"${entry}\"\n"},
 	} {
 		path := filepath.Join(root, addition.file)

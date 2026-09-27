@@ -277,7 +277,7 @@ rows:
     proof_refs:
       - {kind: issue, issue: 1301}
       - {kind: go_test, name: TestRoutedEventKeysForPlanDoesNotRepairCallbackPublicationNames}
-      - {kind: go_test, name: TestEventBusPublishCanonicalCallbackPersistsSameFlowNodeRouteBeforeInternalCarrier}
+      - {kind: go_test, name: TestEventBusPublish_RuntimeCallbackLocalEventPersistsSameFlowNodeRouteBeforeInternalCarrier}
     notes: >
       #2423 supersedes #1301's consumer-side name repair. Runtime-owned
       artifact callbacks construct the canonical name at publication from

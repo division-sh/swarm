@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -13,6 +12,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -110,17 +110,7 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 
 func exactStageCompletionJourneyBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
-	for path, contents := range map[string]string{
-		"entities.yaml":           "run:\n  topic: string\n",
-		"schema.yaml":             "initial_state: active\nstates: [active, done]\nterminal_states: [done]\npins:\n  inputs:\n    events: [flow.started, flow.finish]\n",
-		"discovery/schema.yaml":   "name: discovery\nstages:\n  ready:\n    initial: true\n  Ready:\n    terminal: true\npins:\n  inputs:\n    events: [flow.started, flow.finish]\n",
-		"discovery/entities.yaml": "discovery: {}\n",
-		"discovery/events.yaml":   "flow.started:\n  topic:\n    type: string?\nflow.finish:\n  topic:\n    type: string?\n",
-		"discovery/nodes.yaml":    "pipeline:\n  execution_type: system_node\n  subscribes_to: [flow.started, flow.finish]\n  event_handlers:\n    flow.started:\n      create_entity: true\n    flow.finish:\n      advances_to: Ready\n",
-	} {
-		writeRunCompletionFixtureFile(t, filepath.Join(root, path), contents)
-	}
+	root := canonicalrouting.CopyStageCompletionJourney(t)
 	repo := runCompletionRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

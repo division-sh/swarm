@@ -29,7 +29,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 				for _, method := range []string{"mailbox.defer", "mailbox.decide", "expiry_restart"} {
 					t.Run(method, func(t *testing.T) {
 						f := mailboxCompletionFixtureInRuntime(t, rt, owner)
-						eventName, flowID, instance := "observers/observer.requested", "observers", "observers"
+						eventName, flowID, instance := "observer.requested", "observers", "observers"
 						payload := map[string]any{"seed": true}
 						if mode == "root" {
 							eventName, flowID, instance = "observer.requested", ".", f.base.RunID

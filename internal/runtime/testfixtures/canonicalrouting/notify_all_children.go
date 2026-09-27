@@ -295,7 +295,12 @@ portfolio.notify.completed:
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
     from: portfolio
     to: account
-`, "")
+`, `  - event: account.registered
+    from: portfolio
+    to: .
+`)
+			applyClosedReplacement(t, connectFile, "      - portfolio.notify.requested\n", "      - portfolio.notify.requested\n      - account.registered\n")
+			applyClosedReplacement(t, connectFile, "      - portfolio.notify.requested\nconnect:\n", "      - portfolio.notify.requested\n      - account.registered\nconnect:\n")
 		}
 		if opts.NumericInternalSettlement {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered

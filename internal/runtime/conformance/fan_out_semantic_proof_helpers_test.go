@@ -70,7 +70,7 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	root := notifyallchildren.WriteVariant(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericInternalSettlement: !crossFlow, RegistrationUUIDField: true})
 	modify := func(relative string, change func(string) string) {
 		t.Helper()
-		path := filepath.Join(root, notifyallchildren.OwnerFlowID, relative)
+		path := filepath.Join(root, relative)
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -88,21 +88,34 @@ func semanticProofSourceWithCrossFlow(t *testing.T, crossFlow bool) semanticview
 	}
 	eventsToAdd := []string{semanticProofPayloadEvent, semanticProofEntityEvent, semanticProofOverwriteEvent}
 	modify("schema.yaml", func(raw string) string {
-		var added strings.Builder
+		var inputs, outputs, connects strings.Builder
 		for _, name := range eventsToAdd {
-			fmt.Fprintf(&added, "      - event: %s\n        source: external\n", name)
+			fmt.Fprintf(&inputs, "      - %s\n", name)
+			fmt.Fprintf(&outputs, "      - %s\n", name)
+			fmt.Fprintf(&connects, "  - event: %s\n    from: .\n    to: portfolio\n", name)
 		}
-		raw = replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
-		return raw
+		raw = replace(raw, "  outputs:\n", inputs.String()+"  outputs:\n")
+		raw = replace(raw, "connect:\n", outputs.String()+"connect:\n")
+		return raw + connects.String()
 	})
 	modify("events.yaml", func(raw string) string {
-		raw = replace(raw, "  eligible: boolean\n", "  eligible: boolean\n  ordinal: integer\n  source_count: integer\n  snapshot_threshold: integer\n")
 		for _, name := range eventsToAdd {
 			raw += fmt.Sprintf("%s:\n  portfolio_id: text\n  account_ids: \"[NumericAccount]\"\n  threshold: integer\n", name)
 		}
 		return raw
 	})
-	modify("nodes.yaml", func(raw string) string {
+	modify("portfolio/schema.yaml", func(raw string) string {
+		var added strings.Builder
+		for _, name := range eventsToAdd {
+			fmt.Fprintf(&added, "      - %s\n", name)
+		}
+		return replace(raw, "  outputs:\n", added.String()+"  outputs:\n")
+	})
+	modify("portfolio/events.yaml", func(raw string) string {
+		raw = replace(raw, "  eligible: boolean\n", "  eligible: boolean\n  ordinal: integer\n  source_count: integer\n  snapshot_threshold: integer\n")
+		return raw
+	})
+	modify("portfolio/nodes.yaml", func(raw string) string {
 		var subscriptions strings.Builder
 		for _, name := range eventsToAdd {
 			fmt.Fprintf(&subscriptions, "    - %s\n", name)

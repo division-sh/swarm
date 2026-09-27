@@ -4,16 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -22,7 +21,9 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -61,36 +62,37 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 	}
 }
 
-func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *testing.T) {
+func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) {
 	scopes := []struct {
 		name, flow, instance, other string
 		source                      func(*testing.T) semanticview.Source
+		template                    bool
 	}{
-		{"singleton", "owner", "owner", "owner/child/instance", func(t *testing.T) semanticview.Source { return stateOnlyAcquisitionSource(t, "owner") }},
+		{"singleton", "owner", "owner", "owner/child/instance", func(t *testing.T) semanticview.Source { return stateOnlyAcquisitionSource(t, "owner") }, false},
 		{"static", "owner", "owner", "owner/other", func(t *testing.T) semanticview.Source {
 			return stateOnlyAcquisitionSourceWithMode(t, "owner", runtimecontracts.FlowModeStatic)
-		}},
+		}, false},
 		{"template", "owner", "owner/instance", "owner/other", func(t *testing.T) semanticview.Source {
 			return stateOnlyAcquisitionSourceWithMode(t, "owner", runtimecontracts.FlowModeTemplate)
-		}},
+		}, true},
 		{"parent-singleton-child-template", "parent", "parent", "parent/child/instance", func(t *testing.T) semanticview.Source {
-			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeSingleton, "child", runtimecontracts.FlowModeTemplate)
-		}},
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeSingleton, "child", runtimecontracts.FlowModeTemplate, "parent")
+		}, false},
 		{"parent-template-child-singleton", "parent", "parent/instance", "parent/child", func(t *testing.T) semanticview.Source {
-			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeSingleton)
-		}},
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeSingleton, "parent")
+		}, true},
 		{"nested-template", "parent/child", "parent/child/instance", "parent/instance", func(t *testing.T) semanticview.Source {
-			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeTemplate)
-		}},
+			return stateOnlyNestedAcquisitionSource(t, "parent", runtimecontracts.FlowModeTemplate, "child", runtimecontracts.FlowModeTemplate, "parent/child")
+		}, true},
 		{"sibling-prefix", "owner", "owner/instance", "owner-other/instance", func(t *testing.T) semanticview.Source {
 			return stateOnlySiblingAcquisitionSource(t, "owner", runtimecontracts.FlowModeTemplate, "owner-other", runtimecontracts.FlowModeTemplate)
-		}},
+		}, true},
 		{"deep-template", "parent/child/grandchild", "parent/child/grandchild/instance", "parent/instance", func(t *testing.T) semanticview.Source {
 			return stateOnlyDeepAcquisitionSource(t, "parent", "child", "grandchild")
-		}},
+		}, true},
 		{"root", ".", "", "child", func(t *testing.T) semanticview.Source {
 			return stateOnlyRootAcquisitionSource(t, "different-authored-name")
-		}},
+		}, false},
 	}
 	cases := []struct {
 		name, node, state, lifecycle, failure              string
@@ -110,9 +112,31 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, scope := range scopes {
 			for _, tc := range cases {
+				// Template ingress requires an active, source-bound instance. Owner
+				// edge cases without one belong to the separate persistence and
+				// ClassifyDeliveryTargetOwnership matrices, not this routed path.
+				if scope.template && tc.name != "existing" && tc.name != "initializer-reuses-state" && tc.name != "terminal-state" {
+					continue
+				}
 				t.Run(backend+"/"+scope.name+"/"+tc.name, func(t *testing.T) {
-					selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
 					source := scope.source(t)
+					bundle, ok := semanticview.Bundle(source)
+					if !ok || bundle.SourceArtifact == nil {
+						t.Fatal("state-only acquisition fixture has no admitted artifact")
+					}
+					selected, db, ctx, runID := openStateOnlyAcquisitionStoreWithSource(t, backend, source)
+					scopeFact, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+					if !ok {
+						t.Fatal("state-only acquisition fixture has no bundle scope")
+					}
+					lease, err := selected.(testAuthorActivityCatalogRegistrar).RegisterAuthorActivityEventCatalog(scopeFact, []runtimeauthoractivity.EventDescriptor{
+						{EventType: "test.node_emitted.selector", Disposition: runtimeauthoractivity.StoryAuthored},
+						{EventType: "test.node_emitted.upserter", Disposition: runtimeauthoractivity.StoryAuthored},
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(lease.Release)
 					instance := scope.instance
 					entityID := runtimepipeline.FlowInstanceEntityID(instance)
 					if scope.flow == "." {
@@ -131,8 +155,12 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 					if tc.duplicateOwner {
 						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instance, "active", "same-business-key")
 					}
-					if tc.lifecycle != "" {
-						seedStateOnlyAcquisitionLifecycle(t, backend, db, runID, instance, tc.lifecycle)
+					if tc.lifecycle != "" || scope.template {
+						status := tc.lifecycle
+						if status == "" {
+							status = "active"
+						}
+						seedStateOnlyAcquisitionLifecycleForFlow(t, backend, db, runID, scope.flow, instance, status, scope.template, source)
 					}
 					node, err := runtimeidentity.AdmitExecutableNodeDeclaration(scope.flow, tc.node)
 					if err != nil {
@@ -145,7 +173,7 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 					eventType := events.EventType("test.node_emitted." + tc.node)
 					newBus := func() *runtimebus.EventBus {
 						bus, err := newStoreTestEventBus(t, selected, runtimebus.EventBusOptions{
-							ContractBundle: source,
+							ContractBundle: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
 							RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
 								return []runtimebus.DeliveryRouteBlueprint{{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.RouteIdentity{FlowID: scope.flow, FlowInstance: instance}, Handler: handler.ForEvent(eventType)}}, nil
 							},
@@ -153,10 +181,21 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 						if err != nil {
 							t.Fatal(err)
 						}
+						if scope.template {
+							identity, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.StoredRoute(scope.flow, "instance", instance))
+							if err != nil {
+								t.Fatal(err)
+							}
+							if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+								Identity: identity, ActivationVariables: map[string]string{"entity.instance_key": "instance"},
+							}); err != nil {
+								t.Fatal(err)
+							}
+						}
 						return bus
 					}
 					bus := newBus()
-					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", []byte(`{"account_id":"same-business-key"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+					evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(eventType), "", "", []byte(`{"account_id":"same-business-key","instance_key":"instance"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					if tc.failure != "" {
 						err := bus.Publish(ctx, evt)
 						if err == nil || !strings.Contains(err.Error(), tc.failure) {
@@ -197,7 +236,11 @@ func TestEventBusCompositionOwnerIncludesStateWithoutLifecycleOnBothStores(t *te
 						t.Fatalf("duplicate rewrote receiver: %#v %t %v", again, found, err)
 					}
 					assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
-					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, 0)
+					wantLifecycle := 0
+					if scope.template {
+						wantLifecycle = 1
+					}
+					assertStateOnlyAcquisitionLifecycleCount(t, backend, db, runID, instance, wantLifecycle)
 					var siblingFields string
 					if err := db.QueryRowContext(ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, otherEntity).Scan(&siblingFields); err != nil {
 						t.Fatal(err)
@@ -232,7 +275,7 @@ func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			source := stateOnlyNestedAcquisitionSource(t, parentID, test.parentMode, childID, runtimecontracts.FlowModeSingleton)
+			source := stateOnlyNestedAcquisitionSource(t, parentID, test.parentMode, childID, runtimecontracts.FlowModeSingleton, parentID)
 			owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(source, parentID, "")
 			if err != nil {
 				t.Fatal(err)
@@ -292,19 +335,19 @@ func stateOnlyAcquisitionSource(t *testing.T, flowID string) semanticview.Source
 }
 
 func stateOnlyAcquisitionSourceWithMode(t *testing.T, flowID, mode string) semanticview.Source {
-	return loadStateOnlyAcquisitionSource(t, "state-only-acquisition", map[string]string{flowID: mode})
+	return loadStateOnlyAcquisitionSource(t, "state-only-acquisition", map[string]string{flowID: mode}, flowID)
 }
 
-func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childID, childMode string) semanticview.Source {
+func stateOnlyNestedAcquisitionSource(t *testing.T, parentID, parentMode, childID, childMode, targetFlow string) semanticview.Source {
 	return loadStateOnlyAcquisitionSource(t, "state-only-nested-acquisition", map[string]string{
 		parentID: parentMode, parentID + "/" + childID: childMode,
-	})
+	}, targetFlow)
 }
 
 func stateOnlySiblingAcquisitionSource(t *testing.T, firstID, firstMode, secondID, secondMode string) semanticview.Source {
 	return loadStateOnlyAcquisitionSource(t, "state-only-sibling-acquisition", map[string]string{
 		firstID: firstMode, secondID: secondMode,
-	})
+	}, firstID)
 }
 
 func stateOnlyDeepAcquisitionSource(t *testing.T, parentID, childID, grandchildID string) semanticview.Source {
@@ -312,54 +355,16 @@ func stateOnlyDeepAcquisitionSource(t *testing.T, parentID, childID, grandchildI
 		parentID:                 runtimecontracts.FlowModeSingleton,
 		parentID + "/" + childID: runtimecontracts.FlowModeSingleton,
 		parentID + "/" + childID + "/" + grandchildID: runtimecontracts.FlowModeTemplate,
-	})
+	}, parentID+"/"+childID+"/"+grandchildID)
 }
 
 func stateOnlyRootAcquisitionSource(t *testing.T, workflowName string) semanticview.Source {
-	return loadStateOnlyAcquisitionSource(t, workflowName, map[string]string{".": runtimecontracts.FlowModeStatic})
+	return loadStateOnlyAcquisitionSource(t, workflowName, map[string]string{".": runtimecontracts.FlowModeStatic}, ".")
 }
 
-func loadStateOnlyAcquisitionSource(t *testing.T, workflowName string, modes map[string]string) semanticview.Source {
+func loadStateOnlyAcquisitionSource(t *testing.T, workflowName string, modes map[string]string, targetFlow string) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: "+workflowName+"\n")
-	// The component test supplies the exact receiver blueprint separately from
-	// this root ingress. Its source schema must not be borrowed from that receiver.
-	const eventSchemas = "test.node_emitted.selector:\n  account_id: text\ntest.node_emitted.upserter:\n  account_id: text\n"
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "events.yaml"), eventSchemas)
-	paths := make([]string, 0, len(modes))
-	for path := range modes {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		mode := modes[path]
-		schema := fmt.Sprintf("name: %s\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n", filepath.Base(path))
-		if path == "." {
-			schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1)
-		} else {
-			schema += "mode: " + mode + "\n"
-			if mode == runtimecontracts.FlowModeTemplate {
-				schema += "instance: account_id\n"
-			}
-		}
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "schema.yaml"), schema)
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "entities.yaml"), "review_item:\n  account_id: text\n  items: \"[json]\"\n")
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "events.yaml"), eventSchemas)
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, path, "nodes.yaml"), `selector:
-  execution_type: system_node
-  subscribes_to: [test.node_emitted.selector]
-  event_handlers:
-    test.node_emitted.selector:
-      accumulate: {into: items, from: payload}
-upserter:
-  execution_type: system_node
-  subscribes_to: [test.node_emitted.upserter]
-  event_handlers:
-    test.node_emitted.upserter:
-      create_entity: true
-`)
-	}
+	root := canonicalrouting.CopyStateOnlyAcquisition(t, workflowName, modes, targetFlow)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
 		t.Fatalf("load state-only acquisition contracts: %v", err)
@@ -380,7 +385,7 @@ func writeStateOnlyAcquisitionFixtureFile(t *testing.T, path, content string) {
 func seedStateOnlyAcquisitionEntity(t *testing.T, backend string, db *sql.DB, runID, entityID, instancePath, state, accountID string) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	fields, err := json.Marshal(map[string]any{"account_id": accountID})
+	fields, err := json.Marshal(map[string]any{"account_id": accountID, "instance_key": "instance"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,20 +401,58 @@ func seedStateOnlyAcquisitionEntity(t *testing.T, backend string, db *sql.DB, ru
 }
 
 func seedStateOnlyAcquisitionLifecycle(t *testing.T, backend string, db *sql.DB, runID, instancePath, status string) {
+	seedStateOnlyAcquisitionLifecycleForFlow(t, backend, db, runID, "review", instancePath, status, false, nil)
+}
+
+func seedStateOnlyAcquisitionLifecycleForFlow(t *testing.T, backend string, db *sql.DB, runID, flowTemplate, instancePath, status string, template bool, source semanticview.Source) {
 	t.Helper()
-	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, 'review', 'static', '{}', ?, ?, ?)`
+	mode := runtimecontracts.FlowModeStatic
+	config := "{}"
+	if template {
+		mode = runtimecontracts.FlowModeTemplate
+		config = `{"instance_key":"instance"}`
+	}
+	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	var terminatedAt any
 	if status == "terminated" {
 		terminatedAt = now
 	}
-	args := []any{runID, instancePath, status, terminatedAt, now}
+	args := []any{runID, instancePath, flowTemplate, mode, config, status, terminatedAt, now}
 	if backend == "postgres" {
-		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1::uuid, $2, 'review', 'static', '{}'::jsonb, $3, $4, $5)`
-		args = []any{runID, instancePath, status, terminatedAt, now}
+		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7, $8)`
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("seed state-only acquisition lifecycle: %v", err)
+	}
+	if !template {
+		return
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle.SourceArtifact == nil {
+		t.Fatal("template readiness requires the admitted source")
+	}
+	plan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: runtimeflowidentity.Instance{
+			TemplateID: flowTemplate, ScopeKey: flowTemplate,
+			InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), InstancePath: instancePath,
+			EntityID: runtimepipeline.FlowInstanceEntityID(instancePath), HasStoredPath: true,
+		},
+		RunID: runID, BundleHash: bundle.SourceArtifact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: "live",
+	}).Normalized()
+	if err != nil {
+		t.Fatalf("normalize exact template readiness: %v", err)
+	}
+	readiness, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("encode exact template readiness: %v", err)
+	}
+	readinessQuery := `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
+	if backend == "postgres" {
+		readinessQuery = `INSERT INTO flow_instance_runtime_readiness (run_id, instance_path, plan, created_at, updated_at) VALUES ($1::uuid, $2, $3::jsonb, $4, $5)`
+	}
+	if _, err := db.ExecContext(context.Background(), readinessQuery, runID, instancePath, string(readiness), now, now); err != nil {
+		t.Fatalf("seed exact template readiness: %v", err)
 	}
 }
 

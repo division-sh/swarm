@@ -55,6 +55,11 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Fatal("child did not reach its actual delivery")
 			}
+			completedNode, err := identity.AdmitExecutableNodeDeclaration("a_finished", "controller")
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitServedDeliveryOutcomeCount(t, rt.DB, rt.Backend, input.EventID, "node", completedNode.Key(), "delivered", 1)
 			marker := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.marked", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "marker"})
 			waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, marker.EventID, "platform", "pipeline", "success", 1)
 			family, ok := selected.RunFork()
@@ -117,7 +122,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			}
 			once.Do(func() { close(release) })
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
-			requirePendingInputStateCount(t, rt, seed.RunID, "done", 1)
+			requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
 			requirePendingInputStateCount(t, rt, seed.RunID, "archived", 1)
 		})
 	}
