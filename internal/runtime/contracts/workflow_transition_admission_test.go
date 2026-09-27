@@ -13,7 +13,7 @@ func TestCompiledTransitionPreservesDistinctRuleCarriers(t *testing.T) {
 		t.Fatal(err)
 	}
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("rules:\n  - {id: first, condition: payload.ready, advances_to: done}\n  - {id: second, condition: else, advances_to: done}\n"), &handler); err != nil {
+	if err := yaml.Unmarshal([]byte("rules:\n  - {id: first, when: payload.ready, advances_to: done}\n  - {id: second, else: true, advances_to: done}\n"), &handler); err != nil {
 		t.Fatal(err)
 	}
 	handler, err = QualifySystemNodeHandlerRuleRefsForEvent(node, "work.requested", handler)

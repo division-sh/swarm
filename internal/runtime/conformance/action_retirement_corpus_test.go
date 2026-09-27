@@ -279,7 +279,7 @@ func TestActionRetirementCorpusScannerPreservesHomonymsAndRejectsAliases(t *test
 		raw  string
 		want bool
 	}{
-		{"worker: {timers: [{action: expire}], event_handlers: {request: {activity: {tool: run, input: {action: payload.action}}, rules: {action: {condition: 'true', emit: done}}}}}", false},
+		{"worker: {timers: [{action: expire}], event_handlers: {request: {activity: {tool: run, input: {action: payload.action}}, rules: {action: {else: true, emit: done}}}}}", false},
 		{"template: {event_handlers: {request: {emit: done}}}\naction: {event_handlers: {}}", false},
 		{"worker: {event_handlers: {request: {action: null}}}", true},
 		{"action: new_unknown_action", true},

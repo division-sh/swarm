@@ -104,10 +104,14 @@ func semanticProofSource(t *testing.T) semanticview.Source {
 			{semanticProofPayloadEvent, "rules", "payload.account_ids"},
 			{semanticProofEntityEvent, "on_complete", "entity.account_ids"},
 		} {
+			predicate := "condition: else"
+			if producer.site == "rules" {
+				predicate = "else: true"
+			}
 			raw += fmt.Sprintf(`    %s:
       %s:
         - id: issue
-          condition: else
+          %s
           data_accumulation:
             writes:
               - source_field: account_ids
@@ -131,7 +135,7 @@ func semanticProofSource(t *testing.T) semanticview.Source {
                 ordinal: ${fan_out.index}
                 source_count: ${fan_out.count}
                 snapshot_threshold: ${entity.threshold}
-`, producer.event, producer.site, producer.source)
+`, producer.event, producer.site, predicate, producer.source)
 		}
 		raw += fmt.Sprintf(`    %s:
       data_accumulation:

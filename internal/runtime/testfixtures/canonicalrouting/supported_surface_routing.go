@@ -13,14 +13,14 @@ pins:
   inputs:
     events:
       - {event: rules.selected, source: external}
-      - {event: rules.no_match, source: external}
+      - {event: rules.fallback, source: external}
       - {event: rules.evaluation_failed, source: external}
       - {event: complete.selected, source: external}
       - {event: complete.no_match, source: external}
       - {event: direct, source: external}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `rules.selected: {swarm: {source: external}}
-rules.no_match: {swarm: {source: external}}
+rules.fallback: {swarm: {source: external}}
 rules.evaluation_failed: {swarm: {source: external}}
 complete.selected: {swarm: {source: external}}
 complete.no_match: {swarm: {source: external}}
@@ -28,21 +28,25 @@ direct: {swarm: {source: external}}
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `selection-node:
   execution_type: system_node
-  subscribes_to: [rules.selected, rules.no_match, rules.evaluation_failed, complete.selected, complete.no_match, direct]
+  subscribes_to: [rules.selected, rules.fallback, rules.evaluation_failed, complete.selected, complete.no_match, direct]
   event_handlers:
     rules.selected:
       rules:
         selected:
           id: rules-label
-          condition: else
-    rules.no_match:
+          else: true
+    rules.fallback:
       rules:
         - id: never-rules
-          condition: "false"
+          when: "false"
+        - id: unmatched-rules
+          else: true
     rules.evaluation_failed:
       rules:
         - id: failed-rules
-          condition: "payload.proof > 0"
+          when: "payload.proof > 0"
+        - id: unmatched-evaluation
+          else: true
     complete.selected:
       on_complete:
         - id: complete-label

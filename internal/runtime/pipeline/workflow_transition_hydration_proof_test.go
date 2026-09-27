@@ -27,8 +27,8 @@ stages:
     work:
       guard: {id: admitted-check, check: "true", on_fail: reject}
       rules:
-        - {id: unselected, condition: "false", advances_to: waiting}
-        - {id: selected, condition: else, advances_to: waiting}
+        - {id: unselected, when: "false", advances_to: waiting}
+        - {id: selected, else: true, advances_to: waiting}
 `,
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {

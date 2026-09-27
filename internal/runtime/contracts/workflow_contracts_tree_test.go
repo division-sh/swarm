@@ -503,7 +503,7 @@ validation-orchestrator:
     vertical.shortlisted:
       rules:
         accepted:
-          condition: "else"
+          else: true
           emit: validation.rule
       on_success:
         emit: validation.started

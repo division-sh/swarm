@@ -362,13 +362,13 @@ worker:
     direct: {advances_to: awaiting}
     selected:
       rules:
-        first: {condition: "true", advances_to: done}
-        second: {condition: else, advances_to: done}
+        first: {when: "true", advances_to: done}
+        second: {else: true, advances_to: done}
     inherited:
       advances_to: done
       rules:
-        first: {condition: "true"}
-        second: {condition: else}
+        first: {when: "true"}
+        second: {else: true}
     completed:
       on_complete:
         - {condition: "true", advances_to: done}
