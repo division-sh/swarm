@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -289,7 +288,7 @@ func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause err
 	})
 }
 
-func (p *PendingApply) SettleNativeSettingReadback(ctx context.Context, observed []byte, cause error) error {
+func (p *PendingApply) SettleNativeSettingReadback(ctx context.Context, observed, desired []byte, cause error) error {
 	if p == nil || p.handle == nil || p.source != "channel_native_setting" {
 		return fmt.Errorf("channel native setting pending apply is missing")
 	}
@@ -302,13 +301,13 @@ func (p *PendingApply) SettleNativeSettingReadback(ctx context.Context, observed
 		if err != nil {
 			cause = err
 		} else {
-			desired, desiredErr := channelnative.DesiredCommands()
-			if desiredErr != nil {
-				return desiredErr
+			desired, err = canonicaljson.Canonicalize(desired)
+			if err != nil {
+				cause = err
 			}
-			if !bytes.Equal(observed, desired) {
+			if cause == nil && !bytes.Equal(observed, desired) {
 				cause = fmt.Errorf("native setting readback contradicts desired commands")
-			} else {
+			} else if cause == nil {
 				return p.handle.Succeed(ctx, map[string]any{"authority": "provider_readback", "matched": true,
 					"readback_hash": runtimeeffects.Fingerprint(desired)})
 			}

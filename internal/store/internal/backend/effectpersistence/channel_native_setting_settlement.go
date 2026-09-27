@@ -94,7 +94,7 @@ func projectChannelNativeSettingSettlementTx(ctx context.Context, tx *sql.Tx, se
 	state, readbackHash := "uncertain", any(nil)
 	if settlement.State == runtimeeffects.StateSettled {
 		provided, ok := settlement.Evidence["readback_hash"].(string)
-		desired, err := channelnative.DesiredCommands()
+		desired, err := channelnative.DesiredCommands(s.SettingID, s.SettingGeneration)
 		if err != nil {
 			return err
 		}

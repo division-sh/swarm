@@ -51,3 +51,29 @@ func TestNativeInboxInstallOperationIsExactGeneration(t *testing.T) {
 		t.Fatal("non-setting identity accepted")
 	}
 }
+
+func TestNativeInboxEntryCommandFencesOldGeneration(t *testing.T) {
+	setting := uuid.NewString()
+	first, err := EntryCommand(setting, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) > 32 || first[:6] != "inbox_" {
+		t.Fatalf("invalid provider command spelling %q", first)
+	}
+	replay, err := EntryCommand(setting, 1)
+	if err != nil || replay != first {
+		t.Fatalf("same generation command = %q, %v", replay, err)
+	}
+	next, err := EntryCommand(setting, 2)
+	if err != nil || next == first {
+		t.Fatalf("successor command = %q, %v", next, err)
+	}
+	other, err := EntryCommand(uuid.NewString(), 1)
+	if err != nil || other == first {
+		t.Fatalf("foreign setting command = %q, %v", other, err)
+	}
+	if _, err := DesiredCommands(setting, 0); err == nil {
+		t.Fatal("zero generation produced a command list")
+	}
+}

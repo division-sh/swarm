@@ -83,6 +83,21 @@ interfaces:
             destination: {opaque: destination}
           output:
             commands: {schema: inbox_readback_commands}
+        install_shared_inbox_entry:
+          effect_class: non_idempotent_write
+          input:
+            member_reference: {opaque: external_account_reference}
+            commands: {schema: inbox_install_commands}
+          context:
+            destination: {opaque: destination}
+        read_shared_inbox_entry:
+          effect_class: read_only
+          input:
+            member_reference: {opaque: external_account_reference}
+          context:
+            destination: {opaque: destination}
+          output:
+            commands: {schema: inbox_readback_commands}
       events:
         action:
           required_fields:
@@ -14830,7 +14845,10 @@ platform_tables:
     channel_native_settings:
       description: >-
         One selected-store owner for a provider-authenticated physical bot resource and exact
-        native Open inbox scope. The provider slot comes from verified registration identity;
+        native Open inbox scope. Direct chats use a chat scope; shared chats use the verified
+        operator's chat-member scope. The command spelling is opaque and deterministic for the
+        setting generation, so a stale menu entry never borrows successor authority. The provider
+        slot comes from verified registration identity;
         credential aliases and runtime contexts are not independent settings. A current setting
         may have several compatible activation consumers. Unknown launched writes remain durable
         and block overlapping successor writes and usable readiness, even if a later readback
@@ -14841,12 +14859,14 @@ platform_tables:
             provider TEXT NOT NULL,
             resource_slot_id TEXT NOT NULL,
             conversation_reference TEXT NOT NULL,
-            scope_kind TEXT NOT NULL CHECK (scope_kind = 'chat'),
+            scope_kind TEXT NOT NULL CHECK (scope_kind IN ('chat','chat_member')),
+            member_reference TEXT NOT NULL,
             language_code TEXT NOT NULL CHECK (language_code = ''),
             pack_id TEXT NOT NULL,
             pack_version TEXT NOT NULL,
             pack_manifest_hash TEXT NOT NULL,
             entry_contract_hash TEXT NOT NULL,
+            entry_command TEXT NOT NULL,
             desired_commands JSONB NOT NULL,
             principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
             generation BIGINT NOT NULL CHECK (generation > 0),
@@ -14855,7 +14875,8 @@ platform_tables:
             readback_hash TEXT,
             created_at TIMESTAMPTZ NOT NULL,
             updated_at TIMESTAMPTZ NOT NULL,
-            UNIQUE (provider, resource_slot_id, conversation_reference, scope_kind, language_code),
+            UNIQUE (provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code),
+            CHECK ((scope_kind = 'chat' AND member_reference = '') OR (scope_kind = 'chat_member' AND member_reference <> '')),
             INDEX idx_channel_native_setting_state (state, updated_at)
         );
     channel_native_setting_consumers:

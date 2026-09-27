@@ -233,8 +233,11 @@ type ChannelNativeSettingAuthority struct {
 	Provider                     string
 	ResourceSlotID               string
 	ConversationRef              string
+	ScopeKind                    string
+	MemberReference              string
 	PrincipalID                  string
 	EntryContractHash            string
+	EntryCommand                 string
 	PackID                       string
 	PackVersion                  string
 	PackManifestHash             string
@@ -365,7 +368,11 @@ func (a Authority) Valid() bool {
 	case AuthorityChannelNativeSetting:
 		setting := a.ChannelNativeSetting
 		operationID, err := channelnative.InstallOperationID(setting.SettingID, setting.SettingGeneration)
+		entryCommand, commandErr := channelnative.EntryCommand(setting.SettingID, setting.SettingGeneration)
 		return err == nil && setting.EffectOperationID == operationID && a.ID == operationID &&
+			commandErr == nil && setting.EntryCommand == entryCommand &&
+			((setting.ScopeKind == "chat" && setting.MemberReference == "") ||
+				(setting.ScopeKind == "chat_member" && setting.MemberReference != "")) &&
 			setting.SettingGeneration == int64(a.FenceGeneration) &&
 			validUUIDs(setting.PrincipalID, setting.ActivationID, setting.RuntimeInstanceID) &&
 			setting.ActivationRevision > 0 && setting.BindingRevision > 0 &&
@@ -509,8 +516,11 @@ func (a Authority) Evidence() map[string]any {
 		evidence["provider"] = setting.Provider
 		evidence["resource_slot_id"] = setting.ResourceSlotID
 		evidence["conversation_reference"] = setting.ConversationRef
+		evidence["scope_kind"] = setting.ScopeKind
+		evidence["member_reference"] = setting.MemberReference
 		evidence["principal_id"] = setting.PrincipalID
 		evidence["entry_contract_hash"] = setting.EntryContractHash
+		evidence["entry_command"] = setting.EntryCommand
 		evidence["pack_id"] = setting.PackID
 		evidence["pack_version"] = setting.PackVersion
 		evidence["pack_manifest_hash"] = setting.PackManifestHash

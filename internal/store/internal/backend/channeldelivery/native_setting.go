@@ -23,7 +23,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	query := `SELECT a.provider, a.principal_id, a.interface_key, a.binding_revision,
 		a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 		a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
-		a.plan_generation
+		a.plan_generation, b.external_account_reference, b.conversation_scope
 		FROM connected_channel_activations a
 		JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 		JOIN operator_channel_bindings b ON b.interface_key=a.interface_key
@@ -35,7 +35,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		query = `SELECT a.provider, a.principal_id::text, a.interface_key, a.binding_revision,
 			a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 			a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
-			a.plan_generation
+			a.plan_generation, b.external_account_reference, b.conversation_scope
 			FROM connected_channel_activations a
 			JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 			JOIN operator_channel_bindings b ON b.interface_key=a.interface_key
@@ -45,10 +45,11 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			AND b.conversation_reference=a.conversation_reference
 			FOR UPDATE OF a, o, b`
 	}
-	var provider, principalID, interfaceKey, packID, packVersion, packHash, conversation, planGeneration string
+	var provider, principalID, interfaceKey, packID, packVersion, packHash, conversation, planGeneration, accountReference, conversationScope string
 	var bindingRevision, activationRevision, contextGeneration int64
 	err := tx.QueryRowContext(ctx, query, admission.ActivationID).Scan(&provider, &principalID, &interfaceKey,
-		&bindingRevision, &activationRevision, &contextGeneration, &packID, &packVersion, &packHash, &conversation, &planGeneration)
+		&bindingRevision, &activationRevision, &contextGeneration, &packID, &packVersion, &packHash, &conversation, &planGeneration,
+		&accountReference, &conversationScope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return channelnative.Setting{}, fmt.Errorf("native inbox activation is not exact-current")
 	}
@@ -62,60 +63,85 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		conversation != admission.ConversationReference || planGeneration != admission.PlanGeneration.Diagnostic() {
 		return channelnative.Setting{}, fmt.Errorf("native inbox setting contradicts current activation")
 	}
-	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
-		return channelnative.Setting{}, err
+	scopeKind := "chat"
+	memberReference := ""
+	switch conversationScope {
+	case "direct":
+	case "shared":
+		scopeKind, memberReference = "chat_member", accountReference
+	default:
+		return channelnative.Setting{}, fmt.Errorf("native inbox binding has unsupported conversation scope")
 	}
-	desired, err := channelnative.DesiredCommands()
-	if err != nil {
+	if accountReference == "" {
+		return channelnative.Setting{}, fmt.Errorf("native inbox binding has no verified account")
+	}
+	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
 		return channelnative.Setting{}, err
 	}
 	setting := channelnative.Setting{
 		Provider: admission.Provider, ResourceSlotID: admission.ResourceSlotID,
-		ConversationRef: admission.ConversationReference, EntryContractHash: admission.EntryContractHash,
-		PrincipalID: admission.PrincipalID,
+		ConversationRef: admission.ConversationReference, ScopeKind: scopeKind, MemberReference: memberReference,
+		EntryContractHash: admission.EntryContractHash,
+		PrincipalID:       admission.PrincipalID,
 	}
 	query = `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
-		entry_contract_hash, desired_commands, generation, state, COALESCE(install_operation_id, '')
+		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, '')
 		FROM channel_native_settings WHERE provider=? AND resource_slot_id=? AND conversation_reference=?
-		AND scope_kind='chat' AND language_code=''`
+		AND scope_kind=? AND member_reference=? AND language_code=''`
 	if postgres {
 		query = `SELECT setting_id::text, principal_id::text, pack_id, pack_version, pack_manifest_hash,
-			entry_contract_hash, desired_commands, generation, state, COALESCE(install_operation_id::text, '')
+			entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id::text, '')
 			FROM channel_native_settings WHERE provider=$1 AND resource_slot_id=$2 AND conversation_reference=$3
-			AND scope_kind='chat' AND language_code='' FOR UPDATE`
+			AND scope_kind=$4 AND member_reference=$5 AND language_code='' FOR UPDATE`
 	}
-	var existingPrincipal, existingPack, existingVersion, existingHash, contract string
+	var existingPrincipal, existingPack, existingVersion, existingHash, contract, existingCommand string
 	var raw []byte
-	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference).
+	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference, scopeKind, memberReference).
 		Scan(&setting.SettingID, &existingPrincipal, &existingPack, &existingVersion, &existingHash,
-			&contract, &raw, &setting.Generation, &setting.State, &setting.InstallOperationID)
+			&contract, &existingCommand, &raw, &setting.Generation, &setting.State, &setting.InstallOperationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		setting.SettingID, setting.Generation, setting.State = uuid.NewString(), 1, "planned"
+		setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
+		if err != nil {
+			return channelnative.Setting{}, err
+		}
+		desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
+		if err != nil {
+			return channelnative.Setting{}, err
+		}
 		setting.InstallOperationID, err = channelnative.InstallOperationID(setting.SettingID, setting.Generation)
 		if err != nil {
 			return channelnative.Setting{}, err
 		}
 		query = `INSERT INTO channel_native_settings
-			(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, language_code,
-			pack_id, pack_version, pack_manifest_hash, entry_contract_hash, desired_commands,
+			(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code,
+			pack_id, pack_version, pack_manifest_hash, entry_contract_hash, entry_command, desired_commands,
 			principal_id, generation, state, install_operation_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 'chat', '', ?, ?, ?, ?, ?, ?, 1, 'planned', ?, ?, ?)`
+			VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, 1, 'planned', ?, ?, ?)`
 		if postgres {
 			query = `INSERT INTO channel_native_settings
-				(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, language_code,
-				pack_id, pack_version, pack_manifest_hash, entry_contract_hash, desired_commands,
+				(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code,
+				pack_id, pack_version, pack_manifest_hash, entry_contract_hash, entry_command, desired_commands,
 				principal_id, generation, state, install_operation_id, created_at, updated_at)
-				VALUES ($1::uuid, $2, $3, $4, 'chat', '', $5, $6, $7, $8, $9::jsonb, $10::uuid, 1, 'planned', $11::uuid, $12, $13)`
+				VALUES ($1::uuid, $2, $3, $4, $5, $6, '', $7, $8, $9, $10, $11, $12::jsonb, $13::uuid, 1, 'planned', $14::uuid, $15, $16)`
 		}
 		now := time.Now().UTC()
 		if _, err := tx.ExecContext(ctx, query, setting.SettingID, admission.Provider, admission.ResourceSlotID,
-			admission.ConversationReference, admission.PackID, admission.PackVersion, admission.PackManifestHash,
-			admission.EntryContractHash, string(desired), admission.PrincipalID, setting.InstallOperationID, now, now); err != nil {
+			admission.ConversationReference, scopeKind, memberReference, admission.PackID, admission.PackVersion, admission.PackManifestHash,
+			admission.EntryContractHash, setting.EntryCommand, string(desired), admission.PrincipalID, setting.InstallOperationID, now, now); err != nil {
 			return channelnative.Setting{}, fmt.Errorf("create physical native inbox setting: %w", err)
 		}
 	} else if err != nil {
 		return channelnative.Setting{}, err
 	} else {
+		setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
+		if err != nil {
+			return channelnative.Setting{}, err
+		}
+		desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
+		if err != nil {
+			return channelnative.Setting{}, err
+		}
 		unresolved, err := nativeSettingHasUnresolvedWriteTx(ctx, tx, setting.InstallOperationID, postgres)
 		if err != nil {
 			return channelnative.Setting{}, err
@@ -126,7 +152,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		}
 		compatible := existingPrincipal == admission.PrincipalID && existingPack == admission.PackID &&
 			existingVersion == admission.PackVersion && existingHash == admission.PackManifestHash &&
-			contract == admission.EntryContractHash && bytes.Equal(canonical, desired)
+			contract == admission.EntryContractHash && existingCommand == setting.EntryCommand && bytes.Equal(canonical, desired)
 		if unresolved && setting.State != "uncertain" {
 			query = `UPDATE channel_native_settings SET state='uncertain', updated_at=? WHERE setting_id=?`
 			if postgres {
@@ -152,18 +178,26 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			if err != nil {
 				return channelnative.Setting{}, err
 			}
+			nextCommand, err := channelnative.EntryCommand(setting.SettingID, setting.Generation+1)
+			if err != nil {
+				return channelnative.Setting{}, err
+			}
+			nextDesired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation+1)
+			if err != nil {
+				return channelnative.Setting{}, err
+			}
 			query = `UPDATE channel_native_settings SET principal_id=?, pack_id=?, pack_version=?,
-				pack_manifest_hash=?, entry_contract_hash=?, desired_commands=?, generation=generation+1,
+				pack_manifest_hash=?, entry_contract_hash=?, entry_command=?, desired_commands=?, generation=generation+1,
 				state='planned', install_operation_id=?, readback_hash=NULL, updated_at=?
 				WHERE setting_id=? AND state <> 'uncertain'`
 			if postgres {
 				query = `UPDATE channel_native_settings SET principal_id=$1::uuid, pack_id=$2, pack_version=$3,
-					pack_manifest_hash=$4, entry_contract_hash=$5, desired_commands=$6::jsonb, generation=generation+1,
-					state='planned', install_operation_id=$7::uuid, readback_hash=NULL, updated_at=$8
-					WHERE setting_id=$9::uuid AND state <> 'uncertain'`
+					pack_manifest_hash=$4, entry_contract_hash=$5, entry_command=$6, desired_commands=$7::jsonb, generation=generation+1,
+					state='planned', install_operation_id=$8::uuid, readback_hash=NULL, updated_at=$9
+					WHERE setting_id=$10::uuid AND state <> 'uncertain'`
 			}
 			result, err := tx.ExecContext(ctx, query, admission.PrincipalID, admission.PackID, admission.PackVersion,
-				admission.PackManifestHash, admission.EntryContractHash, string(desired), nextOperationID, time.Now().UTC(), setting.SettingID)
+				admission.PackManifestHash, admission.EntryContractHash, nextCommand, string(nextDesired), nextOperationID, time.Now().UTC(), setting.SettingID)
 			if err != nil {
 				return channelnative.Setting{}, err
 			}
@@ -173,6 +207,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			setting.Generation++
 			setting.State = "planned"
 			setting.InstallOperationID = nextOperationID
+			setting.EntryCommand = nextCommand
 		}
 	}
 	query = `INSERT INTO channel_native_setting_consumers
@@ -318,12 +353,12 @@ func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 		return err
 	}
 	query = `UPDATE channel_native_settings SET state='retired', updated_at=?
-		WHERE state IN ('planned','installed') AND NOT EXISTS (
+		WHERE state IN ('planned','installed','unavailable') AND NOT EXISTS (
 			SELECT 1 FROM channel_native_setting_consumers c
 			WHERE c.setting_id=channel_native_settings.setting_id AND c.state='current')`
 	if postgres {
 		query = `UPDATE channel_native_settings SET state='retired', updated_at=$1
-			WHERE state IN ('planned','installed') AND NOT EXISTS (
+			WHERE state IN ('planned','installed','unavailable') AND NOT EXISTS (
 				SELECT 1 FROM channel_native_setting_consumers c
 				WHERE c.setting_id=channel_native_settings.setting_id AND c.state='current')`
 	}
