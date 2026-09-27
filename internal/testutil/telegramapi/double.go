@@ -20,10 +20,15 @@ type Double struct {
 	commandWrites                []map[string]any
 	registrationRequests         []map[string]any
 	deliveries                   []map[string]any
+	edits                        []map[string]any
+	acknowledgments              []map[string]any
 	rejectNextCredential         bool
 	loseNextRegistrationResponse bool
+	loseNextEditResponse         bool
+	loseNextAckResponse          bool
 	registrationResponseBarrier  *responseBarrier
 	deliveryResponseBarrier      *responseBarrier
+	editResponseBarrier          *responseBarrier
 }
 
 type registration struct {
@@ -158,8 +163,71 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 			<-barrier.release
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": messageID}})
+	case strings.HasSuffix(request.URL.Path, "/editMessageText"):
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		messageID, ok := payload["message_id"].(float64)
+		p.mu.Lock()
+		if !ok || messageID < 1 || int(messageID) > len(p.deliveries) ||
+			payload["chat_id"] != p.deliveries[int(messageID)-1]["chat_id"] {
+			p.mu.Unlock()
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"description":"message not found"}`))
+			return
+		}
+		p.edits = append(p.edits, clonePayload(payload))
+		loseResponse := p.loseNextEditResponse
+		p.loseNextEditResponse = false
+		barrier := p.editResponseBarrier
+		p.editResponseBarrier = nil
+		p.mu.Unlock()
+		if barrier != nil {
+			close(barrier.arrived)
+			<-barrier.release
+		}
+		if loseResponse {
+			loseProviderResponse(w)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": int(messageID)}})
+	case strings.HasSuffix(request.URL.Path, "/answerCallbackQuery"):
+		var payload map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if payload["callback_query_id"] == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"ok":false,"description":"callback query required"}`))
+			return
+		}
+		p.mu.Lock()
+		p.acknowledgments = append(p.acknowledgments, clonePayload(payload))
+		loseResponse := p.loseNextAckResponse
+		p.loseNextAckResponse = false
+		p.mu.Unlock()
+		if loseResponse {
+			loseProviderResponse(w)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 	default:
 		http.Error(w, `{"ok":false}`, http.StatusNotFound)
+	}
+}
+
+func loseProviderResponse(w http.ResponseWriter) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
+		return
+	}
+	connection, _, err := hijacker.Hijack()
+	if err == nil {
+		_ = connection.Close()
 	}
 }
 
@@ -227,6 +295,46 @@ func (p *Double) Delivery(index int) map[string]any {
 		return nil
 	}
 	return clonePayload(p.deliveries[index])
+}
+
+func (p *Double) Edits() []map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]map[string]any, len(p.edits))
+	for index, edit := range p.edits {
+		out[index] = clonePayload(edit)
+	}
+	return out
+}
+
+func (p *Double) Acknowledgments() []map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]map[string]any, len(p.acknowledgments))
+	for index, ack := range p.acknowledgments {
+		out[index] = clonePayload(ack)
+	}
+	return out
+}
+
+func (p *Double) LoseNextEditAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextEditResponse = true
+}
+
+func (p *Double) LoseNextCallbackAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextAckResponse = true
+}
+
+func (p *Double) PauseNextEditResponse() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.editResponseBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
 }
 
 func (p *Double) Confirmation(index int) map[string]any {
