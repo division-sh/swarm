@@ -29,7 +29,7 @@ func decodeInterpolatedScalar(value string) (ExpressionValue, error) {
 		if parts[i] != "" {
 			terms = append(terms, strconv.Quote(parts[i]))
 		}
-		terms = append(terms, R2FormatFunction+"(("+expr+"))")
+		terms = append(terms, R2FormatFunction+"("+wrapCELFragment(expr)+")")
 	}
 	if parts[len(parts)-1] != "" {
 		terms = append(terms, strconv.Quote(parts[len(parts)-1]))
@@ -53,8 +53,8 @@ func splitExpressionInterpolation(value string) ([]string, []string, error) {
 			return nil, nil, fmt.Errorf("unterminated ${...} expression")
 		}
 		end += start + 2
-		expr := strings.TrimSpace(value[start+2 : end])
-		if expr == "" {
+		expr := value[start+2 : end]
+		if strings.TrimSpace(expr) == "" {
 			return nil, nil, fmt.Errorf("empty ${...} expression")
 		}
 		expressions = append(expressions, expr)
@@ -82,12 +82,17 @@ func interpolationEnd(source string) int {
 
 func expressionValueCELSource(value ExpressionValue) (string, error) {
 	if value.HasCELValue() {
-		return "(" + value.CEL + ")", nil
+		return wrapCELFragment(value.CEL), nil
 	}
 	if !value.HasLiteralValue() {
 		return "", fmt.Errorf("unsupported nested expression value kind %q", value.Kind)
 	}
 	return literalCELSource(value.Literal)
+}
+
+// A newline keeps a trailing CEL line comment from consuming generated syntax.
+func wrapCELFragment(source string) string {
+	return "(" + source + "\n)"
 }
 
 func literalCELSource(value any) (string, error) {

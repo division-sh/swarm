@@ -558,66 +558,82 @@ func validateWorkflowResultType(compiled *cel.Ast, provider *workflowStructuralT
 	if actual == cel.DynType || opts.ResultType.Kind == runtimecontracts.CatalogTypeDynamic {
 		return nil
 	}
-	if structural, ok := provider.resolvedType(actual); ok {
-		if runtimecontracts.StructuralCatalogTypeAssignable(structural, *opts.ResultType) {
+	if opts.ResultType.Kind == runtimecontracts.CatalogTypeNumber && actual == cel.IntType {
+		return nil
+	}
+	checked := compiled.NativeRep()
+	if checked == nil {
+		return fmt.Errorf("workflow expression AST is unavailable")
+	}
+	expr := checked.Expr()
+	if isOptional {
+		if inner, absent := workflowOptionalConstructor(expr); absent {
 			return nil
+		} else if inner != nil {
+			expr = inner
+			actual = checked.GetType(inner.ID())
 		}
-		return fmt.Errorf("workflow expression result %s is not assignable to %s", runtimecontracts.StructuralCatalogTypeSyntax(structural), runtimecontracts.StructuralCatalogTypeSyntax(*opts.ResultType))
 	}
-	expected, err := provider.register("result", "result", opts.ResultType.Clone())
-	if err != nil {
-		return fmt.Errorf("workflow expression result type: %w", err)
-	}
-	if !expected.IsAssignableType(actual) {
-		if compiled.NativeRep() != nil && (compiled.NativeRep().Expr().Kind() == celast.MapKind || compiled.NativeRep().Expr().Kind() == celast.ListKind) {
-			return validateWorkflowContainerResult(compiled.NativeRep(), compiled.NativeRep().Expr(), provider, *opts.ResultType, "result")
-		}
-		return fmt.Errorf("workflow expression result %s is not assignable to %s", output, expected)
-	}
-	return nil
+	return validateWorkflowContainerResultWithType(checked, expr, provider, *opts.ResultType, "result", actual)
 }
 
 func validateWorkflowContainerResult(checked *celast.AST, expr celast.Expr, provider *workflowStructuralTypeProvider, target runtimecontracts.ResolvedCatalogType, path string) error {
+	return validateWorkflowContainerResultWithType(checked, expr, provider, target, path, checked.GetType(expr.ID()))
+}
+
+func validateWorkflowContainerResultWithType(checked *celast.AST, expr celast.Expr, provider *workflowStructuralTypeProvider, target runtimecontracts.ResolvedCatalogType, path string, actual *cel.Type) error {
 	switch target.Kind {
 	case runtimecontracts.CatalogTypeObject:
-		if expr.Kind() != celast.MapKind {
-			return fmt.Errorf("%s must be a declared record, got %s", path, checked.GetType(expr.ID()))
+		if expr.Kind() == celast.MapKind {
+			seen := make(map[string]struct{})
+			for _, entry := range expr.AsMap().Entries() {
+				pair := entry.AsMapEntry()
+				if pair.Key().Kind() != celast.LiteralKind {
+					return fmt.Errorf("%s record keys must be literal text", path)
+				}
+				key, ok := pair.Key().AsLiteral().Value().(string)
+				if !ok {
+					return fmt.Errorf("%s record keys must be literal text", path)
+				}
+				field, ok := target.Field(key)
+				if !ok {
+					return fmt.Errorf("%s has undeclared field %s", path, key)
+				}
+				if pair.IsOptional() && !field.IsOptional {
+					return fmt.Errorf("%s required field %s cannot be an optional entry", path, key)
+				}
+				if _, duplicate := seen[key]; duplicate {
+					return fmt.Errorf("%s has duplicate field %s", path, key)
+				}
+				seen[key] = struct{}{}
+				var err error
+				if pair.IsOptional() {
+					err = validateWorkflowOptionalContainerEntry(checked, pair.Value(), provider, field.Type, path+"."+key)
+				} else {
+					err = validateWorkflowContainerResult(checked, pair.Value(), provider, field.Type, path+"."+key)
+				}
+				if err != nil {
+					return err
+				}
+			}
+			for _, field := range target.Fields {
+				if _, ok := seen[field.Name]; !ok && !field.IsOptional {
+					return fmt.Errorf("%s is missing required field %s", path, field.Name)
+				}
+			}
+			return nil
 		}
-		seen := make(map[string]struct{})
-		for _, entry := range expr.AsMap().Entries() {
-			pair := entry.AsMapEntry()
-			if pair.Key().Kind() != celast.LiteralKind {
-				return fmt.Errorf("%s record keys must be literal text", path)
-			}
-			key, ok := pair.Key().AsLiteral().Value().(string)
-			if !ok {
-				return fmt.Errorf("%s record keys must be literal text", path)
-			}
-			field, ok := target.Field(key)
-			if !ok {
-				return fmt.Errorf("%s has undeclared field %s", path, key)
-			}
-			if pair.IsOptional() && !field.IsOptional {
-				return fmt.Errorf("%s required field %s cannot be an optional entry", path, key)
-			}
-			if _, duplicate := seen[key]; duplicate {
-				return fmt.Errorf("%s has duplicate field %s", path, key)
-			}
-			seen[key] = struct{}{}
-			if err := validateWorkflowContainerResult(checked, pair.Value(), provider, field.Type, path+"."+key); err != nil {
-				return err
-			}
-		}
-		for _, field := range target.Fields {
-			if _, ok := seen[field.Name]; !ok && !field.IsOptional {
-				return fmt.Errorf("%s is missing required field %s", path, field.Name)
-			}
-		}
-		return nil
 	case runtimecontracts.CatalogTypeList:
 		if expr.Kind() == celast.ListKind && target.Element != nil {
 			for index, item := range expr.AsList().Elements() {
-				if err := validateWorkflowContainerResult(checked, item, provider, *target.Element, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+				itemPath := fmt.Sprintf("%s[%d]", path, index)
+				var err error
+				if expr.AsList().IsOptional(int32(index)) {
+					err = validateWorkflowOptionalContainerEntry(checked, item, provider, *target.Element, itemPath)
+				} else {
+					err = validateWorkflowContainerResult(checked, item, provider, *target.Element, itemPath)
+				}
+				if err != nil {
 					return err
 				}
 			}
@@ -630,21 +646,26 @@ func validateWorkflowContainerResult(checked *celast.AST, expr celast.Expr, prov
 				if err := validateWorkflowContainerResult(checked, pair.Key(), provider, *target.Key, path+".<key>"); err != nil {
 					return err
 				}
-				if err := validateWorkflowContainerResult(checked, pair.Value(), provider, *target.Value, path+".<value>"); err != nil {
+				var err error
+				if pair.IsOptional() {
+					err = validateWorkflowOptionalContainerEntry(checked, pair.Value(), provider, *target.Value, path+".<value>")
+				} else {
+					err = validateWorkflowContainerResult(checked, pair.Value(), provider, *target.Value, path+".<value>")
+				}
+				if err != nil {
 					return err
 				}
 			}
 			return nil
 		}
 	}
-	actual := checked.GetType(expr.ID())
 	if actual == nil || actual == cel.DynType {
 		return fmt.Errorf("%s has no exact type for %s", path, runtimecontracts.StructuralCatalogTypeSyntax(target))
 	}
-	if structural, ok := provider.resolvedType(actual); ok && runtimecontracts.StructuralCatalogTypeAssignable(structural, target) {
-		return nil
-	}
 	if target.Kind == runtimecontracts.CatalogTypeNumber && actual == cel.IntType {
+		return fmt.Errorf("%s type %s is not assignable to %s", path, actual, runtimecontracts.StructuralCatalogTypeSyntax(target))
+	}
+	if structural, ok := provider.resolvedType(actual); ok && runtimecontracts.StructuralCatalogTypeAssignable(structural, target) {
 		return nil
 	}
 	expected, err := provider.register("result", path, target.Clone())
@@ -655,6 +676,38 @@ func validateWorkflowContainerResult(checked *celast.AST, expr celast.Expr, prov
 		return fmt.Errorf("%s type %s is not assignable to %s", path, actual, expected)
 	}
 	return nil
+}
+
+func validateWorkflowOptionalContainerEntry(checked *celast.AST, expr celast.Expr, provider *workflowStructuralTypeProvider, target runtimecontracts.ResolvedCatalogType, path string) error {
+	actual := checked.GetType(expr.ID())
+	if actual == nil || actual.TypeName() != "optional_type" || len(actual.Parameters()) != 1 {
+		return fmt.Errorf("%s optional entry must have an optional value, got %s", path, actual)
+	}
+	if inner, absent := workflowOptionalConstructor(expr); absent {
+		return nil
+	} else if inner != nil {
+		return validateWorkflowContainerResult(checked, inner, provider, target, path)
+	}
+	return validateWorkflowContainerResultWithType(checked, expr, provider, target, path, actual.Parameters()[0])
+}
+
+func workflowOptionalConstructor(expr celast.Expr) (celast.Expr, bool) {
+	if expr.Kind() != celast.CallKind {
+		return nil, false
+	}
+	call := expr.AsCall()
+	if call.IsMemberFunction() {
+		return nil, false
+	}
+	switch call.FunctionName() {
+	case "optional.of":
+		if len(call.Args()) == 1 {
+			return call.Args()[0], false
+		}
+	case "optional.none":
+		return nil, len(call.Args()) == 0
+	}
+	return nil, false
 }
 
 func (a workflowOptionalReadAnalyzer) selectedField(operand celast.Expr, fieldName string, bindings workflowStructuralBindings) (workflowStructuralField, string, bool) {

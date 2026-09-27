@@ -3800,9 +3800,14 @@ handler_specification:
           fragments evaluates to a string. Mixed fragments format strings without quotes and all other supported
           values as canonical JSON text (null as `null`, lists/objects with deterministic key order). The shared
           workflow value owner applies this formatting once; sole-interpolation results remain typed. Missing or
-          invalid expressions fail closed."
+          invalid expressions fail closed. Generated CEL boundaries preserve stock CEL comment termination, including
+          newlines before generated closing syntax; comments must not consume a wrapper or a later fragment."
         recursive: "Lists and object values recursively apply the same rule to leaves; object keys remain literal names.
-          Dynamic containers evaluate to a typed list or object. Literal numeric kinds must not change during lowering."
+          Dynamic containers evaluate to a typed list or object. Destination checking inspects list/map constructors
+          recursively before rejecting their inferred generic CEL collection type; declared record fields remain closed
+          and exact, while already-typed record selections retain structural identity. Optional constructor entries
+          preserve omission and validate the unwrapped present value against the declared element or optional field.
+          Literal numeric kinds must not change during lowering."
         escape: "`{literal: <value>}` preserves its entire value without interpolation, including nested `${` text."
         retired: "Authored `{ref: ...}`, `{cel: ...}`, `{expression: ...}`, expression `kind` metadata and data-write
           `expression:` aliases are rejected. Use `${...}` for CEL and `{literal: ...}` only to escape interpolation."

@@ -2770,7 +2770,7 @@ fields:
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	cases := map[string]string{"mode": "payload.mode", "batch": `{"geography": (payload.geography), "scan_id": (payload.scan_id)}`, "exact": "payload.mode"}
+	cases := map[string]string{"mode": "payload.mode", "batch": "{\"geography\": (payload.geography\n), \"scan_id\": (payload.scan_id\n)}", "exact": "payload.mode"}
 	for field, want := range cases {
 		expr := spec.Fields[field]
 		if expr.Kind != ExpressionKindCEL || expr.CEL != want {
