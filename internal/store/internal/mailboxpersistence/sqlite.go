@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
 
@@ -50,6 +51,10 @@ func (s *MailboxSQLiteOwner) InsertMailboxItem(ctx context.Context, item runtime
 		`, item.ID, sqliteNullUUID(coalesceMailboxEntityID(item)), strings.Trim(strings.TrimSpace(item.FlowInstance), "/"), scope, item.Type, sqliteNullUUID(item.EventID),
 			sqliteNullString(item.FromAgent), normalizeMailboxSeverity(item.Priority), sqliteNullString(item.Summary), string(item.Context),
 			status, sqliteNullString(decision), sqliteNullString(item.DecisionNotes), item.Notified, sqliteNullTime(item.TimeoutAt), strings.TrimSpace(item.ReplyContextID), time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		_, err = channeldelivery.PlanNoticeTx(txctx, tx, item.ID, false)
 		return err
 	}); err != nil {
 		return "", fmt.Errorf("insert sqlite mailbox item: %w", err)
