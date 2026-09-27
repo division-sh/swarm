@@ -193,6 +193,7 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 		publication := eventBusCommitPublishPlan{bus: eb, event: intent.Event, admitted: admitted, prospective: prospective}
 		if member != nil {
 			publication.outputConsumers = member.outputConsumers
+			publication.topologySource = member.topologySource
 			claim := member.claim
 			if claim.EventID() != intent.Event.ID() {
 				release()

@@ -156,6 +156,56 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	}
 }
 
+func TestRouteTopologyPublicationGroupSharesCompilationButRereadsCurrentTopology(t *testing.T) {
+	source, eb := topologyOperationFixture(t)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eb.routeTable = table
+	lister := &topologyOperationDescriptors{}
+	eb.durable.ActiveFlows = lister
+	scope := new(routeTopologyCompilationScope)
+	source.censuses.Store(0)
+	for _, id := range []string{"alpha", "beta", "gamma"} {
+		plan := runtimepipeline.FlowInstanceActivationPlan{
+			Identity:  runtimeflowidentity.Derive(source, "workers", id),
+			Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
+		}
+		sets, err := eb.prepareFlowInstanceActivationRouteTopologyWithSource(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}, scope)
+		if err != nil || len(sets) != 1 {
+			t.Fatalf("prepare grouped route %s: sets=%d err=%v", id, len(sets), err)
+		}
+	}
+	if source.censuses.Load() != 1 || lister.scopedCalls != 3 {
+		t.Fatalf("grouped source and descriptor reads: censuses=%d scoped=%d", source.censuses.Load(), lister.scopedCalls)
+	}
+	first := scope.compiled
+	table, err = DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eb.routeTable = table
+	source.censuses.Store(0)
+	plan := runtimepipeline.FlowInstanceActivationPlan{
+		Identity:  runtimeflowidentity.Derive(source, "workers", "delta"),
+		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
+	}
+	if _, err := eb.prepareFlowInstanceActivationRouteTopologyWithSource(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}, scope); err != nil {
+		t.Fatal(err)
+	}
+	if scope.compiled == first || source.censuses.Load() != 1 || lister.scopedCalls != 4 {
+		t.Fatalf("route-table replacement reused source evidence or skipped descriptors: same=%t censuses=%d scoped=%d", scope.compiled == first, source.censuses.Load(), lister.scopedCalls)
+	}
+	source.censuses.Store(0)
+	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}); err != nil {
+		t.Fatal(err)
+	}
+	if source.censuses.Load() != 1 || lister.scopedCalls != 5 {
+		t.Fatalf("ordinary publication retained grouped evidence or skipped descriptors: censuses=%d scoped=%d", source.censuses.Load(), lister.scopedCalls)
+	}
+}
+
 func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.T) {
 	source, eb := topologyOperationFixture(t)
 	table, err := DeriveRouteTable(source)

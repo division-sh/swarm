@@ -393,6 +393,7 @@ type eventBusCommitPublishPlan struct {
 	publicationClaim      *pipelinePublicationClaim
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
+	topologySource        *routeTopologyCompilationScope
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -678,7 +679,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		prepared.receiver = receiver
 	}
 	request := prepared.CommitRequest()
-	routeTopology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, routePlan.ActivationPlans)
+	routeTopology, err := eb.prepareFlowInstanceActivationRouteTopologyWithSource(ctx, routePlan.ActivationPlans, publication.topologySource)
 	if err != nil {
 		return releaseFailure(err)
 	}
@@ -694,9 +695,38 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}, nil
 }
 
+type routeTopologyCompilationScope struct {
+	compiled *routeTopologyCompiledSource
+}
+
+type routeTopologyCompiledSource struct {
+	table          *RouteTable
+	graph          runtimepinrouting.CompiledConnectGraph
+	inputProducers runtimepinrouting.FlowInputProducerResolver
+}
+
+func (scope *routeTopologyCompilationScope) forTable(table *RouteTable) (runtimepinrouting.CompiledConnectGraph, runtimepinrouting.FlowInputProducerResolver) {
+	if scope == nil {
+		return runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+	}
+	if scope.compiled == nil || scope.compiled.table != table {
+		graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+		scope.compiled = &routeTopologyCompiledSource{table: table, graph: graph, inputProducers: inputProducers}
+	}
+	return scope.compiled.graph, scope.compiled.inputProducers
+}
+
 func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 	ctx context.Context,
 	plans []runtimepipeline.FlowInstanceActivationPlan,
+) ([]FlowInstanceRouteRecordSet, error) {
+	return eb.prepareFlowInstanceActivationRouteTopologyWithSource(ctx, plans, nil)
+}
+
+func (eb *EventBus) prepareFlowInstanceActivationRouteTopologyWithSource(
+	ctx context.Context,
+	plans []runtimepipeline.FlowInstanceActivationPlan,
+	source *routeTopologyCompilationScope,
 ) ([]FlowInstanceRouteRecordSet, error) {
 	if len(plans) == 0 {
 		return nil, nil
@@ -708,7 +738,7 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 	if table == nil || lister == nil {
 		return nil, errors.New("flow activation publication requires route topology owners")
 	}
-	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+	graph, inputProducers := source.forTable(table)
 	changedPaths := make([]string, 0, len(plans))
 	for _, plan := range plans {
 		changedPaths = append(changedPaths, plan.Identity.Route().ScopeKey)

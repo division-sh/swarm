@@ -12,10 +12,10 @@ import (
 )
 
 // FlowInputProducerResolver shares compiled evidence only within one topology
-// operation whose source remains unchanged. Do not retain it on a route table
-// or bus, or reuse it after the operation/source changes. Only static producer
-// evidence is memoized; returned evidence is caller-private. Mutable routing
-// state is never captured here.
+// operation, including a bounded publication group, whose source remains
+// unchanged. Do not retain it on a route table or bus, or reuse it after the
+// operation/source changes. Only static producer evidence is memoized; returned
+// evidence is caller-private. Mutable routing state is never captured here.
 type FlowInputProducerResolver struct {
 	graph       CompiledConnectGraph
 	census      semanticview.AuthoredEventEndpointCensus
