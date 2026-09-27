@@ -16638,7 +16638,9 @@ platform_tables:
         increments it even when a later revision restores identical plan bytes. The row retains one exact activation
         attempt ID, its generation-grant reference and accepted plan revision. A current admitted grant may acquire
         an attempt only after the preceding same-process attempt has settled; a different process may reconstruct
-        after exact possession takeover. A new attempt clears physical topology readiness. Changed plans supersede
+        after exact possession takeover. A new attempt preserves a completed marker for the unchanged plan as historical
+        durable topology evidence; an initially pending plan stays pending, and neither marker authorizes current-process
+        publication. Changed plans supersede
         the prior attempt without conferring permission to dispose its process resources; their exact owner settles
         before a same-process successor begins. Retirement validates the retained binding against its original
         generation-grant snapshot inside the settlement transaction, including when that grant is retired. Retirement
