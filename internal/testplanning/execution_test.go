@@ -91,6 +91,15 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 						t.Fatalf("local proof %s did not require %s", id, proof)
 					}
 				}
+				apiCanaries, _ := plan.Unit("local-api-routing-canaries")
+				for _, proof := range []string{
+					"TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores",
+					"TestEventPublishCanonicalClassAndProvenanceReadbackParity",
+				} {
+					if !unitRequires(apiCanaries, proof) || !slices.Equal(apiCanaries.RequiredChildren[proof], []string{"sqlite", "postgres"}) {
+						t.Fatalf("local API proof %s lacks required two-store execution: %+v", proof, apiCanaries)
+					}
+				}
 			}
 			if profile == ProfilePRCommon || profile == ProfileFull {
 				golden, err := plan.Unit("hitl-releasee2e-golden")
