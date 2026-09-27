@@ -21,6 +21,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 	if d == nil || d.store == nil || d.cards == nil {
 		return fmt.Errorf("channel delivery source owners are unavailable")
 	}
+	if err := d.reconcileCardChanges(ctx); err != nil {
+		return err
+	}
 	for _, status := range []string{decisioncard.StatusPending, "deferred"} {
 		cursor := ""
 		for {
@@ -109,6 +112,31 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 		cursor = last
 	}
 	return nil
+}
+
+func (d *serveChannelDeliveryDispatcher) reconcileCardChanges(ctx context.Context) error {
+	cursor, current, err := d.store.CurrentChannelCardChangeCursor(ctx)
+	if err != nil || !current {
+		return err
+	}
+	for {
+		changes, err := d.cards.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{After: cursor, Limit: 200})
+		if err != nil {
+			return err
+		}
+		for _, change := range changes {
+			if change.Sequence <= cursor {
+				return fmt.Errorf("channel card change cursor did not advance")
+			}
+			if err := d.store.PlanChangedChannelCard(ctx, change.Sequence, change.CardID); err != nil {
+				return fmt.Errorf("plan channel card change %d: %w", change.Sequence, err)
+			}
+			cursor = change.Sequence
+		}
+		if len(changes) < 200 {
+			return nil
+		}
+	}
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Context) error {
