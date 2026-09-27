@@ -1978,13 +1978,20 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if settlement.Authority.Valid() {
+			if settlement.Authority.Kind == runtimeeffects.AuthorityChannelDelivery {
+				if err := requireChannelDeliverySettlementAuthorityTx(txctx, tx, settlement, true); err != nil {
+					return err
+				}
+			} else if settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}
 			}
 			changed, err := settleExternalAttemptPostgres(txctx, tx, settlement)
 			if err != nil {
+				return err
+			}
+			if err := projectChannelDeliverySettlementTx(txctx, tx, settlement, true); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, settlement.AttemptID); err != nil {
@@ -2023,13 +2030,20 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle external attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			if settlement.Authority.Valid() {
+			if settlement.Authority.Kind == runtimeeffects.AuthorityChannelDelivery {
+				if err := requireChannelDeliverySettlementAuthorityTx(txctx, tx, settlement, false); err != nil {
+					return err
+				}
+			} else if settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}
 			}
 			changed, err := settleExternalAttemptSQLiteTx(txctx, tx, settlement)
 			if err != nil {
+				return err
+			}
+			if err := projectChannelDeliverySettlementTx(txctx, tx, settlement, false); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, settlement.AttemptID); err != nil {
