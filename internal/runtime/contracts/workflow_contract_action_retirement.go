@@ -36,6 +36,16 @@ func validateRetiredHandlerActionFields(node *yaml.Node, context string) error {
 		if err != nil {
 			return err
 		}
+		// Failed shape classification leaves mapping-valued keys as possible keyed labels.
+		if context == "rules_unclassified" && key.Value == "condition" {
+			value, err := resolveHandlerRuleYAMLNode(resolved.Content[i+1])
+			if err != nil {
+				return err
+			}
+			if value.Kind != yaml.MappingNode {
+				return retiredHandlerActionFieldError("rules", key.Value)
+			}
+		}
 		if err := retiredHandlerActionFieldError(context, key.Value); err != nil {
 			return err
 		}
