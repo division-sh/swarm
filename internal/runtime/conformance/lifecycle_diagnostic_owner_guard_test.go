@@ -13,17 +13,13 @@ import (
 
 func TestLifecycleDiagnosticAcknowledgmentAndConsumerOwnership(t *testing.T) {
 	snapshot := mustConformanceRepoSnapshot(t, conformanceRepoRoot(t))
-	writes := regexp.MustCompile(`(?i)\bUPDATE\s+agent_lifecycle_diagnostic_outbox\b`)
+	for _, problem := range lifecycleDiagnosticSourceProblems(snapshot) {
+		t.Error(problem)
+	}
 	consumers := make(map[string]int)
 	for _, file := range snapshot.fileList() {
 		if !strings.HasSuffix(file.Path, ".go") || strings.HasSuffix(file.Path, "_test.go") {
 			continue
-		}
-		if bytes.Contains(file.Raw, []byte("MarkAgentLifecycleDiagnosticProjected")) {
-			t.Errorf("standalone lifecycle acknowledgment restored in %s", file.Path)
-		}
-		if writes.Match(file.Raw) && file.Path != "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go" {
-			t.Errorf("lifecycle acknowledgment bypasses exact log transaction: %s", file.Path)
 		}
 		if !bytes.Contains(file.Raw, []byte("projectLifecycleDiagnostics")) {
 			continue
@@ -68,4 +64,21 @@ func TestLifecycleDiagnosticAcknowledgmentAndConsumerOwnership(t *testing.T) {
 	if !reflect.DeepEqual(consumers, want) {
 		t.Fatalf("diagnostic consumer census changed; update execution proof, not only this list:\ngot=%v\nwant=%v", consumers, want)
 	}
+}
+
+func lifecycleDiagnosticSourceProblems(snapshot *conformanceRepoSnapshot) []string {
+	writes := regexp.MustCompile(`(?i)\bUPDATE\s+agent_lifecycle_diagnostic_outbox\b`)
+	var problems []string
+	for _, file := range snapshot.fileList() {
+		if !strings.HasSuffix(file.Path, ".go") || strings.HasSuffix(file.Path, "_test.go") {
+			continue
+		}
+		if bytes.Contains(file.Raw, []byte("MarkAgentLifecycleDiagnosticProjected")) {
+			problems = append(problems, "standalone lifecycle acknowledgment restored in "+file.Path)
+		}
+		if writes.Match(file.Raw) && file.Path != "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go" {
+			problems = append(problems, "lifecycle acknowledgment bypasses exact log transaction: "+file.Path)
+		}
+	}
+	return problems
 }
