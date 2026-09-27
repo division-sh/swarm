@@ -108,6 +108,10 @@ operations:
       user_id: input.member_reference
     output:
       commands: result.commands
+  identify_inbox_address:
+    tool: telegram.read_bot_address
+    output:
+      address_reference: result.address
 events:
   action:
     event: inbound.telegram.callback_action

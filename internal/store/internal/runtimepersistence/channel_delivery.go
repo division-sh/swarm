@@ -129,6 +129,23 @@ func (s *PostgresStore) ResolveCurrentChannelText(ctx context.Context, text oper
 	return resolved, found, err
 }
 
+func (s *PostgresStore) ResolveCurrentNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedNativeEntry{}, false, fmt.Errorf("postgres native inbox store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedNativeEntry{}, false, err
+	}
+	var entry render.ResolvedNativeEntry
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		entry, found, err = channeldelivery.ResolveCurrentNativeInboxEntryTx(txctx, tx, text, true)
+		return err
+	})
+	return entry, found, err
+}
+
 func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
 	if s == nil || s.backend == nil {
 		return false, fmt.Errorf("postgres channel delivery store is unavailable")
@@ -277,6 +294,23 @@ func (s *SQLiteRuntimeStore) ResolveCurrentChannelText(ctx context.Context, text
 		return err
 	})
 	return resolved, found, err
+}
+
+func (s *SQLiteRuntimeStore) ResolveCurrentNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedNativeEntry{}, false, fmt.Errorf("sqlite native inbox store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedNativeEntry{}, false, err
+	}
+	var entry render.ResolvedNativeEntry
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		entry, found, err = channeldelivery.ResolveCurrentNativeInboxEntryTx(txctx, tx, text, false)
+		return err
+	})
+	return entry, found, err
 }
 
 func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
