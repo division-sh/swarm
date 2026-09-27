@@ -92,6 +92,15 @@ func TestInMemoryRotationReceipts(t *testing.T) {
 	}
 	_, err = registry.Rotate(ctx, identity, "owner", metadata)
 	requireRotationRefusal(t, err, RotationSuccessorNotCurrent)
+	otherLease, err := registry.Acquire(ctx, identity, "other-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = registry.Rotate(ctx, identity, "owner", metadata)
+	requireRotationRefusal(t, err, RotationSuccessorNotCurrent)
+	if _, err := registry.ReleaseOutcome(ctx, otherLease); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := registry.Acquire(ctx, identity, "owner"); err != nil {
 		t.Fatal(err)
 	}
