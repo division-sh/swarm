@@ -313,6 +313,41 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						attached.InstallOperationID != setting.InstallOperationID || attached.CurrentConsumerCount != 2 {
 						t.Fatalf("compatible sibling changed physical setting: %#v, %v", attached, err)
 					}
+					reverseRollback := errors.New("rollback reverse native-setting retirement probe")
+					reverseErr := runTx(func(txctx context.Context, tx *sql.Tx) error {
+						query := `UPDATE connected_channel_activations SET status='retired', retirement_reason='test original retirement',
+							retired_at=?, updated_at=? WHERE activation_id=?`
+						if postgres {
+							query = `UPDATE connected_channel_activations SET status='retired', retirement_reason='test original retirement',
+								retired_at=$1, updated_at=$2 WHERE activation_id=$3::uuid`
+						}
+						if _, err := tx.ExecContext(txctx, query, now.Add(3*time.Second), now.Add(3*time.Second), activation.ActivationID); err != nil {
+							return err
+						}
+						if err := channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, postgres); err != nil {
+							return err
+						}
+						query = `SELECT setting.state, COUNT(consumer.activation_id) FROM channel_native_settings setting
+							JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id AND consumer.state='current'
+							WHERE setting.setting_id=? GROUP BY setting.state`
+						if postgres {
+							query = `SELECT setting.state, COUNT(consumer.activation_id) FROM channel_native_settings setting
+								JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id AND consumer.state='current'
+								WHERE setting.setting_id=$1::uuid GROUP BY setting.state`
+						}
+						var state string
+						var consumers int
+						if err := tx.QueryRowContext(txctx, query, setting.SettingID).Scan(&state, &consumers); err != nil {
+							return err
+						}
+						if state != setting.State || consumers != 1 {
+							return fmt.Errorf("retiring original changed sibling setting: %s, %d consumers", state, consumers)
+						}
+						return reverseRollback
+					})
+					if !errors.Is(reverseErr, reverseRollback) {
+						t.Fatalf("reverse native-setting retirement = %v", reverseErr)
+					}
 					err = runTx(func(txctx context.Context, tx *sql.Tx) error {
 						query := `UPDATE connected_channel_activations SET status='retired', retirement_reason='test sibling retirement',
 							retired_at=?, updated_at=? WHERE activation_id=?`
