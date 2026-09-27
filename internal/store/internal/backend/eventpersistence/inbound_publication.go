@@ -15,6 +15,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
+	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
@@ -78,6 +79,12 @@ func commitInboundPublicationSQL(
 			return runtimeinbound.CommitResult{}, fmt.Errorf("operator channel claim settlement did not consume claim")
 		}
 		settledClaim = &settlement
+	}
+	if command.OperatorChannelAction != nil {
+		_, postgres := any(eventStore).(*EventPostgresOwner)
+		if err := storechanneldelivery.InsertActionIntentTx(ctx, tx, *command.OperatorChannelAction, request.OriginalReceivedAt, postgres); err != nil {
+			return runtimeinbound.CommitResult{}, err
+		}
 	}
 	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
