@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -82,6 +84,56 @@ func (d *serveChannelDeliveryDispatcher) processCardAction(ctx context.Context, 
 		return channelCardActionResult{}, err
 	}
 	return channelCardActionResult{Response: response, Replayed: replayed}, nil
+}
+
+func (d *serveChannelDeliveryDispatcher) processNoticeAction(ctx context.Context, pending runtimechanneldelivery.PendingAction,
+	resolved runtimechanneldelivery.ResolvedAction) error {
+	if d == nil || d.store == nil || d.activations == nil || d.manager == nil ||
+		resolved.SourceKind != "notice" || resolved.Action.Kind != "acknowledge_notice" {
+		return fmt.Errorf("channel notice acknowledgment owners or action are invalid")
+	}
+	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return err
+	}
+	var selected channelonboarding.ConnectedChannelActivation
+	for _, activation := range activations {
+		if activation.ActivationID != resolved.ActivationID {
+			continue
+		}
+		if selected.ActivationID != "" {
+			return fmt.Errorf("channel notice activation identity is duplicated")
+		}
+		selected = activation
+	}
+	if selected.ActivationID == "" || selected.PrincipalID != resolved.PrincipalID ||
+		selected.Revision != resolved.ActivationRevision || selected.BindingRevision != resolved.BindingRevision ||
+		selected.Interface.Key() != pending.Fact.Interface.Key() ||
+		selected.ConversationRef != pending.Fact.ConversationRef {
+		return fmt.Errorf("channel notice activation contradicts verified callback")
+	}
+	use, lookup, err := d.manager.AcquireBundleHash(ctx, selected.Coordinate.BundleHash)
+	if err != nil {
+		return err
+	}
+	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().Bus == nil {
+		return fmt.Errorf("channel notice runtime source is unavailable")
+	}
+	defer use.Done()
+	actionCtx, err := use.Runtime().Bus.AdmitSourceArtifactFact(use.WorkContext())
+	if err != nil {
+		return err
+	}
+	req := apiidempotency.Request{
+		Method: "mailbox.acknowledge", Actor: apiidempotency.PrincipalActor(resolved.PrincipalID),
+		IdempotencyKey: pending.PublicationID, ResourceID: resolved.SourceID,
+		RequestHash: operatorchannel.Hash("channel-notice-ack-v1", pending.PublicationID,
+			pending.Fact.ProviderAuthorization, pending.Fact.Interface.Key(), pending.Fact.Token,
+			resolved.RenderHash, resolved.SourceID),
+		TTL: 24 * time.Hour, Now: pending.ReceivedAt.UTC(),
+	}
+	_, _, err = d.store.AcknowledgeChannelNotice(actionCtx, req, pending.Fact)
+	return err
 }
 
 func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Context, pending runtimechanneldelivery.PendingAction, resolved runtimechanneldelivery.ResolvedAction) error {
@@ -223,7 +275,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		candidate.Audience != prepared.Frozen.Audience {
 		return fmt.Errorf("channel delivery candidate and render are not exact-current")
 	}
-	selectedID := candidate.EntryActivationID
+	selectedID := candidate.RequestActivationID
 	if candidate.SourceKind != "response" {
 		if selectedID != "" {
 			return fmt.Errorf("non-response delivery has entry activation")
