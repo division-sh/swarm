@@ -480,6 +480,9 @@ func TestMixedPubsubConnectCompositionMatchedConnectPreservesLocal(t *testing.T)
 	if persisted.TargetRoute().Empty() == false {
 		t.Fatalf("persisted singular target = %#v, want target_set for two owners", persisted.TargetRoute())
 	}
+	if plans := store.settlements[evt.ID()].Ledger().Plans(); len(plans) != 1 || len(plans[0].Candidates()) != 1 || plans[0].Candidates()[0].Outcome() != events.ConnectCandidateAccepted {
+		t.Fatalf("mixed pubsub/connect candidate ledger = %#v, want one accepted connect candidate alongside the local route", plans)
+	}
 	firstRoutes := append([]events.DeliveryRoute(nil), store.routes[evt.ID()]...)
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("duplicate Publish: %v", err)
@@ -1815,15 +1818,18 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Plans()) != 1 || len(ledger.Plans()[0].Candidates()) != 2 {
-		t.Fatalf("evaluation ledger = %#v, want both considered registrations", ledger)
+	if len(ledger.Plans()) != 1 || len(ledger.Plans()[0].Candidates()) != 1 {
+		t.Fatalf("evaluation ledger = %#v, want only the target-scoped registration", ledger)
 	}
 	outcomes := map[string]events.ConnectCandidateOutcome{}
 	for _, candidate := range ledger.Plans()[0].Candidates() {
 		outcomes[candidate.Recipient().ID()] = candidate.Outcome()
 	}
-	if outcomes[accepted.ID()] != events.ConnectCandidateAccepted || outcomes[unrelated.ID()] != events.ConnectCandidatePathMismatch {
+	if outcomes[accepted.ID()] != events.ConnectCandidateAccepted {
 		t.Fatalf("candidate outcomes = %#v", outcomes)
+	}
+	if _, exists := outcomes[unrelated.ID()]; exists {
+		t.Fatalf("unrelated declaration became target-scoped evidence: %#v", outcomes)
 	}
 }
 
