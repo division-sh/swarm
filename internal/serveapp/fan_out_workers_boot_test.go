@@ -43,7 +43,7 @@ func TestBuildServeRuntimeMapsFanOutWorkers(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			repo := repoRootForTest()
-			root := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 			loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
 				SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
