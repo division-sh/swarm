@@ -24,6 +24,8 @@ type Plan struct {
 	ConversationRef    string
 	ConversationScope  operatorchannel.ConversationScope
 	State              string
+	CurrentRenderID    string
+	CurrentReceiptID   string
 }
 
 const (
@@ -38,18 +40,20 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 		return Plan{}, false, fmt.Errorf("channel delivery plan requires a store and delivery id")
 	}
 	query := `SELECT delivery_id, source_kind, source_id, COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
-		external_account_reference, conversation_reference, conversation_scope, state
+		external_account_reference, conversation_reference, conversation_scope, state,
+		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, '')
 		FROM channel_delivery_plans WHERE delivery_id = ?`
 	if postgres {
 		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
-			external_account_reference, conversation_reference, conversation_scope, state
+			external_account_reference, conversation_reference, conversation_scope, state,
+			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, '')
 			FROM channel_delivery_plans WHERE delivery_id = $1::uuid`
 	}
 	var plan Plan
 	var scope string
 	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.SummaryCount,
 		&plan.PrincipalID, &plan.InterfaceKey, &plan.BindingRevision, &plan.DeliveryEpoch, &plan.ExternalAccountRef,
-		&plan.ConversationRef, &scope, &plan.State)
+		&plan.ConversationRef, &scope, &plan.State, &plan.CurrentRenderID, &plan.CurrentReceiptID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Plan{}, false, nil
 	}
@@ -85,6 +89,12 @@ func (p Plan) Validate() error {
 	case PlanStatePlanned, "rendered", "sent", "uncertain", "retired":
 	default:
 		return fmt.Errorf("stored channel delivery plan state is invalid")
+	}
+	if (p.CurrentRenderID != "" && uuid.Validate(p.CurrentRenderID) != nil) ||
+		(p.CurrentReceiptID != "" && uuid.Validate(p.CurrentReceiptID) != nil) ||
+		(p.State == "rendered" && p.CurrentRenderID == "") ||
+		(p.State == "sent" && p.CurrentReceiptID == "") {
+		return fmt.Errorf("stored channel delivery plan pointers are invalid")
 	}
 	return nil
 }
