@@ -205,12 +205,12 @@ func insertPlanTx(ctx context.Context, tx *sql.Tx, kind, sourceID string, select
 	query := `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, principal_id,
 		interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
 		conversation_scope, state, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?)
-		ON CONFLICT (source_kind, source_id, interface_key, delivery_epoch) DO NOTHING`
+		ON CONFLICT (source_kind, source_id, interface_key, delivery_epoch, resend_generation) DO NOTHING`
 	if postgres {
 		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, principal_id,
 			interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
 			conversation_scope, state, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'planned', $11)
-			ON CONFLICT (source_kind, source_id, interface_key, delivery_epoch) DO NOTHING`
+			ON CONFLICT (source_kind, source_id, interface_key, delivery_epoch, resend_generation) DO NOTHING`
 	}
 	result, err := tx.ExecContext(ctx, query, uuid.NewString(), kind, sourceID, selected.PrincipalID, selected.InterfaceKey,
 		selected.BindingRevision, selected.DeliveryEpoch, selected.ExternalAccountRef, selected.ConversationRef,
@@ -229,10 +229,10 @@ func insertPlanTx(ctx context.Context, tx *sql.Tx, kind, sourceID string, select
 		return false, fmt.Errorf("channel delivery plan insert affected %d rows", rows)
 	}
 	query = `SELECT principal_id, external_account_reference, conversation_reference, conversation_scope
-		FROM channel_delivery_plans WHERE source_kind = ? AND source_id = ? AND interface_key = ? AND delivery_epoch = ?`
+		FROM channel_delivery_plans WHERE source_kind = ? AND source_id = ? AND interface_key = ? AND delivery_epoch = ? AND resend_generation = 0`
 	if postgres {
 		query = `SELECT principal_id::text, external_account_reference, conversation_reference, conversation_scope
-			FROM channel_delivery_plans WHERE source_kind = $1 AND source_id = $2::uuid AND interface_key = $3 AND delivery_epoch = $4`
+			FROM channel_delivery_plans WHERE source_kind = $1 AND source_id = $2::uuid AND interface_key = $3 AND delivery_epoch = $4 AND resend_generation = 0`
 	}
 	var principalID, account, conversation, scope string
 	if err := tx.QueryRowContext(ctx, query, kind, sourceID, selected.InterfaceKey, selected.DeliveryEpoch).

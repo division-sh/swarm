@@ -29,6 +29,7 @@ type selectedChannelDeliveryTestStore interface {
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (render.ResolvedAction, bool, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (render.ResolvedText, bool, error)
+	ListCurrentChannelInputDrafts(context.Context, operatorchannel.InboundText, time.Time, string, int) ([]render.InputDraftCandidate, string, error)
 	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)

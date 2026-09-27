@@ -87,7 +87,37 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 				return channeldelivery.Frozen{}, fmt.Errorf("load exact card dispatch state: %w", err)
 			}
 		}
-		return channeldelivery.FreezeCard(card, revision, dispatch, audience)
+		prompt := channeldelivery.DraftPrompt{}
+		if card.Status == decisioncard.StatusPending {
+			query = `SELECT input_draft_id, verdict, next_field_index, expires_at
+				FROM decision_card_input_drafts WHERE card_id=? AND principal_id=? AND status='active' LIMIT 2`
+			if postgres {
+				query = `SELECT input_draft_id::text, verdict, next_field_index, expires_at
+					FROM decision_card_input_drafts WHERE card_id=$1::uuid AND principal_id=$2 AND status='active' LIMIT 2`
+			}
+			rows, err := tx.QueryContext(ctx, query, plan.SourceID, plan.PrincipalID)
+			if err != nil {
+				return channeldelivery.Frozen{}, err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				if prompt.DraftID != "" {
+					return channeldelivery.Frozen{}, fmt.Errorf("card has multiple active channel input drafts")
+				}
+				var expires any
+				if err := rows.Scan(&prompt.DraftID, &prompt.Verdict, &prompt.NextFieldIndex, &expires); err != nil {
+					return channeldelivery.Frozen{}, err
+				}
+				prompt.ExpiresAt, err = decodeActionTime(expires)
+				if err != nil {
+					return channeldelivery.Frozen{}, err
+				}
+			}
+			if err := rows.Err(); err != nil {
+				return channeldelivery.Frozen{}, err
+			}
+		}
+		return channeldelivery.FreezeCard(card, revision, dispatch, audience, prompt)
 	default:
 		return channeldelivery.Frozen{}, fmt.Errorf("unsupported channel render source %q", plan.SourceKind)
 	}

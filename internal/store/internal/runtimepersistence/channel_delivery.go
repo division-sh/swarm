@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
@@ -208,6 +210,141 @@ func (s *PostgresStore) ResolveCurrentChannelText(ctx context.Context, text oper
 	return resolved, found, err
 }
 
+func (s *PostgresStore) HasCurrentChannelInputDraft(ctx context.Context, text operatorchannel.InboundText, at time.Time) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, fmt.Errorf("postgres channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		found, err = channeldelivery.HasCurrentBareInputDraftTx(txctx, tx, text, at, true)
+		return err
+	})
+	return found, err
+}
+
+func (s *PostgresStore) ListCurrentChannelInputDrafts(ctx context.Context, text operatorchannel.InboundText, at time.Time, cursor string, limit int) ([]render.InputDraftCandidate, string, error) {
+	if s == nil || s.backend == nil {
+		return nil, "", fmt.Errorf("postgres channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, "", err
+	}
+	var drafts []render.InputDraftCandidate
+	var next string
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		drafts, next, err = channeldelivery.ListCurrentInputDraftsTx(txctx, tx, text, at, cursor, limit, true, true)
+		return err
+	})
+	return drafts, next, err
+}
+
+func (s *PostgresStore) PreviewCurrentChannelInputDraftText(ctx context.Context, text operatorchannel.InboundText, at time.Time, draftID string) (decisioncard.InputFieldProgress, string, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, "", fmt.Errorf("postgres channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, "", err
+	}
+	var progress decisioncard.InputFieldProgress
+	var principalID string
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, principalID, err = channeldelivery.PreviewCurrentInputDraftTextTx(txctx, tx, text, at, draftID, true)
+		return err
+	})
+	return progress, principalID, err
+}
+
+func (s *PostgresStore) AdvancePartialChannelInputDraftText(ctx context.Context, text operatorchannel.InboundText, at time.Time, draftID string) (decisioncard.InputFieldProgress, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, fmt.Errorf("postgres channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	var progress decisioncard.InputFieldProgress
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, err = channeldelivery.AdvancePartialInputDraftTextTx(txctx, tx, text, at, draftID, true)
+		return err
+	})
+	return progress, err
+}
+
+func (s *PostgresStore) PreviewChosenChannelInputDraftText(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.InputDraftCandidate, render.PendingText, decisioncard.InputFieldProgress, string, error) {
+	if s == nil || s.backend == nil {
+		return render.InputDraftCandidate{}, render.PendingText{}, decisioncard.InputFieldProgress{}, "", fmt.Errorf("postgres chosen input store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.InputDraftCandidate{}, render.PendingText{}, decisioncard.InputFieldProgress{}, "", err
+	}
+	var candidate render.InputDraftCandidate
+	var text render.PendingText
+	var progress decisioncard.InputFieldProgress
+	var principalID string
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		candidate, text, progress, principalID, err = channeldelivery.PreviewChosenInputDraftTextTx(txctx, tx, action, at, true)
+		return err
+	})
+	return candidate, text, progress, principalID, err
+}
+
+func (s *PostgresStore) AdvancePartialChosenChannelInputDraftText(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (decisioncard.InputFieldProgress, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, fmt.Errorf("postgres chosen input store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	var progress decisioncard.InputFieldProgress
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, err = channeldelivery.AdvancePartialChosenInputDraftTextTx(txctx, tx, action, at, true)
+		return err
+	})
+	return progress, err
+}
+
+func (s *PostgresStore) PreviewChannelInputSkip(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.ResolvedAction, decisioncard.InputFieldProgress, decisioncard.InputDraft, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, fmt.Errorf("postgres channel skip store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, err
+	}
+	var resolved render.ResolvedAction
+	var progress decisioncard.InputFieldProgress
+	var draft decisioncard.InputDraft
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		resolved, progress, draft, err = channeldelivery.RequireCurrentSkipActionTx(txctx, tx, action, at, false, true)
+		return err
+	})
+	return resolved, progress, draft, err
+}
+
+func (s *PostgresStore) AdvancePartialChannelInputSkip(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (decisioncard.InputFieldProgress, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, fmt.Errorf("postgres channel skip store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	var progress decisioncard.InputFieldProgress
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, err = channeldelivery.AdvancePartialSkipActionTx(txctx, tx, action, at, true)
+		return err
+	})
+	return progress, err
+}
+
 func (s *PostgresStore) ResolveCurrentNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error) {
 	if s == nil || s.backend == nil {
 		return render.ResolvedNativeEntry{}, false, fmt.Errorf("postgres native inbox store is unavailable")
@@ -241,6 +378,38 @@ func (s *PostgresStore) PlanNativeInboxResponse(ctx context.Context, text operat
 	return deliveryID, err
 }
 
+func (s *PostgresStore) PlanChannelTextResponse(ctx context.Context, text operatorchannel.InboundText, fullText, disposition string) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("postgres channel text response store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanTextResponseTx(txctx, tx, text, fullText, disposition, true)
+		return err
+	})
+	return deliveryID, err
+}
+
+func (s *PostgresStore) PlanChannelDraftChooser(ctx context.Context, text operatorchannel.InboundText, at time.Time) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("postgres channel draft chooser store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanDraftChooserTx(txctx, tx, text, at, true)
+		return err
+	})
+	return deliveryID, err
+}
+
 func (s *PostgresStore) PlanChannelActionResponse(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string) (string, error) {
 	if s == nil || s.backend == nil {
 		return "", fmt.Errorf("postgres channel response store is unavailable")
@@ -252,6 +421,22 @@ func (s *PostgresStore) PlanChannelActionResponse(ctx context.Context, action op
 	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		deliveryID, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, true)
+		return err
+	})
+	return deliveryID, err
+}
+
+func (s *PostgresStore) PlanManualChannelResend(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("postgres manual channel resend store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanManualResendTx(txctx, tx, action, resolved, true)
 		return err
 	})
 	return deliveryID, err
@@ -437,6 +622,141 @@ func (s *SQLiteRuntimeStore) ResolveCurrentChannelText(ctx context.Context, text
 	return resolved, found, err
 }
 
+func (s *SQLiteRuntimeStore) HasCurrentChannelInputDraft(ctx context.Context, text operatorchannel.InboundText, at time.Time) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, fmt.Errorf("sqlite channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		found, err = channeldelivery.HasCurrentBareInputDraftTx(txctx, tx, text, at, false)
+		return err
+	})
+	return found, err
+}
+
+func (s *SQLiteRuntimeStore) ListCurrentChannelInputDrafts(ctx context.Context, text operatorchannel.InboundText, at time.Time, cursor string, limit int) ([]render.InputDraftCandidate, string, error) {
+	if s == nil || s.backend == nil {
+		return nil, "", fmt.Errorf("sqlite channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, "", err
+	}
+	var drafts []render.InputDraftCandidate
+	var next string
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		drafts, next, err = channeldelivery.ListCurrentInputDraftsTx(txctx, tx, text, at, cursor, limit, true, false)
+		return err
+	})
+	return drafts, next, err
+}
+
+func (s *SQLiteRuntimeStore) PreviewCurrentChannelInputDraftText(ctx context.Context, text operatorchannel.InboundText, at time.Time, draftID string) (decisioncard.InputFieldProgress, string, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, "", fmt.Errorf("sqlite channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, "", err
+	}
+	var progress decisioncard.InputFieldProgress
+	var principalID string
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, principalID, err = channeldelivery.PreviewCurrentInputDraftTextTx(txctx, tx, text, at, draftID, false)
+		return err
+	})
+	return progress, principalID, err
+}
+
+func (s *SQLiteRuntimeStore) AdvancePartialChannelInputDraftText(ctx context.Context, text operatorchannel.InboundText, at time.Time, draftID string) (decisioncard.InputFieldProgress, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, fmt.Errorf("sqlite channel input draft store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	var progress decisioncard.InputFieldProgress
+	err := s.backend.RunTransaction(ctx, "advance channel input draft", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, err = channeldelivery.AdvancePartialInputDraftTextTx(txctx, tx, text, at, draftID, false)
+		return err
+	})
+	return progress, err
+}
+
+func (s *SQLiteRuntimeStore) PreviewChosenChannelInputDraftText(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.InputDraftCandidate, render.PendingText, decisioncard.InputFieldProgress, string, error) {
+	if s == nil || s.backend == nil {
+		return render.InputDraftCandidate{}, render.PendingText{}, decisioncard.InputFieldProgress{}, "", fmt.Errorf("sqlite chosen input store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.InputDraftCandidate{}, render.PendingText{}, decisioncard.InputFieldProgress{}, "", err
+	}
+	var candidate render.InputDraftCandidate
+	var text render.PendingText
+	var progress decisioncard.InputFieldProgress
+	var principalID string
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		candidate, text, progress, principalID, err = channeldelivery.PreviewChosenInputDraftTextTx(txctx, tx, action, at, false)
+		return err
+	})
+	return candidate, text, progress, principalID, err
+}
+
+func (s *SQLiteRuntimeStore) AdvancePartialChosenChannelInputDraftText(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (decisioncard.InputFieldProgress, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, fmt.Errorf("sqlite chosen input store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	var progress decisioncard.InputFieldProgress
+	err := s.backend.RunTransaction(ctx, "advance chosen channel input draft", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, err = channeldelivery.AdvancePartialChosenInputDraftTextTx(txctx, tx, action, at, false)
+		return err
+	})
+	return progress, err
+}
+
+func (s *SQLiteRuntimeStore) PreviewChannelInputSkip(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (render.ResolvedAction, decisioncard.InputFieldProgress, decisioncard.InputDraft, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, fmt.Errorf("sqlite channel skip store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, err
+	}
+	var resolved render.ResolvedAction
+	var progress decisioncard.InputFieldProgress
+	var draft decisioncard.InputDraft
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		resolved, progress, draft, err = channeldelivery.RequireCurrentSkipActionTx(txctx, tx, action, at, false, false)
+		return err
+	})
+	return resolved, progress, draft, err
+}
+
+func (s *SQLiteRuntimeStore) AdvancePartialChannelInputSkip(ctx context.Context, action operatorchannel.InboundAction, at time.Time) (decisioncard.InputFieldProgress, error) {
+	if s == nil || s.backend == nil {
+		return decisioncard.InputFieldProgress{}, fmt.Errorf("sqlite channel skip store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return decisioncard.InputFieldProgress{}, err
+	}
+	var progress decisioncard.InputFieldProgress
+	err := s.backend.RunTransaction(ctx, "advance partial channel input skip", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		progress, err = channeldelivery.AdvancePartialSkipActionTx(txctx, tx, action, at, false)
+		return err
+	})
+	return progress, err
+}
+
 func (s *SQLiteRuntimeStore) ResolveCurrentNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error) {
 	if s == nil || s.backend == nil {
 		return render.ResolvedNativeEntry{}, false, fmt.Errorf("sqlite native inbox store is unavailable")
@@ -470,6 +790,38 @@ func (s *SQLiteRuntimeStore) PlanNativeInboxResponse(ctx context.Context, text o
 	return deliveryID, err
 }
 
+func (s *SQLiteRuntimeStore) PlanChannelTextResponse(ctx context.Context, text operatorchannel.InboundText, fullText, disposition string) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("sqlite channel text response store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, "plan channel text response", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanTextResponseTx(txctx, tx, text, fullText, disposition, false)
+		return err
+	})
+	return deliveryID, err
+}
+
+func (s *SQLiteRuntimeStore) PlanChannelDraftChooser(ctx context.Context, text operatorchannel.InboundText, at time.Time) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("sqlite channel draft chooser store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, "plan channel draft chooser", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanDraftChooserTx(txctx, tx, text, at, false)
+		return err
+	})
+	return deliveryID, err
+}
+
 func (s *SQLiteRuntimeStore) PlanChannelActionResponse(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string) (string, error) {
 	if s == nil || s.backend == nil {
 		return "", fmt.Errorf("sqlite channel response store is unavailable")
@@ -481,6 +833,22 @@ func (s *SQLiteRuntimeStore) PlanChannelActionResponse(ctx context.Context, acti
 	err := s.backend.RunTransaction(ctx, "plan channel action response", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		deliveryID, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, false)
+		return err
+	})
+	return deliveryID, err
+}
+
+func (s *SQLiteRuntimeStore) PlanManualChannelResend(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("sqlite manual channel resend store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, "plan manual channel resend", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanManualResendTx(txctx, tx, action, resolved, false)
 		return err
 	})
 	return deliveryID, err
