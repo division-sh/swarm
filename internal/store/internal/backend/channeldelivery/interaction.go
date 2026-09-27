@@ -300,3 +300,47 @@ func SettleAppliedActionIntentTx(ctx context.Context, tx *sql.Tx, action operato
 	}
 	return nil
 }
+
+// SettleUnappliedActionIntentTx records a terminal non-mutation result for one
+// verified callback. It cannot acknowledge a verdict or grant response content.
+func SettleUnappliedActionIntentTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, disposition render.ActionDisposition, postgres bool) error {
+	if disposition != render.ActionStale && disposition != render.ActionRejected && disposition != render.ActionUnsupported {
+		return fmt.Errorf("channel action requires a non-mutation disposition")
+	}
+	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
+	if err != nil {
+		return err
+	}
+	if state == "settled" {
+		query := `SELECT disposition FROM operator_channel_action_intents WHERE publication_id=?`
+		if postgres {
+			query = `SELECT disposition FROM operator_channel_action_intents WHERE publication_id=$1::uuid`
+		}
+		var previous string
+		if err := tx.QueryRowContext(ctx, query, action.PublicationID).Scan(&previous); err != nil {
+			return err
+		}
+		if previous != string(disposition) {
+			return fmt.Errorf("channel action already settled with a different disposition")
+		}
+		return nil
+	}
+	query := `UPDATE operator_channel_action_intents SET state='settled', disposition=?, settled_at=?
+		WHERE publication_id=? AND state='pending'`
+	if postgres {
+		query = `UPDATE operator_channel_action_intents SET state='settled', disposition=$1, settled_at=$2
+			WHERE publication_id=$3::uuid AND state='pending'`
+	}
+	result, err := tx.ExecContext(ctx, query, string(disposition), time.Now().UTC(), action.PublicationID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("channel action non-mutation disposition did not commit")
+	}
+	return nil
+}
