@@ -24,6 +24,7 @@ type flowActivationAttemptTestStore interface {
 	VerifyDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	MarkDynamicFlowRuntimeTopologyReadyForAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt, runtimepipeline.DynamicFlowRuntimeReadinessPlan, time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error)
 	RetireDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
+	AbandonDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 }
 
@@ -120,6 +121,12 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			}
 			if err := selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
 				t.Fatalf("retire committed attempt: %v", err)
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
+				t.Fatalf("repeat orderly retirement: %v", err)
+			}
+			if err := selected.AbandonDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err == nil {
+				t.Fatal("failure disposition replaced settled orderly retirement")
 			}
 			if err := selected.VerifyDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err == nil {
 				t.Fatal("retired attempt retained activation authority")

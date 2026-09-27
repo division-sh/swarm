@@ -5319,7 +5319,7 @@ engine:
         - Timer reconciliation consumes the same current run/instance lifecycle eligibility, source bundle, plan revision, attempt state and admitted grant as activation verification under the timer mutation's own locks. Terminalization, stop, source revision or grant retirement winning first rejects the entire timer insert/cancel/projection transaction; a healthy timer mutation winning first may commit before subsequent lifecycle transition. Caller-side Verify is not transaction authority.
         - 11. One selected-store operation locks the exact run and flow-instance lifecycle rows, verifies the current attempt and admitted grant, reloads the immutable readiness plan, appends the deterministic creation-only event through EventBus `PublishInMutation`, and records `creation_event_emitted_at` in the same transaction. Dispatch occurs only after commit. This operation linearizes with terminalization; when terminalization wins, neither event nor completion exists and terminal-owned agent topology is retired; when creation wins, event and completion commit together before the terminal transition. A failed or cancelled creation commit without terminal evidence retires only this attempt's process projections; it does not terminate still-desired durable agents. Accepted cleanup joins before the attempt is released for another same-process admission.
         - 12. Direct activation, selected-mutation post-commit activation, exact replay / EnsureFlowInstance, the joined manager automatic-retry loop, and startup all consume this same keyed reconciler. Post-commit failure signals that retry owner rather than abandoning durable pending work.
-        - A failed activation which has retired its exact route, agent and timer projections abandons its attempt in the selected store and clears topology readiness for the still-current plan, preserving any already-emitted immutable creation occurrence. It is then pending for the same source-scoped retry owner even if there is no creation event or that occurrence was already emitted. Orderly process retirement after completed topology preserves the historical completion marker for mandatory serving-generation reconstruction, including when recovery is disabled. A crash after durable completion without a local failure disposition likewise reconstructs completed topology; it is not inferred to be an abandoned activation. Retirement and abandonment are distinct named selected-store settlements under the same exact attempt/grant authority; neither can alter a successor slot.
+        - A failed activation which has retired its exact route, agent and timer projections abandons its attempt in the selected store and clears topology readiness for the still-current plan, preserving any already-emitted immutable creation occurrence. It is then pending for the same source-scoped retry owner even if there is no creation event or that occurrence was already emitted. Orderly process retirement after completed topology preserves the historical completion marker for mandatory serving-generation reconstruction, including when recovery is disabled. A crash after durable completion without a local failure disposition likewise reconstructs completed topology; it is not inferred to be an abandoned activation. Retirement and abandonment are distinct, mutually exclusive named selected-store settlements under the same exact attempt/grant authority; same-disposition retries are idempotent, conflicting settlement fails closed, and neither can alter a successor slot.
       parent_route:
         description: Full structural route from the child instance back to the creating parent.
         metadata_fields:
@@ -16638,7 +16638,8 @@ platform_tables:
         increments it even when a later revision restores identical plan bytes. The row retains one exact activation
         attempt ID, its generation-grant reference and accepted plan revision. A current admitted grant may acquire
         an attempt only after the preceding same-process attempt has settled; a different process may reconstruct
-        after exact possession takeover. A new attempt preserves a completed marker for the unchanged plan as historical
+        after exact possession takeover. Orderly retirement records `retired`; failed abandonment records `aborted`.
+        Both are terminal attempt states and reject a conflicting later disposition. A new attempt preserves a completed marker for the unchanged plan as historical
         durable topology evidence; an initially pending plan stays pending, and neither marker authorizes current-process
         publication. Changed plans supersede
         the prior attempt without conferring permission to dispose its process resources; their exact owner settles
@@ -16694,7 +16695,7 @@ platform_tables:
             activation_attempt_id       UUID,
             activation_attempt_grant_id UUID,
             activation_attempt_revision BIGINT,
-            activation_attempt_state    TEXT CHECK (activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')),
+            activation_attempt_state    TEXT CHECK (activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'retired', 'aborted')),
             topology_ready_at           TIMESTAMPTZ,
             creation_event_emitted_at   TIMESTAMPTZ,
             created_at                  TIMESTAMPTZ NOT NULL,
