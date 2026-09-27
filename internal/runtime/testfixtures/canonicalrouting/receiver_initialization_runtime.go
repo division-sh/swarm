@@ -32,8 +32,8 @@ opco.spinup_created:
       emit:
         event: opco.spinup_created
         fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+          instance_id: ${payload.instance_id}
+          product_id: ${payload.product_id}
 `,
 		"operating/schema.yaml": `name: operating
 mode: template
@@ -71,7 +71,7 @@ component_scaffold.spawn_requested:
       emit:
         event: component_scaffold.spawn_requested
         fields:
-          product_id: payload.product_id
+          product_id: ${payload.product_id}
 `,
 	} {
 		writeClosedVariantFile(t, root, path, contents)
@@ -109,8 +109,8 @@ opco.spinup_created:
       emit:
         event: opco.spinup_created
         fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+          instance_id: ${payload.instance_id}
+          product_id: ${payload.product_id}
 `,
 		"operating/schema.yaml": `name: operating
 mode: template
