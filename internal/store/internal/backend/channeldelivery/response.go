@@ -8,6 +8,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	"github.com/google/uuid"
 )
 
@@ -41,7 +43,16 @@ func PlanNativeInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorcha
 		DeliveryEpoch: selected.DeliveryEpoch, ExternalAccountRef: text.ExternalAccountRef,
 		ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
 	}
-	frozen, err := render.FreezeResponse(text.PublicationID, fullText, audience)
+	recovery, err := ListActionableUncertainTx(ctx, tx, selected, postgres)
+	if err != nil {
+		return "", err
+	}
+	var frozen render.Frozen
+	if len(recovery) == 0 {
+		frozen, err = render.FreezeResponse(text.PublicationID, fullText, audience)
+	} else {
+		frozen, err = render.FreezeRecoveryInbox(text.PublicationID, fullText, recovery, 0, audience)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -68,6 +79,126 @@ func PlanNativeInboxResponseTx(ctx context.Context, tx *sql.Tx, text operatorcha
 		return "", fmt.Errorf("native inbox intent was not settled with its response")
 	}
 	return deliveryID, nil
+}
+
+// PlanTextResponseTx records a non-sensitive response to a verified ordinary
+// text occurrence. It does not grant card, draft, or resend authority.
+func PlanTextResponseTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText,
+	fullText, disposition string, postgres bool) (string, error) {
+	if tx == nil || text.EntryReference != "" || (disposition != "teaching" && disposition != "chooser") {
+		return "", fmt.Errorf("channel text response requires verified ordinary text and a response disposition")
+	}
+	activationID, bindingRevision, audience, err := currentTextResponseAudienceTx(ctx, tx, text, postgres)
+	if err != nil {
+		return "", err
+	}
+	frozen, err := render.FreezeResponse(text.PublicationID, fullText, audience)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	deliveryID, err := insertResponsePlanTx(ctx, tx, frozen, activationID, bindingRevision, now, postgres)
+	if err != nil {
+		return "", err
+	}
+	if err := SettleTextIntentTx(ctx, tx, text, disposition, postgres); err != nil {
+		return "", err
+	}
+	return deliveryID, nil
+}
+
+func PlanDraftChooserTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, at time.Time, postgres bool) (string, error) {
+	if tx == nil || at.IsZero() || text.EntryReference != "" {
+		return "", fmt.Errorf("draft chooser requires a verified ordinary text occurrence")
+	}
+	activationID, bindingRevision, audience, err := currentTextResponseAudienceTx(ctx, tx, text, postgres)
+	if err != nil {
+		return "", err
+	}
+	choices := make([]render.DraftChoice, 0)
+	cursor := ""
+	for {
+		candidates, next, err := ListCurrentInputDraftsTx(ctx, tx, text, at, cursor, 200, true, postgres)
+		if err != nil {
+			return "", err
+		}
+		for _, candidate := range candidates {
+			card, err := decisionpersistence.LoadDecisionCardInTx(ctx, tx, candidate.CardID, postgres)
+			if err != nil {
+				return "", err
+			}
+			if card.Status != decisioncard.StatusPending {
+				return "", fmt.Errorf("draft chooser card is no longer pending")
+			}
+			label := card.Snapshot.Title
+			if label == "" {
+				label = card.Snapshot.Decision
+			}
+			label = render.DraftChoiceLabel(label, candidate.CardID)
+			choices = append(choices, render.DraftChoice{DraftID: candidate.DraftID, CardID: candidate.CardID, Label: label})
+		}
+		if next == "" {
+			break
+		}
+		if next == cursor {
+			return "", fmt.Errorf("channel draft chooser cursor did not advance")
+		}
+		cursor = next
+	}
+	if len(choices) < 2 {
+		return "", fmt.Errorf("draft chooser no longer has multiple current prompts")
+	}
+	frozen, err := render.FreezeDraftChooser(text.PublicationID, text.PublicationID, choices, 0, audience)
+	if err != nil {
+		return "", err
+	}
+	deliveryID, err := insertResponsePlanTx(ctx, tx, frozen, activationID, bindingRevision, time.Now().UTC(), postgres)
+	if err != nil {
+		return "", err
+	}
+	if err := SettleTextIntentTx(ctx, tx, text, "chooser", postgres); err != nil {
+		return "", err
+	}
+	return deliveryID, nil
+}
+
+func currentTextResponseAudienceTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (string, int64, render.Audience, error) {
+	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
+		return "", 0, render.Audience{}, err
+	}
+	resolved, current, err := ResolveCurrentTextTx(ctx, tx, text, postgres)
+	if err != nil {
+		return "", 0, render.Audience{}, err
+	}
+	if !current {
+		return "", 0, render.Audience{}, fmt.Errorf("channel text response has no current binding")
+	}
+	if err := LockPrincipalTx(ctx, tx, resolved.PrincipalID, postgres); err != nil {
+		return "", 0, render.Audience{}, err
+	}
+	selected, found, err := LoadDefault(ctx, tx, postgres)
+	if err != nil {
+		return "", 0, render.Audience{}, err
+	}
+	if !found || selected.State != StateCurrent || selected.PrincipalID != resolved.PrincipalID ||
+		selected.InterfaceKey != resolved.InterfaceKey || selected.BindingRevision != resolved.BindingRevision ||
+		selected.ExternalAccountRef != text.ExternalAccountRef || selected.ConversationRef != text.ConversationRef ||
+		selected.ConversationScope != text.ConversationScope {
+		return "", 0, render.Audience{}, fmt.Errorf("channel text response destination is no longer current")
+	}
+	activationID, found, err := CurrentActivationID(ctx, tx, postgres)
+	if err != nil {
+		return "", 0, render.Audience{}, err
+	}
+	if !found {
+		return "", 0, render.Audience{}, fmt.Errorf("channel text response has no current activation")
+	}
+	audience := render.Audience{
+		PrincipalID: selected.PrincipalID, InterfaceKey: selected.InterfaceKey,
+		DeliveryEpoch: selected.DeliveryEpoch, ExternalAccountRef: selected.ExternalAccountRef,
+		ConversationRef: selected.ConversationRef, ConversationScope: selected.ConversationScope,
+	}
+	return activationID, selected.BindingRevision, audience, nil
 }
 
 func insertResponsePlanTx(ctx context.Context, tx *sql.Tx, frozen render.Frozen, activationID string, bindingRevision int64, now time.Time, postgres bool) (string, error) {
@@ -134,15 +265,15 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 		return "", err
 	}
 	if !found || selected.State != StateCurrent || selected.PrincipalID != resolved.PrincipalID ||
-		selected.BindingRevision != resolved.BindingRevision || selected.InterfaceKey != action.Interface.Key() ||
-		selected.ExternalAccountRef != action.ExternalAccountRef || selected.ConversationRef != action.ConversationRef ||
-		selected.ConversationScope != action.ConversationScope {
+		(resolved.SourceKind != PlanResponse && (selected.BindingRevision != resolved.BindingRevision ||
+			selected.InterfaceKey != action.Interface.Key() || selected.ExternalAccountRef != action.ExternalAccountRef ||
+			selected.ConversationRef != action.ConversationRef || selected.ConversationScope != action.ConversationScope)) {
 		return "", fmt.Errorf("channel navigation destination is no longer current")
 	}
 	audience := render.Audience{
-		PrincipalID: resolved.PrincipalID, InterfaceKey: selected.InterfaceKey,
-		DeliveryEpoch: selected.DeliveryEpoch, ExternalAccountRef: selected.ExternalAccountRef,
-		ConversationRef: selected.ConversationRef, ConversationScope: selected.ConversationScope,
+		PrincipalID: resolved.PrincipalID, InterfaceKey: action.Interface.Key(),
+		DeliveryEpoch: selected.DeliveryEpoch, ExternalAccountRef: action.ExternalAccountRef,
+		ConversationRef: action.ConversationRef, ConversationScope: action.ConversationScope,
 	}
 	var frozen render.Frozen
 	switch resolved.Action.Kind {
@@ -183,6 +314,45 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 			return "", fmt.Errorf("view-full page audience changed")
 		}
 		frozen, err = render.FreezeResponsePage(action.PublicationID, source, sourceRenderID, index, audience)
+	case "next_draft_page":
+		if inboxText != "" {
+			return "", fmt.Errorf("draft chooser page cannot receive caller content")
+		}
+		stored, current, loadErr := LoadRender(ctx, tx, resolved.RenderID, postgres)
+		if loadErr != nil {
+			return "", loadErr
+		}
+		if !current || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.Audience != audience ||
+			stored.Frozen.DraftChooser == nil {
+			return "", fmt.Errorf("draft chooser page lacks current immutable source")
+		}
+		chooser := stored.Frozen.DraftChooser
+		frozen, err = render.FreezeDraftChooser(action.PublicationID, chooser.TextPublicationID,
+			stored.Frozen.DraftChoices, chooser.PageIndex+1, audience)
+	case "next_recovery_page":
+		if inboxText != "" {
+			return "", fmt.Errorf("recovery page cannot receive caller content")
+		}
+		stored, current, loadErr := LoadRender(ctx, tx, resolved.RenderID, postgres)
+		if loadErr != nil {
+			return "", loadErr
+		}
+		if !current || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.Audience != audience ||
+			stored.Frozen.Recovery == nil {
+			return "", fmt.Errorf("recovery page lacks current immutable source")
+		}
+		recovery := stored.Frozen.Recovery
+		frozen, err = render.FreezeRecoveryInbox(action.PublicationID, recovery.BaseText,
+			stored.Frozen.RecoveryChoices, recovery.PageIndex+1, audience)
+	case "select_draft":
+		if inboxText != "" {
+			return "", fmt.Errorf("draft choice teaching cannot receive caller content")
+		}
+		if _, _, _, err = RequireChosenInputDraftTx(ctx, tx, action, time.Now().UTC(), true, postgres); err != nil {
+			return "", err
+		}
+		frozen, err = render.FreezeResponse(action.PublicationID,
+			"That answer does not match the requested field. Reply with a value of the required type, or use the card controls.", audience)
 	default:
 		return "", fmt.Errorf("unsupported channel navigation action %q", resolved.Action.Kind)
 	}
