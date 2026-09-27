@@ -27,6 +27,7 @@ type selectedChannelDeliveryTestStore interface {
 	InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error)
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (render.ResolvedAction, bool, error)
+	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (render.ResolvedText, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)
 	FreezeAndPersistChannelRender(context.Context, string) (render.PreparedRender, error)
@@ -222,6 +223,23 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if err != nil || !found || selectedActivationID != activation.ActivationID {
 					t.Fatalf("selected activation = %s, found=%t err=%v", selectedActivationID, found, err)
 				}
+				textFact := operatorchannel.InboundText{
+					TextFact: operatorchannel.TextFact{Interface: binding.Interface, ExternalAccountRef: "account",
+						ConversationRef: activation.ConversationRef, ConversationScope: conversationScope,
+						Text: "open inbox", MessageReference: `{"id":12}`},
+					Provider: activation.Provider, ProviderEventID: "text-12", PublicationID: uuid.NewString(),
+					ProviderAuthorization: "verified-text-auth",
+				}
+				resolvedText, foundText, err := selected.ResolveCurrentChannelText(ctx, textFact)
+				if err != nil || !foundText || resolvedText.PrincipalID != principal.ID ||
+					resolvedText.InterfaceKey != binding.Interface.Key() || resolvedText.BindingRevision != binding.Revision {
+					t.Fatalf("current selected channel text = %#v, found=%t err=%v", resolvedText, foundText, err)
+				}
+				foreignText := textFact
+				foreignText.ExternalAccountRef = "another-account"
+				if _, found, err := selected.ResolveCurrentChannelText(ctx, foreignText); err != nil || found {
+					t.Fatalf("foreign selected channel text = found:%t err:%v", found, err)
+				}
 				native := selected.(channelnative.Store)
 				entryContractHash, err := channelnative.EntryContractHash(activation.Coordinate.PlanGeneration)
 				if err != nil {
@@ -384,6 +402,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 					if current(nativeAuthority) {
 						t.Fatal("retired binding admitted predecessor native setting")
+					}
+					if _, found, err := selected.ResolveCurrentChannelText(ctx, textFact); err != nil || found {
+						t.Fatalf("retired binding admitted predecessor text: found=%t err=%v", found, err)
 					}
 					if err := native.RetireStaleNativeInboxConsumers(ctx); err != nil {
 						t.Fatal(err)
