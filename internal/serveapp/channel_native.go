@@ -91,11 +91,11 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	if setting.State == "uncertain" || setting.State == "unavailable" || setting.State == "retired" {
 		return fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State)
 	}
-	observed, err := d.readNativeInboxCommands(ctx, compiled.Plan, activation.CredentialAdmissions)
+	observed, err := d.readNativeInboxCommands(ctx, compiled.Plan, activation.CredentialAdmissions, setting)
 	if err != nil {
 		return err
 	}
-	desired, err := channelnative.DesiredCommands()
+	desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
 	if err != nil {
 		return err
 	}
@@ -120,12 +120,57 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	return d.installNativeInboxCommands(ctx, activation, compiled.Plan, setting)
 }
 
-func (d *serveChannelDeliveryDispatcher) readNativeInboxCommands(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission) ([]byte, error) {
-	_, input, err := plan.PrepareOperation("read_inbox_entry", map[string]any{})
+func nativeInboxOperation(scopeKind, action string) (string, error) {
+	if scopeKind != "chat" && scopeKind != "chat_member" {
+		return "", fmt.Errorf("native inbox scope is unsupported")
+	}
+	if action != "read" && action != "install" {
+		return "", fmt.Errorf("native inbox operation is unsupported")
+	}
+	if scopeKind == "chat_member" {
+		return action + "_shared_inbox_entry", nil
+	}
+	return action + "_inbox_entry", nil
+}
+
+func nativeInboxInput(setting channelnative.Setting, includeCommands bool) (map[string]any, error) {
+	input := map[string]any{}
+	if setting.ScopeKind == "chat_member" {
+		if setting.MemberReference == "" {
+			return nil, fmt.Errorf("shared native inbox scope lacks member reference")
+		}
+		input["member_reference"] = setting.MemberReference
+	} else if setting.ScopeKind != "chat" || setting.MemberReference != "" {
+		return nil, fmt.Errorf("native inbox setting scope contradicts member reference")
+	}
+	if includeCommands {
+		desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
+		if err != nil {
+			return nil, err
+		}
+		var commands []map[string]string
+		if err := json.Unmarshal(desired, &commands); err != nil {
+			return nil, err
+		}
+		input["commands"] = commands
+	}
+	return input, nil
+}
+
+func (d *serveChannelDeliveryDispatcher) readNativeInboxCommands(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission, setting channelnative.Setting) ([]byte, error) {
+	operation, err := nativeInboxOperation(setting.ScopeKind, "read")
 	if err != nil {
 		return nil, err
 	}
-	toolID, tool, err := plan.ConnectorOperation("read_inbox_entry")
+	semanticInput, err := nativeInboxInput(setting, false)
+	if err != nil {
+		return nil, err
+	}
+	_, input, err := plan.PrepareOperation(operation, semanticInput)
+	if err != nil {
+		return nil, err
+	}
+	toolID, tool, err := plan.ConnectorOperation(operation)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +182,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxCommands(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	projected, err := plan.ProjectOperationOutput("read_inbox_entry", output)
+	projected, err := plan.ProjectOperationOutput(operation, output)
 	if err != nil {
 		return nil, err
 	}
@@ -149,19 +194,23 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxCommands(ctx context.Con
 }
 
 func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.Context, activation channelonboarding.ConnectedChannelActivation, plan packs.OutboundBindingPlan, setting channelnative.Setting) error {
-	desired, err := channelnative.DesiredCommands()
+	desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
 	if err != nil {
 		return err
 	}
-	var commands []map[string]string
-	if err := json.Unmarshal(desired, &commands); err != nil {
-		return err
-	}
-	_, input, err := plan.PrepareOperation("install_inbox_entry", map[string]any{"commands": commands})
+	operation, err := nativeInboxOperation(setting.ScopeKind, "install")
 	if err != nil {
 		return err
 	}
-	toolID, tool, err := plan.ConnectorOperation("install_inbox_entry")
+	semanticInput, err := nativeInboxInput(setting, true)
+	if err != nil {
+		return err
+	}
+	_, input, err := plan.PrepareOperation(operation, semanticInput)
+	if err != nil {
+		return err
+	}
+	toolID, tool, err := plan.ConnectorOperation(operation)
 	if err != nil {
 		return err
 	}
@@ -176,8 +225,9 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 	bridge := runtimeeffects.ChannelNativeSettingAuthority{
 		EffectOperationID: setting.InstallOperationID, SettingID: setting.SettingID,
 		SettingGeneration: setting.Generation, Provider: setting.Provider, ResourceSlotID: setting.ResourceSlotID,
-		ConversationRef: setting.ConversationRef, PrincipalID: setting.PrincipalID,
-		EntryContractHash: setting.EntryContractHash, PackID: activation.Interface.ChannelPackID,
+		ConversationRef: setting.ConversationRef, ScopeKind: setting.ScopeKind, MemberReference: setting.MemberReference,
+		PrincipalID: setting.PrincipalID, EntryContractHash: setting.EntryContractHash, EntryCommand: setting.EntryCommand,
+		PackID:      activation.Interface.ChannelPackID,
 		PackVersion: activation.Interface.ChannelPackVersion, PackManifestHash: activation.Interface.ChannelManifestHash,
 		ActivationID: activation.ActivationID, ActivationRevision: activation.Revision, BindingRevision: activation.BindingRevision,
 		BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
@@ -189,7 +239,7 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityChannelNativeSetting, ID: setting.InstallOperationID,
 		ExecutionOwner: "channel-native-setting:" + d.runtimeInstanceID,
-		LeaseExpiresAt: now.Add(5 * time.Minute), FenceGeneration: coordinate.ContextPublicationGeneration,
+		LeaseExpiresAt: now.Add(5 * time.Minute), FenceGeneration: uint64(setting.Generation),
 		ExecutionMode: runtimeeffects.ExecutionMode(d.posture.RootMode()), ChannelNativeSetting: bridge,
 	}
 	if !authority.Valid() {
@@ -206,10 +256,10 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 		return applyErr
 	}
 	if applyErr != nil {
-		return fmt.Errorf("native inbox write acknowledgment is uncertain: %w", result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), nil, applyErr))
+		return fmt.Errorf("native inbox write acknowledgment is uncertain: %w", result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), nil, desired, applyErr))
 	}
-	observed, readErr := d.readNativeInboxCommands(ctx, plan, activation.CredentialAdmissions)
-	if err := result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), observed, readErr); err != nil {
+	observed, readErr := d.readNativeInboxCommands(ctx, plan, activation.CredentialAdmissions, setting)
+	if err := result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), observed, desired, readErr); err != nil {
 		return err
 	}
 	return nil
