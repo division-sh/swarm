@@ -175,7 +175,8 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 	}
 	query := `SELECT p.delivery_id FROM channel_delivery_plans p
 		JOIN channel_delivery_renders r ON r.delivery_id=p.delivery_id
-		JOIN operator_channel_text_intents intent ON intent.publication_id=p.source_id
+		LEFT JOIN operator_channel_text_intents intent ON intent.publication_id=p.source_id
+		LEFT JOIN operator_channel_action_intents action ON action.publication_id=p.source_id
 		JOIN channel_delivery_defaults selected ON selected.singleton_id=1
 		JOIN operator_channel_bindings binding ON binding.interface_key=p.interface_key
 		JOIN connected_channel_activations activation ON activation.activation_id=?
@@ -183,7 +184,8 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		WHERE p.delivery_id=? AND p.source_kind='response' AND p.state='rendered'
 		AND p.current_render_id=r.render_id AND r.render_id=? AND r.render_hash=?
 		AND p.current_receipt_operation_id IS NULL
-		AND intent.state='settled' AND intent.disposition='entry'
+		AND ((intent.state='settled' AND intent.disposition='entry' AND action.publication_id IS NULL)
+		  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 		AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
 		AND p.external_account_reference=? AND p.conversation_reference=?
 		AND selected.state='current' AND selected.principal_id=p.principal_id
@@ -194,7 +196,7 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		AND binding.conversation_reference=p.conversation_reference
 		AND binding.conversation_scope=p.conversation_scope
 		AND onboarding.identity_operation_id=binding.operation_id
-		AND activation.status='current' AND activation.activation_id=p.entry_activation_id
+		AND activation.status='current' AND activation.activation_id=p.request_activation_id
 		AND activation.activation_revision=?
 		AND onboarding.phase='succeeded' AND activation.principal_id=binding.principal_id
 		AND activation.interface_key=binding.interface_key
@@ -216,7 +218,8 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 	if postgres {
 		query = `SELECT p.delivery_id::text FROM channel_delivery_plans p
 			JOIN channel_delivery_renders r ON r.delivery_id=p.delivery_id
-			JOIN operator_channel_text_intents intent ON intent.publication_id=p.source_id
+			LEFT JOIN operator_channel_text_intents intent ON intent.publication_id=p.source_id
+			LEFT JOIN operator_channel_action_intents action ON action.publication_id=p.source_id
 			JOIN channel_delivery_defaults selected ON selected.singleton_id=1
 			JOIN operator_channel_bindings binding ON binding.interface_key=p.interface_key
 			JOIN connected_channel_activations activation ON activation.activation_id=$1::uuid
@@ -224,7 +227,8 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			WHERE p.delivery_id=$2::uuid AND p.source_kind='response' AND p.state='rendered'
 			AND p.current_render_id=r.render_id AND r.render_id=$3::uuid AND r.render_hash=$4
 			AND p.current_receipt_operation_id IS NULL
-			AND intent.state='settled' AND intent.disposition='entry'
+			AND ((intent.state='settled' AND intent.disposition='entry' AND action.publication_id IS NULL)
+			  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 			AND p.principal_id=$5::uuid AND p.interface_key=$6 AND p.delivery_epoch=$7
 			AND p.external_account_reference=$8 AND p.conversation_reference=$9
 			AND selected.state='current' AND selected.principal_id=p.principal_id
@@ -235,7 +239,7 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			AND binding.conversation_reference=p.conversation_reference
 			AND binding.conversation_scope=p.conversation_scope
 			AND onboarding.identity_operation_id=binding.operation_id
-			AND activation.status='current' AND activation.activation_id=p.entry_activation_id
+			AND activation.status='current' AND activation.activation_id=p.request_activation_id
 			AND activation.activation_revision=$11
 			AND onboarding.phase='succeeded' AND activation.principal_id=binding.principal_id
 			AND activation.interface_key=binding.interface_key
