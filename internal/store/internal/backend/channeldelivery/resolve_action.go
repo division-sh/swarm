@@ -16,6 +16,44 @@ import (
 // joins must be rechecked in the card/notice mutation transaction before
 // replay and before the domain write.
 func ResolveActionFactTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
+	return resolveActionFactTx(ctx, tx, fact, postgres, false)
+}
+
+func ResolveActionFactForMutationTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
+	return resolveActionFactTx(ctx, tx, fact, postgres, true)
+}
+
+// RequireCardActionTx is the channel-owned pre-mutation projection. Call it
+// before idempotency replay and again in the card write transaction.
+func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, demand render.CardActionDemand, postgres, lock bool) error {
+	if uuid.Validate(demand.CardID) != nil || uuid.Validate(demand.PrincipalID) != nil ||
+		uuid.Validate(demand.ReceiptOperationID) != nil || demand.Verdict == "" ||
+		(demand.Method != "mailbox.decide" && demand.Method != "mailbox.begin_input") ||
+		(demand.Method == "mailbox.decide" && demand.RenderHash == "") {
+		return fmt.Errorf("channel card action demand is incomplete")
+	}
+	var resolved render.ResolvedAction
+	var found bool
+	var err error
+	if lock {
+		resolved, found, err = ResolveActionFactForMutationTx(ctx, tx, fact, postgres)
+	} else {
+		resolved, found, err = ResolveActionFactTx(ctx, tx, fact, postgres)
+	}
+	if err != nil {
+		return err
+	}
+	if !found || !resolved.CurrentRender || resolved.SourceKind != "card" ||
+		resolved.SourceID != demand.CardID || resolved.PrincipalID != demand.PrincipalID ||
+		resolved.Action.Kind != "verdict" || resolved.Action.Verdict != demand.Verdict ||
+		resolved.ReceiptOperationID != demand.ReceiptOperationID ||
+		(demand.Method == "mailbox.decide" && resolved.RenderHash != demand.RenderHash) {
+		return fmt.Errorf("channel action is not current card authority")
+	}
+	return nil
+}
+
+func resolveActionFactTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, postgres, mutation bool) (render.ResolvedAction, bool, error) {
 	if tx == nil {
 		return render.ResolvedAction{}, false, fmt.Errorf("channel action requires a selected transaction")
 	}
@@ -90,6 +128,9 @@ func ResolveActionFactTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 			AND receipt.state='sent' AND receipt.delivery_id=plan.delivery_id
 			AND receipt.render_id=render.render_id
 			LIMIT 2`
+		if mutation {
+			query += ` FOR UPDATE OF action, render, plan, receipt, selected, binding, onboarding, activation`
+		}
 	}
 	rows, err := tx.QueryContext(ctx, query, fact.Token, fact.Interface.Key(), fact.ExternalAccountRef,
 		fact.ConversationRef, string(fact.ConversationScope))

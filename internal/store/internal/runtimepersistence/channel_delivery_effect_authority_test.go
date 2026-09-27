@@ -24,6 +24,9 @@ type selectedChannelDeliveryTestStore interface {
 	InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error)
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (render.ResolvedAction, bool, error)
+	PlanOpenChannelCard(context.Context, string) (bool, error)
+	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)
+	FreezeAndPersistChannelRender(context.Context, string) (render.PreparedRender, error)
 }
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
@@ -276,6 +279,14 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					foreign.MessageReference = `{"id":92}`
 					if _, found, err := selected.ResolveChannelActionFact(ctx, foreign); err != nil || found {
 						t.Fatalf("foreign message action resolved: found=%t err=%v", found, err)
+					}
+					if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+						return channeldelivery.RequireCardActionTx(txctx, tx, fact, render.CardActionDemand{
+							CardID: uuid.NewString(), PrincipalID: principal.ID, Method: "mailbox.decide",
+							Verdict: "accept", ReceiptOperationID: effectOperationID, RenderHash: frozen.Hash,
+						}, postgres, true)
+					}); err == nil || !strings.Contains(err.Error(), "not current card authority") {
+						t.Fatalf("notice callback card admission = %v, want semantic rejection", err)
 					}
 					retire()
 				}
