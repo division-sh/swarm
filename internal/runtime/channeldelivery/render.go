@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -337,27 +338,49 @@ func FreezeResponse(publicationID, fullText string, audience Audience) (Frozen, 
 
 // InboxText presents only canonical list metadata; draft answers and card
 // context are deliberately absent from this requested readback.
-func InboxText(unread int, cards []decisioncard.ListItem, more bool) (string, error) {
+type InboxEntry struct {
+	Kind   string
+	ID     string
+	Label  string
+	Status string
+}
+
+func InboxNoticeEntry(notice mailbox.V1Item) (InboxEntry, error) {
+	if uuid.Validate(notice.MailboxID) != nil || notice.Status != "pending" || strings.TrimSpace(notice.Type) == "" {
+		return InboxEntry{}, fmt.Errorf("inbox notice projection is invalid")
+	}
+	return InboxEntry{Kind: "notice", ID: notice.MailboxID, Label: notice.Type, Status: notice.Status}, nil
+}
+
+func InboxCardEntry(card decisioncard.ListItem) (InboxEntry, error) {
+	if uuid.Validate(card.CardID) != nil || card.Status != decisioncard.StatusPending {
+		return InboxEntry{}, fmt.Errorf("inbox card projection is invalid")
+	}
+	title := strings.TrimSpace(card.Title)
+	if title == "" {
+		title = string(card.Anchor.Kind())
+	}
+	return InboxEntry{Kind: "card", ID: card.CardID, Label: title, Status: card.Status}, nil
+}
+
+func InboxText(unread int, entries []InboxEntry, more bool) (string, error) {
 	if unread < 0 {
 		return "", fmt.Errorf("inbox unread count is invalid")
 	}
 	lines := []string{"Inbox", fmt.Sprintf("Unread notices: %d", unread)}
-	if len(cards) == 0 {
-		lines = append(lines, "No open decisions")
+	if len(entries) == 0 {
+		lines = append(lines, "No open items")
 	} else {
-		lines = append(lines, "Open decisions:")
-		for _, card := range cards {
-			if card.CardID == "" || card.Status != decisioncard.StatusPending {
-				return "", fmt.Errorf("inbox card list is not a pending canonical projection")
+		lines = append(lines, "Open items:")
+		for _, entry := range entries {
+			if uuid.Validate(entry.ID) != nil || entry.Status != "pending" ||
+				(entry.Kind != "notice" && entry.Kind != "card") || strings.TrimSpace(entry.Label) == "" {
+				return "", fmt.Errorf("inbox entry is not a pending canonical projection")
 			}
-			title := strings.TrimSpace(card.Title)
-			if title == "" {
-				title = string(card.Anchor.Kind())
-			}
-			lines = append(lines, "- "+title)
+			lines = append(lines, "- "+entry.Label)
 		}
 		if more {
-			lines = append(lines, "More open decisions are available")
+			lines = append(lines, "More open items are available")
 		}
 	}
 	return strings.Join(lines, "\n"), nil

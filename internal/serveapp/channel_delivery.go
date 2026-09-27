@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -24,12 +25,11 @@ import (
 )
 
 type serveChannelDeliveryDispatcher struct {
-	store   runtimechanneldelivery.Store
-	native  runtimechannelnative.Store
-	cards   decisioncard.Store
-	mailbox interface {
-		CountUnreadInformationalNotices(context.Context) (int, error)
-	}
+	store             runtimechanneldelivery.Store
+	native            runtimechannelnative.Store
+	cards             decisioncard.Store
+	mailbox           apiv1.MailboxAPIStore
+	proposedEffects   decisioncard.ProposedEffectStore
 	activations       channelonboarding.Store
 	manager           *runtime.RuntimeContextManager
 	ingress           *runtimepublicingress.ReadinessOwner
