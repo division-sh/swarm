@@ -14803,6 +14803,8 @@ platform_tables:
             conversation_reference TEXT NOT NULL,
             conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
             state TEXT NOT NULL CHECK (state IN ('planned','rendered','sent','uncertain','retired')),
+            current_render_id UUID,
+            current_receipt_operation_id UUID,
             created_at TIMESTAMPTZ NOT NULL,
             CHECK ((source_kind = 'summary' AND summary_count IS NOT NULL) OR (source_kind <> 'summary' AND summary_count IS NULL)),
             UNIQUE (source_kind, source_id, interface_key, delivery_epoch),

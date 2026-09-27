@@ -212,6 +212,10 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			if err != nil || !created {
 				t.Fatalf("persist notice render = %s, created=%t err=%v", renderID, created, err)
 			}
+			currentPlan, found, err := fixture.loadPlan(ctx, afterDefault)
+			if err != nil || !found || currentPlan.CurrentRenderID != renderID || currentPlan.CurrentReceiptID != "" || currentPlan.State != "rendered" {
+				t.Fatalf("current rendered notice plan = %#v, found=%t err=%v", currentPlan, found, err)
+			}
 			stored, found, err := fixture.loadRender(ctx, renderID)
 			if err != nil || !found || stored.DeliveryID != plan.DeliveryID || stored.Frozen.Hash != frozen.Hash ||
 				string(stored.Frozen.Input) != string(frozen.Input) {
