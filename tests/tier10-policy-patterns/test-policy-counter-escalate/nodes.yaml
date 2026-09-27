@@ -11,4 +11,4 @@ processor:
       data_accumulation:
         writes:
           - target_field: attempt_count
-            expression: entity.attempt_count + 1
+            value: ${entity.attempt_count + 1}

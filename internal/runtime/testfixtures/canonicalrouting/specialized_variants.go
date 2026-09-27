@@ -300,7 +300,7 @@ widget.started:
         source_event: widget.scored
         writes:
           - target_field: score
-            expression: entity.score + payload.delta
+            value: "${entity.score + payload.delta}"
       advances_to: done
 `)
 	return root
@@ -379,8 +379,8 @@ ticket.assigned:
       emit:
         event: ticket.assigned
         fields:
-          category: entity.category
-          priority: entity.priority
+          category: ${entity.category}
+          priority: ${entity.priority}
       advances_to: assigned
 assignee:
   execution_type: system_node

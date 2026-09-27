@@ -247,7 +247,7 @@ work.result:
       emit:
         event: work.result
         fields:
-          score: {ref: entity.score}
+          score: ${entity.score}
       advances_to: done
 `
 			if variant == "bypass" {
@@ -344,20 +344,20 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 		{"literal optional member", `        - target_field: profile
           value: {id: original, note: supplied}
         - target_field: observed
-          expression: entity.profile.note
+          value: ${entity.profile.note}
 `, false},
 		{"replacement forgets optional member", `        - target_field: profile
           value: {id: original, note: supplied}
         - target_field: profile
           value: {id: replacement}
         - target_field: observed
-          expression: entity.profile.note
+          value: ${entity.profile.note}
 `, true},
 		{"constructive root append", `        - op: append
           target: entity.notes
           value: supplied
         - target_field: observed
-          expression: "string(entity.notes.size())"
+          value: "${string(entity.notes.size())}"
 `, false},
 		{"merge cannot construct", `        - op: merge
           target: entity.by_id

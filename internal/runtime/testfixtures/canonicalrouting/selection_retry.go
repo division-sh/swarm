@@ -47,13 +47,13 @@ select:
           condition: "entity.marker == 'second'"
           emit: {event: selected, fields: {marker: {literal: second}}}
       data_accumulation:
-        writes: [{target_field: marker, expression: entity.marker}]
+        writes: [{target_field: marker, value: "${entity.marker}"}]
 final:
   execution_type: system_node
   subscribes_to: [selected]
   event_handlers:
     selected:
-      emit: {event: ack, fields: {marker: payload.marker}}
+      emit: {event: ack, fields: {marker: "${payload.marker}"}}
       advances_to: done
 `)
 	return root

@@ -4715,7 +4715,7 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 				Event: "account.bucketed",
 				From:  "entity",
 				Fields: map[string]runtimecontracts.ExpressionValue{
-					"interest_score": runtimecontracts.CELExpression("payload"),
+					"interest_score": runtimecontracts.CELExpression("payload.interest_score"),
 					"tier":           runtimecontracts.CELExpression("payload.computed_tier"),
 				},
 			},
@@ -5296,7 +5296,7 @@ fan_out:
   emit:
     event: item.requested
     fields:
-      item: fan_item
+      item: ${fan_item}
 join:
   id: all-items-delivered
   members:
@@ -5305,8 +5305,8 @@ join:
     emit:
       event: batch.completed
       fields:
-        total: join.total
-        succeeded: join.dispositions.succeeded
+        total: ${join.total}
+        succeeded: ${join.dispositions.succeeded}
 `), &handler); err != nil {
 		t.Fatal(err)
 	}

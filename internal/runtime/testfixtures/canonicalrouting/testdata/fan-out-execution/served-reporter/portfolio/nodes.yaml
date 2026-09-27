@@ -19,8 +19,8 @@ portfolio-coordinator:
       emit:
         event: account.registered
         fields:
-          account_id: payload.account_id
-          portfolio_id: payload.portfolio_id
+          account_id: ${payload.account_id}
+          portfolio_id: ${payload.portfolio_id}
           eng_roles: {literal: 0}
           gem_score: {literal: 0.25}
           eligible: {literal: true}
@@ -39,12 +39,12 @@ portfolio-coordinator:
         emit:
           event: account.registered
           fields:
-            portfolio_id: payload.portfolio_id
-            account_id: account.account_id
-            eng_roles: account.eng_roles
-            gem_score: account.gem_score
-            external_id: account.external_id
-            eligible: entity.threshold >= 70
+            portfolio_id: ${payload.portfolio_id}
+            account_id: ${account.account_id}
+            eng_roles: ${account.eng_roles}
+            gem_score: ${account.gem_score}
+            external_id: ${account.external_id}
+            eligible: ${entity.threshold >= 70}
     portfolio.membership.seeded:
       data_accumulation:
         writes:
@@ -60,5 +60,5 @@ portfolio-coordinator:
         emit:
           event: account.notify.requested
           fields:
-            account_id: account.account_id
-            command: payload.command
+            account_id: ${account.account_id}
+            command: ${payload.command}

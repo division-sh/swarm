@@ -81,7 +81,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 		applyClosedReplacement(t, ownerSchema, "      - account.notify.requested\n", "")
 	}
 	if opts.MissingEmitField {
-		applyClosedReplacement(t, ownerNodes, "            command: payload.command\n", "")
+		applyClosedReplacement(t, ownerNodes, "            command: ${payload.command}\n", "")
 	}
 	if opts.ProducerTarget {
 		applyClosedReplacement(t, ownerNodes, "          event: account.notify.requested\n", `          event: account.notify.requested
@@ -100,7 +100,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
   AccountRef:
     account_id: text
 `)
-		applyClosedReplacement(t, ownerNodes, "            account_id: account_id\n", "            account_id: account_id.account_id\n")
+		applyClosedReplacement(t, ownerNodes, "            account_id: ${account_id}\n", "            account_id: ${account_id.account_id}\n")
 	}
 	if opts.UndeclaredPayloadMembership {
 		applyClosedReplacement(t, ownerNodes, "        items_from: entity.account_ids\n", `        items_from: payload.account_ids
@@ -130,8 +130,8 @@ auto_emit_on_create:
 `)
 	}
 	if opts.FanOutDeliveryBarrier {
-		applyClosedReplacement(t, ownerNodes, `            command: payload.command
-`, `            command: payload.command
+		applyClosedReplacement(t, ownerNodes, `            command: ${payload.command}
+`, `            command: ${payload.command}
       join:
         id: all-account-notifications-delivered
         members:
@@ -140,12 +140,12 @@ auto_emit_on_create:
           emit:
             event: portfolio.notify.completed
             fields:
-              total: join.total
-              succeeded: join.dispositions.succeeded
-              dead_lettered: join.dispositions.dead_lettered
-              no_route: join.dispositions.no_route
-              semantic_rejected: join.dispositions.semantic_rejected
-              canceled: join.dispositions.canceled
+              total: ${join.total}
+              succeeded: ${join.dispositions.succeeded}
+              dead_lettered: ${join.dispositions.dead_lettered}
+              no_route: ${join.dispositions.no_route}
+              semantic_rejected: ${join.dispositions.semantic_rejected}
+              canceled: ${join.dispositions.canceled}
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
   key: account_id
@@ -208,32 +208,32 @@ portfolio.notify.completed:
         emit:
           event: account.registered
           fields:
-            account_id: account_id
+            account_id: ${account_id}
 `, `        as: account
         identity: account.account_id
         max_items: 100
         emit:
           event: account.registered
           fields:
-            portfolio_id: payload.portfolio_id
-            account_id: account.account_id
-            eng_roles: account.eng_roles
-            gem_score: account.gem_score
-            eligible: entity.threshold >= 70
+            portfolio_id: ${payload.portfolio_id}
+            account_id: ${account.account_id}
+            eng_roles: ${account.eng_roles}
+            gem_score: ${account.gem_score}
+            eligible: ${entity.threshold >= 70}
 `)
 		applyClosedReplacement(t, ownerNodes, `        as: account_id
         max_items: 100
         emit:
           event: account.notify.requested
           fields:
-            account_id: account_id
+            account_id: ${account_id}
 `, `        as: account
         identity: account.account_id
         max_items: 100
         emit:
           event: account.notify.requested
           fields:
-            account_id: account.account_id
+            account_id: ${account.account_id}
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
   key: account_id
@@ -321,11 +321,11 @@ portfolio-coordinator:
 		}
 		if opts.RegistrationUUIDField {
 			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
-			applyClosedReplacement(t, ownerNodes, `            gem_score: account.gem_score
-            eligible: entity.threshold >= 70
-`, `            gem_score: account.gem_score
-            external_id: account.external_id
-            eligible: entity.threshold >= 70
+			applyClosedReplacement(t, ownerNodes, `            gem_score: ${account.gem_score}
+            eligible: ${entity.threshold >= 70}
+`, `            gem_score: ${account.gem_score}
+            external_id: ${account.external_id}
+            eligible: ${entity.threshold >= 70}
 `)
 			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `  gem_score: number
   eligible: boolean

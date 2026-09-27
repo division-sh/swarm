@@ -59,10 +59,10 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		writeClosedVariantFile(t, root, filepath.Join(flow, "events.yaml"), events)
 		create := ""
 		if mode == "template" && !sibling {
-			create = "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, expression: payload.case_id}\n"
+			create = "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: \"${payload.case_id}\"}\n"
 			writeClosedVariantFile(t, root, filepath.Join(flow, "entities.yaml"), "work:\n  case_id: text\n")
 		}
-		nodes := "start:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n" + create + "      emit: {event: work.started, fields: {case_id: payload.case_id}}\nfinal:\n  execution_type: system_node\n  subscribes_to: [work.result]\n  event_handlers:\n    work.result:\n      emit: {event: work.ack, fields: {value: payload.value}}\n"
+		nodes := "start:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n" + create + "      emit: {event: work.started, fields: {case_id: \"${payload.case_id}\"}}\nfinal:\n  execution_type: system_node\n  subscribes_to: [work.result]\n  event_handlers:\n    work.result:\n      emit: {event: work.ack, fields: {value: \"${payload.value}\"}}\n"
 		if sibling {
 			nodes = strings.ReplaceAll(nodes, "work.requested", "sibling.requested")
 		}
@@ -78,7 +78,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 	if mode == "template" {
 		writeClosedVariantFile(t, root, "schema.yaml", "name: managed-driver\npins:\n  inputs:\n    events:\n      - {event: work.requested, source: external}\n  outputs:\n    events: [work.dispatch]\nconnect:\n  - {event: work.dispatch, from: ., to: source, rename: work.requested}\n")
 		writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  key: case_id\n  case_id: text\nwork.dispatch:\n  key: case_id\n  case_id: text\n")
-		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n      emit: {event: work.dispatch, fields: {case_id: payload.case_id}}\n")
+		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested:\n      emit: {event: work.dispatch, fields: {case_id: \"${payload.case_id}\"}}\n")
 	}
 	return root
 }

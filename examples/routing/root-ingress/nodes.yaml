@@ -8,7 +8,7 @@ item-handler:
       emit:
         event: item.processed
         fields:
-          item_id: payload.item_id
+          item_id: ${payload.item_id}
 item-observer:
   execution_type: system_node
   subscribes_to: [item.processed]

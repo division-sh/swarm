@@ -39,9 +39,9 @@ numeric.completed:
       emit:
         event: numeric.completed
         fields:
-          value: {cel: 'payload.value + payload.nested.numbers[?0].value() + 1'}
-          fraction: {cel: 'double(payload.nested.fraction) + 0.5'}
-          explicit_double: {cel: 'double(payload.value) + 1.0'}
+          value: "${payload.value + payload.nested.numbers[?0].value() + 1}"
+          fraction: "${double(payload.nested.fraction) + 0.5}"
+          explicit_double: "${double(payload.value) + 1.0}"
 collector:
   execution_type: system_node
   subscribes_to: [numeric.completed]

@@ -281,7 +281,7 @@ dispatcher:
         event: market_research.scan_assigned
         from: entity
         fields:
-          geography: payload
+          geography: ${payload.geography}
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -327,7 +327,7 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
           escalate:
             event: ` + guardEventType + `
             fields:
-              score: payload.score
+              score: ${payload.score}
               reason:
                 literal: score_below_threshold
 

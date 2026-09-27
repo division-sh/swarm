@@ -705,7 +705,7 @@ func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGenera
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate := "\nother:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: {ref: payload.message}}\n"
+	duplicate := "\nother:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: \"${payload.message}\"}\n"
 	if err := os.WriteFile(path, append(raw, []byte(duplicate)...), 0600); err != nil {
 		t.Fatal(err)
 	}

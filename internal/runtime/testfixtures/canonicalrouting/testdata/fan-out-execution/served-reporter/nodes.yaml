@@ -6,5 +6,5 @@ start-portfolio:
       emit:
         event: portfolio.opened.forwarded
         fields:
-          portfolio_id: payload.portfolio_id
-          threshold: payload.threshold
+          portfolio_id: ${payload.portfolio_id}
+          threshold: ${payload.threshold}

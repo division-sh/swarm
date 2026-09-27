@@ -54,14 +54,14 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
     complete:
       data_accumulation:
         writes:
-          - {target_field: marker, expression: "'completed'"}
+          - {target_field: marker, value: "${'completed'}"}
       on_complete:
         - {id: completion-choice, condition: else, advances_to: done}
     self: {advances_to: ready}
     write_only:
       data_accumulation:
         writes:
-          - {target_field: marker, expression: "'written'"}
+          - {target_field: marker, value: "${'written'}"}
     unmatched:
       rules:
         - {id: never, condition: "false", advances_to: done}
@@ -73,14 +73,14 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
           - {check: "true"}
       data_accumulation:
         writes:
-          - {target_field: marker, expression: "'guarded'"}
+          - {target_field: marker, value: "${'guarded'}"}
       rules:
         - id: explicit-choice
           condition: "true"
           advances_to: done
           emit:
             event: guard_observed
-            fields: {marker: "'guard-output'"}
+            fields: {marker: guard-output}
     kill:
       guard: {id: kill-check, check: "false", on_fail: kill}
       advances_to: done
@@ -108,14 +108,14 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
           - {check: "true"}
       data_accumulation:
         writes:
-          - {target_field: marker, expression: "'guarded'"}
+          - {target_field: marker, value: "${'guarded'}"}
       rules:
         - id: explicit-choice
           condition: "true"
           advances_to: done
           emit:
             event: guard_observed
-            fields: {marker: "'guard-output'"}
+            fields: {marker: guard-output}
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {

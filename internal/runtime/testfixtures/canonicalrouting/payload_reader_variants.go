@@ -65,8 +65,8 @@ func CopyScalarFanOutPayloadReader(t testing.TB) string {
         emit:
           event: market_research.industry_assigned
           fields:
-            industry: industry
-            taxonomy_categories: "[industry]"
+            industry: ${industry}
+            taxonomy_categories: ["${industry}"]
 observer:
   execution_type: system_node
   subscribes_to: [market_research.industry_assigned]

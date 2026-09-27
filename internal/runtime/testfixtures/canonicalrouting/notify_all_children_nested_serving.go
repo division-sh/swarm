@@ -78,9 +78,9 @@ account.tasks.completed:
         emit:
           event: account.task.requested
           fields:
-            account_id: payload.account_id
-            task: task
-            task_key: 'payload.account_id + ":" + task'
+            account_id: ${payload.account_id}
+            task: ${task}
+            task_key: '${payload.account_id + ":" + task}'
       join:
         id: direct-account-tasks-delivered
         members:
@@ -89,13 +89,13 @@ account.tasks.completed:
           emit:
             event: account.tasks.completed
             fields:
-              account_id: entity.account_id
-              total: join.total
-              succeeded: join.dispositions.succeeded
-              dead_lettered: join.dispositions.dead_lettered
-              no_route: join.dispositions.no_route
-              semantic_rejected: join.dispositions.semantic_rejected
-              canceled: join.dispositions.canceled
+              account_id: ${entity.account_id}
+              total: ${join.total}
+              succeeded: ${join.dispositions.succeeded}
+              dead_lettered: ${join.dispositions.dead_lettered}
+              no_route: ${join.dispositions.no_route}
+              semantic_rejected: ${join.dispositions.semantic_rejected}
+              canceled: ${join.dispositions.canceled}
 `)
 	writeClosedVariantFile(t, root, "account/task/schema.yaml", `name: account-task
 mode: template
@@ -142,8 +142,8 @@ pins:
       emit:
         event: account.task.completed
         fields:
-          account_id: payload.account_id
-          task: payload.task
+          account_id: ${payload.account_id}
+          task: ${payload.task}
 `)
 	return root
 }

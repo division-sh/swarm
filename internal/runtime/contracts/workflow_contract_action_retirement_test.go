@@ -113,18 +113,18 @@ func TestLoadWorkflowContractBundleRejectsRetiredHandlerActions(t *testing.T) {
 func TestHandlerActionRetirementPreservesOtherActionConcepts(t *testing.T) {
 	t.Run("emit_template_specialization", func(t *testing.T) {
 		var handler SystemNodeEventHandler
-		err := yaml.Unmarshal([]byte(`emit: {event: scored, fields: {id: payload.id}}
+		err := yaml.Unmarshal([]byte(`emit: {event: scored, fields: {id: "${payload.id}"}}
 rules:
   - condition: payload.score > 0
-    emit: {fields: {label: '"positive"'}}
+    emit: {fields: {label: positive}}
   - condition: else
-    emit: {fields: {label: '"other"'}}
+    emit: {fields: {label: other}}
 `), &handler)
 		if err != nil {
 			t.Fatal(err)
 		}
 		sites := HandlerRuleEmitTemplateSites(handler)
-		if len(sites) != 2 || sites[0].Spec.EventType() != "scored" || sites[0].Spec.Fields["id"].CEL != "payload.id" || sites[1].Spec.Fields["label"].CEL != `"other"` {
+		if len(sites) != 2 || sites[0].Spec.EventType() != "scored" || sites[0].Spec.Fields["id"].CEL != "payload.id" || sites[1].Spec.Fields["label"].Literal != "other" {
 			t.Fatalf("emit template specialization changed: %#v", sites)
 		}
 	})

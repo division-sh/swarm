@@ -11,8 +11,8 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `          emit:
             event: join.observed
             fields:
-              revision_id: {ref: loop.revision_id}
-              completed: {ref: join.completed}
+              revision_id: "${loop.revision_id}"
+              completed: "${join.completed}"
 `, "")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "subscribes_to: [work.requested, review.requested, review.retry, review.closed]", "subscribes_to: [work.requested, review.requested, review.retry, review.closed, checkpoint.requested]")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  event_handlers:\n    work.requested:\n", `  event_handlers:
@@ -22,7 +22,7 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
       emit:
         event: join.observed
         fields:
-          revision_id: {ref: loop.revision_id}
+          revision_id: "${loop.revision_id}"
           completed: {literal: 1}
     work.requested:
 `)
@@ -88,7 +88,7 @@ join.observed:
       emit:
         event: work.requested
         fields:
-          token: {ref: payload.token}
+          token: "${payload.token}"
 controller:
   execution_type: system_node
   subscribes_to: [work.requested, review.requested, review.retry, review.closed]
@@ -97,14 +97,14 @@ controller:
       loop: {start: revision, from: queued}
       data_accumulation:
         writes:
-          - {target_field: members, expression: "[payload.token]"}
-          - {target_field: window, expression: loop.revision_id}
+          - {target_field: members, value: "${[payload.token]}"}
+          - {target_field: window, value: "${loop.revision_id}"}
       advances_to: working
       emit:
         event: review.requested
         fields:
-          token: {ref: payload.token}
-          revision_id: {ref: loop.revision_id}
+          token: "${payload.token}"
+          revision_id: "${loop.revision_id}"
     review.requested:
       loop: {admit: revision, from: working}
       join:
@@ -118,8 +118,8 @@ controller:
           emit:
             event: join.observed
             fields:
-              revision_id: {ref: loop.revision_id}
-              completed: {ref: join.completed}
+              revision_id: "${loop.revision_id}"
+              completed: "${join.completed}"
         timeout:
           after: 1h
           advances_to: reviewing
@@ -130,13 +130,13 @@ controller:
       loop: {repeat: revision, from: reviewing}
       data_accumulation:
         writes:
-          - {target_field: window, expression: loop.revision_id}
+          - {target_field: window, value: "${loop.revision_id}"}
       advances_to: working
       emit:
         event: review.requested
         fields:
-          token: {ref: payload.token}
-          revision_id: {ref: loop.revision_id}
+          token: "${payload.token}"
+          revision_id: "${loop.revision_id}"
 `,
 	} {
 		writeClosedVariantFile(t, root, name, body)

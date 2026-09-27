@@ -76,7 +76,7 @@ opco.spend_recorded:
 	case StaticRetirementMaterialize:
 		body = staticRetirementWriteBody()
 	case StaticRetirementObserve:
-		body = "      emit:\n        event: opco.spend_recorded\n        fields:\n          vertical_id: payload.vertical_id\n"
+		body = "      emit:\n        event: opco.spend_recorded\n        fields:\n          vertical_id: ${payload.vertical_id}\n"
 	default:
 		t.Fatalf("unsupported static retirement handler %d", handler)
 	}
@@ -147,7 +147,7 @@ subject.observed:
       emit:
         event: subject.observed
         fields:
-          display_name: payload.display_name
+          display_name: ${payload.display_name}
 `
 	default:
 		t.Fatalf("unsupported root static handler variant %d", handler)
@@ -367,8 +367,8 @@ opco.create_requested:
       emit:
         event: opco.spinup_requested
         fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+          instance_id: ${payload.instance_id}
+          product_id: ${payload.product_id}
 portfolio-node:
   execution_type: system_node
   subscribes_to: [opco.spinup_requested]
@@ -378,8 +378,8 @@ portfolio-node:
       emit:
         event: opco.create_requested
         fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+          instance_id: ${payload.instance_id}
+          product_id: ${payload.product_id}
 `,
 		"operating/schema.yaml": `name: operating
 mode: template
@@ -418,7 +418,7 @@ component_scaffold.spawn_requested:
       emit:
         event: component_scaffold.spawn_requested
         fields:
-          product_id: payload.product_id
+          product_id: ${payload.product_id}
 `,
 	}
 	for name, source := range files {

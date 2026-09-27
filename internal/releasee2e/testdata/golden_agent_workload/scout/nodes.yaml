@@ -9,8 +9,8 @@ scout-intake:
       emit:
         event: scout.work.requested
         fields:
-          query: payload.query
-          candidate_ids: payload.candidate_ids
+          query: ${payload.query}
+          candidate_ids: ${payload.candidate_ids}
 
 scout-completion:
   execution_type: system_node

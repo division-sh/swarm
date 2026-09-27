@@ -25,7 +25,7 @@ states: [new, waiting, done]
       emit:
         event: item.processed
         fields:
-          item_id: payload.item_id
+          item_id: ${payload.item_id}
 `, `    item.received:
       rules:
         initialize:
@@ -36,7 +36,7 @@ states: [new, waiting, done]
           emit:
             event: item.processed
             fields:
-              item_id: payload.item_id
+              item_id: ${payload.item_id}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `item-observer:
   execution_type: system_node
@@ -312,7 +312,7 @@ lifecycle-orchestrator:
       emit:
         event: component_scaffold.spawn_requested
         fields:
-          product_id: payload.product_id
+          product_id: ${payload.product_id}
       advances_to: spawning
 component-scaffold:
   execution_type: system_node
@@ -398,8 +398,8 @@ portfolio-node:
       emit:
         event: opco.create_requested
         fields:
-          instance_id: payload.instance_id
-          product_id: payload.product_id
+          instance_id: ${payload.instance_id}
+          product_id: ${payload.product_id}
       advances_to: done
 `)
 }

@@ -341,7 +341,9 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		switch strings.TrimSpace(node.Content[i].Value) {
-		case "", "field", "source_field", "target_field", "target_path", "target", "op", "key", "index", "expression", "value":
+		case "", "field", "source_field", "target_field", "target_path", "target", "op", "key", "index", "value":
+		case "expression":
+			return fmt.Errorf("retired workflow data write expression field; use value: ${...}")
 		default:
 			return fmt.Errorf("unsupported workflow data write field %q", strings.TrimSpace(node.Content[i].Value))
 		}
@@ -353,9 +355,8 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		Target      string                `yaml:"target"`
 		TargetField string                `yaml:"target_field"`
 		TargetPath  string                `yaml:"target_path"`
-		Key         ExpressionValue       `yaml:"key"`
-		Index       ExpressionValue       `yaml:"index"`
-		Expression  string                `yaml:"expression"`
+		Key         yaml.Node             `yaml:"key"`
+		Index       yaml.Node             `yaml:"index"`
 		Value       yaml.Node             `yaml:"value"`
 	}
 	if err := node.Decode(&aux); err != nil {
@@ -368,32 +369,27 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		TargetRef:     strings.TrimSpace(aux.Target),
 		TargetField:   strings.TrimSpace(aux.TargetField),
 		TargetPathRef: strings.TrimSpace(aux.TargetPath),
-		Key:           aux.Key,
-		Index:         aux.Index,
 	}
-	switch aux.Value.Kind {
-	case 0:
-		switch {
-		case strings.TrimSpace(aux.Expression) != "":
-			w.Value = CELExpression(aux.Expression)
+	if aux.Key.Kind != 0 {
+		value, err := decodeExpressionValueNode(&aux.Key)
+		if err != nil {
+			return fmt.Errorf("workflow data write key: %w", err)
 		}
-	default:
-		if strings.TrimSpace(aux.Expression) != "" {
-			return fmt.Errorf("workflow data write cannot declare both value and expression")
+		w.Key = value
+	}
+	if aux.Index.Kind != 0 {
+		value, err := decodeExpressionValueNode(&aux.Index)
+		if err != nil {
+			return fmt.Errorf("workflow data write index: %w", err)
 		}
-		if strings.TrimSpace(string(w.Operation)) != "" {
-			var expr ExpressionValue
-			if err := aux.Value.Decode(&expr); err != nil {
-				return err
-			}
-			w.Value = expr
-		} else {
-			expr, err := decodeWorkflowDataWriteValueNode(&aux.Value)
-			if err != nil {
-				return err
-			}
-			w.Value = expr
+		w.Index = value
+	}
+	if aux.Value.Kind != 0 {
+		value, err := decodeWorkflowDataWriteValueNode(&aux.Value)
+		if err != nil {
+			return err
 		}
+		w.Value = value
 	}
 	return hydrateWorkflowDataWrite(w)
 }
@@ -527,83 +523,12 @@ func (e *ExpressionValue) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
 		return nil
 	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
-			*e = ExpressionValue{}
-			return nil
-		}
-		expr, err := decodeLiteralExpressionNode(node)
-		if err != nil {
-			return err
-		}
-		*e = expr
-		return nil
-	case yaml.MappingNode:
-		var aux struct {
-			Kind       ExpressionKind `yaml:"kind"`
-			Literal    any            `yaml:"literal"`
-			Ref        string         `yaml:"ref"`
-			CEL        string         `yaml:"cel"`
-			Expression string         `yaml:"expression"`
-		}
-		if err := node.Decode(&aux); err != nil {
-			return err
-		}
-		fields := 0
-		if strings.TrimSpace(aux.Ref) != "" {
-			fields++
-		}
-		if strings.TrimSpace(aux.CEL) != "" {
-			fields++
-		}
-		if strings.TrimSpace(aux.Expression) != "" {
-			fields++
-		}
-		if aux.Literal != nil {
-			fields++
-		}
-		if fields > 1 {
-			return fmt.Errorf("expression value must declare exactly one semantic field")
-		}
-		switch {
-		case strings.TrimSpace(aux.Ref) != "":
-			*e = RefExpression(aux.Ref)
-		case strings.TrimSpace(aux.CEL) != "":
-			*e = CELExpression(aux.CEL)
-		case strings.TrimSpace(aux.Expression) != "":
-			*e = CELExpression(aux.Expression)
-		case aux.Literal != nil:
-			*e = LiteralExpression(aux.Literal)
-		case aux.Kind != "":
-			switch aux.Kind {
-			case ExpressionKindLiteral, ExpressionKindRef, ExpressionKindCEL:
-				e.Kind = aux.Kind
-			default:
-				return fmt.Errorf("unsupported expression kind %q", aux.Kind)
-			}
-		default:
-			expr, err := decodeLiteralExpressionNode(node)
-			if err != nil {
-				return err
-			}
-			*e = expr
-		}
-		e.hydrate()
-		if err := validateExpressionValue(*e); err != nil {
-			return err
-		}
-		return nil
-	case yaml.SequenceNode:
-		expr, err := decodeLiteralExpressionNode(node)
-		if err != nil {
-			return err
-		}
-		*e = expr
-		return nil
-	default:
-		return fmt.Errorf("unsupported expression value yaml node kind %d", node.Kind)
+	value, err := decodeExpressionValueNode(node)
+	if err != nil {
+		return err
 	}
+	*e = value
+	return validateExpressionValue(*e)
 }
 
 func decodeLiteralExpressionNode(node *yaml.Node) (ExpressionValue, error) {
@@ -765,12 +690,5 @@ func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 }
 
 func decodeWorkflowDataWriteValueNode(node *yaml.Node) (ExpressionValue, error) {
-	if node == nil || node.Kind == 0 {
-		return ExpressionValue{}, nil
-	}
-	var literal any
-	if err := node.Decode(&literal); err != nil {
-		return ExpressionValue{}, err
-	}
-	return LiteralExpression(literal), nil
+	return decodeExpressionValueNode(node)
 }

@@ -37,7 +37,7 @@ func (b *WorkflowContractBundle) LowerEmitSpecFields(ctx EmitFieldLoweringContex
 	}
 	eventType := spec.EventType()
 	if eventType == "" {
-		return EmitSpec{}, emitLoweringError(ctx, "emit.from and bare namespace emit.fields values require emit.event")
+		return EmitSpec{}, emitLoweringError(ctx, "emit.from requires emit.event")
 	}
 	targetFields, required, err := b.emitPayloadTargetFields(ctx, eventType)
 	if err != nil {
@@ -47,7 +47,7 @@ func (b *WorkflowContractBundle) LowerEmitSpecFields(ctx EmitFieldLoweringContex
 	if len(fields) == 0 {
 		fields = map[string]ExpressionValue{}
 	}
-	for target, value := range fields {
+	for target := range fields {
 		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
@@ -55,24 +55,6 @@ func (b *WorkflowContractBundle) LowerEmitSpecFields(ctx EmitFieldLoweringContex
 		if !emitPayloadTargetDeclared(targetFields, target) {
 			return EmitSpec{}, emitLoweringError(ctx, fmt.Sprintf("emit.fields.%s is not declared by emitted event %s payload schema", target, eventType))
 		}
-		source := bareEmitNamespaceValue(value)
-		if source == "" {
-			continue
-		}
-		if err := validateEmitFromSource(source); err != nil {
-			return EmitSpec{}, emitLoweringError(ctx, err.Error())
-		}
-		if !emitSimplePayloadField(target) {
-			return EmitSpec{}, emitLoweringError(ctx, fmt.Sprintf("emit.fields.%s bare namespace value %q requires a top-level payload field target", target, source))
-		}
-		sourceFields, err := b.emitFieldSourceFields(ctx, source)
-		if err != nil {
-			return EmitSpec{}, emitLoweringError(ctx, err.Error())
-		}
-		if !emitPayloadTargetDeclared(sourceFields, target) {
-			return EmitSpec{}, emitLoweringError(ctx, fmt.Sprintf("emit.fields.%s source %s does not declare same-named field %s", target, source, target))
-		}
-		fields[target] = CELExpression(source + "." + target)
 	}
 	if source := strings.TrimSpace(spec.From); source != "" {
 		sourceFields, err := b.emitFieldSourceFields(ctx, source)
@@ -112,30 +94,7 @@ func emitSpecNeedsFieldLowering(spec EmitSpec) bool {
 }
 
 func EmitSpecNeedsFieldLowering(spec EmitSpec) bool {
-	if strings.TrimSpace(spec.From) != "" {
-		return true
-	}
-	for _, value := range spec.Fields {
-		if bareEmitNamespaceValue(value) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-func bareEmitNamespaceValue(value ExpressionValue) string {
-	value.hydrate()
-	if value.Kind != ExpressionKindCEL {
-		return ""
-	}
-	switch strings.TrimSpace(value.CEL) {
-	case EmitFromEntity:
-		return EmitFromEntity
-	case EmitFromPayload:
-		return EmitFromPayload
-	default:
-		return ""
-	}
+	return strings.TrimSpace(spec.From) != ""
 }
 
 func (b *WorkflowContractBundle) normalizeEmitFieldLoweringContext(ctx EmitFieldLoweringContext) EmitFieldLoweringContext {

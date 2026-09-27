@@ -782,7 +782,7 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
         emit:
           event: component_scaffold.spawn_requested
           fields:
-            component_id: component.component_id
+            component_id: ${component.component_id}
             nested_items: {literal: [prepare, publish]}
 nested-fanout-node:
   execution_type: system_node
@@ -795,8 +795,8 @@ nested-fanout-node:
         emit:
           event: component_scaffold.task_requested
           fields:
-            component_id: payload.component_id
-            task: nested_item
+            component_id: ${payload.component_id}
+            task: ${nested_item}
 `,
 	})
 }

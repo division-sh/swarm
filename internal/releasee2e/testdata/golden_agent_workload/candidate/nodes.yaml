@@ -12,8 +12,8 @@ candidate-intake:
       emit:
         event: candidate.work.requested
         fields:
-          batch_id: payload.batch_id
-          candidate_id: payload.candidate_id
+          batch_id: ${payload.batch_id}
+          candidate_id: ${payload.candidate_id}
 
 candidate-completion:
   execution_type: system_node
@@ -25,6 +25,6 @@ candidate-completion:
       emit:
         event: candidate.completed
         fields:
-          batch_id: payload.batch_id
-          candidate_id: payload.candidate_id
-          summary: payload.summary
+          batch_id: ${payload.batch_id}
+          candidate_id: ${payload.candidate_id}
+          summary: ${payload.summary}

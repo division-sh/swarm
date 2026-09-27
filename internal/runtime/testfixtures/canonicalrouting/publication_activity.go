@@ -39,7 +39,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		schema = strings.Replace(schema, "name: publication-activity\n", "name: publication-activity\nmode: template\ninstance: case_id\n", 1)
 		schema = strings.Replace(schema, "source: external", "resolution: {mode: select-or-create}", 1)
 		writeClosedVariantFile(t, root, "events.yaml", request+"activity.dispatch:\n  key: case_id\n  case_id: text\n  message: text\n")
-		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: payload.case_id, message: payload.message}}\n")
+		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: \"${payload.case_id}\", message: \"${payload.message}\"}}\n")
 		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested}\n", flow)
 		writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    events:\n      - {event: activity.requested, source: external}\n  outputs:\n    events: [activity.dispatch]\nconnect:\n"+connects)
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
@@ -55,7 +55,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		}
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
-	activity := "producer:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: {ref: payload.message}}\n"
+	activity := "producer:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: \"${payload.message}\"}\n"
 	effect := "read_only"
 	if approval {
 		activity += "        approval: {decision: approve_send}\n"
@@ -63,7 +63,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		// Approval execution requires existing receiver state. A real upstream
 		// handler acquires it; the approval test must not seed a database row.
 		activity = strings.ReplaceAll(activity, "activity.requested", "activity.execute")
-		activity = "intake:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      data_accumulation:\n        writes: [{target_field: case_id, expression: payload.case_id}]\n      emit: {event: activity.execute, fields: {message: payload.message}}\n" + activity
+		activity = "intake:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      data_accumulation:\n        writes: [{target_field: case_id, value: \"${payload.case_id}\"}]\n      emit: {event: activity.execute, fields: {message: \"${payload.message}\"}}\n" + activity
 		declarations := "activity.execute:\n  message: text\n"
 		if !template {
 			declarations = request + declarations

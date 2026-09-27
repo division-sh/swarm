@@ -442,10 +442,10 @@ rows:
   - id: handler.expression
     ruled: R2
     paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, guard.on_fail.escalate.fields.*, stage_gate.context.*, data_accumulation.writes[].value/key/index; reduce.params is accepted but not executed; sets_gate.value is inert and is not an expression-value slot"
-    owners: [ExpressionValue.UnmarshalYAML, decodeEmitFieldValueNode, decodeWorkflowDataWriteValueNode, LowerEmitSpecFields, validateEmitTemplateCELFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
+    owners: [decodeExpressionValueNode, ExpressionValue.UnmarshalYAML, LowerEmitSpecFields, validateEmitTemplateFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
     information:
       fact: [literal values and references]
-      choice: [literal, ref, CEL]
+      choice: [typed_literal, exact_typed_interpolation, mixed_string_interpolation, recursive_container]
     spelling:
       canonical_candidate: "R2: literal YAML by default; one ${...} returns a typed expression value; mixed text interpolates to string; {literal: ...} escapes interpretation"
       retired_duplicates: ["authored {expression: X}", "authored {cel: X}", "authored {ref: X} and kind metadata", "bare CEL scalar and emit namespace shorthand", "stage-gate literal-to-CEL rewrite", "emit-template CEL-only validation"]

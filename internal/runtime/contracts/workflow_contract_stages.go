@@ -226,14 +226,6 @@ func (g *FlowStageGateDeclaration) UnmarshalYAML(node *yaml.Node) error {
 			if err != nil {
 				return err
 			}
-			for name, expression := range contextFields {
-				if expression.Kind == ExpressionKindLiteral {
-					if text, ok := expression.Literal.(string); ok {
-						expression = CELExpression(text)
-						contextFields[name] = expression
-					}
-				}
-			}
 			out.Context = contextFields
 		case "outcomes":
 			outcomes, err := decodeStageGateOutcomes(value)

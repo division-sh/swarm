@@ -82,7 +82,7 @@ pins:
     work.ready:
       data_accumulation:
         writes:
-          - {target_field: processed_count, expression: "has(entity.processed_count) ? entity.processed_count + 1 : 1"}
+          - {target_field: processed_count, value: "${has(entity.processed_count) ? entity.processed_count + 1 : 1}"}
 `,
 	} {
 		writeClosedVariantFile(t, root, path, contents)

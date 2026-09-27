@@ -7,9 +7,9 @@ worker:
       advances_to: working
       emit:
         event: work.processed
-        fields: {marker: payload.marker, origin: '"."'}
+        fields: {marker: "${payload.marker}", origin: .}
     work.processed:
       advances_to: done
       emit:
         event: work.routed
-        fields: {marker: payload.marker, origin: '"."'}
+        fields: {marker: "${payload.marker}", origin: .}

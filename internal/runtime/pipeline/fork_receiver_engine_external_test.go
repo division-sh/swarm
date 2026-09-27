@@ -85,11 +85,11 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				old := "          - {target_field: processed_token, expression: payload.token}\n"
+				old := "          - {target_field: processed_token, value: \"${payload.token}\"}\n"
 				if strings.Count(string(raw), old) != 1 {
 					t.Fatal("canonical receiver fixture mutation changed")
 				}
-				write := "          - {target_field: marker, expression: \"'consumer-engine'\"}\n"
+				write := "          - {target_field: marker, value: \"${'consumer-engine'}\"}\n"
 				if err := os.WriteFile(path, []byte(strings.Replace(string(raw), old, write, 1)), 0o600); err != nil {
 					t.Fatal(err)
 				}

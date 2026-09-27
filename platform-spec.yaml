@@ -576,7 +576,7 @@ contract_formats:
               emit:
                 event: review.escalated
                 fields:
-                  revision_id: {cel: loop.revision_id}
+                  revision_id: ${loop.revision_id}
 
         event_handlers:
           work.started:
@@ -884,9 +884,8 @@ contract_formats:
       rule: |
         Event payloads are producer-complete only. Every required declared
         payload field must be populated by the active emit site's
-        canonical explicit `emit.fields` map. `emit.from` and same-named
-        bare namespace `emit.fields` values are only authoring sugar for
-        system-node emitted payload maps; they lower to the same explicit map
+        canonical explicit `emit.fields` map. `emit.from` is authoring sugar for
+        system-node emitted payload maps; it lowers to the same explicit map
         before validation, generated/semantic views, and runtime execution. No
         payload defaults. No implicit passthrough. No nested `payload:` block.
         Missing required fields and undeclared emitted fields are contract
@@ -3653,16 +3652,15 @@ handler_specification:
           meaning: 'Write a constant value directly to entity.entity_key. No expression evaluation.'
           example: "- target_field: revision_count\n  value: 0"
           note: '{target_field, literal} is NOT valid. The field name is value, not literal.
-            value and expression are mutually exclusive — a write item MUST NOT have both.'
+            A scalar without `${...}` is a typed constant.'
         computed:
-          shape: '{target_field: entity_key, expression: CEL_expression}'
-          meaning: 'CEL expression evaluated against handler context → entity.entity_key.'
-          context: 'expression is evaluated against: entity, payload, policy, fan_out. The fan_out
+          shape: '{target_field: entity_key, value: "${CEL_expression}"}'
+          meaning: 'The interpolated value is evaluated against handler context → entity.entity_key.'
+          context: 'The value expression is evaluated against: entity, payload, policy, fan_out. The fan_out
             namespace is available when the handler includes a fan_out step (e.g., fan_out.count).
             accumulated is available after the current open-stream arrival has been admitted.'
-          example: "- target_field: revision_count\n  expression: entity.revision_count + 1"
-          note: 'value and expression are mutually exclusive. Use value for constants, expression
-            for dynamic computation. Do not use expression for simple constants — use value instead.'
+          example: "- target_field: revision_count\n  value: ${entity.revision_count + 1}"
+          note: 'Use the same value key for literals and computed values. Only `${...}` selects CEL.'
         contained_operation:
           promoted_by: '#1548'
           canonical_code_owner: internal/runtime/contracts.WorkflowDataWrite.Operation + internal/runtime/entityruntime.MutationPlan
@@ -3673,9 +3671,9 @@ handler_specification:
             MUST use `entity.` scope. For map-scoped operations, `key` is the
             explicit map key expression; dynamic bracket targets such as
             `entity.map[payload.key]` are not valid operation syntax. `value`,
-            `key`, and `index` use the expression-value grammar: scalars/maps/lists
-            are literals, `{ref: payload.field}` reads a scoped value, and
-            `{cel: expression}` evaluates a CEL expression.
+            `key`, and `index` use `expression_value_grammar`: a scalar without
+            `${...}` is literal, `${payload.field}` reads a typed scoped value,
+            and nested maps/lists interpolate recursively.
           map_operations:
             set: >
               Requires `target`, `key`, and `value`. The target root must be
@@ -3723,11 +3721,11 @@ handler_specification:
           - paths.Parse dynamic segments
           - whole-map/list CEL rebuilds used as keyed operation proof
           - connect/direct delivery/RouteTable/descriptor lookup for contained items
-          example: "data_accumulation:\n  writes:\n  - op: append\n    target: entity.verticals.active_jobs\n    key:\n      ref: payload.vertical_id\n    value:\n      ref: payload.job\n  - op: update\n    target: entity.review_queue\n    index: 0\n    value: reviewed"
+          example: "data_accumulation:\n  writes:\n  - op: append\n    target: entity.verticals.active_jobs\n    key: ${payload.vertical_id}\n    value: ${payload.job}\n  - op: update\n    target: entity.review_queue\n    index: 0\n    value: reviewed"
       rules:
       - writes is always a list
-      - each item is exactly one of the five forms above
-      - value and expression are mutually exclusive on the same write item (boot error if both present)
+      - each item is exactly one of the six forms above
+      - the retired expression key is invalid; value owns both literal and interpolated writes
       - source_event is optional — if omitted, the trigger event is the source; this effective default must be visible in
         the normalized handler semantics used by boot and runtime
       - source_event payload must contain all fields referenced by direct and mapped writes (verified at boot)
@@ -3737,7 +3735,7 @@ handler_specification:
       example: "data_accumulation:\n  writes:\n  - geography                              # direct\n\
         \  - source_field: vertical_name             # mapped\n    target_field: name\n  - target_field:\
         \ revision_count                # literal\n    value: 0\n  - target_field: expected_count\
-        \              # computed\n    expression: fan_out.count\n  source_event: scan.requested\
+        \              # computed\n    value: ${fan_out.count}\n  source_event: scan.requested\
         \               # optional"
     emit:
       field: emit
@@ -3747,9 +3745,9 @@ handler_specification:
         and fan_out emit.
       sub_fields:
         event: string — event to emit
-        fields: map of output_field_name → CEL expression evaluated against handler context. Optional. If omitted, the emitted
-          payload contains no business fields. Runtime-owned envelope context is attached on the event carrier and is accessed
-          through event.* rather than payload.*.
+        fields: map of output_field_name → expression_value_grammar value. Optional. If omitted, the emitted payload contains
+          no business fields. Runtime-owned envelope context is attached on the event carrier and is accessed through event.*
+          rather than payload.*.
       retired_fields:
         target: Any authored emit.target value, including empty, null, malformed, sender, instance_id, or flow_match forms,
           is a load-time RETIRED-EMIT-ROUTING error. Recipient identity belongs to typed consumers, connect topology,
@@ -3782,18 +3780,31 @@ handler_specification:
         lowering: "`emit.from: <source>` fills required declared payload fields for the emitted event when the same-named
           field exists in the source and the target field is not explicitly present in `emit.fields`. Optional payload fields
           are never auto-filled; authors opt into optionals through explicit `emit.fields` entries."
-        field_value_micro_sugar: "Inside emitted payload `emit.fields` only, a bare namespace value means same-named source
-          field: `interest_score: payload` lowers to `interest_score: payload.interest_score`; `bucket: entity` lowers to
-          `bucket: entity.bucket`. Explicit dotted CEL values remain the canonical authoring form for renames and computed
-          selections."
+        field_values: "All `emit.fields` values use the R2 expression-value grammar. Bare `payload` and `entity` are literal
+          strings, not same-named source-field selectors. Use `${payload.interest_score}` or `${entity.bucket}` for exact
+          typed selections."
         canonical_output: The generated/semantic view and every validator/runtime consumer see the lowered canonical explicit
           `emit.fields` map with `emit.from` removed. Runtime evaluates only that explicit map; it never performs implicit
           entity or trigger-payload passthrough.
         fail_closed: Missing source namespace, invalid source namespace, missing source field, missing emitted event payload
           schema, missing required emitted payload field after lowering, undeclared target payload field, and envelope-owned
           payload keys are hard invalidity.
-        excluded_surfaces: This sugar is not valid for receiver initialize, connect maps, or data-handoff maps. Those remain separate mapping surfaces
-          and must not inherit `emit.from` or bare namespace field-value lowering.
+        excluded_surfaces: "`emit.from` is not valid for receiver initialize, connect maps, or data-handoff maps. Those
+          remain separate mapping surfaces and must not inherit emitted-payload lowering."
+      expression_value_grammar:
+        scope: "Every executable value slot in emit.fields (including guard escalation and fan_out emits), activity.input,
+          stage gate context, and data_accumulation write value/key/index. Predicates, path selectors, fan_out.identity,
+          and inert sets_gate.value are not expression-value slots."
+        scalar: "A YAML scalar without `${...}` is a typed literal, including empty string, zero and false. A scalar
+          exactly equal to one `${CEL}` evaluates to the typed CEL result. A scalar mixing text and one or more `${CEL}`
+          fragments evaluates to a string. Missing or invalid expressions fail closed."
+        recursive: "Lists and object values recursively apply the same rule to leaves; object keys remain literal names.
+          Dynamic containers evaluate to a typed list or object. Literal numeric kinds must not change during lowering."
+        escape: "`{literal: <value>}` preserves its entire value without interpolation, including nested `${` text."
+        retired: "Authored `{ref: ...}`, `{cel: ...}`, `{expression: ...}`, expression `kind` metadata and data-write
+          `expression:` aliases are rejected. Use `${...}` for CEL and `{literal: ...}` only to escape interpolation."
+        lowered_owner: "Authoring admission materializes one literal or CEL expression value. Verification and runtime
+          consume that materialized value; they do not reinterpret bare scalars by context."
       on_success:
         field: on_success
         type: object
@@ -3922,11 +3933,11 @@ handler_specification:
         syntax: A rules handler may declare handler-level emit as the template, with `emit.event` and optional shared
           `emit.from` / `emit.fields`. Each rule then declares `emit.fields` and may declare the same `emit.from` without
           `emit.event` to add branch-specific fields. `emit` remains one object shape everywhere, `{event?, from?, fields?}`.
-        field_values: All `emit.fields` values use the normal CEL expression string grammar after emitted-payload lowering.
-          String constants are CEL string literals, for example YAML value `'"high"'`. The same-named bare namespace
-          micro-sugar described in `emit_field_lowering` is the only additional emitted-payload field-value shorthand.
-          The platform does not support `emit_fields`, flattened rule emit payload maps, `literal`, `value`, or any second
-          field-value dialect for this specialization.
+        field_values: >-
+          All template and rule `emit.fields` values use `expression_value_grammar`, identical to ordinary
+          emits. For example `bucket: high` is a literal and `bucket: ${payload.bucket}` is a typed selection. There is
+          no CEL-only restriction or second field-value dialect for specialization. `emit_fields` and flattened rule
+          payload maps remain unsupported.
         matching: Rules keep ordered first-match semantics. Threshold-style overlapping rules are valid when ordered from
           most specific to least specific; the platform does not fail closed merely because multiple conditions could be true.
         required_else: Every rules emit template specialization must include an `else` rule so every successful rules-handler
@@ -4600,7 +4611,7 @@ handler_specification:
       limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
-      rules.condition, data_accumulation.expression, query.filter, and filter.condition. Each namespace resolves to a specific
+      rules.condition, data_accumulation.writes[].value, query.filter, and filter.condition. Each namespace resolves to a specific
       data source. Declared bare entity values require program-point definite assignment; optional values require
       a presence decision. Undeclared field references are contract errors.'
     namespaces:
@@ -4649,13 +4660,12 @@ handler_specification:
         resolves_to: 'Handler context produced while creating the durable fan_out obligation. fan_out.count is the
           immutable source cardinality owed by that obligation, not publications committed, deliveries settled,
           successes, or remaining work. fan_out.index is scoped to deferred fan_out.emit.fields evaluation only.'
-        available_in: 'data_accumulation.expression — the canonical way to write fan_out results to entity
-          state. Example: expression: fan_out.count writes the obligation cardinality to an entity field for
+        available_in: 'data_accumulation.writes[].value with `${fan_out.count}` is the canonical way to write fan_out results to entity
+          state. This writes the obligation cardinality to an entity field for
           downstream open-stream processing.'
         not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
           fields written by data_accumulation instead.'
-        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    expression:\
-          \ fan_out.count"
+        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    value: ${fan_out.count}"
       computed:
         resolves_to: 'Turn-scoped derived handler values written by compute-owned operations. Public authors may read
           computed.* in rule conditions and expression-value surfaces after the value has been produced by the handler
@@ -5592,7 +5602,7 @@ engine:
       agents: Not constrained. Multiple agents may subscribe to the same event freely.
       enforcement: Boot validation rejects duplicate node handlers for the same event.
     emit_payload_default: 'For supported declarative system-node emit sites, the platform constructs the business payload by:
-      1. Lower emitted-payload authoring sugar (`emit.from` and bare namespace same-named `emit.fields` values) to a canonical
+      1. Lower `emit.from` to a canonical
       explicit emit.fields map. 2. Start from an empty payload. 3. Evaluate the canonical emit.fields, if present, into the
       payload. 4. Attach runtime-owned envelope context on the emitted event carrier rather than copying it into payload.
       There is no implicit entity or trigger-payload passthrough on this surface. Runtime rejects authored envelope-owned keys
@@ -19219,7 +19229,7 @@ observation_model:
       description: Rules for constructing emitted event payloads on supported system-node runtime emit surfaces.
       declarative_system_node_emit_surface:
         construction_order:
-        - 1. Lower emitted-payload `emit.from` and bare namespace field-value sugar to the canonical explicit emit.fields map
+        - 1. Lower emitted-payload `emit.from` to the canonical explicit emit.fields map
         - 2. Start from an empty business payload
         - 3. Evaluate canonical emit.fields for the active emit site, if present
         - 4. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload

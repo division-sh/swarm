@@ -2895,13 +2895,13 @@ func TestRun_RejectsDisallowedRefNamespaceInEmitFieldExpressions(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsYAMLScalarEmitFieldsAsExpressions(t *testing.T) {
+func TestRun_RejectsInvalidInterpolatedEmitFieldsExpressions(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 emit:
   event: item.scored
   fields:
-    bad: accumulated.size()
+    bad: ${accumulated.size()}
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2918,7 +2918,7 @@ emit:
 	report := Run(context.Background(), source, Options{})
 
 	if !reportContains(report.Errors(), "emit_field_expression_validation", "accumulated.size()") {
-		t.Fatalf("expected YAML scalar emit.fields expression to fail validation, got %#v", report.Errors())
+		t.Fatalf("expected interpolated emit.fields expression to fail validation, got %#v", report.Errors())
 	}
 }
 
@@ -2935,13 +2935,13 @@ func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsBareItemInHandlerEmitFields(t *testing.T) {
+func TestRun_RejectsUnboundItemInHandlerEmitFields(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 emit:
   event: item.scored
   fields:
-    bad: item
+    bad: ${item}
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2958,7 +2958,7 @@ emit:
 	report := Run(context.Background(), source, Options{})
 
 	if !reportContains(report.Errors(), "emit_field_expression_validation", "item") {
-		t.Fatalf("expected bare item in handler emit.fields to fail validation, got %#v", report.Errors())
+		t.Fatalf("expected unbound item in handler emit.fields to fail validation, got %#v", report.Errors())
 	}
 }
 
@@ -3247,7 +3247,7 @@ func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *t
 		Event: "market_research.scan_assigned",
 		From:  "entity",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"geography": runtimecontracts.CELExpression("payload"),
+			"geography": runtimecontracts.CELExpression("payload.geography"),
 		},
 	}
 	node.EventHandlers["scan.corpus_dispatch"] = handler
@@ -3259,8 +3259,8 @@ func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *t
 	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "handler.emit") {
 		t.Fatalf("unexpected payload completeness error after emit.from lowering, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "emit_field_expression_validation", "payload") {
-		t.Fatalf("bare namespace micro-sugar was validated before lowering, got %#v", report.Errors())
+	if reportContains(report.Errors(), "emit_field_expression_validation", "payload.geography") {
+		t.Fatalf("explicit payload field failed validation after emit.from lowering, got %#v", report.Errors())
 	}
 }
 
@@ -3280,7 +3280,7 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 		Condition: "else",
 		Emit: runtimecontracts.EmitSpec{
 			Fields: map[string]runtimecontracts.ExpressionValue{
-				"geography": runtimecontracts.CELExpression("payload"),
+				"geography": runtimecontracts.CELExpression("payload.geography"),
 			},
 		},
 	}}
@@ -3293,8 +3293,8 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[full].emit_template") {
 		t.Fatalf("unexpected template payload completeness error after emit.from lowering, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "emit_field_expression_validation", "payload") {
-		t.Fatalf("template bare namespace micro-sugar was validated before lowering, got %#v", report.Errors())
+	if reportContains(report.Errors(), "emit_field_expression_validation", "payload.geography") {
+		t.Fatalf("template explicit payload field failed validation after emit.from lowering, got %#v", report.Errors())
 	}
 }
 

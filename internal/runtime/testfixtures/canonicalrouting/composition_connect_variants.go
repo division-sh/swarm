@@ -91,7 +91,7 @@ deploy.done:
       emit:
         event: deploy.done
         fields:
-          vertical_id: payload.vertical_id
+          vertical_id: ${payload.vertical_id}
 `)
 	instance := ""
 	input := "      - deploy.completed\n"
