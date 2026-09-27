@@ -184,7 +184,7 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		WHERE p.delivery_id=? AND p.source_kind='response' AND p.state='rendered'
 		AND p.current_render_id=r.render_id AND r.render_id=? AND r.render_hash=?
 		AND p.current_receipt_operation_id IS NULL
-		AND ((intent.state='settled' AND intent.disposition='entry' AND action.publication_id IS NULL)
+		AND ((intent.state='settled' AND intent.disposition IN ('entry','teaching','chooser') AND action.publication_id IS NULL)
 		  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 		AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
 		AND p.external_account_reference=? AND p.conversation_reference=?
@@ -227,7 +227,7 @@ func channelResponseAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			WHERE p.delivery_id=$2::uuid AND p.source_kind='response' AND p.state='rendered'
 			AND p.current_render_id=r.render_id AND r.render_id=$3::uuid AND r.render_hash=$4
 			AND p.current_receipt_operation_id IS NULL
-			AND ((intent.state='settled' AND intent.disposition='entry' AND action.publication_id IS NULL)
+			AND ((intent.state='settled' AND intent.disposition IN ('entry','teaching','chooser') AND action.publication_id IS NULL)
 			  OR (action.state='settled' AND action.disposition='navigation' AND intent.publication_id IS NULL))
 			AND p.principal_id=$5::uuid AND p.interface_key=$6 AND p.delivery_epoch=$7
 			AND p.external_account_reference=$8 AND p.conversation_reference=$9
