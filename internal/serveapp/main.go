@@ -1905,6 +1905,15 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			}
 		}
 	}
+	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
+		store: stores.ChannelDelivery(), cards: storeDeps.DecisionCards,
+		activations: channelOnboardingStore, manager: runtimeContextManager,
+		effects: stores.Effects(), credentials: providerCredentialOwner,
+		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
+	}); err != nil {
+		presenter.runtimeFailure("channel_delivery", err)
+		return 1
+	}
 
 	if req.OnReady != nil {
 		err := req.OnReady(ctx, "http://"+apiListener.Addr().String())
