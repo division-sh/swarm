@@ -222,6 +222,20 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	}
 
 	runtime := &selectedContractAgentRuntime{manager: runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{WorkOwner: runtimeOwner, ReceiverExecution: eventreceiver.NormalExecution()})}
+	preShutdownCtx, cancelPreShutdown := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	if err := runtime.WaitForQuiescence(preShutdownCtx, eventBus); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitForQuiescence before shutdown with current route work = %v, want deadline exceeded", err)
+	}
+	cancelPreShutdown()
+	if err := runtime.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	zeroAgentRuntime := &selectedContractAgentRuntime{}
+	zeroWaitCtx, cancelZeroWait := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	if err := zeroAgentRuntime.WaitForQuiescence(zeroWaitCtx, eventBus); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("zero-agent WaitForQuiescence with current route work = %v, want deadline exceeded", err)
+	}
+	cancelZeroWait()
 	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	if err := runtime.WaitForQuiescence(waitCtx, eventBus); !errors.Is(err, context.DeadlineExceeded) {

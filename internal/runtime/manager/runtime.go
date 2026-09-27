@@ -147,6 +147,11 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 		return err
 	}
 	transition := am.lifecycle.requestShutdownTransition()
+	if transition == nil {
+		// A prior run may already be joined while exact activation cleanup is
+		// retained after a failed durable settlement.
+		return am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+	}
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
 		return err

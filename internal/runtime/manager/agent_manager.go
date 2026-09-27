@@ -82,6 +82,7 @@ type AgentManager struct {
 	deliveryLanes  map[runtimeagentidentity.Identity]*claimedAttemptLane
 
 	dynamicFlowReadinessMu            sync.Mutex
+	dynamicFlowRetirementMu           sync.Mutex
 	dynamicFlowReadinessAttempts      map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
 	dynamicFlowActiveAttempts         map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt
 	dynamicFlowReadinessSignal        chan struct{}

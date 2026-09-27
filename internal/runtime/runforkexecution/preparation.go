@@ -374,16 +374,19 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 			panic(panicked)
 		}
 	}()
-	if err := p.operation.retireSelected(); err != nil {
-		p.closeErr = err
-		return err
-	}
+	// Fence admission before draining retained children. Joining the selected
+	// occurrence first would wait for leases released by runtime cleanup below.
+	p.operation.Retire()
 	if p.retainedRuntime != nil {
 		if err := p.retainedRuntime.Shutdown(); err != nil {
 			p.closeErr = err
 			return err
 		}
 		p.retainedRuntime = nil
+	}
+	if err := p.operation.retireSelected(); err != nil {
+		p.closeErr = err
+		return err
 	}
 	if err := p.agentRuntime.releaseWorkspaceProjection(); err != nil {
 		p.closeErr = err

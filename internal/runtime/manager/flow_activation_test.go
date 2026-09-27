@@ -188,34 +188,35 @@ type flowActivationTestRouteStore struct {
 }
 
 type flowActivationTestInstanceStore struct {
-	readinessMu             sync.Mutex
-	creates                 []runtimepipeline.WorkflowInstance
-	upserts                 []runtimepipeline.WorkflowInstance
-	terminatedPaths         []string
-	terminatedAtSeen        []time.Time
-	byStorageRef            map[string]runtimepipeline.WorkflowInstance
-	routeLoads              []runtimeflowidentity.RunScopedFlowInstance
-	materialization         runtimepipeline.WorkflowInitialMaterializationResult
-	armedEntries            []string
-	armInitialEntry         func(string) error
-	retiredTimerEntries     []string
-	retireInitialEntry      func(string) error
-	retireAttempt           func() error
-	readiness               map[string]runtimepipeline.DynamicFlowRuntimeReadiness
-	activationAttempts      map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt
-	committedAttempts       map[string]bool
-	retiredAttemptIDs       map[string]struct{}
-	foreignSupersededIDs    map[string]struct{}
-	readinessLoadErr        error
-	creationMarkErr         error
-	topologyMarkErr         error
-	creationMarked          func()
-	topologyMarked          func()
-	beforeTopologyMark      func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
-	afterTopologyMark       func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
-	beforeCreation          func()
-	respectReadinessContext bool
-	lifecycleModes          []executionmode.Mode
+	readinessMu                sync.Mutex
+	creates                    []runtimepipeline.WorkflowInstance
+	upserts                    []runtimepipeline.WorkflowInstance
+	terminatedPaths            []string
+	terminatedAtSeen           []time.Time
+	byStorageRef               map[string]runtimepipeline.WorkflowInstance
+	routeLoads                 []runtimeflowidentity.RunScopedFlowInstance
+	materialization            runtimepipeline.WorkflowInitialMaterializationResult
+	armedEntries               []string
+	armInitialEntry            func(string) error
+	retiredTimerEntries        []string
+	retireInitialEntry         func(string) error
+	retireAttempt              func() error
+	settleAttemptPostCommitErr error
+	readiness                  map[string]runtimepipeline.DynamicFlowRuntimeReadiness
+	activationAttempts         map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt
+	committedAttempts          map[string]bool
+	retiredAttemptIDs          map[string]struct{}
+	foreignSupersededIDs       map[string]struct{}
+	readinessLoadErr           error
+	creationMarkErr            error
+	topologyMarkErr            error
+	creationMarked             func()
+	topologyMarked             func()
+	beforeTopologyMark         func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
+	afterTopologyMark          func(runtimepipeline.DynamicFlowRuntimeReadinessPlan)
+	beforeCreation             func()
+	respectReadinessContext    bool
+	lifecycleModes             []executionmode.Mode
 }
 
 type flowActivationStandingRestarts map[string]runtimepipeline.StandingRestartDispositionKind
@@ -1030,7 +1031,9 @@ func (s *flowActivationTestInstanceStore) settleActivationAttempt(attempt runtim
 		item.TopologyReadyAt = time.Time{}
 		s.readiness[key] = item
 	}
-	return nil
+	err := s.settleAttemptPostCommitErr
+	s.settleAttemptPostCommitErr = nil
+	return err
 }
 
 func (b *flowActivationTestBus) CommitDynamicFlowRuntimeCreationOccurrence(
