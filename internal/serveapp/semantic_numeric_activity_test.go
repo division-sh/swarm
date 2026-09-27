@@ -160,7 +160,7 @@ collector:
         source_event: fetch.succeeded
         writes:
           - target_field: score
-            expression: 'payload.result.value + payload.result.nested.numbers[?0].value() + 2'
+            value: "${payload.result.value + payload.result.nested.numbers[?0].value() + 2}"
 `
 				for name, raw := range map[string]string{"nodes.yaml": targetNodes, "tools.yaml": targetTool} {
 					if err := os.WriteFile(filepath.Join(targetRoot, name), []byte(raw), 0600); err != nil {

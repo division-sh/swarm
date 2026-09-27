@@ -147,7 +147,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{
 						CheckID:  "data_accumulation_expression_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("node %s handler %s %s %q is invalid for data_accumulation.expression: %v", nodeID, eventType, expr.Kind, expr.Expression, err),
+						Message:  fmt.Sprintf("node %s handler %s %s %q is invalid for data_accumulation.writes[].value: %v", nodeID, eventType, expr.Kind, expr.Expression, err),
 						Location: nodeID,
 					})
 				}

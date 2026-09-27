@@ -57,7 +57,7 @@ collector:
       data_accumulation:
         writes:
           - target_field: result
-            expression: payload.result
+            value: "${payload.result}"
       rules:
         enter_review:
           condition: "payload.result == 'ready'"
@@ -131,7 +131,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: result
-            expression: payload.result
+            value: "${payload.result}"
       advances_to: done
 `
 		writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
@@ -226,7 +226,7 @@ connect:
       data_accumulation:
         writes:
           - target_field: result
-            expression: payload.result
+            value: "${payload.result}"
       advances_to: done
 `)
 	}
@@ -262,7 +262,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 				events += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  %s: %s\n", event, command.field, command.typ)
 			}
 			nodes += ", " + input
-			handlers += fmt.Sprintf("    %s:\n      advances_to: active\n      emit:\n        event: %s\n        fields:\n          case_id: payload.case_id\n          %s: payload.%s\n", input, output, command.field, command.field)
+			handlers += fmt.Sprintf("    %s:\n      advances_to: active\n      emit:\n        event: %s\n        fields:\n          case_id: ${payload.case_id}\n          %s: ${payload.%s}\n", input, output, command.field, command.field)
 			mode := "select"
 			if command.name == "seed" {
 				mode = "select-or-create"
@@ -435,7 +435,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: result
-            expression: payload.result
+            value: "${payload.result}"
       advances_to: done
 `
 	prefix := ""
@@ -464,7 +464,7 @@ pins:
 			{"schema.yaml", "events: [loop.escaped]", "events: [loop.escaped, ordinary.repeated]"},
 			{"schema.yaml", "    to: sink\n", "    to: sink\n  - event: ordinary.repeated\n    from: .\n    to: ordinary\n"},
 			{"events.yaml", "work.requested:\n", "ordinary.repeated:\n  token: text\n  revision_id: text\nwork.requested:\n"},
-			{"nodes.yaml", "loop: {repeat: revision, from: review}\n      advances_to: drafting", "loop: {repeat: revision, from: review}\n      advances_to: drafting\n      emit:\n        event: ordinary.repeated\n        fields: {token: {literal: ordinary}, revision_id: {cel: loop.revision_id}}"},
+			{"nodes.yaml", "loop: {repeat: revision, from: review}\n      advances_to: drafting", "loop: {repeat: revision, from: review}\n      advances_to: drafting\n      emit:\n        event: ordinary.repeated\n        fields: {token: {literal: ordinary}, revision_id: \"${loop.revision_id}\"}"},
 		} {
 			raw, err := os.ReadFile(filepath.Join(root, edit.path))
 			if err != nil {
@@ -486,9 +486,9 @@ pins:
       data_accumulation:
         writes:
           - target_field: token
-            expression: payload.token
+            value: "${payload.token}"
           - target_field: revision_id
-            expression: payload.revision_id
+            value: "${payload.revision_id}"
       advances_to: observed
 `)
 		return root
@@ -518,7 +518,7 @@ loops:
       advances_to: escaped
       emit:
         event: loop.escaped
-        fields: {revision_id: {cel: loop.revision_id}}
+        fields: {revision_id: "${loop.revision_id}"}
 pins:
   inputs:
     events:
@@ -574,7 +574,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: revision_id
-            expression: payload.revision_id
+            value: "${payload.revision_id}"
       advances_to: done
 `)
 }

@@ -216,7 +216,7 @@ func TestEncodePayloadPreservesEagerNumericKindForPersistedEvaluation(t *testing
 	}
 }
 
-func TestEmitFieldsPayload_EvaluatesYAMLLoadedScalarEmitFieldsAsCEL(t *testing.T) {
+func TestEmitFieldsPayload_EvaluatesYAMLLoadedR2Values(t *testing.T) {
 	payloadType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "SignalPayload", Fields: []runtimecontracts.ResolvedCatalogField{
 		{Name: "mode", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
 		{Name: "scan_id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
@@ -226,10 +226,10 @@ func TestEmitFieldsPayload_EvaluatesYAMLLoadedScalarEmitFieldsAsCEL(t *testing.T
 	if err := yaml.Unmarshal([]byte(`
 event: signals.category_ready
 fields:
-  mode: payload.mode
-  batch: "{'scan_id': payload.scan_id, 'geography': payload.geography}"
+  mode: ${payload.mode}
+  batch: {scan_id: "${payload.scan_id}", geography: "${payload.geography}"}
   count: 0
-  quoted_literal: "'ready'"
+  quoted_literal: ready
   explicit_literal:
     literal: ready
 `), &spec); err != nil {
@@ -256,7 +256,7 @@ fields:
 	if batch["scan_id"] != "scan-1" || batch["geography"] != "us" {
 		t.Fatalf("batch = %#v, want scan/geography from payload", batch)
 	}
-	if got := transformed["count"]; got != int64(0) {
+	if got := transformed["count"]; got != 0 {
 		t.Fatalf("count = %#v, want 0", got)
 	}
 	if got := transformed["quoted_literal"]; got != "ready" {

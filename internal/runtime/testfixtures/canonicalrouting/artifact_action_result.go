@@ -71,15 +71,15 @@ repo_scaffold.repo_commit_failed:
           emit:
             event: repo_scaffold.repo_commit_succeeded
             fields:
-              request_id: payload.request_id
+              request_id: ${payload.request_id}
               result_kind: {literal: ready}
         rejected:
           condition: else
           emit:
             event: repo_scaffold.repo_commit_failed
             fields:
-              request_id: payload.request_id
-              request_copy: payload.request_id
+              request_id: ${payload.request_id}
+              request_copy: ${payload.request_id}
               result_kind: {literal: failed}
     repo_scaffold.repo_commit_succeeded:
       sets_gate: result_callback_observed
@@ -125,6 +125,6 @@ repo_scaffold.repo_commit_requested:
     start.requested:
       emit:
         event: repo_scaffold.repo_commit_requested
-        fields: {request_id: payload.request_id, mvp_yaml: payload.mvp_yaml}
+        fields: {request_id: "${payload.request_id}", mvp_yaml: "${payload.mvp_yaml}"}
 `
 }

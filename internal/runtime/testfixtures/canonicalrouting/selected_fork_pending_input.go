@@ -47,7 +47,7 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 			case PendingInputOrdinaryRoot:
 				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "event: work.first", "event: work.requested")
 				files["events.yaml"] += "work.requested:\n  token: text\n"
-				files["nodes.yaml"] += "emitter:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  produces: [work.first]\n  event_handlers:\n    work.requested:\n      emit:\n        event: work.first\n        fields:\n          token: 'payload.token'\n"
+				files["nodes.yaml"] += "emitter:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  produces: [work.first]\n  event_handlers:\n    work.requested:\n      emit:\n        event: work.first\n        fields:\n          token: ${payload.token}\n"
 			case PendingInputDuplicateEndpoint:
 				files["schema.yaml"] += "      - {event: work.first, source: external}\n"
 			case PendingInputMixedCompletion:

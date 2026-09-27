@@ -2087,28 +2087,26 @@
                 "op": "set",
                 "target": "entity.reports",
                 "value": {
-                  "Kind": "ref",
+                  "Kind": "cel",
                   "Literal": null,
-                  "Ref": "payload",
+                  "Ref": "",
                   "RefPath": {
-                    "Root": 1,
+                    "Root": 0,
                     "Segments": null,
-                    "Raw": "payload"
+                    "Raw": ""
                   },
-                  "CEL": ""
+                  "CEL": "payload"
                 },
                 "key": {
-                  "Kind": "ref",
+                  "Kind": "cel",
                   "Literal": null,
-                  "Ref": "payload.operating_id",
+                  "Ref": "",
                   "RefPath": {
-                    "Root": 1,
-                    "Segments": [
-                      "operating_id"
-                    ],
-                    "Raw": "payload.operating_id"
+                    "Root": 0,
+                    "Segments": null,
+                    "Raw": ""
                   },
-                  "CEL": ""
+                  "CEL": "payload.operating_id"
                 },
                 "index": {
                   "Kind": "",
@@ -2477,28 +2475,26 @@
                       }
                     },
                     "key": {
-                      "CEL": "",
-                      "Kind": "ref",
+                      "CEL": "payload.operating_id",
+                      "Kind": "cel",
                       "Literal": null,
-                      "Ref": "payload.operating_id",
+                      "Ref": "",
                       "RefPath": {
-                        "Raw": "payload.operating_id",
-                        "Root": 1,
-                        "Segments": [
-                          "operating_id"
-                        ]
+                        "Raw": "",
+                        "Root": 0,
+                        "Segments": null
                       }
                     },
                     "op": "set",
                     "target": "entity.reports",
                     "value": {
-                      "CEL": "",
-                      "Kind": "ref",
+                      "CEL": "payload",
+                      "Kind": "cel",
                       "Literal": null,
-                      "Ref": "payload",
+                      "Ref": "",
                       "RefPath": {
-                        "Raw": "payload",
-                        "Root": 1,
+                        "Raw": "",
+                        "Root": 0,
                         "Segments": null
                       }
                     }
@@ -2793,28 +2789,26 @@
               "op": "set",
               "target": "entity.reports",
               "value": {
-                "Kind": "ref",
+                "Kind": "cel",
                 "Literal": null,
-                "Ref": "payload",
+                "Ref": "",
                 "RefPath": {
-                  "Root": 1,
+                  "Root": 0,
                   "Segments": null,
-                  "Raw": "payload"
+                  "Raw": ""
                 },
-                "CEL": ""
+                "CEL": "payload"
               },
               "key": {
-                "Kind": "ref",
+                "Kind": "cel",
                 "Literal": null,
-                "Ref": "payload.operating_id",
+                "Ref": "",
                 "RefPath": {
-                  "Root": 1,
-                  "Segments": [
-                    "operating_id"
-                  ],
-                  "Raw": "payload.operating_id"
+                  "Root": 0,
+                  "Segments": null,
+                  "Raw": ""
                 },
-                "CEL": ""
+                "CEL": "payload.operating_id"
               },
               "index": {
                 "Kind": "",

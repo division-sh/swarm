@@ -32,9 +32,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		t.Fatalf("unsupported publication topology %q", mode)
 	}
 	root := t.TempDir()
-	valueType, valueExpr := "integer", "payload.choice"
+	valueType, valueExpr := "integer", `"${payload.choice}"`
 	if textValues {
-		valueType, valueExpr = "text", "string(payload.choice)"
+		valueType, valueExpr = "text", `"${string(payload.choice)}"`
 	}
 	families := []string{"direct", "rules", "specialized", "completion", "success", "fanout", "rulefanout", "completefanout"}
 	if len(selectedFamilies) != 0 {
@@ -51,7 +51,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		outputPins += "      - " + result + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", result, scope)
 		eventSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n%s:\n  case_id: text\n  value: %s\n", request, valueType, result, valueType)
-		emit := fmt.Sprintf("{event: %s, fields: {case_id: payload.case_id, value: %s}}", result, valueExpr)
+		emit := fmt.Sprintf("{event: %s, fields: {case_id: \"${payload.case_id}\", value: %s}}", result, valueExpr)
 		body := "      emit: " + emit + "\n"
 		switch family {
 		case "rules", "specialized", "completion":
@@ -61,7 +61,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			}
 			body = ""
 			if family == "specialized" {
-				body = fmt.Sprintf("      emit: {event: %s, fields: {case_id: payload.case_id}}\n", result)
+				body = fmt.Sprintf("      emit: {event: %s, fields: {case_id: \"${payload.case_id}\"}}\n", result)
 			}
 			body += "      " + placement + ":\n"
 			for _, choice := range []struct {
@@ -72,9 +72,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				if textValues {
 					literal = strconv.Quote(literal)
 				}
-				selected := fmt.Sprintf("{event: %s, fields: {case_id: payload.case_id, value: {literal: %s}}}", result, literal)
+				selected := fmt.Sprintf("{event: %s, fields: {case_id: \"${payload.case_id}\", value: {literal: %s}}}", result, literal)
 				if family == "specialized" {
-					selected = fmt.Sprintf("{fields: {value: '%s'}}", literal)
+					selected = fmt.Sprintf("{fields: {value: {literal: '%s'}}}", literal)
 				}
 				body += fmt.Sprintf("        - id: %s\n          condition: '%s'\n          emit: %s\n", choice.name, choice.condition, selected)
 			}
@@ -91,7 +91,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				body = "      " + placement + ":\n        - id: dispatch\n          condition: else\n"
 				indent = "          "
 			}
-			body += indent + "fan_out:\n" + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, "value: element", 1) + "\n"
+			body += indent + "fan_out:\n" + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, `value: "${element}"`, 1) + "\n"
 		}
 		handlers += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n%s", family, request, request, body)
 	}
@@ -122,7 +122,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				connects += fmt.Sprintf("  - {event: %s, from: ., to: source, rename: %s}\n", dispatch, request)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
 				driverSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", dispatch, valueType)
-				driver += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: payload.case_id, choice: payload.choice, items: payload.items}}\n", family, request, request, dispatch)
+				driver += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", choice: \"${payload.choice}\", items: \"${payload.items}\"}}\n", family, request, request, dispatch)
 			}
 			writeClosedVariantFile(t, root, "nodes.yaml", driver)
 			writeClosedVariantFile(t, root, "events.yaml", driverSchemas)

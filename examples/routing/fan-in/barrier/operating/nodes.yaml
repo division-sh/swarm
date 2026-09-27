@@ -7,6 +7,6 @@ operating-node:
       emit:
         event: operating.reported
         fields:
-          operating_id: payload.operating_id
-          period_id: payload.period_id
-          revenue: payload.revenue
+          operating_id: ${payload.operating_id}
+          period_id: ${payload.period_id}
+          revenue: ${payload.revenue}

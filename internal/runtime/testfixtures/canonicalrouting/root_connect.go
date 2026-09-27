@@ -91,7 +91,7 @@ platform_version: ">=0.7.0 <0.8.0"
 	rootNodes := ""
 	if emit != RootConnectNoEmitter {
 		rootInput = "  inputs:\n    events: [root.start]\n"
-		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: payload.entity_id\n"
+		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: ${payload.entity_id}\n"
 		if emit != RootConnectCanonicalEmit {
 			t.Fatalf("unsupported root connect emitter %d", emit)
 		}

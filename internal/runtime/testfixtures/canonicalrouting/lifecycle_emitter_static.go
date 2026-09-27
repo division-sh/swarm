@@ -81,7 +81,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			nodes += "collector:\n  execution_type: system_node\n  subscribes_to: [loop.escaped]\n  event_handlers:\n    loop.escaped: {}\n"
 		}
 		if variant == LifecycleStaticLoopNoEmit {
-			schema = strings.Replace(schema, "      emit:\n        event: loop.escaped\n        fields: {revision_id: {cel: loop.revision_id}}\n", "", 1)
+			schema = strings.Replace(schema, "      emit:\n        event: loop.escaped\n        fields: {revision_id: \"${loop.revision_id}\"}\n", "", 1)
 		}
 	case LifecycleStaticGateTwoGates:
 		gate := schema[strings.Index(schema, "  review:\n"):strings.Index(schema, "  approved: {}")]
@@ -190,7 +190,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	case LifecycleStaticGateMissingField:
 		schema = strings.Replace(schema, "fields: {result: {literal: approved}}", "fields: {}", 1)
 	case LifecycleStaticLoopMissingField:
-		schema = strings.Replace(schema, "fields: {revision_id: {cel: loop.revision_id}}", "fields: {}", 1)
+		schema = strings.Replace(schema, "fields: {revision_id: \"${loop.revision_id}\"}", "fields: {}", 1)
 	case LifecycleStaticGateMalformed:
 		schema = strings.Replace(schema, "decision: review_decision", "decision: review_decision\n      unknown_gate_field: true", 1)
 	case LifecycleStaticLoopMalformed:
@@ -251,10 +251,10 @@ template:
       rules:
         high:
           condition: "payload.score > 0"
-          emit: {fields: {bucket: '"high"'}}
+          emit: {fields: {bucket: high}}
         low:
           condition: "else"
-          emit: {fields: {bucket: '"low"'}}
+          emit: {fields: {bucket: low}}
 dispatcher:
   execution_type: system_node
   event_handlers:
@@ -263,7 +263,7 @@ dispatcher:
         items_from: payload.items
         as: element
         identity: element
-        emit: {event: item, fields: {id: {cel: element}}}
+        emit: {event: item, fields: {id: "${element}"}}
 rule-dispatcher:
   execution_type: system_node
   event_handlers:
@@ -275,7 +275,7 @@ rule-dispatcher:
             items_from: payload.items
             as: element
             identity: element
-            emit: {event: item, fields: {id: {cel: element}}}
+            emit: {event: item, fields: {id: "${element}"}}
 completion:
   execution_type: system_node
   event_handlers:
@@ -295,7 +295,7 @@ completion-dispatcher:
             items_from: payload.items
             as: element
             identity: element
-            emit: {event: item, fields: {id: {cel: element}}}
+            emit: {event: item, fields: {id: "${element}"}}
 `
 	for _, node := range []string{"worker", "router", "template", "dispatcher", "rule-dispatcher", "completion", "completion-dispatcher"} {
 		request := "request." + strings.ReplaceAll(node, "-", "_")

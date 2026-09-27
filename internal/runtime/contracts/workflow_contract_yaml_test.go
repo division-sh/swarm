@@ -161,8 +161,8 @@ stages:
     gate:
       decision: launch_review
       context:
-        staging: entity.staging_url
-        qa_summary: entity.qa_summary
+        staging: ${entity.staging_url}
+        qa_summary: ${entity.qa_summary}
       outcomes:
         approve:
           advances_to: operating
@@ -174,7 +174,7 @@ stages:
           emit:
             event: launch.rejected
             fields:
-              feedback: decision.feedback
+              feedback: ${decision.feedback}
   building: {}
   operating: {terminal: true}
 `), &doc)
@@ -2446,9 +2446,9 @@ writes:
   - target_field: resolution_method
     value: first
   - target_field: dispatch_count
-    expression: fan_out.count
+    value: ${fan_out.count}
   - target_field: score_expr
-    expression: entity.score + 1
+    value: ${entity.score + 1}
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2481,10 +2481,8 @@ func TestWorkflowDataWriteDecode_PreservesContainedOperationForms(t *testing.T) 
 writes:
   - op: append
     target: entity.verticals.active_jobs
-    key:
-      ref: payload.vertical_id
-    value:
-      ref: payload.job
+    key: ${payload.vertical_id}
+    value: ${payload.job}
   - op: update
     target: entity.queue
     index: 0
@@ -2505,11 +2503,11 @@ writes:
 	if got := appendWrite.Target(); got != "entity.verticals.active_jobs" {
 		t.Fatalf("Target() = %q", got)
 	}
-	if got := appendWrite.Key.Ref; got != "payload.vertical_id" {
-		t.Fatalf("Key.Ref = %q", got)
+	if got := appendWrite.Key.CEL; got != "payload.vertical_id" {
+		t.Fatalf("Key.CEL = %q", got)
 	}
-	if got := appendWrite.Value.Ref; got != "payload.job" {
-		t.Fatalf("Value.Ref = %q", got)
+	if got := appendWrite.Value.CEL; got != "payload.job" {
+		t.Fatalf("Value.CEL = %q", got)
 	}
 	updateWrite := spec.Writes[1]
 	if got := updateWrite.Index.Literal; got != 0 {
@@ -2696,35 +2694,30 @@ compute:
 	}
 }
 
-func TestWorkflowDataWriteDecode_PreservesExpressionAliasInListForm(t *testing.T) {
+func TestWorkflowDataWriteDecode_RetiresExpressionAliasInListForm(t *testing.T) {
 	var write WorkflowDataWrite
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 target_field: dimensions_requested
 expression: policy.scoring_dimensions
-`), &write); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := write.Target(); got != "dimensions_requested" {
-		t.Fatalf("Target() = %q", got)
-	}
-	if got := write.Value.CEL; got != "policy.scoring_dimensions" {
-		t.Fatalf("Value.CEL = %q", got)
+`), &write)
+	if err == nil || !strings.Contains(err.Error(), "retired workflow data write expression") {
+		t.Fatalf("yaml.Unmarshal error = %v, want retirement", err)
 	}
 }
 
-func TestWorkflowDataWriteDecode_PreservesLiteralValueAndExpressionForms(t *testing.T) {
+func TestWorkflowDataWriteDecode_PreservesLiteralValue(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := yaml.Unmarshal([]byte(`
 target_field: scoring_rubric
-expression: '"corpus_rubric"'
+value: corpus_rubric
 `), &write); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := write.Target(); got != "scoring_rubric" {
 		t.Fatalf("Target() = %q", got)
 	}
-	if got := write.Value.CEL; got != `"corpus_rubric"` {
-		t.Fatalf("Value.CEL = %q", got)
+	if got := write.Value.Literal; got != "corpus_rubric" {
+		t.Fatalf("Value.Literal = %#v", got)
 	}
 }
 
@@ -2739,15 +2732,13 @@ dimensions_requested:
 	}
 }
 
-func TestExpressionValueDecode_PreservesExpressionAliasInMappingForm(t *testing.T) {
+func TestExpressionValueDecode_RetiresExpressionAliasInMappingForm(t *testing.T) {
 	var expr ExpressionValue
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 expression: entity.score + 1
-`), &expr); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := expr.CEL; got != "entity.score + 1" {
-		t.Fatalf("CEL = %q", got)
+`), &expr)
+	if err == nil || !strings.Contains(err.Error(), "retired expression value") {
+		t.Fatalf("yaml.Unmarshal error = %v, want retirement", err)
 	}
 }
 
@@ -2764,28 +2755,22 @@ func TestExpressionValueDecode_PreservesScalarAsLiteralOutsideEmitFields(t *test
 	}
 }
 
-func TestEmitSpecDecode_ScalarFieldsHydrateAsCELOnlyOnEmitFields(t *testing.T) {
+func TestEmitSpecDecode_R2ValuesOnEmitFields(t *testing.T) {
 	var spec EmitSpec
 	if err := yaml.Unmarshal([]byte(`
 event: signals.category_ready
 fields:
-  mode: payload.mode
-  batch: "{'scan_id': payload.scan_id, 'geography': payload.geography}"
+  mode: ${payload.mode}
+  batch: {scan_id: "${payload.scan_id}", geography: "${payload.geography}"}
   count: 0
-  quoted_literal: "'ready'"
+  quoted_literal: ready
   explicit_literal:
     literal: ready
-  explicit_ref:
-    ref: payload.mode
+  exact: ${payload.mode}
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	cases := map[string]string{
-		"mode":           "payload.mode",
-		"batch":          "{'scan_id': payload.scan_id, 'geography': payload.geography}",
-		"count":          "0",
-		"quoted_literal": "'ready'",
-	}
+	cases := map[string]string{"mode": "payload.mode", "batch": `{"geography": (payload.geography), "scan_id": (payload.scan_id)}`, "exact": "payload.mode"}
 	for field, want := range cases {
 		expr := spec.Fields[field]
 		if expr.Kind != ExpressionKindCEL || expr.CEL != want {
@@ -2795,8 +2780,11 @@ fields:
 	if expr := spec.Fields["explicit_literal"]; expr.Kind != ExpressionKindLiteral || expr.Literal != "ready" {
 		t.Fatalf("explicit_literal = %#v, want literal ready", expr)
 	}
-	if expr := spec.Fields["explicit_ref"]; expr.Kind != ExpressionKindRef || expr.Ref != "payload.mode" {
-		t.Fatalf("explicit_ref = %#v, want ref payload.mode", expr)
+	if expr := spec.Fields["count"]; !expr.HasLiteralValue() || expr.Literal != 0 {
+		t.Fatalf("count = %#v, want literal 0", expr)
+	}
+	if expr := spec.Fields["quoted_literal"]; !expr.HasLiteralValue() || expr.Literal != "ready" {
+		t.Fatalf("quoted_literal = %#v, want literal ready", expr)
 	}
 }
 
@@ -2809,8 +2797,8 @@ on_fail:
   escalate:
     event: check.escalated
     fields:
-      score: payload.score
-      threshold: policy.threshold
+      score: ${payload.score}
+      threshold: ${policy.threshold}
       reason:
         literal: score_below_threshold
 `), &spec); err != nil {
@@ -2939,7 +2927,7 @@ source: payload.items
 	}
 }
 
-func TestEmitSpecDecode_RejectsUnstructuredObjectFieldMappings(t *testing.T) {
+func TestEmitSpecDecode_AcceptsLiteralObjectFieldMappings(t *testing.T) {
 	var spec EmitSpec
 	err := yaml.Unmarshal([]byte(`
 event: signals.category_ready
@@ -2947,11 +2935,11 @@ fields:
   batch:
     scan_id: payload.scan_id
 `), &spec)
-	if err == nil {
-		t.Fatal("expected unstructured emit.fields object mapping to be rejected")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "explicit expression keys") {
-		t.Fatalf("unexpected error: %v", err)
+	if got := spec.Fields["batch"].Literal; !reflect.DeepEqual(got, map[string]any{"scan_id": "payload.scan_id"}) {
+		t.Fatalf("batch = %#v, want literal object", got)
 	}
 }
 
@@ -2970,7 +2958,7 @@ fan_out:
 data_accumulation:
   writes:
     - target_field: dispatch_count
-      expression: fan_out.count
+      value: ${fan_out.count}
 `), &rule); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -3021,24 +3009,24 @@ func TestSystemNodeEventHandlerDecode_AllowsRulesEmitTemplateSpecialization(t *t
 emit:
   event: account.bucketed
   fields:
-    account_id: entity.id
-    score: payload.score
+    account_id: ${entity.id}
+    score: ${payload.score}
 rules:
   high:
     condition: payload.score >= 80
     emit:
       fields:
-        bucket: '"high"'
+        bucket: high
   medium:
     condition: payload.score >= 40
     emit:
       fields:
-        bucket: '"medium"'
+        bucket: medium
   low:
     condition: else
     emit:
       fields:
-        bucket: '"low"'
+        bucket: low
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -3060,8 +3048,8 @@ rules:
 			t.Fatalf("merged fields missing %s: %#v", field, sites[0].Spec.Fields)
 		}
 	}
-	if expr := sites[0].Spec.Fields["bucket"]; expr.Kind != ExpressionKindCEL || expr.CEL != `"high"` {
-		t.Fatalf("bucket expression = %#v, want CEL \"high\"", expr)
+	if expr := sites[0].Spec.Fields["bucket"]; !expr.HasLiteralValue() || expr.Literal != "high" {
+		t.Fatalf("bucket expression = %#v, want literal high", expr)
 	}
 }
 
@@ -3151,40 +3139,6 @@ rules:
         bucket: '"low"'
 `,
 			contains: "cannot be combined with on_success.emit",
-		},
-		{
-			name: "rule_literal_field_value",
-			raw: `
-emit:
-  event: account.bucketed
-  fields:
-    account_id: entity.id
-rules:
-  low:
-    condition: else
-    emit:
-      fields:
-        bucket:
-          literal: low
-`,
-			contains: "rules[0].emit.fields.bucket to be a CEL expression string",
-		},
-		{
-			name: "handler_template_literal_field_value",
-			raw: `
-emit:
-  event: account.bucketed
-  fields:
-    account_id:
-      literal: acct-1
-rules:
-  low:
-    condition: else
-    emit:
-      fields:
-        bucket: '"low"'
-`,
-			contains: "handler.emit.fields.account_id to be a CEL expression string",
 		},
 	}
 	for _, tc := range cases {

@@ -7,5 +7,5 @@ test-node:
       emit:
         event: flow.spawned
         fields:
-          worker_id: payload.worker_id
+          worker_id: ${payload.worker_id}
       advances_to: spawned

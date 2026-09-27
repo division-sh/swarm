@@ -32,7 +32,7 @@ connect:
       emit:
         event: work.requested
         fields:
-          work_id: payload.work_id
+          work_id: ${payload.work_id}
 `)
 	writeClosedVariantFile(t, root, "producer/schema.yaml", `name: producer
 stages:
@@ -56,11 +56,11 @@ pins:
       data_accumulation:
         writes:
           - target_field: work_id
-            expression: payload.work_id
+            value: "${payload.work_id}"
       emit:
         event: work.ready
         fields:
-          work_id: payload.work_id
+          work_id: ${payload.work_id}
 `)
 	return root
 }

@@ -5,7 +5,7 @@ activity-node:
         id: send
         tool: send
         input:
-          message: payload.message
+          message: ${payload.message}
     send.succeeded:
       rules:
         - id: observe_success

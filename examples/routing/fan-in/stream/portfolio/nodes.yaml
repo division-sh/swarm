@@ -10,7 +10,7 @@ portfolio-collector:
         writes:
           - op: set
             target: entity.reports
-            key: {ref: payload.operating_id}
-            value: {ref: payload}
+            key: ${payload.operating_id}
+            value: ${payload}
           - source_field: revenue
             target_field: last_revenue

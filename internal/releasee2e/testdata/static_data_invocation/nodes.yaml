@@ -11,7 +11,7 @@ intake:
           - {source_field: request_key, target_field: request_key}
       emit:
         event: read.work
-        fields: {foreign_id: payload.foreign_id}
+        fields: {foreign_id: "${payload.foreign_id}"}
 root-completion:
   execution_type: system_node
   subscribes_to: [read.completed]
@@ -25,7 +25,7 @@ root-completion:
           - {source_field: content, target_field: content}
       emit:
         event: child.requested
-        fields: {request_key: entity.request_key}
+        fields: {request_key: "${entity.request_key}"}
 child-completion:
   execution_type: system_node
   subscribes_to: [child.completed]

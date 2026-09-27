@@ -26,9 +26,9 @@ func CopyReceiverConfigComposedOwner(t testing.TB) string {
         emit:
           event: items.child
           fields:
-            request_id: {cel: entry}
-            label: {cel: "'label-' + entry"}
-            nested: {cel: "[7, 7.0]"}
+            request_id: "${entry}"
+            label: "${'label-' + entry}"
+            nested: "${[7, 7.0]}"
 `,
 		"review/schema.yaml": `name: review
 mode: template

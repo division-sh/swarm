@@ -130,8 +130,7 @@ coordinator-node:
         writes:
           - op: set
             target: entity.verticals[payload.vertical_id]
-            key:
-              ref: payload.vertical_id
+            key: ${payload.vertical_id}
             value:
               status: active
               active_jobs: []
@@ -333,8 +332,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         source: payload.job
         operation: count
         params:
-          value:
-            ref: entity.verticals
+          value: entity.verticals
         store_as: metadata.reduced`,
 		},
 		{
@@ -388,8 +386,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
           activity:
             tool: review
             input:
-              value:
-                ref: entity.verticals`,
+              value: entity.verticals`,
 		},
 	}
 
