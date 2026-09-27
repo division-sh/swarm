@@ -15,9 +15,9 @@ scatter:
         emit:
           event: item.registered
           fields:
-            item_id: entry.item_id
-            batch_id: payload.batch_id
-            value: entry.value
+            item_id: ${entry.item_id}
+            batch_id: ${payload.batch_id}
+            value: ${entry.value}
     batch.finished:
       fan_out:
         items_from: payload.items
@@ -27,6 +27,6 @@ scatter:
         emit:
           event: item.finished
           fields:
-            item_id: entry.item_id
-            batch_id: payload.batch_id
-            value: entry.value
+            item_id: ${entry.item_id}
+            batch_id: ${payload.batch_id}
+            value: ${entry.value}
