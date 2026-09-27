@@ -637,8 +637,12 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		}
 	}
 
+	confirmationText := "Swarm channel connected."
+	if binding.ConversationScope == operatorchannel.ConversationScopeShared {
+		confirmationText += " Future notices, decision cards, and updates sent here will be visible to this group."
+	}
 	publicInput := map[string]any{
-		"presentation": map[string]any{"text": "Swarm channel connected."},
+		"presentation": map[string]any{"text": confirmationText},
 		"actions":      []any{},
 	}
 	_, providerInput, err := compiled.Plan.PrepareOperation(request.Candidate.ConfirmationOperation, publicInput)

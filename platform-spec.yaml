@@ -10344,7 +10344,9 @@ tool_model:
         disposition; silent absence and consumed-but-unbound terminal states are forbidden.
       confirmation_rule: >
         A provider-authenticated claimant first moves the operation to awaiting_confirmation. The authenticated operator
-        must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
+        must confirm that exact claimant before local binding mutation. A shared-conversation confirmation states that
+        future notices, decision cards, and their updates sent to the selected default will be visible to that group;
+        it does not add a second dialog or grant another member action authority. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
         return the original outcome while changed input conflicts. An exact selected-store begin replay is classified
@@ -14791,13 +14793,16 @@ platform_tables:
         default leaves the notice durable but creates no individual delivery obligation.
         Reconnect does not create another plan for the same source and delivery epoch; verified
         rebind or a fresh connect after retirement advances the epoch, even when returning to a
-        previously used destination. Planning is not evidence
+        previously used destination. The first verified connection also freezes one bounded
+        count-only summary of older pending notices; those notices are never planned individually.
+        Planning is not evidence
         that a provider write was launched, accepted, or acknowledged by a human.
       ddl: |
         CREATE TABLE channel_delivery_plans (
             delivery_id UUID PRIMARY KEY,
             source_kind TEXT NOT NULL CHECK (source_kind IN ('notice','card','summary')),
             source_id UUID NOT NULL,
+            summary_count BIGINT CHECK (summary_count > 0),
             principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
             binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
@@ -14807,9 +14812,30 @@ platform_tables:
             conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
             state TEXT NOT NULL CHECK (state IN ('planned','rendered','sent','uncertain','retired')),
             created_at TIMESTAMPTZ NOT NULL,
+            CHECK ((source_kind = 'summary' AND summary_count IS NOT NULL) OR (source_kind <> 'summary' AND summary_count IS NULL)),
             UNIQUE (source_kind, source_id, interface_key, delivery_epoch),
             INDEX idx_channel_delivery_plan_source (source_kind, source_id),
             INDEX idx_channel_delivery_plan_pending (state, created_at)
+        );
+    channel_delivery_renders:
+      description: >-
+        Immutable complete provider-neutral render evidence for a planned delivery. The exact
+        canonical JSON input, its hash, source revision, audience, and projection version are
+        checked together at selected-store admission and readback. A provider excerpt or page
+        never replaces this full input. A new card or independent dispatch state creates a
+        separate render member; previously shown input is never overwritten. This table owns
+        no verdict, provider effect attempt, or acknowledgment state.
+      ddl: |
+        CREATE TABLE channel_delivery_renders (
+            render_id UUID PRIMARY KEY,
+            delivery_id UUID NOT NULL REFERENCES channel_delivery_plans(delivery_id),
+            source_revision BIGINT NOT NULL CHECK (source_revision > 0),
+            projection_version TEXT NOT NULL,
+            render_input JSONB NOT NULL,
+            render_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (delivery_id, render_hash),
+            INDEX idx_channel_delivery_render_delivery (delivery_id, created_at)
         );
     channel_onboarding_operations:
       description: >-
