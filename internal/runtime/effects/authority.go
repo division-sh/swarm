@@ -28,6 +28,7 @@ const (
 	AuthorityServeRegistration    AuthorityKind = "serve_registration"
 	AuthorityChannelConfirmation  AuthorityKind = "channel_confirmation"
 	AuthorityChannelDelivery      AuthorityKind = "channel_delivery"
+	AuthorityChannelActionAck     AuthorityKind = "channel_action_ack"
 	AuthorityChannelNativeSetting AuthorityKind = "channel_native_setting"
 )
 
@@ -227,6 +228,41 @@ type ChannelDeliveryAuthority struct {
 	TargetGeneration             uint64
 }
 
+type ChannelActionAckAuthority struct {
+	EffectOperationID            string
+	PublicationID                string
+	Provider                     string
+	ProviderEventID              string
+	ProviderAuthorization        string
+	InterfaceKey                 string
+	ExternalAccountRef           string
+	ConversationRef              string
+	ConversationScope            string
+	MessageReference             string
+	InteractionRef               string
+	Token                        string
+	ReceiptOperationID           string
+	PrincipalID                  string
+	BindingRevision              int64
+	ActivationID                 string
+	ActivationRevision           int64
+	BundleHash                   string
+	BundleIdentity               string
+	PackInventoryGeneration      string
+	RuntimeInstanceID            string
+	ContextPublicationGeneration uint64
+	PlanGeneration               plangeneration.Generation
+	TargetGeneration             uint64
+}
+
+func ChannelActionAckOperationID(publicationID string) (string, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(publicationID))
+	if err != nil {
+		return "", fmt.Errorf("channel action acknowledgment requires a publication id")
+	}
+	return uuid.NewSHA1(parsed, []byte("acknowledge_interaction")).String(), nil
+}
+
 type ChannelNativeSettingAuthority struct {
 	EffectOperationID            string
 	SettingID                    string
@@ -272,6 +308,7 @@ type Authority struct {
 	ServeRegistration    ServeRegistrationAuthority
 	ChannelConfirmation  ChannelConfirmationAuthority
 	ChannelDelivery      ChannelDeliveryAuthority
+	ChannelActionAck     ChannelActionAckAuthority
 	ChannelNativeSetting ChannelNativeSettingAuthority
 	ExecutionOwner       string
 	LeaseExpiresAt       time.Time
@@ -367,6 +404,16 @@ func (a Authority) Valid() bool {
 			delivery.ContextPublicationGeneration == a.FenceGeneration && delivery.TargetGeneration > 0 &&
 			nonEmpty(delivery.InterfaceKey, delivery.ExternalAccountRef, delivery.ConversationRef, delivery.RenderHash,
 				delivery.BundleHash, delivery.BundleIdentity, delivery.PackInventoryGeneration) && delivery.PlanGeneration.Valid()
+	case AuthorityChannelActionAck:
+		ack := a.ChannelActionAck
+		operationID, err := ChannelActionAckOperationID(ack.PublicationID)
+		return err == nil && ack.EffectOperationID == operationID && a.ID == operationID &&
+			validUUIDs(ack.Token) && nonEmpty(ack.Provider, ack.ProviderEventID, ack.ProviderAuthorization, ack.InterfaceKey,
+			ack.ExternalAccountRef, ack.ConversationRef, ack.ConversationScope, ack.MessageReference, ack.InteractionRef) &&
+			validUUIDs(ack.ReceiptOperationID, ack.PrincipalID, ack.ActivationID, ack.RuntimeInstanceID) &&
+			ack.BindingRevision > 0 && ack.ActivationRevision > 0 && ack.TargetGeneration > 0 &&
+			ack.ContextPublicationGeneration == a.FenceGeneration && ack.PlanGeneration.Valid() &&
+			nonEmpty(ack.BundleHash, ack.BundleIdentity, ack.PackInventoryGeneration)
 	case AuthorityChannelNativeSetting:
 		setting := a.ChannelNativeSetting
 		operationID, err := channelnative.InstallOperationID(setting.SettingID, setting.SettingGeneration)
@@ -394,7 +441,7 @@ func (a Authority) Generation() uint64 {
 		return a.Normal.Generation
 	case AuthoritySelectedContractFork:
 		return a.SelectedFork.Generation
-	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation, AuthorityChannelDelivery, AuthorityChannelNativeSetting:
+	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation, AuthorityChannelDelivery, AuthorityChannelActionAck, AuthorityChannelNativeSetting:
 		return a.FenceGeneration
 	case AuthorityStartupProbe:
 		return a.FenceGeneration
@@ -513,6 +560,32 @@ func (a Authority) Evidence() map[string]any {
 		evidence["context_publication_generation"] = delivery.ContextPublicationGeneration
 		evidence["plan_generation"] = delivery.PlanGeneration.Diagnostic()
 		evidence["target_generation"] = delivery.TargetGeneration
+	case AuthorityChannelActionAck:
+		ack := a.ChannelActionAck
+		evidence["effect_operation_id"] = ack.EffectOperationID
+		evidence["publication_id"] = ack.PublicationID
+		evidence["provider"] = ack.Provider
+		evidence["provider_event_id"] = ack.ProviderEventID
+		evidence["provider_authorization"] = ack.ProviderAuthorization
+		evidence["interface_key"] = ack.InterfaceKey
+		evidence["external_account_reference"] = ack.ExternalAccountRef
+		evidence["conversation_reference"] = ack.ConversationRef
+		evidence["conversation_scope"] = ack.ConversationScope
+		evidence["message_reference"] = ack.MessageReference
+		evidence["interaction_reference"] = ack.InteractionRef
+		evidence["token"] = ack.Token
+		evidence["receipt_operation_id"] = ack.ReceiptOperationID
+		evidence["principal_id"] = ack.PrincipalID
+		evidence["binding_revision"] = ack.BindingRevision
+		evidence["activation_id"] = ack.ActivationID
+		evidence["activation_revision"] = ack.ActivationRevision
+		evidence["bundle_hash"] = ack.BundleHash
+		evidence["bundle_identity"] = ack.BundleIdentity
+		evidence["pack_inventory_generation"] = ack.PackInventoryGeneration
+		evidence["runtime_instance_id"] = ack.RuntimeInstanceID
+		evidence["context_publication_generation"] = ack.ContextPublicationGeneration
+		evidence["plan_generation"] = ack.PlanGeneration.Diagnostic()
+		evidence["target_generation"] = ack.TargetGeneration
 	case AuthorityChannelNativeSetting:
 		setting := a.ChannelNativeSetting
 		evidence["effect_operation_id"] = setting.EffectOperationID
