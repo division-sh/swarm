@@ -122,7 +122,7 @@ func projectSchemaGateValue(value yamlsource.Value) (*FlowStageGateDeclaration, 
 			}
 		}
 		if input, present := members["input"]; present {
-			outcome.Input, err = projectSchemaGateInputValue(input)
+			outcome.Input, outcome.InputOrder, err = projectSchemaGateInputValue(input)
 			if err != nil {
 				return nil, err
 			}
@@ -132,37 +132,39 @@ func projectSchemaGateValue(value yamlsource.Value) (*FlowStageGateDeclaration, 
 	return out, nil
 }
 
-func projectSchemaGateInputValue(value yamlsource.Value) (map[string]WorkflowGateInputField, error) {
+func projectSchemaGateInputValue(value yamlsource.Value) (map[string]WorkflowGateInputField, []string, error) {
 	rows, err := schemaValueDeclarations(value, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := map[string]WorkflowGateInputField{}
+	order := make([]string, 0, len(rows))
 	for _, row := range rows {
 		fields, err := schemaValueFields(row.Value, "stage gate input field", stageGateInputFieldOptions, nil, true)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var field WorkflowGateInputField
 		if err := schemaValueRequiredTexts(row.Value, fields, map[string]*string{"type": &field.Type}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		field.Type, err = NormalizeWorkflowGateInputType(field.Type)
 		if err != nil {
-			return nil, nodeValueError(row.Value, err)
+			return nil, nil, nodeValueError(row.Value, err)
 		}
 		if err := schemaValueTexts(fields, map[string]*string{"label": &field.Label}, false); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if required, present := fields["required"]; present {
 			field.Required, err = schemaValueBool(required, "gate input required")
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		out[row.Name] = field
+		order = append(order, row.Name)
 	}
-	return out, nil
+	return out, order, nil
 }
 
 func projectSchemaEmitValue(value yamlsource.Value) (EmitSpec, error) {
