@@ -242,7 +242,7 @@ func TestProviderRegistrationReadbackAcknowledgedCleanupLeavesNoPendingAttempt(t
 			if err := handle.MarkLaunched(ctx); err != nil {
 				t.Fatal(err)
 			}
-			pending := &PendingApply{handle: handle}
+			pending := &PendingApply{handle: handle, source: providerRegistrationSource}
 			if err := pending.SettleReadback(ctx, true, nil); err != nil {
 				t.Fatalf("acknowledged readback settlement: %v", err)
 			}
