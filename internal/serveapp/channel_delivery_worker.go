@@ -2,10 +2,12 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
 
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
@@ -107,6 +109,55 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 	return nil
 }
 
+func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Context) error {
+	if d == nil || d.store == nil || d.cards == nil {
+		return fmt.Errorf("channel action owners are unavailable")
+	}
+	cursor := ""
+	var failures error
+	for {
+		pending, err := d.store.ListPendingChannelActions(ctx, cursor, 200)
+		if err != nil {
+			return errors.Join(failures, err)
+		}
+		for _, intent := range pending {
+			resolved, found, err := d.store.ResolveChannelActionFact(ctx, intent.Fact.ActionFact)
+			if err != nil {
+				failures = errors.Join(failures, fmt.Errorf("resolve channel action %s: %w", intent.PublicationID, err))
+				continue
+			}
+			if !found || !resolved.CurrentRender {
+				if err := d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionRejected); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("reject channel action %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
+			if resolved.SourceKind != "card" || resolved.Action.Kind != "verdict" {
+				continue
+			}
+			card, err := d.cards.GetDecisionCard(ctx, resolved.SourceID)
+			if errors.Is(err, decisioncard.ErrNotFound) {
+				err = d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionStale)
+			} else if err == nil && card.Status != decisioncard.StatusPending {
+				err = d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionStale)
+			} else if err == nil {
+				_, err = d.processCardAction(ctx, intent)
+			}
+			if err != nil {
+				failures = errors.Join(failures, fmt.Errorf("process channel action %s: %w", intent.PublicationID, err))
+			}
+		}
+		if len(pending) < 200 {
+			return failures
+		}
+		last := pending[len(pending)-1].PublicationID
+		if last == cursor {
+			return errors.Join(failures, fmt.Errorf("channel action pagination did not advance"))
+		}
+		cursor = last
+	}
+}
+
 func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher) error {
 	if owner == nil || dispatcher == nil {
 		return fmt.Errorf("channel delivery worker requires process and dispatcher")
@@ -128,6 +179,9 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 		for {
 			if err := dispatcher.reconcileDeliveries(workCtx); err != nil && workCtx.Err() == nil {
 				log.Printf("channel delivery reconciliation: %v", err)
+			}
+			if err := dispatcher.reconcileCardActions(workCtx); err != nil && workCtx.Err() == nil {
+				log.Printf("channel action reconciliation: %v", err)
 			}
 			select {
 			case <-workCtx.Done():
