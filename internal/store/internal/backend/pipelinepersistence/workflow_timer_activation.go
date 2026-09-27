@@ -173,7 +173,7 @@ func commitWorkflowTimerReconciliation(
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 		if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if command.ActivationAttempt != nil {
-				state, err := authorizeCurrentFlowActivationAttemptTx(txctx, tx, postgres, *command.ActivationAttempt)
+				state, err := authorizeEligibleFlowActivationAttemptTx(txctx, tx, postgres, *command.ActivationAttempt)
 				if err != nil {
 					return err
 				}

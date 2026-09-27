@@ -70,6 +70,7 @@ type dynamicFlowActiveAttempt struct {
 	timersRetired   bool
 	complete        bool
 	timersProjected bool
+	admittedPreRun  bool
 }
 
 var errDynamicFlowRuntimeReadinessRetiring = errors.New("dynamic flow runtime readiness retains predecessor retirement")
@@ -131,10 +132,11 @@ type dynamicFlowRuntimeReadinessAdmission struct {
 // DynamicFlowRuntimeStartupReadiness is the one-startup-attempt authority for
 // pending rows admitted by exact source transition or explicit recovery.
 type DynamicFlowRuntimeStartupReadiness struct {
-	sourceFact        runtimecorrelation.SourceArtifactFact
-	replayAllowed     bool
-	authorizedPending map[dynamicFlowRuntimeReadinessKey]struct{}
-	empty             bool
+	sourceFact         runtimecorrelation.SourceArtifactFact
+	replayAllowed      bool
+	authorizedPending  map[dynamicFlowRuntimeReadinessKey]struct{}
+	completedBeforeRun map[dynamicFlowRuntimeReadinessKey]uint64
+	empty              bool
 }
 
 var errDynamicFlowRuntimeReadinessPlanStale = errors.New(
@@ -251,7 +253,8 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx context.Context, sourceFact runtimecorrelation.SourceArtifactFact, replayAllowed bool) (DynamicFlowRuntimeStartupReadiness, error) {
 	startup := DynamicFlowRuntimeStartupReadiness{
 		sourceFact: sourceFact, replayAllowed: replayAllowed,
-		authorizedPending: make(map[dynamicFlowRuntimeReadinessKey]struct{}),
+		authorizedPending:  make(map[dynamicFlowRuntimeReadinessKey]struct{}),
+		completedBeforeRun: make(map[dynamicFlowRuntimeReadinessKey]uint64),
 	}
 	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
 	if err != nil {
@@ -298,6 +301,13 @@ func (am *AgentManager) CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx conte
 	}
 	if len(projection.SourceTransitionRequired) != 0 {
 		return DynamicFlowRuntimeStartupReadiness{}, fmt.Errorf("dynamic topology startup retains %d unresolved source transition(s)", len(projection.SourceTransitionRequired))
+	}
+	for _, item := range projection.CurrentCompleted {
+		key, keyErr := newDynamicFlowRuntimeReadinessKey(item.Plan.RunID, item.InstancePath)
+		if keyErr != nil {
+			return DynamicFlowRuntimeStartupReadiness{}, keyErr
+		}
+		startup.completedBeforeRun[key] = item.PlanRevision
 	}
 	for _, item := range projection.CurrentPending {
 		key, keyErr := newDynamicFlowRuntimeReadinessKey(item.Plan.RunID, item.InstancePath)
@@ -433,7 +443,13 @@ func (am *AgentManager) CompleteDynamicFlowRuntimeStartupTopology(ctx context.Co
 			return keyErr
 		}
 		if _, authorized := startup.authorizedPending[key]; !authorized {
-			return fmt.Errorf("dynamic flow startup topology lacks pending authorization for %s", item.InstancePath)
+			am.dynamicFlowReadinessMu.Lock()
+			active := am.dynamicFlowActiveAttempts[key]
+			preRun := active != nil && active.admittedPreRun && active.receipt.PlanRevision() == item.PlanRevision
+			am.dynamicFlowReadinessMu.Unlock()
+			if startup.completedBeforeRun[key] != item.PlanRevision || !preRun {
+				return fmt.Errorf("dynamic flow startup topology lacks pending authorization for %s", item.InstancePath)
+			}
 		}
 	}
 	for _, item := range prepare {
@@ -1334,7 +1350,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if activationAccepted || complete {
 			return
 		}
-		retErr = errors.Join(retErr, am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, flowActivationProcessRetirement))
+		retErr = errors.Join(retErr, am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, flowActivationFailedRetirement))
 	}()
 	topologyAuthority, err := DynamicFlowAgentTopologyAdmission(plan)
 	if err != nil {
@@ -1365,6 +1381,9 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		if am.lifecycle.phaseSnapshot() != runtimeLifecycleStopped {
 			return errors.New("admitted flow preparation crossed manager run admission")
 		}
+		am.dynamicFlowReadinessMu.Lock()
+		active.admittedPreRun = true
+		am.dynamicFlowReadinessMu.Unlock()
 		activationAccepted = true
 		return nil
 	}

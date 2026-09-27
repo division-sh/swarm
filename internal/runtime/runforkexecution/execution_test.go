@@ -3586,7 +3586,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, selected)
+	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
 	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
 	loaded := LoadedSelectedContractSource{SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
 	preparedAgents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability}}
@@ -3630,6 +3630,22 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	}, eventBus, &runtimepipeline.PipelineCoordinator{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "cannot reconstruct its derived prompt without a semantic source") {
 		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
+	}
+	if processCapability.issued == nil || prepared.retainedRuntime == nil || prepared.retainedRuntime.generationGrant == nil {
+		t.Fatal("failed selected startup discarded its exact grant and cleanup owner")
+	}
+	select {
+	case <-processCapability.issued.Done():
+		t.Fatal("failed cleanup retired the grant before a successful owner retry")
+	default:
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatalf("retry exact selected startup cleanup: %v", err)
+	}
+	select {
+	case <-processCapability.issued.Done():
+	default:
+		t.Fatal("preparation Close returned before retained grant retirement")
 	}
 	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {
 		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want unchanged %q", got, staleHostURL)

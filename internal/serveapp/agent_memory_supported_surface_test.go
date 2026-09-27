@@ -40,9 +40,11 @@ const standingMemoryAsyncProofTimeout = 30 * time.Second
 func TestCanonicalTelegramAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.TelegramAgent)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			runStandingTelegramMemorySupportedSurface(t, backend)
-		})
+		for _, recoveryOnRestart := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/recovery_on_restart=%t", backend, recoveryOnRestart), func(t *testing.T) {
+				runStandingTelegramMemorySupportedSurface(t, backend, recoveryOnRestart)
+			})
+		}
 	}
 }
 
@@ -323,7 +325,7 @@ func equalStringValues(left, right map[string]string) bool {
 	return true
 }
 
-func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
+func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string, recoveryOnRestart bool) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "")
@@ -433,6 +435,13 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 
 	if prepareRestart != nil {
 		prepareRestart()
+	}
+	if !recoveryOnRestart {
+		sqlitePath := ""
+		if backend == "sqlite" {
+			sqlitePath = storeLocation
+		}
+		opts.ConfigPath = writeStandingMockRuntimeConfigWithRecovery(t, backend, sqlitePath, false)
 	}
 	second := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	second.waitForReadyLine()
@@ -930,10 +939,14 @@ func redirectExternalHosts(t testing.TB, targets map[string]string) {
 }
 
 func writeStandingMockRuntimeConfig(t *testing.T, backend, sqlitePath string) string {
+	return writeStandingMockRuntimeConfigWithRecovery(t, backend, sqlitePath, true)
+}
+
+func writeStandingMockRuntimeConfigWithRecovery(t *testing.T, backend, sqlitePath string, recovery bool) string {
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  recovery_on_startup: true",
+		fmt.Sprintf("  recovery_on_startup: %t", recovery),
 		"store:",
 		"  backend: " + backend,
 	}

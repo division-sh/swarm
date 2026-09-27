@@ -59,6 +59,10 @@ import (
 	time "time"
 )
 
+func (s *PostgresStore) AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelinePostgresOwner.AbandonDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+}
+
 func (s *PostgresStore) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (apiidempotency.Completion, bool, error) {
 	return s.mailboxPostgresOwner.AcknowledgeMailboxNotice(ctx, req)
 }
@@ -1293,6 +1297,10 @@ func (s *PostgresStore) VerifyPreparedPublishEventIdentity(candidate events.Admi
 
 func (s *PostgresStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
 	return s.postgresOwner.WithAPIIdempotency(ctx, req, execute)
+}
+
+func (s *SQLiteRuntimeStore) AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt pipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.pipelineSQLiteOwner.AbandonDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
 func (s *SQLiteRuntimeStore) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (apiidempotency.Completion, bool, error) {

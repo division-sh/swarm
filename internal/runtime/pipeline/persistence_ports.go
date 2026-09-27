@@ -287,6 +287,10 @@ func (pc *PipelineCoordinator) RetireDynamicFlowRuntimeActivationAttempt(ctx con
 	return pc.workflowStore.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
+func (pc *PipelineCoordinator) AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {
+	return pc.workflowStore.AbandonDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+}
+
 func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error {
 	_, err := pc.commitWorkflowTermination(ctx, flowIdentity, entityID, terminatedAt, false)
 	return err

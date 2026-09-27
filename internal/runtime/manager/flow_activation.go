@@ -49,6 +49,7 @@ type flowInstancePersistence interface {
 	VerifyDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) (runtimepipeline.DynamicFlowRuntimeTopologyReadyResult, error)
 	RetireDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
+	AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 	MarkTerminated(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance, entityID identity.EntityID, terminatedAt time.Time) error
 	Load(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, flowIdentity runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)

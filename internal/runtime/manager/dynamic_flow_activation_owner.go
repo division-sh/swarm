@@ -52,6 +52,7 @@ type flowActivationRetirementDisposition uint8
 const (
 	flowActivationProcessRetirement flowActivationRetirementDisposition = iota + 1
 	flowActivationTerminalRetirement
+	flowActivationFailedRetirement
 )
 
 func (am *AgentManager) retireCurrentDynamicFlowActiveAttempt(ctx context.Context, key dynamicFlowRuntimeReadinessKey, retirement *preparedFlowTopologyRetirement, disposition flowActivationRetirementDisposition) error {
@@ -88,7 +89,9 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 	}
 	am.dynamicFlowReadinessMu.Lock()
 	previous := am.dynamicFlowActiveAttempts[key]
+	previousDisposition := flowActivationRetirementDisposition(0)
 	if previous != nil {
+		previousDisposition = previous.retirementKind
 		if previous.retiring {
 			am.dynamicFlowReadinessMu.Unlock()
 			return nil, false, errors.New("dynamic flow activation predecessor retirement is incomplete")
@@ -100,12 +103,16 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 	}
 	am.dynamicFlowReadinessMu.Unlock()
 	if previous != nil {
+		disposition := flowActivationProcessRetirement
+		if previousDisposition != 0 {
+			disposition = previousDisposition
+		}
 		lease, err := am.beginWork(ctx, "flow activation predecessor retirement")
 		if err != nil {
 			return nil, false, err
 		}
 		retirement := &preparedFlowTopologyRetirement{manager: am, lease: lease, attempt: previous.receipt}
-		if err := am.settleDynamicFlowActiveAttempt(ctx, key, previous, retirement, flowActivationProcessRetirement); err != nil {
+		if err := am.settleDynamicFlowActiveAttempt(ctx, key, previous, retirement, disposition); err != nil {
 			return nil, false, fmt.Errorf("settle flow activation predecessor: %w", err)
 		}
 	}
@@ -180,7 +187,7 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 		if previousSet == nil {
 			var retireErr error
 			switch disposition {
-			case flowActivationProcessRetirement:
+			case flowActivationProcessRetirement, flowActivationFailedRetirement:
 				retireErr = retirement.retire(identity)
 			case flowActivationTerminalRetirement:
 				retireErr = retirement.retireTerminal(identity)
@@ -197,7 +204,7 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 				return retireErr
 			}
 		} else {
-			if disposition != flowActivationProcessRetirement {
+			if disposition != flowActivationProcessRetirement && disposition != flowActivationFailedRetirement {
 				return errors.New("failed terminal flow retirement requires process replacement")
 			}
 			if err := am.retireFlowRouteAttempt(active.receipt, active.publication); err != nil {
@@ -224,7 +231,13 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 		active.timersRetired = true
 		am.dynamicFlowReadinessMu.Unlock()
 	}
-	if err := am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempt(ctx, active.receipt); err != nil {
+	var durableErr error
+	if disposition == flowActivationFailedRetirement {
+		durableErr = am.workflowInstances.AbandonDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
+	} else {
+		durableErr = am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
+	}
+	if err := durableErr; err != nil {
 		return fmt.Errorf("retire durable flow activation attempt: %w", err)
 	}
 	am.dynamicFlowReadinessMu.Lock()

@@ -133,8 +133,19 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 				t.Fatalf("fresh attempt after retirement: result=%+v err=%v", admitted, err)
 			}
 			readiness, found, err = selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
-			if err != nil || !found || !readiness.TopologyReadyAt.IsZero() {
-				t.Fatalf("fresh process attempt inherited prior readiness: found=%v readiness=%+v err=%v", found, readiness, err)
+			if err != nil || !found || readiness.TopologyReadyAt.IsZero() {
+				t.Fatalf("fresh process admission erased completed durable topology: found=%v readiness=%+v err=%v", found, readiness, err)
+			}
+			if err := selected.RetireDynamicFlowRuntimeActivationAttempt(ctx, admitted.Attempt); err != nil {
+				t.Fatalf("retire interrupted pre-run reconstruction: %v", err)
+			}
+			readiness, found, err = selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+			if err != nil || !found || readiness.TopologyReadyAt.IsZero() {
+				t.Fatalf("interrupted pre-run reconstruction erased completed durable topology: found=%v readiness=%+v err=%v", found, readiness, err)
+			}
+			admitted, err = selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.PlanRevision, binding)
+			if err != nil || !admitted.Acknowledged || admitted.Reused {
+				t.Fatalf("readmit completed reconstruction after interruption: result=%+v err=%v", admitted, err)
 			}
 			ready, err = selected.MarkDynamicFlowRuntimeTopologyReadyForAttempt(ctx, admitted.Attempt, readiness.Plan, time.Now().UTC())
 			if err != nil || !ready.Acknowledged {
