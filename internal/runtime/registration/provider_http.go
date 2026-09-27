@@ -3,6 +3,7 @@ package registration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -134,14 +135,17 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 }
 
 func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
-	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelConfirmation, "channel_confirmation")
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelConfirmation, "channel_confirmation", nil)
 }
 
-func (e HTTPExecutor) DeliverChannelMessage(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
-	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelDelivery, "channel_delivery")
+func (e HTTPExecutor) DeliverChannelMessage(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, project func(any) (map[string]any, error)) (DeliveryResult, error) {
+	if project == nil {
+		return DeliveryResult{}, fmt.Errorf("channel delivery requires the compiled result projection")
+	}
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelDelivery, "channel_delivery", project)
 }
 
-func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string) (DeliveryResult, error) {
+func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string, project func(any) (map[string]any, error)) (DeliveryResult, error) {
 	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return DeliveryResult{}, fmt.Errorf("%s tool %q has an invalid contract", source, strings.TrimSpace(toolID))
 	}
@@ -192,7 +196,30 @@ func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, to
 			map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err,
 		))
 	}
-	settleErr := handle.Succeed(ctx, map[string]any{"status": response.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(raw)})
+	settlement := map[string]any{"status": response.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(raw)}
+	if source == "channel_delivery" {
+		output, err = project(output)
+		if err != nil {
+			return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, handle.Fail(
+				ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
+				"channel_delivery_projection_unconfirmed", source, "project_result",
+				map[string]any{"tool": strings.TrimSpace(toolID)}, err,
+			))
+		}
+		projected, encodeErr := json.Marshal(output)
+		if encodeErr == nil {
+			projected, encodeErr = canonicaljson.Canonicalize(projected)
+		}
+		if encodeErr != nil {
+			return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, handle.Fail(
+				ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
+				"channel_delivery_receipt_unconfirmed", source, "validate_response",
+				map[string]any{"tool": strings.TrimSpace(toolID)}, encodeErr,
+			))
+		}
+		settlement["projected_output"] = json.RawMessage(projected)
+	}
+	settleErr := handle.Succeed(ctx, settlement)
 	if settleErr != nil && !runtimeeffects.CommittedMutationPhase(settleErr, runtimeeffects.MutationSettlement, handle.Attempt()) {
 		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, settleErr)
 	}

@@ -303,6 +303,8 @@ func platformTableOrder(name string) int {
 		return 101
 	case "channel_delivery_renders":
 		return 102
+	case "channel_delivery_receipts":
+		return 104
 	case "decision_cards":
 		return 101
 	case "proposed_effect_continuations", "human_task_continuations":
