@@ -76,6 +76,16 @@ type ResolvedText struct {
 	BindingRevision int64
 }
 
+type ResolvedNativeEntry struct {
+	PrincipalID       string
+	InterfaceKey      string
+	BindingRevision   int64
+	ActivationID      string
+	SettingID         string
+	SettingGeneration int64
+	EntryReference    string
+}
+
 type ActionDisposition string
 
 const (
@@ -105,4 +115,5 @@ type Store interface {
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
 	ListPendingChannelTexts(context.Context, string, int) ([]PendingText, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (ResolvedText, bool, error)
+	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (ResolvedNativeEntry, bool, error)
 }
