@@ -69,7 +69,7 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 							rows = append(rows, row)
 						}
 						requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-							"run_id": opened.RunID, "event_name": "portfolio/portfolio.accounts.register.requested",
+							"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested",
 							"payload": map[string]any{"portfolio_id": portfolio, "account_ids": rows}, "idempotency_key": uuid.NewString(),
 						})
 					}
@@ -342,7 +342,7 @@ func proveIssue2394SurfaceRefusals(t *testing.T, rt servedControlProofRuntime, r
 	}
 	for _, method := range []string{"run.start", "event.publish"} {
 		unsupported := semanticNumericRPC(t, rt.Endpoint, "ws", fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":"transport-refusal","method":%q,"params":{"run_id":%q,"bundle_hash":%q,"event_name":"portfolio/portfolio.accounts.register.requested","payload":{"portfolio_id":"refused","account_ids":[]},"idempotency_key":%q}}`,
+			`{"jsonrpc":"2.0","id":"transport-refusal","method":%q,"params":{"run_id":%q,"bundle_hash":%q,"event_name":"portfolio.accounts.register.requested","payload":{"portfolio_id":"refused","account_ids":[]},"idempotency_key":%q}}`,
 			method, runID, rt.BundleHash, uuid.NewString()))
 		if unsupported.Error == nil || unsupported.Error.Code != -32601 {
 			t.Fatalf("unsupported served command transport did not refuse at method admission: %+v", unsupported)

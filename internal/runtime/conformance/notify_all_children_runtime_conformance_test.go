@@ -670,9 +670,10 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			if err != nil {
 				t.Fatalf("load numeric registration operator event: %v", err)
 			}
-			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || strings.TrimSpace(fmt.Sprint(view.Payload["external_id"])) == "" || view.Payload["eligible"] != true || len(view.Deliveries) != 0 || view.NoDelivery == nil {
+			if view.Payload["eng_roles"] != float64(499) || view.Payload["gem_score"] != 499.25 || strings.TrimSpace(fmt.Sprint(view.Payload["external_id"])) == "" || view.Payload["eligible"] != true {
 				t.Fatalf("numeric registration operator readback = payload:%#v deliveries:%#v", view.Payload, view.Deliveries)
 			}
+			assertNumericRegistrationDelivery(t, view)
 
 			mixedRunID := validRunID
 			mixedCtx := validCtx
@@ -727,12 +728,24 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			}
 			for _, accountID := range []string{"mixed-before", "mixed-after"} {
 				accepted, err := operatorStore.LoadOperatorEvent(mixedCtx, mixedRegistrations[accountID].ID)
-				if err != nil || len(accepted.Deliveries) != 0 || accepted.NoDelivery == nil {
+				if err != nil {
 					t.Fatalf("mixed accepted registration %s readback = %#v err=%v", accountID, accepted, err)
 				}
+				assertNumericRegistrationDelivery(t, accepted)
 			}
 			assertNotifyAllChildrenFanOutRunStatus(t, mixedCtx, selected, mixedRunID)
 		})
+	}
+}
+
+func assertNumericRegistrationDelivery(t *testing.T, event operatorread.OperatorEventFull) {
+	t.Helper()
+	if event.NoDelivery != nil || len(event.Deliveries) != 1 {
+		t.Fatalf("registration requires one root consumer: %+v", event)
+	}
+	delivery := event.Deliveries[0]
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != conformanceNode(t, "", "numeric-registration-reporter").Key() || delivery.Status != string(runtimedelivery.StatusDelivered) || !delivery.Terminal {
+		t.Fatalf("registration root delivery = %+v", delivery)
 	}
 }
 

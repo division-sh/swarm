@@ -316,10 +316,10 @@ units:
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
   local-routing-reporter:
-    packages: [github.com/division-sh/swarm/internal/runtime/conformance]
-    run: '^TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends$'
+    packages: [github.com/division-sh/swarm/internal/serveapp]
+    run: '^TestIssue2394ServedFanOutSupportedSurfacesBothStores$'
     required_children:
-      TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends: [sqlite, postgres]
+      TestIssue2394ServedFanOutSupportedSurfacesBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full

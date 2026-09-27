@@ -123,7 +123,15 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 				}
 				bundle := loadProducerRoutingFixture(t, filepath.ToSlash(filepath.Dir(row.Path)))
 				connects := bundle.CompositionConnects()
-				if len(connects) != 1 || connects[0].Event != row.Event || connects[0].From != "." || connects[0].To != wantTarget {
+				matched := 0
+				for _, connect := range connects {
+					if connect.Event == row.Event && connect.From == "." && connect.To == wantTarget {
+						matched++
+					} else if connect.Event == row.Event {
+						t.Fatalf("connected creation %s has unrelated route for %s: %#v", row.ID, row.Event, connects)
+					}
+				}
+				if matched != 1 {
 					t.Fatalf("connected creation %s lost exact route to %s: %#v", row.ID, wantTarget, connects)
 				}
 			case "retired_handler_action":

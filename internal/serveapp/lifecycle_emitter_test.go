@@ -107,7 +107,7 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 					root := canonicalrouting.CopyLifecycleEmitter(t, tc.variant)
 					rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"event_name": tc.prefix + "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "gate-start", "bundle_hash": rt.BundleHash,
+						"event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "gate-start", "bundle_hash": rt.BundleHash,
 					})
 					entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, started.RunID, "", "review")
 					cardID := waitLifecycleGateCard(t, rt, started.RunID)

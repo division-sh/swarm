@@ -48,9 +48,6 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 					opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyPublicationActivity(t, mode, provider.URL, approval))
 					first, rt := start()
 					inputName := "activity.requested"
-					if mode == "static" {
-						inputName = "source/" + inputName
-					}
 					type completedCase struct {
 						outcome, runID, seedID, eventID, local, readback string
 						params, decisionParams                           map[string]any

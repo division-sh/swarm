@@ -301,6 +301,12 @@ portfolio.notify.completed:
 `)
 			applyClosedReplacement(t, connectFile, "      - portfolio.notify.requested\n", "      - portfolio.notify.requested\n      - account.registered\n")
 			applyClosedReplacement(t, connectFile, "      - portfolio.notify.requested\nconnect:\n", "      - portfolio.notify.requested\n      - account.registered\nconnect:\n")
+			writeClosedVariantFile(t, root, "nodes.yaml", `numeric-registration-reporter:
+  execution_type: system_node
+  subscribes_to: [account.registered]
+  event_handlers:
+    account.registered: {}
+`)
 		}
 		if opts.NumericInternalSettlement {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered

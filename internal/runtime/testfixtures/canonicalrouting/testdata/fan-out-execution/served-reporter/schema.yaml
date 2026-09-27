@@ -7,6 +7,7 @@ pins:
       - portfolio.accounts.register.requested
       - portfolio.membership.seeded
       - portfolio.notify.requested
+      - account.registered
   outputs:
     events:
       - portfolio.opened.forwarded
@@ -14,12 +15,14 @@ pins:
       - portfolio.accounts.register.requested
       - portfolio.membership.seeded
       - portfolio.notify.requested
+      - account.registered
 connect:
   - {event: portfolio.opened.forwarded, from: ., to: portfolio, rename: portfolio.opened}
   - {event: portfolio.account.register.requested, from: ., to: portfolio}
   - {event: portfolio.accounts.register.requested, from: ., to: portfolio}
   - {event: portfolio.membership.seeded, from: ., to: portfolio}
   - {event: portfolio.notify.requested, from: ., to: portfolio}
+  - {event: account.registered, from: portfolio, to: .}
   - event: account.notify.requested
     from: portfolio
     to: account

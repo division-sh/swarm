@@ -177,9 +177,22 @@ func CopyLifecycleGateAdvanceOnly(t testing.TB) string {
 func CopyLifecycleNestedCascade(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", "name: cascade\n")
+	rootInputs, rootOutputs, rootEvents, rootConnects := "", "", "", ""
 	writeClosedVariantFile(t, root, "outer/schema.yaml", "name: outer\n")
 	for _, side := range []string{"left", "right"} {
+		for _, command := range []struct{ name, field, typ string }{
+			{"work.requested", "seed", "boolean"},
+			{"loop.start", "seed", "boolean"},
+			{"loop.admit", "revision_id", "text"},
+			{"loop.repeat", "revision_id", "text"},
+			{"loop.close", "revision_id", "text"},
+		} {
+			public := side + "." + command.name
+			rootInputs += "      - " + public + "\n"
+			rootOutputs += "      - " + public + "\n"
+			rootEvents += fmt.Sprintf("%s:\n  %s: %s\n", public, command.field, command.typ)
+			rootConnects += fmt.Sprintf("  - {event: %s, from: ., to: outer/%s, rename: %s}\n", public, side, command.name)
+		}
 		prefix := "outer/" + side + "/"
 		loopRoot := CopyLifecycleEmitter(t, LifecycleLoopConnected)
 		for _, path := range []string{"schema.yaml", "events.yaml", "entities.yaml", "nodes.yaml", "sink/entities.yaml", "sink/nodes.yaml"} {
@@ -188,6 +201,9 @@ func CopyLifecycleNestedCascade(t testing.TB) string {
 				t.Fatal(err)
 			}
 			text := string(raw)
+			if path == "events.yaml" {
+				text = "loop.escaped:\n  revision_id: text\n"
+			}
 			if path == "sink/nodes.yaml" {
 				text = strings.Replace(text, "advances_to: done", "advances_to: review", 1)
 			}
@@ -230,6 +246,8 @@ connect:
       advances_to: done
 `)
 	}
+	writeClosedVariantFile(t, root, "schema.yaml", "name: cascade\npins:\n  inputs:\n    events:\n"+rootInputs+"  outputs:\n    events:\n"+rootOutputs+"connect:\n"+rootConnects)
+	writeClosedVariantFile(t, root, "events.yaml", rootEvents)
 	return root
 }
 
@@ -452,8 +470,10 @@ pins:
 		schema = strings.Replace(schema, "          emit:\n            event: work.completed\n            fields: {result: {literal: approved}}\n", "", 1)
 	case LifecycleGateNested:
 		prefix = "outer/inner/"
-		writeClosedVariantFile(t, root, "schema.yaml", "name: lifecycle-parent\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "name: lifecycle-parent\npins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: outer/inner}\n")
+		writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\n")
 		writeClosedVariantFile(t, root, "outer/schema.yaml", "name: lifecycle-middle\n")
+		events = "work.completed:\n  result: text\n"
 		nodes += consumer
 	case LifecycleLoopConnected:
 		writeLifecycleLoopConnected(t, root)

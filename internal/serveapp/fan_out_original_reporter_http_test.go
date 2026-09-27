@@ -219,7 +219,7 @@ func publishIssue2394ReporterBatch(t *testing.T, rt servedControlProofRuntime, r
 	t.Helper()
 	var result servedEventPublishRPCResult
 	issue2394ReporterRPC(t, rt, "event.publish", map[string]any{
-		"run_id": runID, "event_name": "portfolio/portfolio.accounts.register.requested",
+		"run_id": runID, "event_name": "portfolio.accounts.register.requested",
 		"payload": map[string]any{"portfolio_id": portfolio, "account_ids": rows}, "idempotency_key": uuid.NewString(),
 	}, &result)
 	if result.RunID != runID || result.EventID == "" {
@@ -314,9 +314,10 @@ func assertIssue2394ReporterEvents(t *testing.T, rt servedControlProofRuntime, r
 				t.Fatalf("unexpected/duplicate/rejected reporter event: %+v", event)
 			}
 			expected := map[string]any{"account_id": account, "portfolio_id": portfolio, "eng_roles": float64(row["eng_roles"].(int)), "gem_score": row["gem_score"], "external_id": row["external_id"], "eligible": true}
-			if !reflect.DeepEqual(event.Payload, expected) || len(event.Deliveries) != 0 || event.NoDelivery == nil {
-				t.Fatalf("original payload/no-delivery evidence changed for %s: %+v want=%v", account, event, expected)
+			if !reflect.DeepEqual(event.Payload, expected) {
+				t.Fatalf("original payload evidence changed for %s: %+v want=%v", account, event, expected)
 			}
+			assertIssue2394RegistrationDelivery(t, event)
 			seen[account], ids[event.EventID] = event, true
 		}
 		if page.NextCursor == "" {
@@ -371,8 +372,20 @@ func assertIssue2394ReporterEventGet(t *testing.T, rt servedControlProofRuntime,
 	t.Helper()
 	var got operatorread.OperatorEventFull
 	issue2394ReporterRPC(t, rt, "event.get", map[string]any{"event_id": want.EventID}, &got)
-	if got.EventID != want.EventID || got.RunID != want.RunID || !reflect.DeepEqual(got.Payload, want.Payload) || len(got.Deliveries) != 0 || got.NoDelivery == nil {
-		t.Fatalf("original reporter event.get changed payload/no-delivery: %+v want=%+v", got, want)
+	if got.EventID != want.EventID || got.RunID != want.RunID || !reflect.DeepEqual(got.Payload, want.Payload) {
+		t.Fatalf("original reporter event.get changed payload: %+v want=%+v", got, want)
+	}
+	assertIssue2394RegistrationDelivery(t, got)
+}
+
+func assertIssue2394RegistrationDelivery(t *testing.T, event operatorread.OperatorEventFull) {
+	t.Helper()
+	if event.NoDelivery != nil || len(event.Deliveries) != 1 {
+		t.Fatalf("registration requires one root consumer: %+v", event)
+	}
+	delivery := event.Deliveries[0]
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != "numeric-registration-reporter" || !delivery.Terminal || delivery.Status != "delivered" {
+		t.Fatalf("registration root delivery = %+v", delivery)
 	}
 }
 

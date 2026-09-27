@@ -100,7 +100,7 @@ func TestScatterGatherSafetyBothStores(t *testing.T) {
 					item := raw.(map[string]any)
 					expectedIDs[i], expectedResults[i] = item["item_id"], item["value"]
 				}
-				publish("collector/batch.opened", map[string]any{"batch_id": "batch-one", "expected_item_ids": expectedIDs})
+				publish("batch.opened", map[string]any{"batch_id": "batch-one", "expected_item_ids": expectedIDs})
 				publish("batch.submitted", map[string]any{"batch_id": "batch-one", "items": items})
 				ids := map[string]string{}
 				paths := map[string]string{}
@@ -571,7 +571,7 @@ func scatterGatherCounts(t testing.TB, h *runtimeHarness, ctx context.Context) m
 		counts[table] = count
 	}
 	var domainEvents int
-	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name IN ('batch.submitted','batch.finished','item.registered','item.finished','collector/batch.opened') OR event_name LIKE 'workers/%/item.reported')`, catalogRuntimeRunID).Scan(&domainEvents); err != nil {
+	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name IN ('batch.submitted','batch.finished','item.registered','item.finished','batch.opened') OR event_name LIKE 'workers/%/item.reported')`, catalogRuntimeRunID).Scan(&domainEvents); err != nil {
 		t.Fatal(err)
 	}
 	counts["domain_events"] = domainEvents

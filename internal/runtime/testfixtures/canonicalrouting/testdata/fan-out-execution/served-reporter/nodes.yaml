@@ -8,3 +8,8 @@ start-portfolio:
         fields:
           portfolio_id: ${payload.portfolio_id}
           threshold: ${payload.threshold}
+numeric-registration-reporter:
+  execution_type: system_node
+  subscribes_to: [account.registered]
+  event_handlers:
+    account.registered: {}
