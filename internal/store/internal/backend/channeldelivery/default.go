@@ -132,7 +132,15 @@ func ApplyBindingTx(ctx context.Context, tx *sql.Tx, binding operatorchannel.Bin
 		}
 		_, err = tx.ExecContext(ctx, query, binding.PrincipalID, binding.Interface.Key(), binding.Revision,
 			binding.ExternalAccountRef, binding.ConversationRef, string(binding.ConversationScope), binding.OperationID, binding.UpdatedAt.UTC())
-		return err
+		if err != nil {
+			return err
+		}
+		return PlanFirstSummaryTx(ctx, tx, Default{
+			PrincipalID: binding.PrincipalID, InterfaceKey: binding.Interface.Key(), BindingRevision: binding.Revision,
+			DeliveryEpoch: 1, ExternalAccountRef: binding.ExternalAccountRef,
+			ConversationRef: binding.ConversationRef, ConversationScope: binding.ConversationScope,
+			State: StateCurrent, FirstOperationID: binding.OperationID,
+		}, postgres)
 	}
 	if current.PrincipalID != binding.PrincipalID {
 		return fmt.Errorf("channel delivery default principal changed")

@@ -15,6 +15,7 @@ type Plan struct {
 	DeliveryID         string
 	SourceKind         string
 	SourceID           string
+	SummaryCount       int64
 	PrincipalID        string
 	InterfaceKey       string
 	BindingRevision    int64
@@ -36,17 +37,17 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 	if db == nil || uuid.Validate(deliveryID) != nil {
 		return Plan{}, false, fmt.Errorf("channel delivery plan requires a store and delivery id")
 	}
-	query := `SELECT delivery_id, source_kind, source_id, principal_id, interface_key, binding_revision, delivery_epoch,
+	query := `SELECT delivery_id, source_kind, source_id, COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
 		external_account_reference, conversation_reference, conversation_scope, state
 		FROM channel_delivery_plans WHERE delivery_id = ?`
 	if postgres {
-		query = `SELECT delivery_id::text, source_kind, source_id::text, principal_id::text, interface_key, binding_revision, delivery_epoch,
+		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
 			external_account_reference, conversation_reference, conversation_scope, state
 			FROM channel_delivery_plans WHERE delivery_id = $1::uuid`
 	}
 	var plan Plan
 	var scope string
-	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID,
+	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.SummaryCount,
 		&plan.PrincipalID, &plan.InterfaceKey, &plan.BindingRevision, &plan.DeliveryEpoch, &plan.ExternalAccountRef,
 		&plan.ConversationRef, &scope, &plan.State)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -69,7 +70,14 @@ func (p Plan) Validate() error {
 		return fmt.Errorf("stored channel delivery plan identity is invalid")
 	}
 	switch p.SourceKind {
-	case PlanNotice, PlanCard, PlanSummary:
+	case PlanNotice, PlanCard:
+		if p.SummaryCount != 0 {
+			return fmt.Errorf("non-summary delivery plan has summary count")
+		}
+	case PlanSummary:
+		if p.SummaryCount < 1 {
+			return fmt.Errorf("summary delivery plan has no notices")
+		}
 	default:
 		return fmt.Errorf("stored channel delivery source kind is invalid")
 	}
@@ -79,6 +87,35 @@ func (p Plan) Validate() error {
 		return fmt.Errorf("stored channel delivery plan state is invalid")
 	}
 	return nil
+}
+
+// PlanFirstSummaryTx runs only after inserting the first default in the same
+// principal-fenced confirmation transaction. It counts only older pending
+// notices; the cut is transaction order, never a timestamp comparison.
+func PlanFirstSummaryTx(ctx context.Context, tx *sql.Tx, selected Default, postgres bool) error {
+	if tx == nil || selected.State != StateCurrent || selected.DeliveryEpoch != 1 ||
+		uuid.Validate(selected.FirstOperationID) != nil {
+		return fmt.Errorf("first channel summary requires exact new default")
+	}
+	var count int64
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE status = 'pending'`).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	query := `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, summary_count, principal_id,
+		interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+		conversation_scope, state, created_at) VALUES (?, 'summary', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?)`
+	if postgres {
+		query = `INSERT INTO channel_delivery_plans (delivery_id, source_kind, source_id, summary_count, principal_id,
+			interface_key, binding_revision, delivery_epoch, external_account_reference, conversation_reference,
+			conversation_scope, state, created_at) VALUES ($1, 'summary', $2, $3, $4, $5, $6, $7, $8, $9, $10, 'planned', $11)`
+	}
+	_, err := tx.ExecContext(ctx, query, uuid.NewString(), selected.FirstOperationID, count, selected.PrincipalID,
+		selected.InterfaceKey, selected.BindingRevision, selected.DeliveryEpoch, selected.ExternalAccountRef,
+		selected.ConversationRef, string(selected.ConversationScope), time.Now().UTC())
+	return err
 }
 
 // PlanNoticeTx shares the mailbox insertion transaction. The principal fence
