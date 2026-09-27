@@ -2299,6 +2299,16 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 			if retiredEarly {
 				t.Fatal("durable attempt retired before every local cleanup stage joined")
 			}
+			foreignLease, err := am.beginWork(ctx, "wrong flow retirement disposition")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := am.settleDynamicFlowActiveAttempt(ctx, key, active, &preparedFlowTopologyRetirement{manager: am, lease: foreignLease}, flowActivationTerminalRetirement); err == nil || !strings.Contains(err.Error(), "retirement disposition changed") {
+				t.Fatalf("wrong retirement disposition = %v", err)
+			}
+			if err := foreignLease.Done(); !errors.Is(err, worklifetime.ErrAlreadySettled) {
+				t.Fatalf("refused retirement retained work lease: %v", err)
+			}
 			if failure == "route" {
 				readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, req.Instance.Route())
 				if err != nil || !found {
