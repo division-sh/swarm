@@ -183,6 +183,40 @@ func ListPendingTextIntents(ctx context.Context, tx *sql.Tx, afterPublicationID 
 	return pending, rows.Err()
 }
 
+func RequireTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) error {
+	if tx == nil {
+		return fmt.Errorf("channel text admission requires a selected transaction")
+	}
+	if err := text.Validate(); err != nil {
+		return err
+	}
+	query := `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state
+		FROM operator_channel_text_intents WHERE publication_id=?`
+	if postgres {
+		query = `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, state
+			FROM operator_channel_text_intents WHERE publication_id=$1::uuid`
+	}
+	var provider, providerEventID, interfaceKey, authorization, state string
+	var raw []byte
+	err := tx.QueryRowContext(ctx, query, text.PublicationID).Scan(&provider, &providerEventID, &interfaceKey, &raw, &authorization, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("verified channel text intent is absent")
+	}
+	if err != nil {
+		return err
+	}
+	var stored operatorchannel.TextFact
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return err
+	}
+	if provider != text.Provider || providerEventID != text.ProviderEventID ||
+		interfaceKey != text.Interface.Key() || authorization != text.ProviderAuthorization ||
+		stored != text.TextFact || state != "pending" {
+		return fmt.Errorf("verified channel text intent contradicts admitted fact")
+	}
+	return nil
+}
+
 func decodeActionTime(value any) (time.Time, error) {
 	switch value := value.(type) {
 	case time.Time:
