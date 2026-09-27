@@ -134,8 +134,16 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 }
 
 func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelConfirmation, "channel_confirmation")
+}
+
+func (e HTTPExecutor) DeliverChannelMessage(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelDelivery, "channel_delivery")
+}
+
+func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string) (DeliveryResult, error) {
 	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		return DeliveryResult{}, fmt.Errorf("channel confirmation tool %q has an invalid contract", strings.TrimSpace(toolID))
+		return DeliveryResult{}, fmt.Errorf("%s tool %q has an invalid contract", source, strings.TrimSpace(toolID))
 	}
 	prepared, secrets, err := prepareProviderRequest(toolID, tool, input, credentials)
 	if err != nil {
@@ -145,7 +153,7 @@ func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID str
 	if err != nil {
 		return DeliveryResult{}, err
 	}
-	handle, err := runtimeeffects.BeginChannelConfirmation(ctx, fingerprint, lineage)
+	handle, err := begin(ctx, fingerprint, lineage)
 	if err != nil {
 		return DeliveryResult{}, err
 	}
@@ -156,19 +164,19 @@ func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID str
 			if launchErr != nil {
 				return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, handle.Fail(
 					context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict,
-					"channel_confirmation_launch_dispatch_blocked", "channel_confirmation", "dispatch",
+					source+"_launch_dispatch_blocked", source, "dispatch",
 					map[string]any{"tool": strings.TrimSpace(toolID), "no_dispatch": true}, err,
 				))
 			}
 			return DeliveryResult{OperationID: operationID}, handle.Fail(
 				ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable,
-				"channel_confirmation_prelaunch_rejected", "channel_confirmation", "dispatch",
+				source+"_prelaunch_rejected", source, "dispatch",
 				map[string]any{"tool": strings.TrimSpace(toolID), "launch_rejected": true}, err,
 			)
 		}
 		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, handle.Fail(
 			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
-			"channel_confirmation_acknowledgment_lost", "channel_confirmation", "dispatch",
+			source+"_acknowledgment_lost", source, "dispatch",
 			map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets),
 		))
 	}
@@ -180,7 +188,7 @@ func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID str
 	if err != nil {
 		return DeliveryResult{OperationID: operationID}, errors.Join(launchErr, observationErr, handle.Fail(
 			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
-			"channel_confirmation_response_unconfirmed", "channel_confirmation", "validate_response",
+			source+"_response_unconfirmed", source, "validate_response",
 			map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err,
 		))
 	}
