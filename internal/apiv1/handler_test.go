@@ -650,7 +650,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 				EventCount:     1,
 				EntityCount:    2,
 				Deliveries:     []operatorread.RunDebugDeliveryCount{{SubscriberID: "worker", Status: "pending", Count: 1}},
-				TestQuiescence: operatorread.RunTestQuiescence{Ready: true},
+				TestQuiescence: operatorread.RunTestQuiescence{ActiveDeliveries: 1},
 				FanOut: fanoutobligation.RunSummary{
 					RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, SemanticRejected: 1,
 					SemanticRejectionSample: &fanoutobligation.FanOutSemanticRejectionSample{
@@ -776,8 +776,8 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 		t.Fatalf("run.diagnose semantic rejection sample = %#v", sample)
 	}
 	quiescence := asMap(t, asMap(t, diagnose.Result)["test_quiescence"])
-	if quiescence["ready"] != true || quiescence["active_deliveries"] != float64(0) || quiescence["fan_out_unsettled"] != float64(0) {
-		t.Fatalf("run.diagnose test_quiescence = %#v, want ready zero-count projection", quiescence)
+	if quiescence["ready"] != false || quiescence["active_deliveries"] != float64(1) || quiescence["fan_out_unsettled"] != float64(0) {
+		t.Fatalf("run.diagnose test_quiescence = %#v, want pending-delivery blocker", quiescence)
 	}
 	for _, tc := range []struct {
 		name       string
@@ -803,6 +803,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			report := fakeRuns.reports[runID]
+			report.Deliveries = nil
 			report.TestQuiescence = tc.quiescence
 			report.FanOut = tc.fanOut
 			fakeRuns.reports[runID] = report
