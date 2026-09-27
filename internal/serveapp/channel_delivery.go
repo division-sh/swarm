@@ -24,9 +24,12 @@ import (
 )
 
 type serveChannelDeliveryDispatcher struct {
-	store             runtimechanneldelivery.Store
-	native            runtimechannelnative.Store
-	cards             decisioncard.Store
+	store   runtimechanneldelivery.Store
+	native  runtimechannelnative.Store
+	cards   decisioncard.Store
+	mailbox interface {
+		CountUnreadInformationalNotices(context.Context) (int, error)
+	}
 	activations       channelonboarding.Store
 	manager           *runtime.RuntimeContextManager
 	ingress           *runtimepublicingress.ReadinessOwner
@@ -110,12 +113,22 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		candidate.Audience != prepared.Frozen.Audience {
 		return fmt.Errorf("channel delivery candidate and render are not exact-current")
 	}
-	selectedID, found, err := d.store.CurrentChannelDeliveryActivationID(ctx)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return fmt.Errorf("channel delivery has no succeeded activation")
+	selectedID := candidate.EntryActivationID
+	if candidate.SourceKind != "response" {
+		if selectedID != "" {
+			return fmt.Errorf("non-response delivery has entry activation")
+		}
+		var found bool
+		var err error
+		selectedID, found, err = d.store.CurrentChannelDeliveryActivationID(ctx)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("channel delivery has no succeeded activation")
+		}
+	} else if selectedID == "" {
+		return fmt.Errorf("channel response has no admitted entry activation")
 	}
 	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
 	if err != nil {
