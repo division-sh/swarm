@@ -86,6 +86,12 @@ func commitInboundPublicationSQL(
 			return runtimeinbound.CommitResult{}, err
 		}
 	}
+	if command.OperatorChannelText != nil {
+		_, postgres := any(eventStore).(*EventPostgresOwner)
+		if err := storechanneldelivery.InsertTextIntentTx(ctx, tx, *command.OperatorChannelText, request.OriginalReceivedAt, postgres); err != nil {
+			return runtimeinbound.CommitResult{}, err
+		}
+	}
 	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
 	for index, publication := range command.Publications {
