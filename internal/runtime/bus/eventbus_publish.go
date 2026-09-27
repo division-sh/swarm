@@ -592,6 +592,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 
 	planner := eb.deliveryPlanner
 	planner.recipientPolicy.prospective = publication.prospective
+	planner.connectPlanner.topologySource = publication.topologySource
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}

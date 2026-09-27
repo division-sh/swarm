@@ -1591,7 +1591,9 @@ contract_formats:
             EventBus derives only those complete owner route sets from freshly selected run/source-admitted descriptors.
             A bounded fan-out publication group may share compiled static graph and authored-producer evidence among its
             members only while the exact route-table source owner is unchanged. Every member still reads current route
-            and descriptor state and commits against its own fenced generation; compiled evidence is not retained beyond
+            and descriptor state, constructs an isolated receiver preview route table, and commits against its own fenced
+            generation. Receiver preview derivation may consume the same group-scoped static evidence, but never shares
+            the preview table or its materialized routes with another member. Compiled evidence is not retained beyond
             the group or treated as a cache of mutable routing state.
             Selected-store queries may use conservative key prefilters, but only the canonical descriptor matcher decides
             identity; a prefilter may never exclude a possible canonical match. A run-wide descriptor or target-owner census,

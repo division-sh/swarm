@@ -28,7 +28,8 @@ type connectRoutePlanPreviewRoutesKey struct{}
 type closedPublicationPlanningKey struct{}
 
 type connectRoutePlanPreviewRoutes struct {
-	table *RouteTable
+	table          *RouteTable
+	inputProducers *runtimepinrouting.FlowInputProducerResolver
 }
 
 type connectRoutePlanEvaluationMemoKey struct{}
@@ -78,6 +79,7 @@ type connectRoutePlanResolver struct {
 	loadAgents      connectAgentDescriptorLoader
 	lifecycle       templateInstanceLifecycleOwner
 	replyStore      runtimereplycontext.Store
+	topologySource  *routeTopologyCompilationScope
 }
 
 type connectRoutePlanDispatch struct {
@@ -532,7 +534,15 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 		return errors.New("connect route planning preview table is required before lifecycle materialization")
 	}
 	if preview.table == nil {
-		table, err := DeriveRouteTable(r.source)
+		var table *RouteTable
+		var err error
+		if r.topologySource != nil && r.routeTable != nil {
+			graph, inputProducers := r.topologySource.forTable(r.routeTable)
+			table, err = deriveRouteTableWithInputProducers(r.source, graph, inputProducers)
+			preview.inputProducers = &inputProducers
+		} else {
+			table, err = DeriveRouteTable(r.source)
+		}
 		if err != nil {
 			return fmt.Errorf("derive connect route planning preview table: %w", err)
 		}
@@ -549,10 +559,10 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 	if len(preview.table.MaterializedRoutes(liveIdentity)) > 0 {
 		return nil
 	}
-	if err := preview.table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+	if err := preview.table.addFlowInstanceRouteForContextWithInputProducers(ctx, FlowInstanceRouteMaterializationRequest{
 		Identity:            liveIdentity,
 		ActivationVariables: decision.ActivationVariables(),
-	}); err != nil {
+	}, preview.inputProducers); err != nil {
 		return err
 	}
 	return nil
