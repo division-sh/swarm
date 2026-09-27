@@ -84,6 +84,116 @@ func (d *serveChannelDeliveryDispatcher) processCardAction(ctx context.Context, 
 	return channelCardActionResult{Response: response, Replayed: replayed}, nil
 }
 
+func (d *serveChannelDeliveryDispatcher) acknowledgeChannelAction(ctx context.Context, pending runtimechanneldelivery.PendingAction, resolved runtimechanneldelivery.ResolvedAction) error {
+	if d == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil || d.now == nil || !d.posture.Valid() {
+		return fmt.Errorf("channel callback acknowledgment owners are unavailable")
+	}
+	operationID, err := runtimeeffects.ChannelActionAckOperationID(pending.PublicationID)
+	if err != nil {
+		return err
+	}
+	outcomes, ok := d.effects.(runtimeeffects.OutcomeStore)
+	if !ok {
+		return fmt.Errorf("channel callback acknowledgment outcome owner is unavailable")
+	}
+	if outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, operationID); err != nil {
+		return err
+	} else if found {
+		if outcome.Kind != runtimeeffects.KindChannelActionAck || outcome.AuthorityKind != runtimeeffects.AuthorityChannelActionAck || outcome.AuthorityID != operationID {
+			return fmt.Errorf("channel callback acknowledgment operation identity conflicts")
+		}
+		return nil
+	}
+	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return err
+	}
+	var selected channelonboarding.ConnectedChannelActivation
+	for _, activation := range activations {
+		if activation.ActivationID == resolved.ActivationID {
+			if selected.ActivationID != "" {
+				return fmt.Errorf("channel callback activation identity is duplicated")
+			}
+			selected = activation
+		}
+	}
+	if selected.ActivationID == "" || selected.Revision != resolved.ActivationRevision ||
+		selected.BindingRevision != resolved.BindingRevision || selected.PrincipalID != resolved.PrincipalID ||
+		selected.Provider != pending.Fact.Provider || selected.Interface.Key() != pending.Fact.Interface.Key() ||
+		selected.ConversationRef != pending.Fact.ConversationRef {
+		return fmt.Errorf("channel callback activation contradicts verified fact")
+	}
+	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return fmt.Errorf("channel callback runtime publication is unavailable")
+	}
+	defer lease.Release()
+	var compiled channelonboarding.CompiledActivation
+	for _, activation := range lease.Activations() {
+		if activation.Source == channelonboarding.ActivationSourceLearned &&
+			activation.OnboardingOperationID == selected.OperationID && activation.ActivationRevision == selected.Revision &&
+			activation.Coordinate.Matches(selected.Coordinate) {
+			if compiled.OnboardingOperationID != "" {
+				return fmt.Errorf("channel callback compiled activation is duplicated")
+			}
+			compiled = activation
+		}
+	}
+	if compiled.OnboardingOperationID == "" {
+		return fmt.Errorf("channel callback compiled activation is absent")
+	}
+	_, input, err := compiled.Plan.PrepareOperation("acknowledge_interaction", map[string]any{
+		"interaction_reference": pending.Fact.InteractionRef,
+	})
+	if err != nil {
+		return err
+	}
+	toolID, tool, err := compiled.Plan.ConnectorOperation("acknowledge_interaction")
+	if err != nil {
+		return err
+	}
+	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, compiled.Plan, selected.CredentialAdmissions, tool)
+	if err != nil {
+		return err
+	}
+	ack := runtimeeffects.ChannelActionAckAuthority{
+		EffectOperationID: operationID, PublicationID: pending.PublicationID,
+		Provider: pending.Fact.Provider, ProviderEventID: pending.Fact.ProviderEventID,
+		ProviderAuthorization: pending.Fact.ProviderAuthorization, InterfaceKey: pending.Fact.Interface.Key(),
+		ExternalAccountRef: pending.Fact.ExternalAccountRef, ConversationRef: pending.Fact.ConversationRef,
+		ConversationScope: string(pending.Fact.ConversationScope), MessageReference: pending.Fact.MessageReference,
+		InteractionRef: pending.Fact.InteractionRef, Token: pending.Fact.Token,
+		ReceiptOperationID: resolved.ReceiptOperationID, PrincipalID: resolved.PrincipalID,
+		BindingRevision: resolved.BindingRevision, ActivationID: selected.ActivationID,
+		ActivationRevision: selected.Revision, BundleHash: selected.Coordinate.BundleHash,
+		BundleIdentity: selected.Coordinate.BundleIdentity, PackInventoryGeneration: selected.Coordinate.PackInventoryGeneration,
+		RuntimeInstanceID:            selected.Coordinate.RuntimeInstanceID,
+		ContextPublicationGeneration: selected.Coordinate.ContextPublicationGeneration,
+		PlanGeneration:               selected.Coordinate.PlanGeneration, TargetGeneration: selected.Coordinate.TargetGeneration,
+	}
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityChannelActionAck, ID: operationID,
+		ExecutionOwner:  "channel-action:" + d.runtimeInstanceID,
+		LeaseExpiresAt:  d.now().UTC().Add(5 * time.Minute),
+		FenceGeneration: selected.Coordinate.ContextPublicationGeneration,
+		ExecutionMode:   runtimeeffects.ExecutionMode(d.posture.RootMode()), ChannelActionAck: ack,
+	}
+	if !authority.Valid() {
+		return fmt.Errorf("channel callback acknowledgment authority is invalid")
+	}
+	effectCtx := runtimeeffects.WithExecutionMode(ctx, authority.ExecutionMode)
+	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
+	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
+	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, selected.Coordinate.BundleHash))
+	_, err = (runtimeregistration.HTTPExecutor{Client: d.httpClient}).AcknowledgeChannelAction(
+		effectCtx, toolID, tool, input, credentials, map[string]string{"publication_id": pending.PublicationID},
+	)
+	return err
+}
+
 func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender) error {
 	if candidate.CurrentReceiptID != "" {
 		return fmt.Errorf("initial channel delivery already has a receipt")
