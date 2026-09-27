@@ -26,6 +26,18 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 		ConversationScope: plan.ConversationScope,
 	}
 	switch plan.SourceKind {
+	case PlanResponse:
+		if plan.CurrentRenderID == "" {
+			return channeldelivery.Frozen{}, fmt.Errorf("channel response has no committed render")
+		}
+		stored, found, err := LoadRender(ctx, tx, plan.CurrentRenderID, postgres)
+		if err != nil {
+			return channeldelivery.Frozen{}, err
+		}
+		if !found {
+			return channeldelivery.Frozen{}, fmt.Errorf("channel response render is absent")
+		}
+		return stored.Frozen, nil
 	case PlanSummary:
 		return channeldelivery.FreezeSummary(plan.SourceID, plan.SummaryCount, audience)
 	case PlanNotice:
