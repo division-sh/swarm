@@ -316,6 +316,20 @@ func (p *Double) FailCommandReadbackAfterWrite() {
 	p.failCommandReadbackAfterWrite = true
 }
 
+func (p *Double) SeedCommands(credential string, scope map[string]any, language string, commands []map[string]any) error {
+	key, err := commandScopeKey(credential, scope, language)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.commands == nil {
+		p.commands = map[string][]map[string]any{}
+	}
+	p.commands[key] = append([]map[string]any(nil), commands...)
+	return nil
+}
+
 // SetResourceID makes one credential represent a distinct provider resource.
 func (p *Double) SetResourceID(credential string, resourceID int64) {
 	p.mu.Lock()
