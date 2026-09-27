@@ -635,8 +635,11 @@ func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 				}
 			}
 			probe.mu.Unlock()
-			if err := c.waitForWork(ctx); (err != nil) != (mode != "success") || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
-				t.Fatalf("owned readiness completion result: %v", err)
+			if err := prepared.wait(); (err != nil) != (mode != "success") || (err != nil && !strings.Contains(err.Error(), injected.Error())) {
+				t.Fatalf("exact readiness retirement result: %v", err)
+			}
+			if err := c.waitForWork(ctx); err != nil {
+				t.Fatalf("process retirement leaked into terminal completion: %v", err)
 			}
 		})
 	}
