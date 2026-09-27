@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -214,6 +215,34 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if err != nil || !found || selectedActivationID != activation.ActivationID {
 					t.Fatalf("selected activation = %s, found=%t err=%v", selectedActivationID, found, err)
 				}
+				native := selected.(channelnative.Store)
+				admission := channelnative.Admission{
+					Provider: activation.Provider, ResourceSlotID: activation.Provider + ":bot_webhook:42",
+					ConversationReference: activation.ConversationRef, PrincipalID: principal.ID,
+					InterfaceKey: activation.Interface.Key(), BindingRevision: activation.BindingRevision,
+					ActivationID: activation.ActivationID, ActivationRevision: activation.Revision,
+					ContextPublicationGeneration: int64(activation.Coordinate.ContextPublicationGeneration),
+					PackID:                       activation.Interface.ChannelPackID, PackVersion: activation.Interface.ChannelPackVersion,
+					PackManifestHash: activation.Interface.ChannelManifestHash, EntryContractHash: "exact-native-contract",
+				}
+				setting, err := native.AttachNativeInboxSetting(ctx, admission)
+				if err != nil || setting.State != "planned" || setting.Generation != 1 || setting.CurrentConsumerCount != 1 {
+					t.Fatalf("attach physical native setting = %#v, %v", setting, err)
+				}
+				replayedSetting, err := native.AttachNativeInboxSetting(ctx, admission)
+				if err != nil || replayedSetting.SettingID != setting.SettingID || replayedSetting.Generation != 1 || replayedSetting.CurrentConsumerCount != 1 {
+					t.Fatalf("native setting replay = %#v, %v", replayedSetting, err)
+				}
+				foreignAdmission := admission
+				foreignAdmission.BindingRevision++
+				if _, err := native.AttachNativeInboxSetting(ctx, foreignAdmission); err == nil {
+					t.Fatal("native setting accepted contradictory binding revision")
+				}
+				incompatible := admission
+				incompatible.EntryContractHash = "different-native-contract"
+				if _, err := native.AttachNativeInboxSetting(ctx, incompatible); err == nil {
+					t.Fatal("native setting accepted incompatible contract with a current consumer")
+				}
 				if !current(authority) {
 					t.Fatal("succeeded channel activation rejected exact delivery")
 				}
@@ -241,6 +270,25 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 					if current(authority) {
 						t.Fatal("retired default admitted predecessor delivery")
+					}
+					if err := native.RetireStaleNativeInboxConsumers(ctx); err != nil {
+						t.Fatal(err)
+					}
+					var nativeState, consumerState string
+					query := `SELECT state FROM channel_native_settings WHERE setting_id=?`
+					consumerQuery := `SELECT state FROM channel_native_setting_consumers WHERE activation_id=?`
+					if postgres {
+						query = `SELECT state FROM channel_native_settings WHERE setting_id=$1::uuid`
+						consumerQuery = `SELECT state FROM channel_native_setting_consumers WHERE activation_id=$1::uuid`
+					}
+					if err := db.QueryRowContext(ctx, query, setting.SettingID).Scan(&nativeState); err != nil {
+						t.Fatal(err)
+					}
+					if err := db.QueryRowContext(ctx, consumerQuery, activation.ActivationID).Scan(&consumerState); err != nil {
+						t.Fatal(err)
+					}
+					if nativeState != "retired" || consumerState != "retired" {
+						t.Fatalf("native setting/consumer after local retirement = %s/%s", nativeState, consumerState)
 					}
 				}
 				if mode == "late" {
