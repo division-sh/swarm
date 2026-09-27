@@ -34,6 +34,7 @@ type Double struct {
 	registrationResponseBarrier  *responseBarrier
 	deliveryResponseBarrier      *responseBarrier
 	editResponseBarrier          *responseBarrier
+	commandApplyBarrier          *responseBarrier
 }
 
 type registration struct {
@@ -80,6 +81,14 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		if err != nil || len(payload.Commands) > 100 {
 			http.Error(w, "invalid command scope", http.StatusBadRequest)
 			return
+		}
+		p.mu.Lock()
+		barrier := p.commandApplyBarrier
+		p.commandApplyBarrier = nil
+		p.mu.Unlock()
+		if barrier != nil {
+			close(barrier.arrived)
+			<-barrier.release
 		}
 		p.mu.Lock()
 		if p.commands == nil {
@@ -314,6 +323,14 @@ func (p *Double) FailCommandReadbackAfterWrite() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.failCommandReadbackAfterWrite = true
+}
+
+func (p *Double) PauseNextCommandApply() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.commandApplyBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
 }
 
 func (p *Double) SeedCommands(credential string, scope map[string]any, language string, commands []map[string]any) error {
