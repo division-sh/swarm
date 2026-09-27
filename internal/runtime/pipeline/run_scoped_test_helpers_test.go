@@ -276,6 +276,10 @@ func (p pipelineTestWorkflowTimerPersistence) ListWorkflowTimerActivations(ctx c
 	return p.store.listWorkflowTimerActivations(ctx, runID, entityID, activeOnly)
 }
 
+func (p pipelineTestWorkflowTimerPersistence) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]WorkflowTimerActivation, error) {
+	return p.store.listTestActiveWorkflowTimerActivationsForRoute(ctx, identity)
+}
+
 func (p pipelineTestWorkflowTimerPersistence) CommitWorkflowTimerReconciliation(ctx context.Context, command WorkflowTimerReconciliationCommand) (CommittedWorkflowLifecycleMutation, error) {
 	if err := command.Validate(); err != nil {
 		return CommittedWorkflowLifecycleMutation{}, err

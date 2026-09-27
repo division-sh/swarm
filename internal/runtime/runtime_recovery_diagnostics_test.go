@@ -71,6 +71,10 @@ func (startupRecoveryWorkflowOwner) ListWorkflowTimerActivations(context.Context
 	return nil, nil
 }
 
+func (startupRecoveryWorkflowOwner) ListActiveWorkflowTimerActivationsForRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimepipeline.WorkflowTimerActivation, error) {
+	return nil, nil
+}
+
 func (startupRecoveryWorkflowOwner) StandingRunRestartDisposition(context.Context, string) (runtimepipeline.StandingRestartDisposition, error) {
 	return runtimepipeline.ClassifyStandingRestart(runtimepipeline.StandingRestartFact{})
 }

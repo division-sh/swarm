@@ -432,13 +432,26 @@ func initialWorkflowTimerExecutionMode(ctx context.Context, readinessMode execut
 }
 
 func (l *WorkflowTimerLifecycle) RetireInitialEntryTimerWakeups(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	active, err := l.initialEntryTimerActivations(ctx, identity)
+	store := l.store()
+	if store == nil || !store.enabled() {
+		return nil
+	}
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("workflow initial timer retirement requires instance identity")
+	}
+	active, err := store.listActiveWorkflowTimerActivationsForRoute(ctx, identity)
 	if err != nil {
 		return err
 	}
 	refs := make([]timeridentity.WorkflowTimerActivationRef, 0, len(active))
 	for _, activation := range active {
-		refs = append(refs, activation.Ref)
+		if activation.RunID != identity.RunID || activation.Route != identity.Route {
+			return fmt.Errorf("workflow initial timer retirement read crossed instance ownership")
+		}
+		if activation.Ref.Cause == timeridentity.WorkflowTimerActivationCauseInitial {
+			refs = append(refs, activation.Ref)
+		}
 	}
 	if len(refs) == 0 {
 		return nil

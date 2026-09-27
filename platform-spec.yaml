@@ -16543,8 +16543,12 @@ platform_tables:
         activations, and inserts changed and added successors. After progress it preserves unchanged initial-caused
         activations, cancels changed and removed ones, and does not retroactively insert changed or added declarations;
         event- and transition-caused activations remain outside that operation. A stale activation from a prior
-        declaration revision cannot register, fire, or authorize an accepted event. One selected-store agent-topology
-        admission covers lifecycle first execution,
+        declaration revision cannot register, fire, or authorize an accepted event.
+        Process-local initial-timer wakeup retirement reads active timer rows by exact run and route, independent of
+        the workflow instance projection and run activity after failed activation or terminalization. It withdraws
+        only initial-caused wakeups; it does not cancel durable timer rows or event- and transition-caused wakeups.
+        Malformed matching timer rows fail closed rather than silently skipping retirement.
+        One selected-store agent-topology admission covers lifecycle first execution,
         duplicate/stored-result replay, raw agent projection writes, config/path/status rewrites, replacement, and
         terminalization. It locks and matches the exact `{run_id, instance_path, canonical plan fingerprint}`, desired
         membership or absence, and declared config revision before any write or replay return. Authorized replay remains

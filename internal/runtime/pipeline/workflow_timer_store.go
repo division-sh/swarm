@@ -111,6 +111,7 @@ func DecodeWorkflowTimerActivationPersistenceRecord(record WorkflowTimerActivati
 type WorkflowTimerActivationPersistence interface {
 	LoadWorkflowTimerActivation(context.Context, string) (WorkflowTimerActivation, bool, error)
 	ListWorkflowTimerActivations(context.Context, string, string, bool) ([]WorkflowTimerActivation, error)
+	ListActiveWorkflowTimerActivationsForRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]WorkflowTimerActivation, error)
 	CommitWorkflowTimerReconciliation(context.Context, WorkflowTimerReconciliationCommand) (CommittedWorkflowLifecycleMutation, error)
 }
 
@@ -280,6 +281,13 @@ func (s *workflowInstanceStore) listPersistedWorkflowTimerActivations(ctx contex
 		return nil, fmt.Errorf("workflow timer activation reader is required")
 	}
 	return s.timerActivations.ListWorkflowTimerActivations(ctx, runID, entityID, activeOnly)
+}
+
+func (s *workflowInstanceStore) listActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]WorkflowTimerActivation, error) {
+	if s == nil || s.timerActivations == nil {
+		return nil, fmt.Errorf("workflow timer activation reader is required")
+	}
+	return s.timerActivations.ListActiveWorkflowTimerActivationsForRoute(ctx, identity)
 }
 
 func workflowTimerIntervalString(activation WorkflowTimerActivation) string {
