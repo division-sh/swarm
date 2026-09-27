@@ -207,6 +207,8 @@ func platformTableOrder(name string) int {
 		return 2
 	case "operator_channel_bindings":
 		return 3
+	case "channel_delivery_defaults":
+		return 4
 	case "operator_channel_claim_receipts":
 		return 4
 	case "channel_onboarding_operations":
@@ -295,6 +297,8 @@ func platformTableOrder(name string) int {
 		return 95
 	case "mailbox":
 		return 100
+	case "channel_delivery_plans":
+		return 101
 	case "decision_cards":
 		return 101
 	case "proposed_effect_continuations", "human_task_continuations":
