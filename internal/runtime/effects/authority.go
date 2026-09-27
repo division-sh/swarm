@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -27,6 +28,7 @@ const (
 	AuthorityServeRegistration    AuthorityKind = "serve_registration"
 	AuthorityChannelConfirmation  AuthorityKind = "channel_confirmation"
 	AuthorityChannelDelivery      AuthorityKind = "channel_delivery"
+	AuthorityChannelNativeSetting AuthorityKind = "channel_native_setting"
 )
 
 type UsageTargetKind string
@@ -226,6 +228,30 @@ type ChannelDeliveryAuthority struct {
 	TargetGeneration             uint64
 }
 
+type ChannelNativeSettingAuthority struct {
+	EffectOperationID            string
+	SettingID                    string
+	SettingGeneration            int64
+	Provider                     string
+	ResourceSlotID               string
+	ConversationRef              string
+	PrincipalID                  string
+	EntryContractHash            string
+	PackID                       string
+	PackVersion                  string
+	PackManifestHash             string
+	ActivationID                 string
+	ActivationRevision           int64
+	BindingRevision              int64
+	BundleHash                   string
+	BundleIdentity               string
+	PackInventoryGeneration      string
+	RuntimeInstanceID            string
+	ContextPublicationGeneration uint64
+	PlanGeneration               plangeneration.Generation
+	TargetGeneration             uint64
+}
+
 func ChannelDeliveryOperationID(deliveryID, renderID string) (string, error) {
 	parsed, err := uuid.Parse(strings.TrimSpace(deliveryID))
 	if err != nil || !validUUIDs(renderID) {
@@ -235,21 +261,22 @@ func ChannelDeliveryOperationID(deliveryID, renderID string) (string, error) {
 }
 
 type Authority struct {
-	Kind                AuthorityKind
-	ID                  string
-	Normal              LifecycleToken
-	SelectedFork        SelectedContractForkAuthority
-	ForkChat            ConversationForkChatAuthority
-	StartupProbe        StartupProbeAuthority
-	ServeRegistration   ServeRegistrationAuthority
-	ChannelConfirmation ChannelConfirmationAuthority
-	ChannelDelivery     ChannelDeliveryAuthority
-	ExecutionOwner      string
-	LeaseExpiresAt      time.Time
-	FenceGeneration     uint64
-	Target              UsageTarget
-	BudgetScopes        []BudgetAdmissionScope
-	ExecutionMode       ExecutionMode
+	Kind                 AuthorityKind
+	ID                   string
+	Normal               LifecycleToken
+	SelectedFork         SelectedContractForkAuthority
+	ForkChat             ConversationForkChatAuthority
+	StartupProbe         StartupProbeAuthority
+	ServeRegistration    ServeRegistrationAuthority
+	ChannelConfirmation  ChannelConfirmationAuthority
+	ChannelDelivery      ChannelDeliveryAuthority
+	ChannelNativeSetting ChannelNativeSettingAuthority
+	ExecutionOwner       string
+	LeaseExpiresAt       time.Time
+	FenceGeneration      uint64
+	Target               UsageTarget
+	BudgetScopes         []BudgetAdmissionScope
+	ExecutionMode        ExecutionMode
 }
 
 type ExecutionMode = executionmode.Mode
@@ -297,7 +324,8 @@ func (a Authority) Valid() bool {
 				nonEmpty(a.StartupProbe.ActorID) && a.Target == (UsageTarget{}) && len(a.BudgetScopes) == 0 &&
 				a.Normal == (LifecycleToken{}) && a.SelectedFork == (SelectedContractForkAuthority{}) &&
 				a.ForkChat == (ConversationForkChatAuthority{}) && a.ServeRegistration == (ServeRegistrationAuthority{}) &&
-				a.ChannelConfirmation == (ChannelConfirmationAuthority{}) && a.ChannelDelivery == (ChannelDeliveryAuthority{})
+				a.ChannelConfirmation == (ChannelConfirmationAuthority{}) && a.ChannelDelivery == (ChannelDeliveryAuthority{}) &&
+				a.ChannelNativeSetting == (ChannelNativeSettingAuthority{})
 		}
 		return validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.StartupAuthorityID) &&
 			a.ID == strings.TrimSpace(a.StartupProbe.ProbeID) && a.StartupProbe.StartupStateVersion > 0 &&
@@ -336,6 +364,18 @@ func (a Authority) Valid() bool {
 			delivery.ContextPublicationGeneration == a.FenceGeneration && delivery.TargetGeneration > 0 &&
 			nonEmpty(delivery.InterfaceKey, delivery.ExternalAccountRef, delivery.ConversationRef, delivery.RenderHash,
 				delivery.BundleHash, delivery.BundleIdentity, delivery.PackInventoryGeneration) && delivery.PlanGeneration.Valid()
+	case AuthorityChannelNativeSetting:
+		setting := a.ChannelNativeSetting
+		operationID, err := channelnative.InstallOperationID(setting.SettingID, setting.SettingGeneration)
+		return err == nil && setting.EffectOperationID == operationID && a.ID == operationID &&
+			setting.SettingGeneration == int64(a.FenceGeneration) &&
+			validUUIDs(setting.PrincipalID, setting.ActivationID, setting.RuntimeInstanceID) &&
+			setting.ActivationRevision > 0 && setting.BindingRevision > 0 &&
+			setting.ContextPublicationGeneration > 0 && setting.TargetGeneration > 0 &&
+			strings.HasPrefix(setting.ResourceSlotID, setting.Provider+":") &&
+			nonEmpty(setting.Provider, setting.ConversationRef, setting.EntryContractHash,
+				setting.PackID, setting.PackVersion, setting.PackManifestHash,
+				setting.BundleHash, setting.BundleIdentity, setting.PackInventoryGeneration) && setting.PlanGeneration.Valid()
 	default:
 		return false
 	}
@@ -347,7 +387,7 @@ func (a Authority) Generation() uint64 {
 		return a.Normal.Generation
 	case AuthoritySelectedContractFork:
 		return a.SelectedFork.Generation
-	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation, AuthorityChannelDelivery:
+	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation, AuthorityChannelDelivery, AuthorityChannelNativeSetting:
 		return a.FenceGeneration
 	case AuthorityStartupProbe:
 		return a.FenceGeneration
@@ -463,6 +503,29 @@ func (a Authority) Evidence() map[string]any {
 		evidence["context_publication_generation"] = delivery.ContextPublicationGeneration
 		evidence["plan_generation"] = delivery.PlanGeneration.Diagnostic()
 		evidence["target_generation"] = delivery.TargetGeneration
+	case AuthorityChannelNativeSetting:
+		setting := a.ChannelNativeSetting
+		evidence["effect_operation_id"] = setting.EffectOperationID
+		evidence["setting_id"] = setting.SettingID
+		evidence["setting_generation"] = setting.SettingGeneration
+		evidence["provider"] = setting.Provider
+		evidence["resource_slot_id"] = setting.ResourceSlotID
+		evidence["conversation_reference"] = setting.ConversationRef
+		evidence["principal_id"] = setting.PrincipalID
+		evidence["entry_contract_hash"] = setting.EntryContractHash
+		evidence["pack_id"] = setting.PackID
+		evidence["pack_version"] = setting.PackVersion
+		evidence["pack_manifest_hash"] = setting.PackManifestHash
+		evidence["activation_id"] = setting.ActivationID
+		evidence["activation_revision"] = setting.ActivationRevision
+		evidence["binding_revision"] = setting.BindingRevision
+		evidence["bundle_hash"] = setting.BundleHash
+		evidence["bundle_identity"] = setting.BundleIdentity
+		evidence["pack_inventory_generation"] = setting.PackInventoryGeneration
+		evidence["runtime_instance_id"] = setting.RuntimeInstanceID
+		evidence["context_publication_generation"] = setting.ContextPublicationGeneration
+		evidence["plan_generation"] = setting.PlanGeneration.Diagnostic()
+		evidence["target_generation"] = setting.TargetGeneration
 	}
 	return evidence
 }
