@@ -96,6 +96,39 @@ func (s *PostgresStore) ListPendingChannelActions(ctx context.Context, cursor st
 	return pending, err
 }
 
+func (s *PostgresStore) ListPendingChannelTexts(ctx context.Context, cursor string, limit int) ([]render.PendingText, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres channel text store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	var pending []render.PendingText
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		pending, err = channeldelivery.ListPendingTextIntents(txctx, tx, cursor, limit, true)
+		return err
+	})
+	return pending, err
+}
+
+func (s *PostgresStore) ResolveCurrentChannelText(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedText, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedText{}, false, fmt.Errorf("postgres channel text store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedText{}, false, err
+	}
+	var resolved render.ResolvedText
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		resolved, found, err = channeldelivery.ResolveCurrentTextTx(txctx, tx, text, true)
+		return err
+	})
+	return resolved, found, err
+}
+
 func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
 	if s == nil || s.backend == nil {
 		return false, fmt.Errorf("postgres channel delivery store is unavailable")
@@ -211,6 +244,39 @@ func (s *SQLiteRuntimeStore) ListPendingChannelActions(ctx context.Context, curs
 		return err
 	})
 	return pending, err
+}
+
+func (s *SQLiteRuntimeStore) ListPendingChannelTexts(ctx context.Context, cursor string, limit int) ([]render.PendingText, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite channel text store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	var pending []render.PendingText
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		pending, err = channeldelivery.ListPendingTextIntents(txctx, tx, cursor, limit, false)
+		return err
+	})
+	return pending, err
+}
+
+func (s *SQLiteRuntimeStore) ResolveCurrentChannelText(ctx context.Context, text operatorchannel.InboundText) (render.ResolvedText, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedText{}, false, fmt.Errorf("sqlite channel text store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedText{}, false, err
+	}
+	var resolved render.ResolvedText
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		resolved, found, err = channeldelivery.ResolveCurrentTextTx(txctx, tx, text, false)
+		return err
+	})
+	return resolved, found, err
 }
 
 func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {

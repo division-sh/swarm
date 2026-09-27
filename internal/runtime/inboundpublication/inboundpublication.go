@@ -168,6 +168,7 @@ type CommitCommand struct {
 	AuthorProjection      runtimeauthoractivity.InboundProjection
 	OperatorChannelClaim  *operatorchannel.InboundClaim
 	OperatorChannelAction *operatorchannel.InboundAction
+	OperatorChannelText   *operatorchannel.InboundText
 }
 
 func (c CommitCommand) Validate() error {
@@ -178,8 +179,14 @@ func (c CommitCommand) Validate() error {
 	if len(c.Finalization.Events) > 2 {
 		return fmt.Errorf("inbound publication requires raw plus zero or one normalized event")
 	}
-	if c.OperatorChannelClaim != nil && c.OperatorChannelAction != nil {
-		return fmt.Errorf("inbound publication cannot contain both operator channel claim and action")
+	operatorKinds := 0
+	for _, present := range []bool{c.OperatorChannelClaim != nil, c.OperatorChannelAction != nil, c.OperatorChannelText != nil} {
+		if present {
+			operatorKinds++
+		}
+	}
+	if operatorKinds > 1 {
+		return fmt.Errorf("inbound publication cannot contain multiple operator channel facts")
 	}
 	if len(c.Finalization.Events) == 0 {
 		switch {
@@ -197,10 +204,17 @@ func (c CommitCommand) Validate() error {
 			if c.OperatorChannelAction.PublicationID != request.PublicationID || c.OperatorChannelAction.Provider != request.Provider || c.OperatorChannelAction.ProviderEventID != request.ProviderEventID {
 				return fmt.Errorf("operator channel action provenance does not match inbound request")
 			}
+		case c.OperatorChannelText != nil:
+			if err := c.OperatorChannelText.Validate(); err != nil {
+				return err
+			}
+			if c.OperatorChannelText.PublicationID != request.PublicationID || c.OperatorChannelText.Provider != request.Provider || c.OperatorChannelText.ProviderEventID != request.ProviderEventID {
+				return fmt.Errorf("operator channel text provenance does not match inbound request")
+			}
 		default:
-			return fmt.Errorf("zero-event inbound publication requires an operator channel claim or action")
+			return fmt.Errorf("zero-event inbound publication requires an operator channel fact")
 		}
-	} else if c.OperatorChannelClaim != nil || c.OperatorChannelAction != nil {
+	} else if operatorKinds != 0 {
 		return fmt.Errorf("operator channel publication must contain zero business events")
 	}
 	if len(c.Publications) != len(c.Finalization.Events) {
