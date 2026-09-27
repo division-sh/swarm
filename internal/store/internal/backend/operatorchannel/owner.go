@@ -11,6 +11,7 @@ import (
 
 	domain "github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
@@ -434,6 +435,9 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			terminalErr = domain.ErrCredentialStale
 			return nil
 		}
+		if err := channeldelivery.LockPrincipalTx(txctx, tx, req.PrincipalID, runner.dialect() == dialectPostgres); err != nil {
+			return err
+		}
 		current, currentFound, err := loadBinding(txctx, tx, runner.dialect(), op.Interface.Key(), true)
 		if err != nil {
 			return err
@@ -476,6 +480,9 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			OperationID: op.OperationID, UpdatedAt: now, ProviderCredential: op.ProviderCredential,
 		}
 		if err := upsertBinding(txctx, tx, runner.dialect(), binding); err != nil {
+			return err
+		}
+		if err := channeldelivery.ApplyBindingTx(txctx, tx, binding, op.Kind, runner.dialect() == dialectPostgres); err != nil {
 			return err
 		}
 		op.State, op.Revision, op.BindingRevision, op.CompletedAt = domain.StateBound, op.Revision+1, bindingRevision, now
@@ -554,6 +561,9 @@ func unbind(ctx context.Context, runner transactionRunner, req domain.UnbindRequ
 			binding, _, err = loadBinding(txctx, tx, runner.dialect(), req.Interface.Key(), false)
 			return err
 		}
+		if err := channeldelivery.LockPrincipalTx(txctx, tx, req.PrincipalID, runner.dialect() == dialectPostgres); err != nil {
+			return err
+		}
 		current, found, err := loadBinding(txctx, tx, runner.dialect(), req.Interface.Key(), true)
 		if err != nil {
 			return err
@@ -570,7 +580,10 @@ func unbind(ctx context.Context, runner transactionRunner, req domain.UnbindRequ
 			return err
 		}
 		binding = domain.Binding{PrincipalID: req.PrincipalID, Interface: req.Interface.Normalized(), Revision: current.Revision + 1, Status: domain.BindingUnbound, OperationID: op.OperationID, UpdatedAt: now}
-		return upsertBinding(txctx, tx, runner.dialect(), binding)
+		if err := upsertBinding(txctx, tx, runner.dialect(), binding); err != nil {
+			return err
+		}
+		return channeldelivery.RetireBindingTx(txctx, tx, binding, runner.dialect() == dialectPostgres)
 	})
 	return op, binding, err
 }
@@ -591,6 +604,9 @@ func bindFromProof(ctx context.Context, runner transactionRunner, req domain.Boo
 	}
 	var binding domain.Binding
 	err := runner.mutate(ctx, "bind operator channel from proof", func(txctx context.Context, tx *sql.Tx) error {
+		if err := channeldelivery.LockPrincipalTx(txctx, tx, req.PrincipalID, runner.dialect() == dialectPostgres); err != nil {
+			return err
+		}
 		current, found, err := loadBinding(txctx, tx, runner.dialect(), req.Interface.Key(), true)
 		if err != nil {
 			return err
@@ -623,7 +639,10 @@ func bindFromProof(ctx context.Context, runner transactionRunner, req domain.Boo
 			return err
 		}
 		binding = domain.Binding{PrincipalID: req.PrincipalID, Interface: req.Interface.Normalized(), ExternalAccountRef: req.Proof.ExternalAccountRef, ConversationRef: req.Proof.ConversationRef, ConversationScope: req.Proof.ConversationScope, AccountPresentation: req.Proof.AccountPresentation, Revision: 1, Status: domain.BindingCurrent, Source: domain.BindingSourceLocalProof, ProofID: req.Proof.ProofID, ProofRevision: req.Proof.Revision, OperationID: opID, UpdatedAt: now, ProviderCredential: req.Proof.ProviderCredential}
-		return upsertBinding(txctx, tx, runner.dialect(), binding)
+		if err := upsertBinding(txctx, tx, runner.dialect(), binding); err != nil {
+			return err
+		}
+		return channeldelivery.ApplyBindingTx(txctx, tx, binding, op.Kind, runner.dialect() == dialectPostgres)
 	})
 	return binding, err
 }

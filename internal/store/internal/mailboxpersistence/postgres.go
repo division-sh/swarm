@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
 
@@ -194,6 +195,10 @@ func (s *MailboxPostgresOwner) insertMailboxItemSpec(ctx context.Context, item r
 			NULLIF($13,''), $14, $15, NULLIF($16,''), now()
 		)
 	`, item.ID, coalesceMailboxEntityID(item), strings.Trim(strings.TrimSpace(item.FlowInstance), "/"), scope, item.Type, item.EventID, item.FromAgent, normalizeMailboxSeverity(item.Priority), item.Summary, string(item.Context), status, decision, item.DecisionNotes, item.Notified, expiresAt, strings.TrimSpace(item.ReplyContextID))
+		if err != nil {
+			return err
+		}
+		_, err = channeldelivery.PlanNoticeTx(sqlCtx, tx, item.ID, true)
 		return err
 	})
 	if err != nil {
