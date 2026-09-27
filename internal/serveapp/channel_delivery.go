@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,8 +23,10 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+	"github.com/google/uuid"
 )
 
 type serveChannelDeliveryDispatcher struct {
@@ -84,6 +87,133 @@ func (d *serveChannelDeliveryDispatcher) processCardAction(ctx context.Context, 
 		return channelCardActionResult{}, err
 	}
 	return channelCardActionResult{Response: response, Replayed: replayed}, nil
+}
+
+func (d *serveChannelDeliveryDispatcher) processFinalCardText(ctx context.Context, pending runtimechanneldelivery.PendingText,
+	candidate runtimechanneldelivery.InputDraftCandidate, progress decisioncard.InputFieldProgress, principalID string,
+	choice *runtimechanneldelivery.PendingAction) error {
+	if d == nil || d.cards == nil || d.manager == nil || !progress.Complete || candidate.DraftID == "" || principalID == "" {
+		return fmt.Errorf("final channel card text requires a complete current draft")
+	}
+	card, err := d.cards.GetDecisionCard(ctx, candidate.CardID)
+	if err != nil {
+		return err
+	}
+	if card.Status != decisioncard.StatusPending {
+		return decisioncard.ErrDraftNotAuthority
+	}
+	fields, err := canonicaljson.Encode(progress.Fields)
+	if err != nil {
+		return err
+	}
+	occurrenceID := pending.PublicationID
+	now := pending.ReceivedAt.UTC()
+	if choice != nil {
+		occurrenceID = choice.PublicationID
+		now = choice.ReceivedAt.UTC()
+	}
+	publicationID, err := uuid.Parse(occurrenceID)
+	if err != nil {
+		return err
+	}
+	mutation, err := pipeline.NewDecisionCardDecision(decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: candidate.Verdict, Fields: progress.Fields,
+		PrincipalID: principalID, ObservedContentHash: card.CardContentHash,
+		InputDraftID: candidate.DraftID, DeliveryReceiptID: candidate.ReceiptOperationID,
+		DecisionEventID: uuid.NewSHA1(publicationID, []byte("card-decision")).String(), Now: now,
+	}).WithChannelText(pending.Fact)
+	if err != nil {
+		return err
+	}
+	if choice != nil {
+		mutation, err = mutation.WithChannelChoice(choice.Fact)
+		if err != nil {
+			return err
+		}
+	}
+	request := apiidempotency.Request{
+		Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor(principalID),
+		IdempotencyKey: occurrenceID, ResourceID: card.CardID,
+		RequestHash: operatorchannel.Hash("channel-card-input-v1", occurrenceID, pending.PublicationID,
+			pending.Fact.ProviderAuthorization, pending.Fact.Interface.Key(), pending.Fact.ProviderEventID,
+			candidate.DraftID, card.CardContentHash, string(fields)),
+		TTL: 24 * time.Hour, Now: now,
+	}
+	if err := mutation.ValidateRequest(request); err != nil {
+		return err
+	}
+	use, lookup, err := d.manager.AcquireBundleHash(ctx, card.BundleHash)
+	if err != nil {
+		return err
+	}
+	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
+		return fmt.Errorf("channel card runtime source is unavailable")
+	}
+	defer use.Done()
+	mutationCtx, err := use.Runtime().Bus.AdmitSourceArtifactFact(use.WorkContext())
+	if err != nil {
+		return err
+	}
+	_, _, err = use.Runtime().Pipeline.CommitDecisionCardMutation(mutationCtx, request, mutation)
+	return err
+}
+
+func (d *serveChannelDeliveryDispatcher) processFinalCardSkip(ctx context.Context, pending runtimechanneldelivery.PendingAction,
+	resolved runtimechanneldelivery.ResolvedAction, draft decisioncard.InputDraft, progress decisioncard.InputFieldProgress) error {
+	if d == nil || d.cards == nil || d.manager == nil || !progress.Complete ||
+		resolved.Action.Kind != "skip_input" || draft.InputDraftID != resolved.Action.DraftID {
+		return fmt.Errorf("final channel skip requires a complete current draft")
+	}
+	card, err := d.cards.GetDecisionCard(ctx, draft.CardID)
+	if err != nil {
+		return err
+	}
+	if card.Status != decisioncard.StatusPending {
+		return decisioncard.ErrDraftNotAuthority
+	}
+	fields, err := canonicaljson.Encode(progress.Fields)
+	if err != nil {
+		return err
+	}
+	publicationID, err := uuid.Parse(pending.PublicationID)
+	if err != nil {
+		return err
+	}
+	now := pending.ReceivedAt.UTC()
+	mutation, err := pipeline.NewDecisionCardDecision(decisioncard.DecideRequest{
+		CardID: card.CardID, Verdict: draft.Verdict, Fields: progress.Fields,
+		PrincipalID: resolved.PrincipalID, ObservedContentHash: card.CardContentHash,
+		InputDraftID: draft.InputDraftID, DeliveryReceiptID: draft.DeliveryReceiptID,
+		DecisionEventID: uuid.NewSHA1(publicationID, []byte("card-decision")).String(), Now: now,
+	}).WithChannelSkip(pending.Fact)
+	if err != nil {
+		return err
+	}
+	request := apiidempotency.Request{
+		Method: "mailbox.decide", Actor: apiidempotency.PrincipalActor(resolved.PrincipalID),
+		IdempotencyKey: pending.PublicationID, ResourceID: card.CardID,
+		RequestHash: operatorchannel.Hash("channel-card-skip-v1", pending.PublicationID,
+			pending.Fact.ProviderAuthorization, pending.Fact.Interface.Key(), pending.Fact.Token,
+			resolved.RenderHash, draft.InputDraftID, card.CardContentHash, string(fields)),
+		TTL: 24 * time.Hour, Now: now,
+	}
+	if err := mutation.ValidateRequest(request); err != nil {
+		return err
+	}
+	use, lookup, err := d.manager.AcquireBundleHash(ctx, card.BundleHash)
+	if err != nil {
+		return err
+	}
+	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
+		return fmt.Errorf("channel card runtime source is unavailable")
+	}
+	defer use.Done()
+	mutationCtx, err := use.Runtime().Bus.AdmitSourceArtifactFact(use.WorkContext())
+	if err != nil {
+		return err
+	}
+	_, _, err = use.Runtime().Pipeline.CommitDecisionCardMutation(mutationCtx, request, mutation)
+	return err
 }
 
 func (d *serveChannelDeliveryDispatcher) processNoticeAction(ctx context.Context, pending runtimechanneldelivery.PendingAction,

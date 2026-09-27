@@ -716,7 +716,7 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	projected, _, _, _, err := projectInboundPublication(target, admitted, store.record.Request, time.Now(), executionposture.Live, nil)
+	projected, _, _, _, err := projectInboundPublication(target, admitted, store.record.Request, time.Now(), executionposture.Live, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
