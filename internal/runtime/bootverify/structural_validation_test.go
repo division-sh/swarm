@@ -65,7 +65,6 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 	// Pin the entire registry so new checks require a deliberate purpose decision.
 	classified := map[string]string{
 		"declared_agent_name_valid":               "structural",
-		"event_metadata_authority":                "structural",
 		"event_chain_integrity":                   "structural",
 		"event_consumer_exists":                   "structural",
 		"event_producer_exists":                   "structural",
@@ -132,7 +131,6 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"composition_connect_validation":          "structural",
 		"input_pin_wiring":                        "structural",
 		"pin_target_resolution":                   "structural",
-		"cross_flow_pin_ambiguity_validation":     "structural",
 		"flow_boundary_create_entity_validation":  "structural",
 		"flow_data_access_validation":             "structural",
 		"impl.platform_metadata_validation":       "structural",

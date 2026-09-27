@@ -203,7 +203,9 @@ func TestDeriveRouteTableRequiresExactPackageOwnerAcrossRouteSurfaces(t *testing
 				}
 				resolved := routes.ResolveForRun(eventBusTestRunID, "orders/root.start")
 				assertExactFlowRoute(t, resolved, "subscription", "orders")
-				assertExactFlowRoute(t, routes.ResolveForRun(eventBusTestRunID, "root.start"), "root_input_flow", "orders")
+				if got := routes.ResolveForRun(eventBusTestRunID, "root.start"); len(got) != 0 {
+					t.Fatalf("root input manufactured private subscription: %#v", got)
+				}
 			})
 		}
 	}
@@ -577,7 +579,7 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 	instanceEnvelope := events.EventEnvelope{
 		EntityID: runtimeflowidentity.EntityID(route.InstancePath), FlowInstance: route.InstancePath,
 	}
-	before := eventtest.RunCreatingRootIngress(
+	before := eventtest.RuntimeControl(
 		eventtest.UUID("event-before-runtime-readiness"),
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
 		"", "", nil, 0, eventBusTestRunID, "", instanceEnvelope, time.Time{},
@@ -595,7 +597,7 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 	if len(resolved) != 1 || resolved[0].AgentPlan != agentPlan {
 		t.Fatalf("published agent route = %#v, want exact identity %s", resolved, agentIdentity)
 	}
-	after := eventtest.RunCreatingRootIngress(
+	after := eventtest.RuntimeControl(
 		eventtest.UUID("event-after-runtime-readiness"),
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"),
 		"", "", nil, 0, eventBusTestRunID, "", instanceEnvelope, time.Time{},
@@ -895,7 +897,7 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 	if len(resolved) != 1 || resolved[0].AgentPlan != agentPlan {
 		t.Fatalf("active agent route = %#v, want exact identity %s", resolved, agentIdentity)
 	}
-	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("event-rendered-route-delivery"),
+	evt := eventtest.RuntimeControl(eventtest.UUID("event-rendered-route-delivery"),
 		events.EventType("operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_requested"), "", "", nil, 0, eventBusTestRunID, "",
 		events.EventEnvelope{EntityID: runtimeflowidentity.EntityID(routeIdentity.InstancePath), FlowInstance: routeIdentity.InstancePath}, time.Time{})
 

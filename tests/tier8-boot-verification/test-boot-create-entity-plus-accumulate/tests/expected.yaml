@@ -4,5 +4,5 @@ conformance:
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "accumulator_input_producer_path"
-    contains: "no accepted producer/source path"
+    category: "dialect_compliance"
+    contains: "declares both create_entity and accumulate"

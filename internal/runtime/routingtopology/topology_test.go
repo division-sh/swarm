@@ -315,7 +315,7 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 	}
 }
 
-func TestBuildDoesNotInventExternalConsumerForFreeFormMetadata(t *testing.T) {
+func TestBuildDoesNotInventExternalRolesFromCatalogPresence(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -323,16 +323,16 @@ func TestBuildDoesNotInventExternalConsumerForFreeFormMetadata(t *testing.T) {
 			}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"external.received": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"dashboard"}}},
+			"external.received": {},
 		},
 	})
 	topology := Build(source)
-	if len(topology.Producers) < 2 {
-		t.Fatalf("external source endpoint missing from census: producers=%#v", topology.Producers)
+	if len(topology.Producers) != 1 {
+		t.Fatalf("expected only the actual handler producer: producers=%#v", topology.Producers)
 	}
 	for _, consumer := range topology.Consumers {
 		if consumer.Kind == "external" {
-			t.Fatalf("free-form swarm.consumer created external authority: %#v", consumer)
+			t.Fatalf("catalog presence created external authority: %#v", consumer)
 		}
 	}
 	for _, edge := range topology.Edges {

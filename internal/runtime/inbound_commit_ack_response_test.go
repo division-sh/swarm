@@ -100,9 +100,10 @@ func (s *inboundPostCommitFaultStore) LoadInboundPublicationByIdentity(ctx conte
 	return s.InboundPersistence.LoadInboundPublicationByIdentity(ctx, provider, entityID, eventID)
 }
 
-func inboundAcknowledgedSelectedFixture(t *testing.T, backend, runID, entityID, flowInstance, slug, agentID string) (context.Context, operatorChannelInboundSelectedStore, *sql.DB, runtimepkg.InboundTarget) {
+func inboundAcknowledgedSelectedFixture(t *testing.T, backend, runID, entityID, slug, agentID string) (context.Context, operatorChannelInboundSelectedStore, *sql.DB, runtimepkg.InboundTarget) {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	flowInstance := boundedProviderFlowID
 	if backend == "postgres" {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
@@ -134,7 +135,7 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 			const runID = "75100000-0000-0000-0000-000000000001"
 			const entityID = "75100000-0000-0000-0000-000000000002"
 			const agentID = "committed-inbound-observer"
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound-instance", "committed-inbound", agentID)
+			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound", agentID)
 			probe := &inboundCommittedFinalizerProbe{}
 			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{TestLifecycleProbe: probe}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
@@ -211,7 +212,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			const entityID = "75000000-0000-0000-0000-000000000002"
 			const agentID = "acknowledged-telegram-observer"
 			const providerEventID = "8201"
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram-instance", "ack-telegram", agentID)
+			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram", agentID)
 			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
@@ -297,7 +298,7 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 				const runID = "77000000-0000-0000-0000-000000000001"
 				const entityID = "77000000-0000-0000-0000-000000000002"
 				const agentID = "hostile-result-telegram-observer"
-				ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "hostile-result-instance", "hostile-result", agentID)
+				ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "hostile-result", agentID)
 				bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 				if err != nil {
 					t.Fatal(err)
@@ -327,7 +328,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 		t.Run(backend, func(t *testing.T) {
 			const runID = "76000000-0000-0000-0000-000000000001"
 			const entityID = "76000000-0000-0000-0000-000000000002"
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator-instance", "ack-operator", "")
+			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator", "")
 			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
 			identity, err := plan.InterfaceIdentity()
 			if err != nil {

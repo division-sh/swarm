@@ -554,7 +554,6 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 		want     FlowInputPinSource
 	}{
 		{name: "empty", specimen: canonicalrouting.InputPinSourceDefault, want: FlowInputPinSourceNone},
-		{name: "external", specimen: canonicalrouting.InputPinSourceExternal, want: FlowInputPinSourceExternal},
 		{name: "harness", specimen: canonicalrouting.InputPinSourceHarness, want: FlowInputPinSourceHarness},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -568,6 +567,10 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 		})
 	}
 
+	var retired FlowSchemaDocument
+	if err := canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceExternal).Decode(&retired); err == nil || !strings.Contains(err.Error(), "RETIRED: input event pin source: external") {
+		t.Fatalf("retired source accepted: %v", err)
+	}
 	var doc FlowSchemaDocument
 	err := canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceInvalid).Decode(&doc)
 	if err == nil || !strings.Contains(err.Error(), "input event pin source must be") {
@@ -1849,7 +1852,7 @@ func TestFlowPinsDecode_AcceptsOptionMappingsAndScalarPermissions(t *testing.T) 
 	if got := schema.Pins.Inputs.EventPins[0].EventType(); got != "check.requested" {
 		t.Fatalf("Inputs.EventPins[0].EventType() = %q", got)
 	}
-	if got := schema.Pins.Inputs.EventPins[0].Source; got != FlowInputPinSourceExternal {
+	if got := schema.Pins.Inputs.EventPins[0].Source; got != FlowInputPinSourceHarness {
 		t.Fatalf("Inputs.EventPins[0].Source = %s", FlowInputPinSourceCode(got))
 	}
 	if got := schema.Pins.Outputs.EventPins[0].EventType(); got != "check.passed" {

@@ -3,8 +3,7 @@ mode: static
 pins:
   inputs:
     events:
-      - event: account.requested
-        source: external
+      - account.requested
   outputs:
     events:
       - account.ready

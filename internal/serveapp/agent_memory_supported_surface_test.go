@@ -166,7 +166,7 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 
 	providerRecorder := &standingLiveAnthropicRecorder{t: t}
 	provider := httptest.NewServer(providerRecorder)
-	defer provider.Close()
+	t.Cleanup(provider.Close)
 	telegramCalls := make(chan map[string]any, 4)
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/botbot-token/sendMessage" {
@@ -180,11 +180,17 @@ func TestCanonicalTelegramAgentLiveSelectionPreservesAuthoredDoubles(t *testing.
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		telegramCalls <- body
+		select {
+		case telegramCalls <- body:
+		default:
+			t.Errorf("unexpected excess Telegram call: %#v", body)
+			http.Error(w, "unexpected excess call", http.StatusConflict)
+			return
+		}
 		w.Header().Set("content-type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
 	}))
-	defer telegram.Close()
+	t.Cleanup(telegram.Close)
 	redirectExternalHosts(t, map[string]string{
 		"api.anthropic.com": provider.URL,
 		"api.telegram.org":  telegram.URL,

@@ -13,6 +13,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
@@ -152,11 +153,13 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 	entityID := eventtest.UUID("provider-raw-settlement-entity")
 	exactTarget := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	externalSource := inboundRawSettlementRoutingSource(t, entityID)
-	exactEvent := inboundRawSettlementEvent(externalSource, exactTarget)
-	exactBus := &EventBus{semanticSource: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceExternal)}
+	exactEvent := inboundRawSettlementEvent(externalSource, events.RouteIdentity{})
+	exactBus := &EventBus{semanticSource: inboundRawSettlementSource(true)}
 
 	admission := exactBus.admitProviderRawSettlement(runtimeprovideroutput.KindRaw, exactEvent)
-	liveNoSubscriber := RoutePlan{TargetFailure: runtimepinrouting.FailureTargetNotSubscribed}
+	liveNoSubscriber := RoutePlan{ordinarySource: ordinaryPublicationSource{route: events.RouteIdentity{
+		FlowID: "telegram-ingress", FlowInstance: exactTarget.FlowInstance, EntityID: entityID,
+	}}}
 	if !admission.authorizes(exactEvent, exactEvent, liveNoSubscriber) {
 		t.Fatal("complete provider raw ingress authority did not admit deliberate empty settlement")
 	}
@@ -169,13 +172,15 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 		plan  RoutePlan
 	}{
 		{name: "raw kind alone", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(events.NoRoutingSource(), exactTarget), plan: liveNoSubscriber},
-		{name: "provider source alone", bus: &EventBus{semanticSource: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceHarness)}, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: liveNoSubscriber},
-		{name: "external input alone", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(events.NoRoutingSource(), exactTarget), plan: liveNoSubscriber},
+		{name: "provider source alone", bus: &EventBus{semanticSource: inboundRawSettlementSource(false)}, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: liveNoSubscriber},
+		{name: "declared ingress alone", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(events.NoRoutingSource(), exactTarget), plan: liveNoSubscriber},
 		{name: "normalized kind", bus: exactBus, kind: runtimeprovideroutput.KindNormalized, event: exactEvent, plan: liveNoSubscriber},
 		{name: "foreign entity target", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(externalSource, events.RouteIdentity{FlowInstance: exactTarget.FlowInstance, EntityID: eventtest.UUID("foreign-provider-raw-target")}), plan: liveNoSubscriber},
 		{name: "foreign flow scope", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(externalSource, events.RouteIdentity{FlowInstance: "other-flow/standing", EntityID: entityID}), plan: liveNoSubscriber},
 		{name: "contradictory target flow id", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(externalSource, events.RouteIdentity{FlowID: "other-flow", FlowInstance: exactTarget.FlowInstance, EntityID: entityID}), plan: liveNoSubscriber},
-		{name: "missing target", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(externalSource, events.RouteIdentity{}), plan: liveNoSubscriber},
+		{name: "preassigned local target", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(externalSource, exactTarget), plan: liveNoSubscriber},
+		{name: "foreign source owner", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: RoutePlan{ordinarySource: ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "other-flow", FlowInstance: exactTarget.FlowInstance, EntityID: entityID}}}},
+		{name: "foreign owner entity", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: RoutePlan{ordinarySource: ordinaryPublicationSource{route: events.RouteIdentity{FlowID: "telegram-ingress", FlowInstance: exactTarget.FlowInstance, EntityID: "other-entity"}}}},
 		{name: "terminated target", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: RoutePlan{TargetFailure: runtimepinrouting.FailureTargetUnreachableTerminated}},
 		{name: "unproved live target", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: RoutePlan{}},
 	}
@@ -189,17 +194,17 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 	}
 }
 
-func TestPrepareInboundDeliveryBatchPreservesLiveTargetPlanAndSettlesConsumerlessRawByDesign(t *testing.T) {
+func TestPrepareInboundDeliveryBatchUsesLiveSourceOwnerAndSettlesConsumerlessRawByDesign(t *testing.T) {
 	entityID := eventtest.UUID("provider-raw-settlement-integrated-entity")
 	target := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(ActiveTargetDescriptor{ID: "standing", FlowInstance: target.FlowInstance, EntityID: target.EntityID})
-	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceExternal)})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(true)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	batch := InboundDeliveryBatch{Provider: "telegram", Events: []InboundDeliveryEvent{{
-		Event: inboundRawSettlementEvent(inboundRawSettlementRoutingSource(t, entityID), target),
+		Event: inboundRawSettlementEvent(inboundRawSettlementRoutingSource(t, entityID), events.RouteIdentity{}),
 		Kind:  runtimeprovideroutput.KindRaw,
 	}}}
 	plan, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch)
@@ -211,8 +216,8 @@ func TestPrepareInboundDeliveryBatchPreservesLiveTargetPlanAndSettlesConsumerles
 	if len(prepared) != 1 || len(commands) != 1 {
 		t.Fatalf("prepared/commands = %d/%d, want 1/1", len(prepared), len(commands))
 	}
-	if prepared[0].plan.TargetFailure != runtimepinrouting.FailureTargetNotSubscribed {
-		t.Fatalf("generic target failure = %q, want preserved target_not_subscribed", prepared[0].plan.TargetFailure)
+	if !prepared[0].plan.TargetFailure.Empty() {
+		t.Fatalf("target-free source acquired target failure = %q", prepared[0].plan.TargetFailure)
 	}
 	if prepared[0].targetFailure {
 		t.Fatalf("approved deliberate raw empty remained an executable target failure: admission=%#v source=%#v target=%#v",
@@ -232,11 +237,11 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	target := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(ActiveTargetDescriptor{ID: "standing", FlowInstance: target.FlowInstance, EntityID: target.EntityID})
-	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceExternal)})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(true)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	event := inboundRawSettlementEvent(inboundRawSettlementRoutingSource(t, entityID), target)
+	event := inboundRawSettlementEvent(inboundRawSettlementRoutingSource(t, entityID), events.RouteIdentity{})
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatalf("AdmitForPublish: %v", err)
@@ -248,19 +253,22 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 		t.Fatalf("prepareClosedPublication: %v", err)
 	}
 	if !prepared.providerRawSettlement.authorizes(prepared.Event, prepared.targetFailureInput, prepared.plan) &&
-		prepared.targetFailure && command.Commit.RouteSettlement.Reason() == events.NoDeliveryResolutionBlocked &&
-		command.Commit.Disposition != nil && command.Commit.DeadLetter != nil {
+		command.Commit.RouteSettlement.Reason() == events.NoDeliveryDeclaredConsumerNoPlan {
 		return
 	}
 	t.Fatalf("generic provider-looking publication escaped fail-closed settlement: admission=%#v target_failure=%t reason=%q disposition=%#v dead_letter=%#v",
 		prepared.providerRawSettlement, prepared.targetFailure, command.Commit.RouteSettlement.Reason().Code(), command.Commit.Disposition, command.Commit.DeadLetter)
 }
 
-func inboundRawSettlementSource(pinSource runtimecontracts.FlowInputPinSource) semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+func inboundRawSettlementSource(admitted bool) semanticview.Source {
+	base := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 		id: "telegram-ingress", mode: "singleton",
-		inputs: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram", Source: pinSource}},
+		inputs: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
 	}}, nil))
+	if !admitted {
+		return base
+	}
+	return semanticviewtest.WithProviderIngress(base, map[string][]string{"telegram-ingress": {"inbound.telegram"}})
 }
 
 func inboundRawSettlementRoutingSource(t testing.TB, entityID string) events.RoutingSource {

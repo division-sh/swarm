@@ -1,0 +1,11 @@
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: [worker.ready, worker.inspect]
+  outputs:
+    events: [worker.ready, worker.inspect]
+connect:
+  - {event: worker.ready, from: ., to: worker-flow}
+  - {event: worker.inspect, from: ., to: worker-flow}

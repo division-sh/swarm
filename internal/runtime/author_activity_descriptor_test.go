@@ -25,7 +25,7 @@ func TestAuthorActivityEventDescriptorsIncludeInternalStageTimer(t *testing.T) {
 		if descriptor.EventType != runtimecontracts.WorkflowStageTimerInternalEvent {
 			continue
 		}
-		if descriptor.Disposition != runtimeauthoractivity.StoryDifferent || descriptor.AuthorSummaryField != "" {
+		if descriptor.Disposition != runtimeauthoractivity.StoryDifferent {
 			t.Fatalf("internal stage timer descriptor = %#v", descriptor)
 		}
 		return
@@ -82,7 +82,7 @@ func TestAuthorActivityEventDescriptorsJoinDemandAndConflict(t *testing.T) {
 			counts := map[string]int{}
 			for _, descriptor := range descriptors {
 				counts[descriptor.EventType]++
-				if descriptor.Disposition != runtimeauthoractivity.StoryDifferent || descriptor.AuthorSummaryField != "" {
+				if descriptor.Disposition != runtimeauthoractivity.StoryDifferent {
 					t.Fatalf("internal occurrence became authored: %+v", descriptor)
 				}
 			}
@@ -173,7 +173,7 @@ func TestAuthorActivityEventDescriptorsIncludeCompiledJoinOccurrences(t *testing
 						continue
 					}
 					count++
-					if descriptor.Disposition != runtimeauthoractivity.StoryDifferent || descriptor.AuthorSummaryField != "" {
+					if descriptor.Disposition != runtimeauthoractivity.StoryDifferent {
 						t.Errorf("internal join occurrence became an authored story: %+v", descriptor)
 					}
 				}

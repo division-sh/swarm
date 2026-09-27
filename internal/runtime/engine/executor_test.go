@@ -452,9 +452,25 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 	operating := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
 		Path:  "operating",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeStatic,
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "component.scaffolded"}}}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"component.scaffolded": {}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"receiver": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"component.scaffolded": {}},
+		}},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{component, repo, operating}}
+	root.Schema.Connect = []runtimecontracts.FlowConnect{{Event: "component.scaffolded", From: "component-scaffold", To: "operating", SourceFile: "schema.yaml", SourceLine: 1}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &root.Schema,
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":                  {FlowPath: ".", Schema: "schema.yaml"},
+			"component-scaffold": {FlowPath: "component-scaffold", Schema: "component-scaffold/schema.yaml"},
+			"operating":          {FlowPath: "operating", Schema: "operating/schema.yaml"},
+			"repo-scaffold":      {FlowPath: "repo-scaffold", Schema: "repo-scaffold/schema.yaml"},
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"component.scaffolded":          component.Events["component.scaffolded"],
 			"repo_scaffold.repo_scaffolded": repo.Events["repo_scaffold.repo_scaffolded"],
@@ -467,6 +483,7 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
+				".":                  &root,
 				"component-scaffold": &root.Children[0],
 				"repo-scaffold":      &root.Children[1],
 				"operating":          &root.Children[2],
@@ -6206,7 +6223,7 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 				EntityID:       targetEntityID,
 				Node:           testFlowExecutableNode(t, "validation", "validation-router"),
 				ProducerSource: eventtest.ConcreteTemplateRoutingSource("validation", targetFlowInstance, targetEntityID),
-				Event: eventtest.RunCreatingRootIngress(
+				Event: eventtest.RunCreatingRootIngressWithRoutingSource(
 					"evt-1",
 					"scoring/vertical.resumed",
 					"",
@@ -6220,6 +6237,7 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 						FlowInstance: sourceFlowInstance,
 						FlowID:       "scoring",
 					}),
+					eventtest.ConcreteTemplateRoutingSource("scoring", sourceFlowInstance, sourceEntityID),
 					time.Time{},
 				),
 
@@ -6461,8 +6479,8 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 			if got := emitted.ProducerType(); got != events.EventProducerNode {
 				t.Fatalf("producer type = %q, want node", got)
 			}
-			if got := emitted.TargetRoute().FlowInstance; got != parentRoute.FlowInstance {
-				t.Fatalf("target flow_instance = %q, want %s", got, parentRoute.FlowInstance)
+			if !emitted.TargetRoute().Empty() {
+				t.Fatalf("compiled connection must resolve at publication, not from stored parent address: %#v", emitted.TargetRoute())
 			}
 		})
 	}
@@ -6520,7 +6538,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	}
 }
 
-func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
+func TestExecutor_ChildPinOutputRejectsCompleteParentWithoutConsumer(t *testing.T) {
 	source := sourceWithChildOutputPin()
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        source,
@@ -6548,7 +6566,7 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 		EntityID:       "child-ent",
 		Node:           testFlowExecutableNode(t, "child", "child-node"),
 		ProducerSource: eventtest.ConcreteTemplateRoutingSource("child", "child/inst-1", "child-ent"),
-		Event: eventtest.RunCreatingRootIngress(
+		Event: eventtest.RunCreatingRootIngressWithRoutingSource(
 			"evt-1",
 			"child/requested",
 			"",
@@ -6562,6 +6580,7 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 				FlowInstance: "wrong/root",
 				EntityID:     "wrong-parent",
 			}),
+			eventtest.ConcreteTemplateRoutingSource("wrong", "wrong/root", "wrong-parent"),
 			time.Time{},
 		),
 
@@ -6570,14 +6589,11 @@ func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 		},
 		State: state,
 	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("Execute error = %v, want missing consumer rejection", err)
 	}
-	if got := len(result.EmitIntents); got != 1 {
-		t.Fatalf("EmitIntents count = %d, want 1", got)
-	}
-	if got := result.EmitIntents[0].Event.TargetRoute(); got != parentRoute {
-		t.Fatalf("target route = %#v, want %#v", got, parentRoute)
+	if got := len(result.EmitIntents); got != 0 {
+		t.Fatalf("EmitIntents count = %d, want 0", got)
 	}
 }
 
@@ -6629,7 +6645,7 @@ func TestExecutor_LoweredConnectEmissionRemainsTargetlessBeforeEventBus(t *testi
 	}
 }
 
-func TestExecutor_NestedStaticOutputUsesExactCurrentDeliveryTarget(t *testing.T) {
+func TestExecutor_NestedStaticOutputRejectsCompleteCurrentDeliveryWithoutConsumer(t *testing.T) {
 	source := sourceWithNestedStaticOutputPin()
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}}, nil)
@@ -6655,14 +6671,11 @@ func TestExecutor_NestedStaticOutputUsesExactCurrentDeliveryTarget(t *testing.T)
 			events.EnvelopeForTargetRoute(events.EventEnvelope{}, inboundOwner), time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
 	})
-	if err != nil {
-		t.Fatalf("Execute error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("Execute error = %v, want missing consumer rejection", err)
 	}
-	if len(result.EmitIntents) != 1 {
-		t.Fatalf("emit intents = %#v, want one", result.EmitIntents)
-	}
-	if got := result.EmitIntents[0].Event.TargetRoute(); got != currentOwner {
-		t.Fatalf("target = %#v, want exact current delivery %#v", got, currentOwner)
+	if len(result.EmitIntents) != 0 {
+		t.Fatalf("emit intents = %#v, want none", result.EmitIntents)
 	}
 	if currentOwner.EntityID == inboundOwner.EntityID || currentOwner.EntityID == producerSource.Route().EntityID {
 		t.Fatal("test identities must be distinguishable")
@@ -6723,8 +6736,8 @@ func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T)
 		Event:          eventtest.RunCreatingRootIngress("evt-partial-parent", "child/requested", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler:        runtimecontracts.SystemNodeEventHandler{Emit: runtimecontracts.EmitSpec{Event: "child.done"}}, State: state,
 	})
-	if err == nil || !strings.Contains(err.Error(), "parent_route_incomplete") {
-		t.Fatalf("Execute error = %v, want parent_route_incomplete", err)
+	if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("Execute error = %v, want no consumer independently of incomplete parent", err)
 	}
 	if len(result.EmitIntents) != 0 {
 		t.Fatalf("emit intents = %#v, want none", result.EmitIntents)

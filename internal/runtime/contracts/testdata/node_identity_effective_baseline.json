@@ -1,6 +1,25 @@
 {
   "examples/integrations/telegram-agent": {
-    "connects": [],
+    "connects": [
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 12,
+        "Event": "inbound.telegram.text_message",
+        "From": ".",
+        "To": "telegram-chat",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 15,
+        "Event": "inbound.telegram.text_message",
+        "From": "telegram-ingress",
+        "To": "telegram-chat",
+        "Rename": ""
+      }
+    ],
     "handlers": {
       "dGVsZWdyYW0tY2hhdA.dGVsZWdyYW0tcmVzcG9uZGVy": {
         "telegram.reply_requested": {
@@ -242,7 +261,25 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 8,
+        "Event": "operating.report.triggered",
+        "From": ".",
+        "To": "ingress",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 11,
+        "Event": "portfolio.setup",
+        "From": ".",
+        "To": "portfolio",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 14,
         "Event": "operating.report.requested",
         "From": "ingress",
         "To": "operating",
@@ -251,7 +288,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 6,
+        "SourceLine": 17,
         "Event": "operating.reported",
         "From": "operating",
         "To": "portfolio",
@@ -1887,7 +1924,16 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 8,
+        "Event": "operating.report.triggered",
+        "From": ".",
+        "To": "ingress",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 11,
         "Event": "operating.report.requested",
         "From": "ingress",
         "To": "operating",
@@ -1896,7 +1942,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 6,
+        "SourceLine": 14,
         "Event": "operating.reported",
         "From": "operating",
         "To": "portfolio",
@@ -3144,7 +3190,52 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 18,
+        "Event": "portfolio.opened",
+        "From": ".",
+        "To": "portfolio",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 21,
+        "Event": "portfolio.account.register.requested",
+        "From": ".",
+        "To": "portfolio",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 24,
+        "Event": "portfolio.accounts.register.requested",
+        "From": ".",
+        "To": "portfolio",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 27,
+        "Event": "portfolio.membership.seeded",
+        "From": ".",
+        "To": "portfolio",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 30,
+        "Event": "portfolio.notify.requested",
+        "From": ".",
+        "To": "portfolio",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 33,
         "Event": "account.registered",
         "From": "portfolio",
         "To": "account",
@@ -3153,7 +3244,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 6,
+        "SourceLine": 36,
         "Event": "account.notify.requested",
         "From": "portfolio",
         "To": "account",
@@ -5222,7 +5313,16 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 8,
+        "Event": "work.requested",
+        "From": ".",
+        "To": "producer",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 11,
         "Event": "work.ready",
         "From": "producer",
         "To": "consumer",
@@ -6058,7 +6158,16 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 8,
+        "Event": "validation.triggered",
+        "From": ".",
+        "To": "producer",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 11,
         "Event": "validation.requested",
         "From": "producer",
         "To": "validator",
@@ -6067,7 +6176,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 6,
+        "SourceLine": 14,
         "Event": "validation.started",
         "From": "validator",
         "To": "producer",
@@ -6839,7 +6948,25 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 8,
+        "Event": "requester.setup.requested",
+        "From": ".",
+        "To": "initiator",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 11,
+        "Event": "request.submitted",
+        "From": ".",
+        "To": "initiator",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 14,
         "Event": "requester.setup",
         "From": "initiator",
         "To": "requester",
@@ -6848,7 +6975,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 6,
+        "SourceLine": 17,
         "Event": "requester.requested",
         "From": "initiator",
         "To": "requester",
@@ -6857,7 +6984,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 9,
+        "SourceLine": 20,
         "Event": "provider.requested",
         "From": "requester",
         "To": "provider",
@@ -6866,7 +6993,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 12,
+        "SourceLine": 23,
         "Event": "provider.replied",
         "From": "provider",
         "To": "requester",
@@ -8051,7 +8178,25 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 8,
+        "Event": "account.setup.requested",
+        "From": ".",
+        "To": "producer",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 11,
+        "Event": "account.work.requested",
+        "From": ".",
+        "To": "producer",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 14,
         "Event": "account.setup",
         "From": "producer",
         "To": "account",
@@ -8060,7 +8205,7 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 6,
+        "SourceLine": 17,
         "Event": "account.ready",
         "From": "producer",
         "To": "account",
@@ -8809,7 +8954,16 @@
       {
         "OwnerFlowPath": ".",
         "SourceFile": "schema.yaml",
-        "SourceLine": 3,
+        "SourceLine": 8,
+        "Event": "account.requested",
+        "From": ".",
+        "To": "producer",
+        "Rename": ""
+      },
+      {
+        "OwnerFlowPath": ".",
+        "SourceFile": "schema.yaml",
+        "SourceLine": 11,
         "Event": "account.ready",
         "From": "producer",
         "To": "account",

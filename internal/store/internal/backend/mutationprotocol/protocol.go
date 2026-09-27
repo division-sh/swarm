@@ -146,16 +146,6 @@ func (a *Attempt) PersistedOccurredAt(ctx context.Context, key string) (time.Tim
 	return a.story.PersistedOccurredAt(ctx, key)
 }
 
-func (a *Attempt) PersistedAuthorSafeSummary(ctx context.Context, key string) (string, bool, error) {
-	if err := a.requireActive(); err != nil {
-		return "", false, err
-	}
-	if a.story == nil || a.cleanup {
-		return "", false, errors.New("mutation has no active activity story")
-	}
-	return a.story.PersistedAuthorSafeSummary(ctx, key)
-}
-
 func (a *Attempt) AddFact(runID string, family privatefork.Family, key string) error {
 	if err := a.requireActive(); err != nil {
 		return err

@@ -63,12 +63,13 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 	}
 }
 
-func TestWorkflowEventPolicyDoesNotUseAnotherFlowDeclaration(t *testing.T) {
+func TestWorkflowHandlerDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 	root := runtimecontracts.FlowContractView{
 		Path:  ".",
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"listener": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"task.done": {}}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.done": {RuntimeHandling: "consuming"},
+			"task.done": {},
 		},
 		Children: []runtimecontracts.FlowContractView{{
 			Path:  "child",
@@ -86,9 +87,15 @@ func TestWorkflowEventPolicyDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 		},
 	}
 
-	policy := deriveWorkflowEventPolicy(semanticview.Wrap(bundle), pipelineFlowPathNode(t, "child", "listener"), "task.done")
-	if policy.Consume || policy.VisibleDownstream {
-		t.Fatalf("child event policy = %#v, want no policy from another flow's declaration", policy)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	if rootResolution := workflowNodeEventHandlerResolutionForEventType(semanticview.Wrap(bundle), pipelineFlowPathNode(t, ".", "listener"), "task.done"); !rootResolution.Matched {
+		t.Fatalf("root handler must be executable: %#v", rootResolution)
+	}
+	resolution := workflowNodeEventHandlerResolutionForEventType(semanticview.Wrap(bundle), pipelineFlowPathNode(t, "child", "listener"), "task.done")
+	if resolution.Matched {
+		t.Fatalf("child handler = %#v, want no handler from another flow's event declaration", resolution)
 	}
 }
 
@@ -315,8 +322,8 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"scan.requested": {OwningNode: "consumer-node"},
-			"scan.completed": {OwningNode: "consumer-node"},
+			"scan.requested": {},
+			"scan.completed": {},
 		},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
@@ -333,7 +340,7 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 			"consumer-node": consumer.Nodes["consumer-node"],
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"consumer/scan.completed": {OwningNode: "consumer-node"},
+			"consumer/scan.completed": {},
 		},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
@@ -611,12 +618,12 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_DoesNotInferClaimFromF
 
 func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *testing.T) {
 	source := testWorkflowNodeConnectedInputSource("template")
-	evt := eventtest.RunCreatingRootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		EntityID:     "receiver-entity",
 		FlowInstance: "receiver",
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"},
 		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
-	}, time.Unix(1, 0).UTC())
+	}, eventtest.ConcreteTemplateRoutingSource("producer", "producer/inst-1", "producer-entity"), time.Unix(1, 0).UTC())
 
 	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy.requested", "receiver-node")
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "receiver", "receiver-node"), evt)
@@ -645,12 +652,20 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 			if !sourceRoute.Empty() {
 				sourceRoute.EntityID = "producer-entity"
 			}
-			evt := eventtest.RunCreatingRootIngress("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+			routingSource := eventtest.RootRoutingSource(testPipelineRunID)
+			if !sourceRoute.Empty() {
+				if tc.mode == "template" {
+					routingSource = eventtest.ConcreteTemplateRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID)
+				} else {
+					routingSource = eventtest.StaticFlowRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID)
+				}
+			}
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
 				EntityID:     "receiver-entity",
 				FlowInstance: "receiver",
 				Source:       sourceRoute,
 				Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
-			}, time.Unix(1, 0).UTC())
+			}, routingSource, time.Unix(1, 0).UTC())
 			ctx := context.Background()
 			if tc.want {
 				route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy.requested", "receiver-node")
@@ -666,12 +681,12 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 
 func TestWorkflowNodeConnectedInputHandlerUsesExactStampedReceiverPin(t *testing.T) {
 	source := testWorkflowNodeConnectedInputCollisionSource()
-	evt := eventtest.RunCreatingRootIngress("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		EntityID:     "receiver-entity",
 		FlowInstance: "receiver",
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity"},
 		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
-	}, time.Unix(1, 0).UTC())
+	}, eventtest.StaticFlowRoutingSource("producer", "producer", "producer-entity"), time.Unix(1, 0).UTC())
 
 	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy.accepted", "receiver-node")
 	ctx := withWorkflowNodeDeliveryRoute(context.Background(), route)

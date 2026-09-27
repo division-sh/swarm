@@ -17,7 +17,7 @@ type SelectedInputValidation struct {
 	original   events.Event
 	source     semanticview.Source
 	bundleHash string
-	admission  apiEventPublicationAdmission
+	flowID     string
 	recipients []forkrecipient.Evidence
 }
 
@@ -39,29 +39,30 @@ func RevalidateSelectedInput(source semanticview.Source, original events.Event) 
 	if err != nil {
 		return SelectedInputValidation{}, err
 	}
-	var endpoint APIEventPublicationEndpoint
-	if payload.Binding().FlowID() == "." {
-		association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(".", string(original.Type()))
-		if err := association.Err(); err != nil {
-			return SelectedInputValidation{}, fmt.Errorf("selected root input: %w", err)
+	flowID := payload.Binding().FlowID()
+	switch routing := original.RoutingSource(); routing.Kind() {
+	case events.RoutingSourceRoot:
+		if flowID != "." {
+			return SelectedInputValidation{}, fmt.Errorf("selected root input requires its exact root schema binding")
 		}
-		endpoint, err = NewRootInputAPIEventPublicationEndpoint(source, string(original.Type()))
-	} else if payload.Binding().FlowID() == "" {
-		// The ordinary root API has no flow-scoped admission. Require its
-		// exact root declaration, as the API resolver does; absence alone is
-		// never a root-input endpoint or permission to fan out to children.
-		endpoint, err = NewOrdinaryFlowAPIEventPublicationEndpoint(source, ".", string(original.Type()))
-	} else {
-		endpoint, err = NewOrdinaryFlowAPIEventPublicationEndpoint(source, payload.Binding().FlowID(), string(original.Type()))
+		endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, string(original.Type()))
+		if err != nil {
+			return SelectedInputValidation{}, err
+		}
+		if _, _, err := endpoint.admit(source, original); err != nil {
+			return SelectedInputValidation{}, err
+		}
+	case events.RoutingSourceExternalIngress:
+		if routing.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan || routing.Route().FlowID != flowID {
+			return SelectedInputValidation{}, fmt.Errorf("selected provider input differs from its admitted declaring flow")
+		}
+		if !source.SemanticCapabilities().HasProviderIngressEvent(flowID, string(original.Type())) {
+			return SelectedInputValidation{}, fmt.Errorf("selected provider input lacks its exact compiled ingress binding")
+		}
+	default:
+		return SelectedInputValidation{}, fmt.Errorf("selected input requires exact root or provider ingress source")
 	}
-	if err != nil {
-		return SelectedInputValidation{}, err
-	}
-	admission, _, err := endpoint.admit(source, original)
-	if err != nil {
-		return SelectedInputValidation{}, err
-	}
-	return SelectedInputValidation{original: original, source: source, bundleHash: hash, admission: admission}, nil
+	return SelectedInputValidation{original: original, source: source, bundleHash: hash, flowID: flowID}, nil
 }
 
 func (v SelectedInputValidation) Present() bool { return v.original.ID() != "" }
@@ -100,17 +101,9 @@ func (v SelectedInputValidation) AllowsSubscriber(subscriber Subscriber) bool {
 	if len(eventDeliveryTargetRoutes(v.original)) > 0 && !eventTargetsRoutedSubscriber(v.source, v.original, subscriber) {
 		return false
 	}
-	if subscriber.Recipient.IsAgent() {
-		if v.admission.kind == apiEventPublicationEndpointOrdinaryFlow {
-			return flowID == v.admission.flowID && subscriber.Path == v.admission.flowPath
-		}
-		return flowID == "."
-	}
-	if v.admission.authorizesSubscriber(v.source, v.original, subscriber) {
-		return true
-	}
-	return v.admission.kind == apiEventPublicationEndpointRootInput &&
-		(routedRootInputFlowNodeMatchesNoTargetEvent(v.original, subscriber) || routedRootNodeMatchesNoTargetEvent(v.original, subscriber, "."))
+	// This owner filters only independently subscribed local consumers. The
+	// compiled graph separately proves every cross-flow recipient relation.
+	return flowID == v.flowID && independentPubsubSubscriber(subscriber)
 }
 
 // SelectRecipients narrows revalidated input resolution to the existing fixed

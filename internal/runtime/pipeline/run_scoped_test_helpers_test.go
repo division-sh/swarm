@@ -619,6 +619,13 @@ func testWorkflowSourceEnvelope(flowID, instancePath, entityID string) events.Ev
 	})
 }
 
+func testWorkflowRoutingSource(flowID, instancePath, entityID string) events.RoutingSource {
+	if flowID != "." && instancePath != flowID {
+		return eventtest.ConcreteTemplateRoutingSource(flowID, instancePath, entityID)
+	}
+	return eventtest.StaticFlowRoutingSource(flowID, instancePath, entityID)
+}
+
 func testWorkflowStateTransitionContext(ctx context.Context, route runtimeflowidentity.Route, entityID, eventType string) context.Context {
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route.InstancePath)
 	evt := eventtest.RunCreatingRootIngress(

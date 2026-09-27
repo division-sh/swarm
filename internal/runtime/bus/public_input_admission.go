@@ -81,7 +81,7 @@ func NewRootInputAPIEventPublicationEndpoint(source semanticview.Source, eventTy
 	if source == nil || eventType == "" {
 		return APIEventPublicationEndpoint{}, fmt.Errorf("root-input event publication endpoint is incomplete")
 	}
-	if !source.FlowHasInputEvent(".", eventType) {
+	if _, ok := semanticview.SelectedRootInputPin(source, eventType); !ok {
 		return APIEventPublicationEndpoint{}, fmt.Errorf("root input does not own %q", eventType)
 	}
 	return APIEventPublicationEndpoint{
@@ -132,6 +132,9 @@ func NewTemplateAPIEventPublicationEndpoint(source semanticview.Source, endpoint
 	if source == nil || strings.TrimSpace(endpoint.ID) == "" {
 		return APIEventPublicationEndpoint{}, fmt.Errorf("template event publication endpoint is incomplete")
 	}
+	if strings.TrimSpace(endpoint.FlowID) != semanticview.RootExecutionFlowID(source) {
+		return APIEventPublicationEndpoint{}, fmt.Errorf("template event publication requires a selected-root input endpoint")
+	}
 	resolved, ok := semanticview.BuildAuthoredEventEndpointCensus(source).Endpoint(endpoint.ID)
 	if !ok || resolved.Direction != semanticview.EventEndpointInputPin || resolved.Kind != semanticview.EventEndpointFlowInputPin ||
 		strings.TrimSpace(resolved.FlowID) != strings.TrimSpace(endpoint.FlowID) ||
@@ -174,7 +177,7 @@ func (e APIEventPublicationEndpoint) admit(source semanticview.Source, evt event
 		if source == nil {
 			return apiEventPublicationAdmission{}, nil, fmt.Errorf("root-input event publication source is unavailable")
 		}
-		if !source.FlowHasInputEvent(".", string(e.eventType)) {
+		if _, ok := semanticview.SelectedRootInputPin(source, string(e.eventType)); !ok {
 			return apiEventPublicationAdmission{}, nil, fmt.Errorf("root-input event publication endpoint %s no longer resolves exactly", e.eventType)
 		}
 		admission := apiEventPublicationAdmission{kind: apiEventPublicationEndpointRootInput, flowID: ".", eventType: e.eventType}
@@ -217,6 +220,12 @@ func (a apiEventPublicationAdmission) validateEvent(evt events.Event) error {
 	if evt.Type() != a.eventType {
 		return fmt.Errorf("%s event publication endpoint resolves %s, not %s", a.endpointCode(), a.eventType, evt.Type())
 	}
+	if a.kind == apiEventPublicationEndpointRootInput {
+		routing := evt.RoutingSource()
+		if routing.Kind() != events.RoutingSourceRoot || routing.Route() != (events.RouteIdentity{EntityID: evt.RunID()}) {
+			return fmt.Errorf("root-input event publication requires the exact root routing source for run %s", evt.RunID())
+		}
+	}
 	return nil
 }
 
@@ -247,6 +256,9 @@ func apiEventPublicationAdmissionFromContext(ctx context.Context) (apiEventPubli
 }
 
 func newPublicInputAdmission(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint) (publicInputAdmission, error) {
+	if source == nil || strings.TrimSpace(endpoint.FlowID) != semanticview.RootExecutionFlowID(source) {
+		return publicInputAdmission{}, fmt.Errorf("public input requires a selected-root endpoint")
+	}
 	plan, issue := runtimepinrouting.LowerPublicInputRoutePlan(source, endpoint)
 	if !issue.Failure.Empty() {
 		return publicInputAdmission{}, fmt.Errorf("public input route %s.%s: %s (%s)",
@@ -309,20 +321,4 @@ func requirePublicInputRoutePlan(ctx context.Context, routePlan RoutePlan) error
 		return fmt.Errorf("public input endpoint %s.%s selected zero durable deliveries", admission.flowID, admission.pinName)
 	}
 	return nil
-}
-
-// PublishPublicInputAcknowledged admits one census-proven public template input
-// through the canonical route/lifecycle transaction before acknowledging it.
-func (eb *EventBus) PublishPublicInputAcknowledged(ctx context.Context, evt events.Event, endpoint semanticview.AuthoredEventEndpoint) error {
-	if eb == nil {
-		return fmt.Errorf("event bus is required")
-	}
-	admission, err := newPublicInputAdmission(eb.semanticSource, endpoint)
-	if err != nil {
-		return err
-	}
-	if err := admission.validateEvent(evt); err != nil {
-		return err
-	}
-	return eb.PublishAcknowledged(withPublicInputAdmission(ctx, admission), evt)
 }

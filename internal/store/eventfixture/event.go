@@ -144,9 +144,13 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, dialect auth
 // BindPayload attaches explicit schema-less fixture admission evidence. It is
 // shared by store fixtures that intentionally bypass runtime publication.
 func BindPayload(event events.Event) (events.Event, error) {
+	flowID := event.RoutingSource().Route().FlowID
+	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
+		flowID = "."
+	}
 	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
 		BundleHash: "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000",
-		FlowID:     event.RoutingSource().Route().FlowID, EventKey: string(event.Type()),
+		FlowID:     flowID, EventKey: string(event.Type()),
 		SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		SchemaClass:  events.PayloadSchemaSchemaLess,
 	})

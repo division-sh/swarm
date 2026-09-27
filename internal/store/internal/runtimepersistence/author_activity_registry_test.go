@@ -152,10 +152,6 @@ func (rejectedAuthorActivityMutation) PersistedOccurredAt(context.Context, strin
 	return time.Time{}, false, nil
 }
 
-func (rejectedAuthorActivityMutation) PersistedAuthorSafeSummary(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
-
 func (r dynamicAuthoredEventDescriptorResolver) ResolveAuthorActivityEventDescriptor(scope runtimeauthoractivity.Scope, name string) (runtimeauthoractivity.EventDescriptor, bool) {
 	return r.registry.Resolve(scope, name)
 }
@@ -178,7 +174,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	}
 	resolver := dynamicAuthoredEventDescriptorResolver{registry: registry}
 	dynamic := runtimeauthoractivity.EventDescriptor{
-		EventType: "chat/instance-1/reply.requested", Disposition: runtimeauthoractivity.StoryAuthored, AuthorSummaryField: "text",
+		EventType: "chat/instance-1/reply.requested", Disposition: runtimeauthoractivity.StoryAuthored,
 	}
 	base := runtimeauthoractivity.WithScope(context.Background(), scope)
 	base, err = runtimeauthoractivity.WithResolvedEventDescriptor(base, scope, dynamic)
@@ -204,7 +200,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Occurrences) != 1 || page.Occurrences[0].AuthorSafeSummary != "hello" {
+	if len(page.Occurrences) != 1 || page.Occurrences[0].Projection.EventType != dynamic.EventType {
 		t.Fatalf("dynamic occurrence = %#v", page.Occurrences)
 	}
 
@@ -228,14 +224,14 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T) {
 	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v2:sha256:"+strings.Repeat("e", 64))
 	registry := runtimeauthoractivity.NewEventCatalogRegistry()
-	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "message.sent", Disposition: runtimeauthoractivity.StoryAuthored, AuthorSummaryField: "text"}})
+	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "message.sent", Disposition: runtimeauthoractivity.StoryAuthored}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lease.Release()
 	ctx := runtimeauthoractivity.WithScope(context.Background(), scope)
 	ctx, err = runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, runtimeauthoractivity.EventDescriptor{
-		EventType: "message.sent", Disposition: runtimeauthoractivity.StoryAuthored, AuthorSummaryField: "body",
+		EventType: "message.sent", Disposition: runtimeauthoractivity.StoryDifferent,
 	})
 	if err != nil {
 		t.Fatal(err)

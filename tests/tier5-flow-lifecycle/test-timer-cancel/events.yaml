@@ -1,8 +1,4 @@
-timer.scheduled:
-  swarm:
-    source: external
-timer.cancel_requested:
-  swarm:
-    source: external
+timer.scheduled: {}
+timer.cancel_requested: {}
 timer.check: {}
 timer.cancelled: {}

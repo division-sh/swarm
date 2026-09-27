@@ -16,9 +16,8 @@ const (
 )
 
 type EventDescriptor struct {
-	EventType          string
-	Disposition        StoryDisposition
-	AuthorSummaryField string
+	EventType   string
+	Disposition StoryDisposition
 }
 
 type resolvedEventDescriptorFact struct {
@@ -174,7 +173,6 @@ func normalizeEventDescriptors(descriptors []EventDescriptor) (map[string]EventD
 	out := make(map[string]EventDescriptor, len(descriptors))
 	for _, descriptor := range descriptors {
 		descriptor.EventType = strings.TrimSpace(descriptor.EventType)
-		descriptor.AuthorSummaryField = strings.TrimSpace(descriptor.AuthorSummaryField)
 		if descriptor.EventType == "" {
 			return nil, fmt.Errorf("author activity event descriptor event_type is required")
 		}

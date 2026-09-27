@@ -192,8 +192,8 @@ func (f *compiledAdapterFixture) eventPayload(event string, payload []byte) even
 	envelope := events.EnvelopeForTargetRoute(testWorkflowSourceEnvelope(f.flow, f.path, f.entityID), events.RouteIdentity{
 		FlowID: f.flow, FlowInstance: f.path, EntityID: f.entityID,
 	})
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType(event), "", "", payload, 0,
-		correlation.RunIDFromContext(f.ctx), "", envelope, time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), events.EventType(event), "", "", payload, 0,
+		correlation.RunIDFromContext(f.ctx), "", envelope, testWorkflowRoutingSource(f.flow, f.path, f.entityID), time.Now().UTC())
 	seedExactOnceEvent(f.t, f.store, f.ctx, evt)
 	return evt
 }
@@ -539,7 +539,7 @@ func TestTerminalReceiverClaimFailsClosedWithoutEngineMutationBothStores(t *test
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "Ready", true)
-			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"direct"}, Policies: map[string]WorkflowEventPolicy{"direct": {Consume: true}}}}
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"direct"}}}
 			evt := f.event("direct")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
@@ -588,7 +588,7 @@ func TestCaseDistinctReadyReceiverClaimExecutesAndSettlesBothStores(t *testing.T
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
-			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}, Policies: map[string]WorkflowEventPolicy{"write_only": {Consume: true}}}}
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}}}
 			evt := f.event("write_only")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
@@ -631,7 +631,7 @@ func TestInactiveCompanionRefusesNonterminalClaimBothStores(t *testing.T) {
 		for _, status := range []string{"draining", "terminated"} {
 			t.Run(backend+"/"+status, func(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
-				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}, Policies: map[string]WorkflowEventPolicy{"write_only": {Consume: true}}}}
+				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"write_only"}}}
 				inactive, _ := f.load()
 				inactive.Status = status
 				if status == "terminated" {
@@ -676,7 +676,7 @@ func TestNoMatchClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
-			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"unmatched"}, Policies: map[string]WorkflowEventPolicy{"unmatched": {Consume: true}}}}
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"unmatched"}}}
 			evt := f.event("unmatched")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
@@ -730,7 +730,7 @@ func TestGuardRefusalClaimSettlesWithoutBusinessTransitionBothStores(t *testing.
 		for _, event := range []string{"reject", "discard"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
-				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{events.EventType(event)}, Policies: map[string]WorkflowEventPolicy{event: {Consume: true}}}}
+				f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{events.EventType(event)}}}
 				evt := f.event(event)
 				route := events.DeliveryRoute{
 					Recipient: events.MustNodeDeliveryRecipient(f.node),

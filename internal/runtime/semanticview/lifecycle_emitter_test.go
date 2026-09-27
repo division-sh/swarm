@@ -229,9 +229,6 @@ func TestCompiledLifecycleEmitterAllCensusReadbacksIsolateSchemas(t *testing.T) 
 				if len(proof.Entry.Payload.Required) > 0 {
 					proof.Entry.Payload.Required[0] = "mutated"
 				}
-				if len(proof.Entry.Swarm.Producer) > 0 {
-					proof.Entry.Swarm.Producer[0] = "mutated"
-				}
 			}
 			if !reflect.DeepEqual(snapshot(census), want) || !reflect.DeepEqual(census.ResolveTypedPubSubRelations(), wantRelations) {
 				t.Fatal("returned schema mutation changed census or relations")

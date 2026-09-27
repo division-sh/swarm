@@ -286,7 +286,7 @@ func TestDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBoth
 				handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 				evt := handlerTestRootIngress(
 					uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
-					handlerTestWorkflowEnvelope(".", wrongRunID, entityID), now,
+					events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: wrongRunID, EntityID: entityID}), now,
 				)
 				route := events.RouteIdentity{FlowID: ".", FlowInstance: wrongRunID, EntityID: entityID}
 				owner := testCase.owner(route)
@@ -358,7 +358,7 @@ func TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothSt
 			hostile := events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
-				handlerTestWorkflowEnvelope("review", instancePath, entityID), now,
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, hostile), now,
 			)
 			if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(hostile)); err == nil || !strings.Contains(err.Error(), "not owned by flow review") {
 				t.Fatalf("state-only child relabeling error = %v", err)
@@ -507,7 +507,7 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 				handlerFact := MustDeliveryTargetHandler(node).ForEvent("work.ready")
 				handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 				target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
-				evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", handlerTestWorkflowEnvelope(".", instancePath, entityID), time.Now().UTC())
+				evt := handlerTestRootIngress(uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC())
 				if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target)); err == nil || !strings.Contains(err.Error(), testCase.wantError) {
 					t.Fatalf("invalid %s persistence error = %v, want %q", testCase.name, err, testCase.wantError)
 				}
@@ -659,7 +659,7 @@ func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnS
 
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0,
-				testPipelineRunID, "", handlerTestWorkflowEnvelope(".", instancePath, entityID), occurredAt.Add(time.Minute),
+				testPipelineRunID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}), occurredAt.Add(time.Minute),
 			)
 			seedExactOnceEvent(t, store, ctx, evt)
 			node := pipelineNode(t, ".", "node-a")
@@ -722,7 +722,7 @@ func TestDeliveryTargetApplicationReloadsCurrentScopedStateOnSQLiteAndPostgres(t
 			handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
-				handlerTestWorkflowEnvelope(".", instancePath, entityID), time.Now().UTC(),
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}), time.Now().UTC(),
 			)
 			target := events.RouteIdentity{FlowID: ".", FlowInstance: instancePath, EntityID: entityID}
 			application, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(target))
@@ -769,7 +769,7 @@ func TestDeliveryTargetApplicationProjectsExactOwnerIntoEmptyPreviewAndRejectsCo
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}
 	evt := handlerTestRootIngress(
 		uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
-		handlerTestWorkflowEnvelope(".", target.FlowInstance, entityID), time.Now().UTC(),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), time.Now().UTC(),
 	)
 
 	application, err := pc.prepareDeliveryTargetApplication(

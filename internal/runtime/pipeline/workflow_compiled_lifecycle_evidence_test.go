@@ -411,7 +411,7 @@ func TestPipelineCompiledJoinTransitionEvidenceOnBothStores(t *testing.T) {
 				event := workflowJoinScheduleEventForTest(t, uuid.NewString(), schedules[0], runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 				wantStage, wantContext := "ready", handlerselection.ContextJoinComplete
 				if outcome == "arrival" {
-					event = eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+					event = eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), testWorkflowRoutingSource("orders", path, entityID), time.Now().UTC())
 					node := mustPipelineNode("orders", "join-node")
 					delivery := seedExactOnceEventDelivery(t, pc, ctx, event, node)
 					if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, delivery), node, event); err != nil || !handled {

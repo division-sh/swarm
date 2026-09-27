@@ -3864,11 +3864,11 @@ func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
 	}
 }
 
-func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithExternalSource(t *testing.T) {
+func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithRootInput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 
 	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
-		eventSource: "external (verify accumulator safety proof)",
+		publicInput: true,
 	})
 
 	var stdout, stderr bytes.Buffer
@@ -3881,7 +3881,7 @@ func TestRunVerifyCommand_AllowsOpenStreamAccumulatorWithExternalSource(t *testi
 	}
 	errText := stderr.String()
 	if strings.Contains(errText, "accumulator_input_producer_path") {
-		t.Fatalf("verify stderr reported no-producer error despite external source:\n%s", errText)
+		t.Fatalf("verify stderr reported no-producer error despite public root input:\n%s", errText)
 	}
 }
 
@@ -3910,28 +3910,25 @@ func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing
 }
 
 type verifyAccumulatorSafetyCommandFixtureOptions struct {
-	eventSource string
+	publicInput bool
 }
 
 func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumulatorSafetyCommandFixtureOptions) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+	schema := `
 name: verify-accumulator-safety
 initial_state: collecting
 terminal_states: [done]
 states: [collecting, done]
-pins:
-  inputs:
-    events: [item.arrived]
-`)
-	sourceBlock := ""
-	if strings.TrimSpace(opts.eventSource) != "" {
-		sourceBlock = "\n  swarm:\n    source: " + opts.eventSource
+`
+	if opts.publicInput {
+		schema += "pins:\n  inputs:\n    events: [item.arrived]\n"
 	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), schema)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-item.arrived:`+sourceBlock+`
+item.arrived:
   expected_count: integer
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
@@ -4151,8 +4148,12 @@ func addTestAgentOwners(bundle *runtimecontracts.WorkflowContractBundle) {
 		bundle.Events = map[string]runtimecontracts.EventCatalogEntry{}
 	}
 	if _, ok := bundle.Events["test.input"]; !ok {
-		bundle.Events["test.input"] = runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}}
+		bundle.Events["test.input"] = runtimecontracts.EventCatalogEntry{}
 	}
+	if bundle.RootSchema == nil {
+		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{}
+	}
+	bundle.RootSchema.Pins.Inputs.EventPins = append(bundle.RootSchema.Pins.Inputs.EventPins, runtimecontracts.FlowInputEventPin{Event: "test.input"})
 	for localID, entry := range bundle.Agents {
 		uri := "swarm-test://root/agents/" + localID
 		ref := runtimecontracts.ContractURIRef{Kind: "agent", LocalID: localID, Full: uri}
@@ -4173,6 +4174,10 @@ func addTestAgentOwners(bundle *runtimecontracts.WorkflowContractBundle) {
 		}
 		entry.ResolvedIntent = resolved
 		bundle.Agents[localID] = entry
+	}
+	semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
 	}
 }
 
@@ -4594,7 +4599,6 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.corpus_dispatch": {
-				Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"scan_id":   {Type: "string"},
@@ -4604,7 +4608,6 @@ func TestExecutionValidation_EmittedPayloadCompletenessReturnsWarningSurface(t *
 				},
 			},
 			"market_research.scan_assigned": {
-				ConsumerType: []string{"dashboard"},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"entity_id":          {Type: "string"},
@@ -4649,8 +4652,8 @@ func TestExecutionValidation_InputPinProducerPathReturnsHardInvaliditySurface(t 
 	}
 	for _, want := range []string{
 		"no accepted producer source was found in the authored bundle",
-		"Boundary external ingress: not found",
-		"Intrinsic ingress input pin: not found",
+		"Selected-root public input: not found",
+		"Admitted provider ingress: not found",
 		"Parent connect: not found",
 		"Validation-only harness input: not found",
 		"Platform source: not found",

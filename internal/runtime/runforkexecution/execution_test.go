@@ -520,11 +520,11 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				// This declaration's receiver is the run root, not the template
 				// entity used by the older deferred-work fixtures below.
 				entityID = sourceRunID
-				seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+				seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 					t, db, sourceRunID, entityID, sourceEventID, test.eventName, at, "root",
-					selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", ""), nil,
+					executionmode.Live, selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", ""), nil,
 					eventtest.RootRoutingSource(sourceRunID),
-					events.EnvelopeForEntityID(events.EventEnvelope{}, sourceRunID), loaded.SourceArtifactFact,
+					events.EnvelopeForEntityID(events.EventEnvelope{}, sourceRunID), selectedExecutionInputFixture{flow: ".", payload: json.RawMessage(`{"items":["first","second"]}`)}, loaded.SourceArtifactFact,
 				)
 				if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = $1 WHERE run_id = $1::uuid AND entity_id = $1::uuid`, sourceRunID); err != nil {
 					t.Fatalf("seed declared root receiver metadata: %v", err)
@@ -1190,7 +1190,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	payload := json.RawMessage(`{"candidate":"candidate-1"}`)
 	sourceEvent := eventtest.ExistingRunRootIngress(
 		sourceEventID,
-		events.EventType(loaded.Source.ResolveFlowEventReference("producer", "validation.triggered")),
+		events.EventType("validation.triggered"),
 		sourceRunID,
 		"",
 		payload,
@@ -1200,7 +1200,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		time.Now().UTC(),
 	)
 	sourceCtx := runtimecorrelation.WithRunID(ctx, sourceRunID)
-	proof := semanticview.ResolveFlowEventProof(loaded.Source, "producer", string(sourceEvent.Type()))
+	proof := semanticview.ResolveFlowEventProof(loaded.Source, ".", string(sourceEvent.Type()))
 	if !proof.HasSchema {
 		t.Fatalf("source event %s has no semantic descriptor proof", sourceEvent.Type())
 	}
@@ -1209,9 +1209,8 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		disposition = runtimeauthoractivity.StoryAuthored
 	}
 	sourceCtx, err = runtimeauthoractivity.WithResolvedEventDescriptor(sourceCtx, sourceScope, runtimeauthoractivity.EventDescriptor{
-		EventType:          string(sourceEvent.Type()),
-		Disposition:        disposition,
-		AuthorSummaryField: strings.TrimSpace(proof.Entry.AuthorSummaryField),
+		EventType:   string(sourceEvent.Type()),
+		Disposition: disposition,
 	})
 	if err != nil {
 		t.Fatalf("bind source event descriptor: %v", err)

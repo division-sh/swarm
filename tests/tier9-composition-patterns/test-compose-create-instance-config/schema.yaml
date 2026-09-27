@@ -4,7 +4,7 @@ terminal_states: [spawned]
 states: [idle, spawned]
 pins:
   inputs:
-    events: [spawn.requested]
+    events: [spawn.requested, task.assign]
   outputs:
     events:
       - spawn.done

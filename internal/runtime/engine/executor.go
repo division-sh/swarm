@@ -99,7 +99,6 @@ type Executor struct {
 
 type executionFrame struct {
 	ctx                       context.Context
-	deliveryTarget            runtimepinrouting.CurrentDeliveryTarget
 	req                       ExecutionRequest
 	fanOutEmission            *fanoutobligation.OrdinalEmission
 	base                      BaseContext
@@ -638,11 +637,9 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 	if err != nil {
 		return executionFrame{}, err
 	}
-	delivery, deliveryPresent := runtimedelivery.RouteFromContext(ctx)
 	frame := executionFrame{
 		entityMutations:          creationPlan,
 		ctx:                      ctx,
-		deliveryTarget:           runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent),
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
@@ -3469,27 +3466,16 @@ func nextPersistenceSafeEmitTime(now, previous time.Time) time.Time {
 
 func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
 	input := runtimepinrouting.ResolutionInput{
-		Source:               e.deps.Source,
-		FlowID:               frame.req.ExecutionFlowID.String(),
-		EventType:            strings.TrimSpace(eventType),
-		RoutingSource:        frame.req.ProducerSource,
-		StructuralParent:     structuralParentFromState(frame.state.State.StateCarrier.Fields),
-		CurrentDeliveryOwner: frame.deliveryTarget,
+		Source:        e.deps.Source,
+		FlowID:        frame.req.ExecutionFlowID.String(),
+		EventType:     strings.TrimSpace(eventType),
+		RoutingSource: frame.req.ProducerSource,
 	}
 	resolution := runtimepinrouting.ResolveEnvelope(input, envelope)
 	if err := runtimepinrouting.FailureError(resolution.Failure); err != nil {
 		return runtimepinrouting.Resolution{}, err
 	}
 	return resolution, nil
-}
-
-func structuralParentFromState(metadata map[string]any) runtimepinrouting.PersistedStructuralParent {
-	route := runtimeflowidentity.ParentRouteFromMetadata(metadata).Normalized()
-	return runtimepinrouting.ClassifyPersistedStructuralParent(events.RouteIdentity{
-		FlowID:       route.FlowID,
-		FlowInstance: route.FlowInstance,
-		EntityID:     route.EntityID,
-	})
 }
 
 func emitSourceRoute(frame *executionFrame) events.RouteIdentity {

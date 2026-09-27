@@ -1,5 +1,13 @@
 name: template-select-or-create
+pins:
+  inputs:
+    events: [account.requested]
+  outputs:
+    events: [account.requested]
 connect:
+  - event: account.requested
+    from: .
+    to: producer
   - event: account.ready
     from: producer
     to: account

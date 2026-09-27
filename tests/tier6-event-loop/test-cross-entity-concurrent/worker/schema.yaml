@@ -8,4 +8,4 @@ pins:
   inputs:
     events:
       - event: task.submitted
-        source: external
+        resolution: {mode: select}

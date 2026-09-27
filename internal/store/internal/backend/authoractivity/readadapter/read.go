@@ -28,7 +28,7 @@ type QueryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), COALESCE(author_safe_summary, ''), projection, failure, occurred_at FROM author_activity_occurrences`
+const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at FROM author_activity_occurrences`
 
 func Head(ctx context.Context, db QueryRower) (int64, error) {
 	if db == nil {
@@ -143,7 +143,7 @@ func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
 		&occurrence.Transition, &occurrence.SourceOwner, &occurrence.SourceIdentity, &occurrence.DedupKey,
 		&occurrence.RunID, &occurrence.EntityID, &occurrence.AgentID, &occurrence.FlowID,
 		&occurrence.Scope.Kind, &occurrence.Scope.RuntimeInstanceID, &occurrence.Scope.BundleHash,
-		&occurrence.AuthorSafeSummary, &projectionRaw, &failureRaw, &occurredAtRaw,
+		&projectionRaw, &failureRaw, &occurredAtRaw,
 	); err != nil {
 		return runtimeauthoractivity.Occurrence{}, err
 	}
@@ -169,7 +169,7 @@ func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
 		Kind: occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition,
 		SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity,
 		DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, Scope: occurrence.Scope,
-		AuthorSafeSummary: occurrence.AuthorSafeSummary, Projection: occurrence.Projection, Failure: occurrence.Failure,
+		Projection: occurrence.Projection, Failure: occurrence.Failure,
 	}); err != nil {
 		return runtimeauthoractivity.Occurrence{}, fmt.Errorf("invalid persisted author activity %s: %w", occurrence.OccurrenceID, err)
 	}

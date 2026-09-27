@@ -16,6 +16,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -77,6 +78,9 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	assertPipelineReceiptSucceeded(t, db, eventID)
 	assertSystemNodeOutcomePersisted(t, db, eventID, pipelineNodeID)
 	assertSystemNodeDeliverySettled(t, db, eventID, pipelineNodeID)
+	rootNodeID := identitytest.FlowNode(t, ".", "root-completion").Key()
+	assertSystemNodeOutcomePersisted(t, db, eventID, rootNodeID)
+	assertSystemNodeDeliverySettled(t, db, eventID, rootNodeID)
 	assertFlowEntityTerminal(t, db, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "discovery", "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))
@@ -306,56 +310,7 @@ func assertFlowEntityTerminal(t *testing.T, db *sql.DB, runID, entityID, flowIns
 
 func runCompletionSystemNodeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
-
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-run:
-  topic: string
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "schema.yaml"), `
-initial_state: active
-terminal_states:
-  - done
-states:
-  - active
-  - done
-pins:
-  inputs:
-    events:
-      - flow.started
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "schema.yaml"), `
-name: discovery
-initial_state: active
-terminal_states:
-  - done
-states:
-  - active
-  - done
-pins:
-  inputs:
-    events:
-      - flow.started
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "entities.yaml"), `
-discovery: {}
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "events.yaml"), `
-flow.started:
-  entity_id:
-    type: string?
-  topic:
-    type: string?
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "discovery", "nodes.yaml"), `
-pipeline:
-  execution_type: system_node
-  subscribes_to:
-    - flow.started
-  event_handlers:
-    flow.started:
-      advances_to: done
-`)
+	root := canonicalrouting.CopyRunCompletionSystemNode(t)
 	repoRoot := runCompletionRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

@@ -63,7 +63,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 					secret := provider.provider + "-raw-settlement-secret"
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 					target := seedProviderRawSettlementRuntime(t, ctx, selected, db, runID, entityID, flowInstance, provider.provider, secret, "")
-					source := providerRawSettlementSemanticSource(target.FlowPath, provider.eventName)
+					source := providerRawSettlementSemanticSource(t, target, provider, secret)
 					for _, realSubscriber := range []bool{false, true} {
 						outcome := "zero_consumer"
 						if realSubscriber {
@@ -281,10 +281,21 @@ func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selecte
 	}
 }
 
-func providerRawSettlementSemanticSource(flowID, eventName string) semanticview.Source {
-	pin := runtimecontracts.FlowInputEventPin{Event: eventName, Source: runtimecontracts.FlowInputPinSourceExternal}
+func providerRawSettlementSemanticSource(t *testing.T, target runtimepkg.InboundTarget, provider providerRawSettlementCase, secret string) semanticview.Source {
+	t.Helper()
+	flowID, eventName := target.FlowPath, provider.eventName
+	binding := runtimecontracts.ProjectFlowIngressProvider{Provider: provider.provider, SigningSecret: secret}
+	if provider.explicit {
+		binding.Admission = runtimecontracts.ProjectFlowIngressAdmission{
+			Kind: "raw", Event: eventName, Payload: "json",
+			Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "hmac_sha256", Header: "X-Partner-Signature", Prefix: "sha256=", Encoding: "hex"},
+			DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "header", Header: "X-Partner-Delivery"},
+		}
+	}
+	pin := runtimecontracts.FlowInputEventPin{Event: eventName}
 	schema := runtimecontracts.FlowSchemaDocument{
 		Name: flowID, Mode: runtimecontracts.FlowModeStatic,
+		Ingress: &runtimecontracts.ProjectFlowIngress{Alias: target.Alias, Providers: []runtimecontracts.ProjectFlowIngressProvider{binding}},
 		StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
 			{ID: "active", Initial: true}, {ID: "done", Terminal: true},
 		}},
@@ -292,7 +303,9 @@ func providerRawSettlementSemanticSource(flowID, eventName string) semanticview.
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID}, Path: flowID, Schema: schema,
-		Events: map[string]runtimecontracts.EventCatalogEntry{eventName: providertriggers.RawEventCatalogEntry()},
+	}
+	if provider.explicit {
+		flow.Events = map[string]runtimecontracts.EventCatalogEntry{eventName: providertriggers.RawEventCatalogEntry()}
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	admittedFlow := &root.Children[0]
@@ -308,7 +321,14 @@ func providerRawSettlementSemanticSource(flowID, eventName string) semanticview.
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		panic(err)
 	}
-	return semanticview.Wrap(bundle)
+	source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), testProviderTriggerCatalog(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !source.SemanticCapabilities().HasProviderIngressEvent(flowID, eventName) {
+		t.Fatal("declared provider ingress missing from semantic source")
+	}
+	return source
 }
 
 func providerRawSettlementEventID(provider, backend, outcome string, index int) string {

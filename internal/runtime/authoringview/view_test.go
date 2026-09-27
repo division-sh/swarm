@@ -220,10 +220,16 @@ func TestBuildShowsTemplateInstanceRouteIdentityAndProjection(t *testing.T) {
 	}
 
 	edges := interFlowRouteEdges(view.RoutingTopology)
-	if len(edges) != 1 {
-		t.Fatalf("inter-flow route edge count = %d, want 1: %#v", len(edges), edges)
+	if len(edges) != 2 {
+		t.Fatalf("inter-flow route edge count = %d, want root admission plus child connection: %#v", len(edges), edges)
 	}
-	edge := edges[0]
+	edge, admission := edges[0], edges[1]
+	if edge.Producer.FlowID == "." {
+		edge, admission = admission, edge
+	}
+	if admission.Producer.FlowID != "." || admission.Consumer.FlowID != "producer" || admission.Event.Local != "account.requested" {
+		t.Fatalf("root admission edge = %#v, want root account.requested -> producer", admission)
+	}
 	if edge.Producer.FlowID != "producer" || edge.Boundary == nil || edge.Boundary.OutputPin != "account.ready" {
 		t.Fatalf("route producer/boundary = %#v, want producer.account.ready", edge)
 	}
@@ -907,10 +913,16 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 		t.Fatalf("producer output = %#v, want canonical immutable event pin", output)
 	}
 	edges := interFlowRouteEdges(view.RoutingTopology)
-	if len(edges) != 1 {
-		t.Fatalf("inter-flow route edge count = %d, want 1: %#v", len(edges), edges)
+	if len(edges) != 2 {
+		t.Fatalf("inter-flow route edge count = %d, want root admission plus child connection: %#v", len(edges), edges)
 	}
-	edge := edges[0]
+	edge, admission := edges[0], edges[1]
+	if edge.Producer.FlowID == "." {
+		edge, admission = admission, edge
+	}
+	if admission.Producer.FlowID != "." || admission.Consumer.FlowID != "producer" || admission.Event.Local != "account.requested" {
+		t.Fatalf("root admission edge = %#v, want root account.requested -> producer", admission)
+	}
 	if edge.Producer.FlowID != finalflowinstanceauthoring.ProducerFlowID || edge.Consumer.FlowID != finalflowinstanceauthoring.TemplateFlowID {
 		t.Fatalf("route endpoints = %#v -> %#v, want final fixture producer to template", edge.Producer, edge.Consumer)
 	}

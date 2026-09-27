@@ -1798,11 +1798,11 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByExplicitMetadata(t *test
 	}
 
 	evt := requireBusEvent(t, controlCh, "explicit metadata delivery to control-plane")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless control event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, matchCh, "explicit metadata delivery to entity-scoped reviewer")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless matched event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "explicit metadata delivery to filtered entity-scoped reviewer")
@@ -1841,7 +1841,7 @@ func TestEventBusPublish_FiltersEntityScopedRecipientsByTypedEnvelopeNotPayload(
 	}
 
 	evt := requireBusEvent(t, matchCh, "typed-envelope delivery to entity-scoped reviewer")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless matched event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "typed-envelope delivery to filtered entity-scoped reviewer")
@@ -1913,15 +1913,15 @@ func TestEventBusPublish_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning
 	}
 
 	evt := requireBusEvent(t, workflowCh, "internal workflow-runtime descriptor delivery")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless workflow-runtime event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, nodeCh, "internal system-node descriptor delivery")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless system node event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, agentCh, "agent descriptor delivery")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless agent event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, missingCh, "descriptor delivery to missing agent")
@@ -1962,11 +1962,11 @@ func TestEventBusPublishDeferred_UsesCanonicalSubscribedRecipientFiltering(t *te
 	}
 
 	evt := requireBusEvent(t, workflowCh, "deferred delivery to workflow-runtime")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless workflow-runtime event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, agentCh, "deferred delivery to agent")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless agent event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "deferred delivery to filtered agent")
@@ -3341,7 +3341,9 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 	defer runtimebustest.Unsubscribe(eb, "scan-orchestrator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress("", "producer/scan.requested", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID(eventtest.UUID("ent-1"))), time.Time{})); err != nil {
+	producerSource := eventtest.StaticFlowRoutingSource("producer", "producer", eventtest.UUID("ent-1"))
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngressWithRoutingSource("", "producer/scan.requested", "", "", nil, 0, eventBusTestRunID,
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, producerSource.Route()), producerSource, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()
@@ -3695,14 +3697,14 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 
 	live := subscribeInternalDeliveriesForTest(t, eb, "workflow-runtime", events.EventType(eventType))
 	defer runtimebustest.Unsubscribe(eb, "workflow-runtime")
-	evt := eventtest.ExistingRunRootIngress(
+	evt := eventtest.RuntimeControl(
 		uuid.NewString(),
 		events.EventType(eventType),
 		"source",
 		"",
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
-		eventBusTestRunID,
+		eventBusTestRunID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	)
@@ -3831,16 +3833,10 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 			{
 				Node:          testRootNode(t, "project-observer"),
 				Subscriptions: []events.EventType{"route.start"},
-				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-					"route.start": {Consume: true},
-				},
 			},
 			{
 				Node:          testFlowNode(t, "child", "child-intake"),
 				Subscriptions: []events.EventType{"route.start"},
-				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-					"route.start": {Consume: true},
-				},
 			},
 		},
 		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),

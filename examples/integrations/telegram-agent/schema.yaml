@@ -1,0 +1,17 @@
+name: telegram-agent
+imports:
+  provider_trigger_events:
+    - provider: telegram
+      event: inbound.telegram.text_message
+pins:
+  inputs:
+    events: [inbound.telegram.text_message]
+  outputs:
+    events: [inbound.telegram.text_message]
+connect:
+  - event: inbound.telegram.text_message
+    from: .
+    to: telegram-chat
+  - event: inbound.telegram.text_message
+    from: telegram-ingress
+    to: telegram-chat

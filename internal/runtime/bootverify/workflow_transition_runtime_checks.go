@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -209,42 +210,35 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 		return c.eventRuntimeFindings
 	}
 	c.eventRuntimeLoaded = true
-	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	for _, requirement := range runtimeHandledEventRequirements(c.source) {
-		if !requirement.owner.Valid() {
-			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
-				CheckID:  "event_runtime_wiring_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("event %s with runtime_handling=%s missing exact owning_node", requirement.eventType, requirement.handling),
-				Location: requirement.eventType,
-			})
-			continue
-		}
 		if _, ok := c.source.ExecutableNode(requirement.owner); !ok {
 			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
-				CheckID:  "event_runtime_wiring_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("event %s owning_node %s missing from system nodes", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
+				CheckID: "event_runtime_wiring_validation", Severity: "error",
+				Message:  fmt.Sprintf("event %s requires missing executable node %s", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
 				Location: requirement.eventType,
 			})
 			continue
 		}
-		if handlers := c.source.ExecutableNodeEventHandlers(requirement.owner); len(handlers) > 0 {
-			matched := false
-			for _, endpoint := range census.MatchingConsumers(requirement.owner.FlowPath(), requirement.eventType) {
-				if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.Node.Equal(requirement.owner) {
-					matched = true
+		// Join lifecycle handlers are generated from the exact compiled declaration.
+		// A reserved event name alone does not establish a runtime owner.
+		if runtimecontracts.IsIntrinsicWorkflowRuntimeEvent(requirement.eventType) {
+			ownsJoin := false
+			for _, plan := range c.source.WorkflowJoins() {
+				if plan.Node.Equal(requirement.owner) {
+					ownsJoin = true
 					break
 				}
 			}
-			if !matched {
-				c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
-					CheckID:  "event_runtime_wiring_validation",
-					Severity: "error",
-					Message:  fmt.Sprintf("event %s owning_node %s missing semantic event_handler", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
-					Location: requirement.eventType,
-				})
+			if ownsJoin {
+				continue
 			}
+		}
+		if !semanticview.ResolveExecutableNodeSubscriptionHandler(c.source, requirement.owner, requirement.eventType).Matched {
+			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
+				CheckID: "event_runtime_wiring_validation", Severity: "error",
+				Message:  fmt.Sprintf("event %s on node %s has no matching executable handler", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
+				Location: requirement.eventType,
+			})
 		}
 	}
 	return c.eventRuntimeFindings
@@ -252,32 +246,50 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 
 type runtimeHandledEventRequirement struct {
 	eventType string
-	handling  string
 	owner     runtimeidentity.ExecutableNode
 }
 
+// Requirements come from executable declarations and compiled transitions, never
+// from event schema annotations or the existence of another node's handler.
 func runtimeHandledEventRequirements(source semanticview.Source) []runtimeHandledEventRequirement {
-	if source == nil || !contractBundleUsesOwningNodeModel(source) {
+	if source == nil {
 		return nil
 	}
-	out := make([]runtimeHandledEventRequirement, 0)
-	appendEntries := func(flowID string, entries map[string]runtimecontracts.EventCatalogEntry) {
-		for eventType, entry := range entries {
-			eventType = strings.TrimSpace(eventType)
-			handling := strings.TrimSpace(entry.RuntimeHandling)
-			if eventType == "" || !requiresOwningNode(handling) {
-				continue
-			}
-			owner, _ := runtimeidentity.AdmitExecutableNodeDeclaration(flowID, entry.OwningNode)
-			out = append(out, runtimeHandledEventRequirement{
-				eventType: eventType,
-				handling:  handling,
-				owner:     owner,
-			})
+	requirements := map[string]runtimeHandledEventRequirement{}
+	add := func(owner runtimeidentity.ExecutableNode, event string) {
+		if !owner.Valid() || event == "" {
+			return
+		}
+		requirements[owner.Key()+"\x00"+event] = runtimeHandledEventRequirement{eventType: event, owner: owner}
+	}
+	for _, record := range source.ExecutableNodeRecords() {
+		owner, err := record.Identity()
+		if err != nil {
+			continue
+		}
+		for _, event := range source.ExecutableNodeRuntimeSubscriptions(owner) {
+			add(owner, event)
 		}
 	}
-	for _, scope := range source.FlowScopes() {
-		appendEntries(scope.ID, scope.Events)
+	for flowID := range source.FlowSchemaEntries() {
+		topology, ok := semanticview.WorkflowStageTopology(source, flowID)
+		if !ok {
+			continue
+		}
+		for _, edge := range topology.Edges {
+			if edge.Source != "timer" && edge.Source != "gate" {
+				add(edge.Node, edge.HandlerEvent)
+			}
+		}
+	}
+	keys := make([]string, 0, len(requirements))
+	for key := range requirements {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]runtimeHandledEventRequirement, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, requirements[key])
 	}
 	return out
 }
@@ -301,38 +313,9 @@ func runtimeHandledEventsMissingExecutors(source semanticview.Source) []Finding 
 		out = append(out, Finding{
 			CheckID:  "handler_field_compliance",
 			Severity: "error",
-			Message:  fmt.Sprintf("event %s owning_node %s has no runtime executor", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
+			Message:  fmt.Sprintf("event %s on node %s has no runtime executor", requirement.eventType, executableNodeDiagnostic(requirement.owner)),
 			Location: requirement.eventType,
 		})
 	}
 	return out
-}
-
-func requiresOwningNode(runtimeHandling string) bool {
-	switch strings.TrimSpace(runtimeHandling) {
-	case "consuming", "dual_delivery", "projection", "stage_projection":
-		return true
-	default:
-		return false
-	}
-}
-
-func contractBundleUsesOwningNodeModel(source semanticview.Source) bool {
-	if source == nil {
-		return false
-	}
-	for _, scope := range source.FlowScopes() {
-		for _, entry := range scope.Events {
-			if strings.TrimSpace(entry.OwningNode) != "" {
-				return true
-			}
-		}
-	}
-	for _, record := range source.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err == nil && len(source.ExecutableNodeEventHandlers(node)) > 0 {
-			return true
-		}
-	}
-	return false
 }

@@ -1608,7 +1608,7 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 			ProofDimensions:      []string{"canonical_store_owner", "cli_v1_path", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
 			GoTestProofRefs: []string{
 				"TestEventPublishSerializesTargetRouteParam",
-				"TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget",
+				"TestOperatorEventPublishPrivateTargetCannotAuthorizePublication",
 				"TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence",
 				"TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite",
 				"TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres",

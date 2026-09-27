@@ -14,10 +14,8 @@ import (
 
 const eventRequiredByDefaultRule = "event_payload_field_required_by_default/v1"
 
-var eventCatalogMetadataFields = map[string]struct{}{
-	"description":          {},
+var retiredEventCatalogMetadataFields = map[string]struct{}{
 	"swarm":                {},
-	"key":                  {},
 	"emitter":              {},
 	"emitter_type":         {},
 	"producer":             {},
@@ -35,7 +33,6 @@ var eventCatalogMetadataFields = map[string]struct{}{
 	"runtime_handling":     {},
 	"owning_node":          {},
 	"delivery_channel":     {},
-	"required":             {},
 	"author_summary_field": {},
 }
 
@@ -108,6 +105,9 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		return EventCatalogEntry{}, err
 	}
 	for _, field := range fields {
+		if _, retired := retiredEventCatalogMetadataFields[field.Name]; retired {
+			return EventCatalogEntry{}, fmt.Errorf("RETIRED: events.yaml metadata field %s at %s is unsupported; remove it; inputs, outputs, connections and executable declarations own event roles, and event APIs expose full payloads", field.Name, field.KeyLocation)
+		}
 		if field.Name == "required" {
 			return EventCatalogEntry{}, fmt.Errorf("RETIRED: events.yaml field required at %s is no longer supported; fields are required by default and optional fields use one trailing ? on their type", field.KeyLocation)
 		}
@@ -153,7 +153,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 
 	payloadFieldNames := make([]string, 0, len(fields))
 	for _, field := range fields {
-		if _, metadata := eventCatalogMetadataFields[field.Name]; metadata {
+		if field.Name == "key" || field.Name == "description" {
 			continue
 		}
 		payloadField, optional, typeSource, err := admitEventPayloadField(field.Value)
@@ -193,12 +193,6 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		InputPaths: eventFieldTypePaths(payloadFieldNames),
 	}
 
-	if err := admitEventMetadata(&entry, byName); err != nil {
-		return EventCatalogEntry{}, err
-	}
-	if err := populateEventMetadataAdmissionProvenance(&entry, byName); err != nil {
-		return EventCatalogEntry{}, err
-	}
 	if entry.BusinessKeyField != "" {
 		field, ok := entry.Payload.Properties[entry.BusinessKeyField]
 		if !ok {
@@ -267,36 +261,6 @@ func populateEventNestedAdmissionProvenance(entry *EventCatalogEntry, prefix str
 	for _, field := range fields {
 		if _, ok := allowed[field.Name]; ok {
 			entry.admissionProvenance[prefix+field.Name] = authoredEventProvenance(field.Value)
-		}
-	}
-	return nil
-}
-
-func populateEventMetadataAdmissionProvenance(entry *EventCatalogEntry, fields map[string]yamlsource.MappingField) error {
-	if entry == nil {
-		return nil
-	}
-	if swarmField, ok := fields["swarm"]; ok && swarmField.Value.Presence() == yamlsource.PresenceMapping {
-		swarmFields, err := uniqueYAMLMappingFields(swarmField.Value, "event swarm metadata provenance")
-		if err != nil {
-			return err
-		}
-		for _, field := range swarmFields {
-			entry.admissionProvenance["metadata.swarm."+field.Name] = authoredEventProvenance(field.Value)
-		}
-	}
-	if _, canonical := entry.admissionProvenance["metadata.swarm.note"]; !canonical {
-		if field, ok := fields["_note"]; ok {
-			entry.admissionProvenance["metadata.swarm.note"] = authoredEventProvenance(field.Value)
-		}
-	}
-	for _, name := range []string{
-		"emitter", "alternate_emitters", "emitter_type", "consumer_type", "_consumer_type",
-		"intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "author_summary_field",
-	} {
-		if field, ok := fields[name]; ok {
-			path := strings.TrimPrefix(name, "_")
-			entry.admissionProvenance["metadata."+path] = authoredEventProvenance(field.Value)
 		}
 	}
 	return nil
@@ -553,186 +517,6 @@ func admitEventCitation(value yamlsource.Value) (CriteriaCitation, error) {
 	return out, nil
 }
 
-func admitEventMetadata(entry *EventCatalogEntry, fields map[string]yamlsource.MappingField) error {
-	if entry == nil {
-		return nil
-	}
-	if err := rejectRetiredEventMetadataValues(fields); err != nil {
-		return err
-	}
-	if swarmField, ok := fields["swarm"]; ok {
-		swarm, err := admitEventSwarmMetadata(swarmField.Value)
-		if err != nil {
-			return err
-		}
-		entry.Swarm = swarm
-	}
-	var err error
-	legacyNote, err := optionalScalarString(eventFieldValue(fields, "_note"), "_note")
-	if err != nil {
-		return err
-	}
-	legacySource, err := optionalScalarString(eventFieldValue(fields, "_source"), "_source")
-	if err != nil {
-		return err
-	}
-	legacyStatus, err := optionalScalarString(eventFieldValue(fields, "_status"), "_status")
-	if err != nil {
-		return err
-	}
-	entry.Swarm.Note, err = mergeCanonicalLegacyString(entry.Swarm.Note, legacyNote, "swarm.note", "_note")
-	if err != nil {
-		return err
-	}
-	entry.Swarm.Source, err = mergeCanonicalLegacyString(entry.Swarm.Source, legacySource, "swarm.source", "_source")
-	if err != nil {
-		return err
-	}
-	entry.Swarm.Status, err = mergeCanonicalLegacyString(entry.Swarm.Status, legacyStatus, "swarm.status", "_status")
-	if err != nil {
-		return err
-	}
-
-	producer, err := optionalStringList(eventFieldValue(fields, "producer"), "producer")
-	if err != nil {
-		return err
-	}
-	legacyProducer, err := optionalStringList(eventFieldValue(fields, "_producer"), "_producer")
-	if err != nil {
-		return err
-	}
-	producer, err = mergeCanonicalLegacyStringLists(entry.Swarm.Producer, mergeStringLists(producer, legacyProducer), "swarm.producer", "producer/_producer")
-	if err != nil {
-		return err
-	}
-	consumer, err := optionalStringList(eventFieldValue(fields, "consumer"), "consumer")
-	if err != nil {
-		return err
-	}
-	legacyConsumer, err := optionalStringList(eventFieldValue(fields, "_consumer"), "_consumer")
-	if err != nil {
-		return err
-	}
-	consumer, err = mergeCanonicalLegacyStringLists(entry.Swarm.Consumer, mergeStringLists(consumer, legacyConsumer), "swarm.consumer", "consumer/_consumer")
-	if err != nil {
-		return err
-	}
-	entry.Swarm.Producer = producer
-	entry.Swarm.Consumer = consumer
-
-	entry.Note = entry.SwarmNote()
-	entry.Producer = entry.SwarmProducer()
-	entry.Consumer = entry.SwarmConsumer()
-	entry.Source = entry.SwarmSource()
-	entry.Status = entry.SwarmStatus()
-	entry.Emitter, entry.AlternateEmitters, err = optionalEventEmitter(eventFieldValue(fields, "emitter"))
-	if err != nil {
-		return err
-	}
-	additionalEmitters, err := optionalStrictStringSequence(eventFieldValue(fields, "alternate_emitters"), "alternate_emitters")
-	if err != nil {
-		return err
-	}
-	entry.AlternateEmitters = mergeStringLists(additionalEmitters, entry.AlternateEmitters)
-	entry.EmitterType, err = optionalScalarString(eventFieldValue(fields, "emitter_type"), "emitter_type")
-	if err != nil {
-		return err
-	}
-	consumerType, err := optionalStringList(eventFieldValue(fields, "consumer_type"), "consumer_type")
-	if err != nil {
-		return err
-	}
-	legacyConsumerType, err := optionalStringList(eventFieldValue(fields, "_consumer_type"), "_consumer_type")
-	if err != nil {
-		return err
-	}
-	entry.ConsumerType = mergeStringLists(consumerType, legacyConsumerType)
-	entry.Intercepted, err = optionalBool(eventFieldValue(fields, "intercepted"), "intercepted")
-	if err != nil {
-		return err
-	}
-	entry.Passthrough, err = optionalBool(eventFieldValue(fields, "passthrough"), "passthrough")
-	if err != nil {
-		return err
-	}
-	entry.RuntimeHandling, err = optionalScalarString(eventFieldValue(fields, "runtime_handling"), "runtime_handling")
-	if err != nil {
-		return err
-	}
-	entry.OwningNode, err = optionalScalarString(eventFieldValue(fields, "owning_node"), "owning_node")
-	if err != nil {
-		return err
-	}
-	entry.DeliveryChannel, err = optionalScalarString(eventFieldValue(fields, "delivery_channel"), "delivery_channel")
-	if err != nil {
-		return err
-	}
-	entry.AuthorSummaryField, err = optionalScalarString(eventFieldValue(fields, "author_summary_field"), "author_summary_field")
-	return err
-}
-
-func admitEventSwarmMetadata(value yamlsource.Value) (EventSwarmMetadata, error) {
-	if value.Presence() == yamlsource.PresenceMissing || value.Presence() == yamlsource.PresenceNull {
-		return EventSwarmMetadata{}, nil
-	}
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return EventSwarmMetadata{}, fmt.Errorf("swarm metadata at %s is %s, want mapping", value.Location(), value.Presence())
-	}
-	fields, err := uniqueYAMLMappingFields(value, "event swarm metadata")
-	if err != nil {
-		return EventSwarmMetadata{}, err
-	}
-	byName := map[string]yamlsource.MappingField{}
-	for _, field := range fields {
-		if _, ok := eventSwarmMetadataFields[field.Name]; !ok {
-			return EventSwarmMetadata{}, NewUndefinedFieldDiagnostic("event swarm metadata", field.Name, eventSwarmMetadataFields)
-		}
-		byName[field.Name] = field
-	}
-	note, err := optionalScalarString(eventFieldValue(byName, "note"), "swarm.note")
-	if err != nil {
-		return EventSwarmMetadata{}, err
-	}
-	source, err := optionalScalarString(eventFieldValue(byName, "source"), "swarm.source")
-	if err != nil {
-		return EventSwarmMetadata{}, err
-	}
-	producer, err := optionalStringList(eventFieldValue(byName, "producer"), "swarm.producer")
-	if err != nil {
-		return EventSwarmMetadata{}, err
-	}
-	consumer, err := optionalStringList(eventFieldValue(byName, "consumer"), "swarm.consumer")
-	if err != nil {
-		return EventSwarmMetadata{}, err
-	}
-	status, err := optionalScalarString(eventFieldValue(byName, "status"), "swarm.status")
-	if err != nil {
-		return EventSwarmMetadata{}, err
-	}
-	return EventSwarmMetadata{Note: note, Source: source, Producer: producer, Consumer: consumer, Status: status}, nil
-}
-
-var eventSwarmMetadataFields = map[string]struct{}{
-	"note": {}, "source": {}, "producer": {}, "consumer": {}, "status": {},
-}
-
-func rejectRetiredEventMetadataValues(fields map[string]yamlsource.MappingField) error {
-	retired := map[string]string{
-		"producer":  "swarm.producer",
-		"_producer": "swarm.producer",
-		"consumer":  "swarm.consumer",
-		"_consumer": "swarm.consumer",
-		"_source":   "swarm.source",
-		"_status":   "swarm.status",
-	}
-	for field, canonical := range retired {
-		if occurrence, ok := fields[field]; ok {
-			return fmt.Errorf("RETIRED: events.yaml metadata field %s at %s is no longer supported; use %s for external/non-derivable proof and derive internal roles from topology", field, occurrence.KeyLocation, canonical)
-		}
-	}
-	return nil
-}
-
 func eventPayloadValueIsRetiredNestedBlock(value yamlsource.Value) bool {
 	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
 		return false
@@ -813,27 +597,6 @@ func optionalScalarString(value yamlsource.Value, context string) (string, error
 	}
 }
 
-func optionalStringList(value yamlsource.Value, context string) ([]string, error) {
-	switch value.Presence() {
-	case yamlsource.PresenceMissing, yamlsource.PresenceNull, yamlsource.PresenceEmptyScalar, yamlsource.PresenceEmptySequence:
-		return nil, nil
-	case yamlsource.PresenceScalar:
-		text, err := optionalScalarString(value, context)
-		if err != nil || text == "" {
-			return nil, err
-		}
-		return []string{text}, nil
-	case yamlsource.PresenceSequence:
-		var values []string
-		if err := value.Project(&values); err != nil {
-			return nil, fmt.Errorf("%s at %s: %w", context, value.Location(), err)
-		}
-		return normalizeStrings(values), nil
-	default:
-		return nil, fmt.Errorf("%s at %s is %s, want scalar or sequence", context, value.Location(), value.Presence())
-	}
-}
-
 func optionalStrictStringSequence(value yamlsource.Value, context string) ([]string, error) {
 	switch value.Presence() {
 	case yamlsource.PresenceMissing, yamlsource.PresenceNull, yamlsource.PresenceEmptySequence:
@@ -846,59 +609,6 @@ func optionalStrictStringSequence(value yamlsource.Value, context string) ([]str
 		return normalizeStrings(values), nil
 	default:
 		return nil, fmt.Errorf("%s at %s is %s, want sequence", context, value.Location(), value.Presence())
-	}
-}
-
-func optionalBool(value yamlsource.Value, context string) (bool, error) {
-	switch value.Presence() {
-	case yamlsource.PresenceMissing, yamlsource.PresenceNull, yamlsource.PresenceEmptyScalar:
-		return false, nil
-	case yamlsource.PresenceScalar:
-		var decoded bool
-		if err := value.Project(&decoded); err == nil {
-			return decoded, nil
-		}
-		scalar, err := value.Scalar()
-		if err != nil {
-			return false, err
-		}
-		switch strings.ToLower(strings.TrimSpace(scalar.Value)) {
-		case "true", "yes", "on", "conditional":
-			return true, nil
-		case "false", "no", "off":
-			return false, nil
-		default:
-			return false, fmt.Errorf("unsupported %s bool value %q at %s", context, scalar.Value, scalar.Location)
-		}
-	default:
-		return false, fmt.Errorf("%s at %s is %s, want scalar", context, value.Location(), value.Presence())
-	}
-}
-
-func optionalEventEmitter(value yamlsource.Value) (EventEmitterRef, []string, error) {
-	switch value.Presence() {
-	case yamlsource.PresenceMissing, yamlsource.PresenceNull, yamlsource.PresenceEmptyScalar, yamlsource.PresenceEmptySequence:
-		return EventEmitterRef{}, nil, nil
-	case yamlsource.PresenceScalar:
-		text, err := optionalScalarString(value, "emitter")
-		if err != nil || text == "" {
-			return EventEmitterRef{}, nil, err
-		}
-		return EventEmitterRef{AgentID: text}, nil, nil
-	case yamlsource.PresenceSequence:
-		values, err := optionalStringList(value, "emitter")
-		if err != nil || len(values) == 0 {
-			return EventEmitterRef{}, nil, err
-		}
-		return EventEmitterRef{AgentID: values[0]}, values[1:], nil
-	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		var ref EventEmitterRef
-		if err := value.Project(&ref); err != nil {
-			return EventEmitterRef{}, nil, err
-		}
-		return ref, nil, nil
-	default:
-		return EventEmitterRef{}, nil, fmt.Errorf("emitter at %s has unsupported presence %s", value.Location(), value.Presence())
 	}
 }
 

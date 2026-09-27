@@ -525,7 +525,7 @@ func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBot
 					t.Fatalf("barrier output %s = %#v, want %d; payload=%#v", field, completion.Payload[field], want, completion.Payload)
 				}
 			}
-			if completion.NoDelivery == nil || len(completion.Deliveries) != 0 {
+			if completion.NoDelivery != nil || len(completion.Deliveries) != 1 || completion.Deliveries[0].SubscriberID != conformanceNode(t, "portfolio", "portfolio-coordinator").Key() || completion.Deliveries[0].Status != string(runtimedelivery.StatusDelivered) || !completion.Deliveries[0].Terminal {
 				t.Fatalf("barrier business output settlement = deliveries:%#v no_delivery:%#v", completion.Deliveries, completion.NoDelivery)
 			}
 			var status string
@@ -2525,14 +2525,14 @@ func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, runti
 		t.Fatalf("marshal %s payload: %v", localEvent, err)
 	}
 	id := uuid.NewString()
-	eventType := events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, localEvent))
+	eventType := events.EventType(source.ResolveFlowEventReference(".", localEvent))
 	createdAt := time.Now().UTC()
 	mode := executionmode.Live
 	if runtime.posture == executionposture.MockOnly {
 		mode = executionmode.Mock
 	}
 	evt := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
-		id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, events.EventEnvelope{}, events.NoRoutingSource(), createdAt, mode,
+		id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), createdAt, mode,
 	)
 	if runCreating {
 		evt = eventtest.RunCreatingRootIngressWithMode(

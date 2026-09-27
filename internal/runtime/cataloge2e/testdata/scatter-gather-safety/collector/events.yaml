@@ -1,3 +1,0 @@
-batch.opened:
-  batch_id: text
-  expected_item_ids: "[text]"

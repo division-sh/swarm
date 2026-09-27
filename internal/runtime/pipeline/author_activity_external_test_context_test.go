@@ -218,12 +218,12 @@ func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOp
 		}
 		byName[name] = descriptor
 	}
-	for name, entry := range resolved {
+	for name := range resolved {
 		disposition := runtimeauthoractivity.StoryDifferent
 		if _, ok := authored[name]; ok {
 			disposition = runtimeauthoractivity.StoryAuthored
 		}
-		add(name, runtimeauthoractivity.EventDescriptor{Disposition: disposition, AuthorSummaryField: strings.TrimSpace(entry.AuthorSummaryField)})
+		add(name, runtimeauthoractivity.EventDescriptor{Disposition: disposition})
 	}
 	census := semanticview.BuildAuthoredEventEndpointCensus(opts.ContractBundle)
 	endpoints := append(census.Producers(), census.Consumers()...)
@@ -238,7 +238,7 @@ func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOp
 		if proof.IsAuthored(opts.ContractBundle) {
 			disposition = runtimeauthoractivity.StoryAuthored
 		}
-		add(proof.EventKey(), runtimeauthoractivity.EventDescriptor{Disposition: disposition, AuthorSummaryField: strings.TrimSpace(proof.Entry.AuthorSummaryField)})
+		add(proof.EventKey(), runtimeauthoractivity.EventDescriptor{Disposition: disposition})
 	}
 	names := make([]string, 0, len(byName))
 	for name := range byName {

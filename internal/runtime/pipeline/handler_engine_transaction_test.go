@@ -48,7 +48,11 @@ func handlerTestRootIngress(id string, eventType events.EventType, sourceAgent, 
 	if strings.TrimSpace(runID) == "" {
 		runID = testPipelineRunID
 	}
-	candidate := eventtest.RunCreatingRootIngress(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+	source := eventtest.RootRoutingSource(runID)
+	if route := envelope.Source.Normalized(); !route.Empty() {
+		source = testWorkflowRoutingSource(route.FlowID, route.FlowInstance, route.EntityID)
+	}
+	candidate := eventtest.RunCreatingRootIngressWithRoutingSource(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt)
 	admitted, err := events.AdmitForPublish(candidate, events.AdmissionOptions{Now: time.Now().UTC()})
 	if err != nil {
 		panic(err)

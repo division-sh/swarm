@@ -1,6 +1,1 @@
-task.requested:
-  swarm:
-    source: external
-task.completed:
-  swarm:
-    source: external
+task.requested: {}

@@ -1,8 +1,18 @@
 entry.root:
   marker: text
+  title: text
+  body: text
+  context: json
 work.processed:
   marker: text
   origin: text
+
+entry.left:
+  marker: text
+entry.right:
+  marker: text
+entry.nested:
+  marker: text
 work.routed:
   marker: text
   origin: text

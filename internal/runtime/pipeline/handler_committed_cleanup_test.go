@@ -27,7 +27,6 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{
 				Node: pipelineNode(t, ".", "node-a"), Subscriptions: []events.EventType{"source.evt"},
-				Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}},
 			}}
 			bus := &recordingPipelineBus{}
 			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
@@ -37,7 +36,7 @@ func TestHandlerCommittedCleanupErrorRetainsExactOutcomeBothStores(t *testing.T)
 			owner := configurePipelineTestDeliveryOwner(t, pc)
 			runID := correlation.RunIDFromContext(ctx)
 			entityID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
 				dialect = authoractivityfixture.DialectSQLite
@@ -96,7 +95,7 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			node := pipelineNode(t, ".", "node-a")
-			module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}, Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}}}}
+			module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}}}
 			bus := &recordingPipelineBus{}
 			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()),
@@ -104,7 +103,7 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 			pc.workflowStore = store
 			owner := configurePipelineTestDeliveryOwner(t, pc)
 			runID, entityID := correlation.RunIDFromContext(ctx), uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
 				dialect = authoractivityfixture.DialectSQLite

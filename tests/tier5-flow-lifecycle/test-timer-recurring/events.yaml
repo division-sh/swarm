@@ -1,7 +1,3 @@
-monitor.started:
-  swarm:
-    source: external
-monitor.stopped:
-  swarm:
-    source: external
+monitor.started: {}
+monitor.stopped: {}
 timer.tick: {}

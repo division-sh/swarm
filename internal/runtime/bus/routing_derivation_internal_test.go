@@ -168,7 +168,7 @@ func TestRouteTableMixedRolesPreserveFullSubscriberIdentity(t *testing.T) {
 	variants := []Subscriber{base}
 
 	differentSource := base
-	differentSource.routeSource = subscriberRouteSourceRootInputFlow
+	differentSource.routeSource = subscriberRouteSourceConnectRoutePlan
 	variants = append(variants, differentSource)
 
 	differentEvent := base

@@ -17,7 +17,6 @@ type InboundDeliveryBatch struct {
 	Provider          string
 	AuthorSubjectType string
 	AuthorSubjectID   string
-	AuthorSummary     string
 	Events            []InboundDeliveryEvent
 }
 
@@ -32,25 +31,23 @@ type InboundDeliveryEvent struct {
 type providerRawSettlementAdmission struct {
 	eventID string
 	source  events.RouteIdentity
-	target  events.RouteIdentity
 }
 
 func (a providerRawSettlementAdmission) authorizes(projected, inbound events.Event, plan RoutePlan) bool {
 	if strings.TrimSpace(a.eventID) == "" || a.eventID != projected.ID() || a.eventID != inbound.ID() ||
 		!events.SameRouteIdentity(a.source, projected.RoutingSource().Route()) ||
 		!events.SameRouteIdentity(a.source, inbound.RoutingSource().Route()) ||
-		!events.SameRouteIdentity(a.target, inbound.TargetRoute()) || len(inbound.TargetRoutes()) != 0 {
+		inbound.HasTargetRoute() || len(inbound.TargetRoutes()) != 0 {
 		return false
 	}
-	// A route-less plan canonically clears journal target facts. Any different
-	// projected target remains a contradiction rather than settlement authority.
-	if target := projected.TargetRoute(); !target.Empty() && !events.SameRouteIdentity(a.target, target) {
+	if projected.HasTargetRoute() || len(projected.TargetRoutes()) != 0 {
 		return false
 	}
-	if len(projected.TargetRoutes()) != 0 {
-		return false
-	}
-	return len(plan.DeliveryRoutes()) == 0 && plan.TargetFailure == runtimepinrouting.FailureTargetNotSubscribed
+	// Ordinary planning proves one live source owner, independently of whether
+	// that source has consumers. A recipient address cannot supply this proof.
+	owner := plan.ordinarySource.route
+	return owner.FlowInstance != "" && owner.FlowID == a.source.FlowID && owner.EntityID == a.source.EntityID &&
+		len(plan.DeliveryRoutes()) == 0 && plan.TargetFailure.Empty() && !plan.CanonicalRouteOwnerMatched()
 }
 
 // InboundDeliveryPlan is the immutable runtime half of a closed inbound
@@ -152,20 +149,14 @@ func (eb *EventBus) admitProviderRawSettlement(kind runtimeprovideroutput.Kind, 
 		return providerRawSettlementAdmission{}
 	}
 	sourceRoute := source.Route().Normalized()
-	target := evt.TargetRoute().Normalized()
-	if sourceRoute.FlowID == "" || sourceRoute.EntityID == "" || target.FlowInstance == "" || target.EntityID == "" ||
-		len(evt.TargetRoutes()) != 0 || target.EntityID != sourceRoute.EntityID ||
-		(target.FlowID != "" && target.FlowID != sourceRoute.FlowID) {
-		return providerRawSettlementAdmission{}
-	}
-	if runtimeflowidentity.SemanticScope(target.FlowInstance) != runtimeflowidentity.ScopeKey(eb.semanticSource, sourceRoute.FlowID) {
+	if sourceRoute.FlowID == "" || sourceRoute.EntityID == "" || evt.HasTargetRoute() || len(evt.TargetRoutes()) != 0 {
 		return providerRawSettlementAdmission{}
 	}
 	producer := runtimepinrouting.ResolveFlowInputProducer(eb.semanticSource, sourceRoute.FlowID, string(evt.Type()))
 	if !producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
 		return providerRawSettlementAdmission{}
 	}
-	return providerRawSettlementAdmission{eventID: evt.ID(), source: sourceRoute, target: target}
+	return providerRawSettlementAdmission{eventID: evt.ID(), source: sourceRoute}
 }
 
 func (eb *EventBus) AbandonInboundDeliveryPlan(ctx context.Context, plan InboundDeliveryPlan) error {
@@ -207,7 +198,6 @@ func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier,
 	validated.Provider = provider
 	validated.AuthorSubjectType = strings.TrimSpace(validated.AuthorSubjectType)
 	validated.AuthorSubjectID = strings.TrimSpace(validated.AuthorSubjectID)
-	validated.AuthorSummary = strings.TrimSpace(validated.AuthorSummary)
 	if (validated.AuthorSubjectType == "") != (validated.AuthorSubjectID == "") {
 		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery author subject requires type and id together")
 	}

@@ -1069,7 +1069,11 @@ func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance stri
 		eventType = flowInstance + "/" + strings.TrimPrefix(eventType, flowID+"/")
 	}
 	raw, _ := json.Marshal(payload)
-	return eventtest.ExistingRunRootIngress(
+	source := eventtest.ConcreteTemplateRoutingSource(flowID, flowInstance, runtimeflowidentity.EntityID(flowInstance))
+	if flowID == templatereply.ProviderFlowID {
+		source = eventtest.StaticFlowRoutingSource(flowID, flowInstance, runtimeflowidentity.EntityID(flowInstance))
+	}
+	return eventtest.ExistingRunRootIngressWithRoutingSource(
 		id,
 		events.EventType(eventType),
 		flowID,
@@ -1082,7 +1086,7 @@ func replyConformanceEventForRun(eventType, id, runID, flowID, flowInstance stri
 			FlowInstance: flowInstance,
 			EntityID:     runtimeflowidentity.EntityID(flowInstance),
 		}),
-		time.Now().UTC(),
+		source, time.Now().UTC(),
 	)
 }
 

@@ -55,17 +55,8 @@ func TestWorkflowRuntime_NodesOwnRegisteredPolicies(t *testing.T) {
 		if admittedSubscriptions == 0 {
 			t.Fatalf("compiled node %s missing subscriptions", node.Node.Key())
 		}
-		subscriptions := make(map[string]struct{}, len(node.Subscriptions))
-		for _, sub := range node.Subscriptions {
-			subscriptions[string(sub)] = struct{}{}
-		}
-		if len(node.Policies) == 0 {
-			t.Fatalf("workflow node %s missing runtime policies", node.Node.Key())
-		}
-		for eventType := range node.Policies {
-			if _, ok := subscriptions[eventType]; !ok {
-				t.Fatalf("policy %s for node %s is not backed by a node subscription", eventType, node.Node.Key())
-			}
+		if len(pc.SemanticSource().ExecutableNodeEventHandlers(node.Node)) == 0 {
+			t.Fatalf("workflow node %s has no executable handlers", node.Node.Key())
 		}
 	}
 }

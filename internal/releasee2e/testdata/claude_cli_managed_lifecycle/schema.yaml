@@ -2,11 +2,11 @@ name: claude-cli-release-lifecycle
 pins:
   inputs:
     events:
-      - event: task.assigned
-        source: external
+      - task.assigned
   outputs:
     events:
       - task.assigned
+      - agent.completed
 connect:
   - event: task.assigned
     from: .

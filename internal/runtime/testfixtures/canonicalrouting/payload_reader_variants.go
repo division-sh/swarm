@@ -29,10 +29,11 @@ func CopyLocalWildcardPayload(t testing.TB, variant LocalWildcardPayloadVariant)
 	}
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":          "name: wildcard-payload-proof\n",
-		"worker/schema.yaml":   "name: worker\nmode: static\ninitial_state: active\nstates: [active]\npins:\n  inputs:\n    events:\n      - event: start\n        source: external\n",
+		"schema.yaml":          "name: wildcard-payload-proof\npins:\n  inputs: {events: [start]}\n  outputs: {events: [start]}\nconnect:\n  - {event: start, from: ., to: worker}\n",
+		"events.yaml":          "start: {}\n",
+		"worker/schema.yaml":   "name: worker\nmode: static\ninitial_state: active\nstates: [active]\npins:\n  inputs:\n    events: [start]\n",
 		"worker/entities.yaml": "work: {}\n",
-		"worker/events.yaml":   "start: {}\ntask.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",
+		"worker/events.yaml":   "task.done:\n  work_id: text\ntask.failed:\n  work_id: " + secondType + "\n",
 		"worker/nodes.yaml":    "observer:\n  execution_type: system_node\n  subscribes_to: [\"" + pattern + "\"]\n  event_handlers:\n    \"" + pattern + "\":\n      rules:\n        accept:\n          condition: payload.work_id != \"\"\n",
 	}
 	files["worker/nodes.yaml"] += "producer:\n  execution_type: system_node\n  subscribes_to: [start, task.done]\n  produces: [task.done, task.failed]\n  event_handlers:\n    start:\n      emit:\n        event: task.done\n        fields:\n          work_id: {literal: work-1}\n    task.done:\n      emit:\n        event: task.failed\n        fields:\n          work_id: {literal: " + secondValue + "}\n"
@@ -48,10 +49,11 @@ func CopyScalarFanOutPayloadReader(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":           "name: scalar-fan-out-proof\n",
-		"scanner/schema.yaml":   "name: scanner\nmode: static\ninitial_state: active\nstates: [active]\npins:\n  inputs:\n    events:\n      - event: scan.requested\n        source: external\n",
+		"schema.yaml":           "name: scalar-fan-out-proof\npins:\n  inputs: {events: [scan.requested]}\n  outputs: {events: [scan.requested]}\nconnect:\n  - {event: scan.requested, from: ., to: scanner}\n",
+		"events.yaml":           "scan.requested:\n  industries: \"[text]\"\n",
+		"scanner/schema.yaml":   "name: scanner\nmode: static\ninitial_state: active\nstates: [active]\npins:\n  inputs:\n    events: [scan.requested]\n",
 		"scanner/entities.yaml": "scan: {}\n",
-		"scanner/events.yaml":   "scan.requested:\n  industries: \"[text]\"\nmarket_research.industry_assigned:\n  industry: text\n  taxonomy_categories: \"[text]\"\n",
+		"scanner/events.yaml":   "market_research.industry_assigned:\n  industry: text\n  taxonomy_categories: \"[text]\"\n",
 		"scanner/nodes.yaml": `scan-orchestrator:
   execution_type: system_node
   subscribes_to: [scan.requested]

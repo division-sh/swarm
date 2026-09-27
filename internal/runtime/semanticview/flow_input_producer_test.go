@@ -5,15 +5,16 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"gopkg.in/yaml.v3"
 )
 
-func TestResolveFlowInputProducer_ClassifiesIntrinsicInputPinSource(t *testing.T) {
+func TestResolveFlowInputProducer_ClassifiesAdmittedProviderIngress(t *testing.T) {
 	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
-		Event:  "work.requested",
-		Source: runtimecontracts.FlowInputPinSourceExternal,
+		Event: "work.requested",
 	}, nil)
 
+	source = markedToolOverlaySource{Source: source, capabilities: source.SemanticCapabilities().WithProviderTriggerEvents(source, triggergeneration.FromCanonicalBytes([]byte("provider-test")), nil).WithProviderIngressEvents(map[string][]string{"worker": {"work.requested"}})}
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {

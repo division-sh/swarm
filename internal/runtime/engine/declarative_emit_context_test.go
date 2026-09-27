@@ -66,12 +66,14 @@ func TestDeclarativeEmitPreservesScopedProducerSourceRoute(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			entityID := "ent-worker"
 			parentEnvelope := events.EventEnvelope{EntityID: "upstream-ent", FlowInstance: tc.inboundFlowPath}
+			parentSource := eventtest.RootRoutingSource("run-1")
 			if tc.stateFlowPath != "" || !tc.producerRoute.Empty() || !tc.targetRoute.Empty() {
 				parentEnvelope = events.EnvelopeForSourceRoute(parentEnvelope, events.RouteIdentity{
 					FlowID:       "upstream",
 					FlowInstance: "upstream/inst-0",
 					EntityID:     "upstream-ent",
 				})
+				parentSource = eventtest.ConcreteTemplateRoutingSource("upstream", "upstream/inst-0", "upstream-ent")
 
 			}
 			if !tc.targetRoute.Empty() {
@@ -79,7 +81,7 @@ func TestDeclarativeEmitPreservesScopedProducerSourceRoute(t *testing.T) {
 			} else if tc.inboundFlowPath != "" {
 				parentEnvelope = events.EnvelopeForFlowInstance(parentEnvelope, tc.inboundFlowPath)
 			}
-			parent := eventtest.RunCreatingRootIngress(
+			parent := eventtest.RunCreatingRootIngressWithRoutingSource(
 				"evt-parent",
 				"work.requested",
 				"workflow-runtime",
@@ -89,6 +91,7 @@ func TestDeclarativeEmitPreservesScopedProducerSourceRoute(t *testing.T) {
 				"run-1",
 				"",
 				parentEnvelope,
+				parentSource,
 				time.Unix(1_700_000_000, 0).UTC())
 			stateMetadata := map[string]any{}
 			if tc.stateFlowPath != "" {

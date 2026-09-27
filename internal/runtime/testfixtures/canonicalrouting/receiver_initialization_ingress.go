@@ -3,7 +3,7 @@ package canonicalrouting
 import "testing"
 
 // CopyProviderReceiverInitialization keeps the checked Telegram schema import
-// but uses only a system node: no producer/connect hop or provider transport.
+// and enters the private receiver through the selected root's connect edge.
 func CopyProviderReceiverInitialization(t testing.TB) string {
 	t.Helper()
 	root := CopyTelegramChatWithoutIngress(t)
@@ -27,7 +27,6 @@ pins:
   inputs:
     events:
       - event: inbound.telegram.text_message
-        source: external
         resolution: {mode: select-or-create}
         initialize:
           initial_text: payload.text

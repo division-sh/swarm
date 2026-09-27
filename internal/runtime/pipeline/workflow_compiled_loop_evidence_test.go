@@ -135,7 +135,7 @@ func (h *compiledLoopEvidenceHarness) execute(nodeID, eventType, revision string
 		h.t.Fatal(err)
 	}
 	runID := runtimecorrelation.RunIDFromContext(h.ctx)
-	event := eventtest.RunCreatingRootIngress(eventID, events.EventType(eventType), "operator", "", payload, 0, runID, "", handlerTestWorkflowEnvelope(".", runID, h.entityID), h.clock)
+	event := eventtest.RunCreatingRootIngressWithRoutingSource(eventID, events.EventType(eventType), "operator", "", payload, 0, runID, "", handlerTestWorkflowEnvelope(".", runID, h.entityID), testWorkflowRoutingSource(".", runID, h.entityID), h.clock)
 	persistWorkflowTimerEvent(h.t, h.store, h.ctx, eventID, eventType, runID, h.entityID, payload, h.clock)
 	node := pipelineSourceNode(h.t, h.source, ".", nodeID)
 	handler, ok := h.source.ExecutableNodeEventHandlers(node)[eventType]

@@ -71,7 +71,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			source := semanticview.Wrap(bundle)
 			var nodes []pipeline.WorkflowNode
 			for _, row := range []struct{ id, event string }{{"seed", "seed"}, {"select", "select"}, {"final", "selected"}} {
-				nodes = append(nodes, pipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, ".", row.id), Subscriptions: []events.EventType{events.EventType(row.event)}, ExecutionType: contracts.SystemNodeExecutionType, Policies: map[string]pipeline.WorkflowEventPolicy{row.event: {Consume: true}}})
+				nodes = append(nodes, pipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, ".", row.id), Subscriptions: []events.EventType{events.EventType(row.event)}, ExecutionType: contracts.SystemNodeExecutionType})
 			}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {

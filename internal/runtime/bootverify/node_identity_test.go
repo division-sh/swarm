@@ -40,7 +40,7 @@ func TestNodeIdentityActivityControlRemainsValid(t *testing.T) {
 	}
 }
 
-func TestNodeIdentityMetadataProjectionAcrossScopes(t *testing.T) {
+func TestNodeIdentityExecutableProjectionAcrossScopes(t *testing.T) {
 	repo := repoRootForBootverifyTest(t)
 	root := filepath.Join(repo, "internal/releasee2e/testdata/node_identity")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
@@ -52,7 +52,7 @@ func TestNodeIdentityMetadataProjectionAcrossScopes(t *testing.T) {
 	if invalid := report.HardInvalidities(); len(invalid) != 0 {
 		t.Fatalf("identity fixture is not executable: %#v", invalid)
 	}
-	names := eventMetadataInternalActorNames(source)
+	seen := map[string]bool{}
 	for _, record := range bundle.ScopedNodeRecords() {
 		ref, err := record.Identity()
 		if err != nil {
@@ -61,11 +61,12 @@ func TestNodeIdentityMetadataProjectionAcrossScopes(t *testing.T) {
 		if ref.NodeID() != "worker" || bundle.Semantics.EffectiveNodes[ref.Key()].ID != "worker" {
 			t.Fatalf("effective identity disagrees: %v", ref)
 		}
-		if label, ok := names.match(ref.Key()); !ok || label != "system node "+ref.Key() {
-			t.Fatalf("metadata lost scoped identity %s: %#v", ref.Key(), names)
+		if seen[ref.Key()] {
+			t.Fatalf("duplicate scoped identity %s", ref.Key())
 		}
+		seen[ref.Key()] = true
 	}
-	if _, ok := names["worker"]; !ok {
-		t.Fatal("metadata lost local rejection vocabulary")
+	if len(seen) < 2 {
+		t.Fatalf("fixture must prove distinct scopes: %v", seen)
 	}
 }

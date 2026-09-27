@@ -1,4 +1,2 @@
-work.requested:
-  work_id: text
 work.ready:
   work_id: text?

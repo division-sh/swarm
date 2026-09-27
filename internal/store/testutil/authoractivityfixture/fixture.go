@@ -84,14 +84,6 @@ func PersistedOccurredAt(ctx context.Context, key string) (time.Time, bool, erro
 	return current.mutation.PersistedOccurredAt(ctx, key)
 }
 
-func PersistedAuthorSafeSummary(ctx context.Context, key string) (string, bool, error) {
-	current, ok := fromContext(ctx)
-	if !ok || current.finalized {
-		return "", false, fmt.Errorf("test author activity mutation is not active")
-	}
-	return current.mutation.PersistedAuthorSafeSummary(ctx, key)
-}
-
 func Require(ctx context.Context) error {
 	current, ok := fromContext(ctx)
 	if !ok || current.finalized {

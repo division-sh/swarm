@@ -370,8 +370,8 @@ func TestCommandLiveReceiptUsesExactConfiguredConversation(t *testing.T) {
 		t.Run(chat, func(t *testing.T) {
 			receipt := fullLifecycleIngressReceipt{EntityID: "standing", EventIDs: []string{"raw", "normalized"}, EventNames: []string{"inbound.telegram", "inbound.telegram.text_message"}}
 			events := []fullLifecycleEvent{
-				{EventID: "raw", EventName: "inbound.telegram", EntityID: "standing", NoDelivery: &fullLifecycleNoDelivery{Reason: "no_subscriber_by_design"}},
-				{EventID: "normalized", EventName: "inbound.telegram.text_message", EntityID: "downstream", Payload: map[string]any{"provider_message_reference": float64(1001), "conversation_reference": chat}, Deliveries: []fullLifecycleEventDelivery{{SubscriberType: "agent", SubscriberID: "phrase-bot", Target: fullLifecycleDeliveryTarget{Kind: "materializing_entity", EntityID: "downstream", FlowID: "telegram-chat", FlowInstance: "telegram-chat/instance"}}}},
+				{EventID: "raw", EventName: "inbound.telegram", RunID: "standing-run", NoDelivery: &fullLifecycleNoDelivery{Reason: "no_subscriber_by_design"}},
+				{EventID: "normalized", EventName: "inbound.telegram.text_message", RunID: "standing-run", EntityID: "downstream", Payload: map[string]any{"provider_message_reference": float64(1001), "conversation_reference": chat}, Deliveries: []fullLifecycleEventDelivery{{SubscriberType: "agent", SubscriberID: "phrase-bot", Target: fullLifecycleDeliveryTarget{Kind: "materializing_entity", EntityID: "downstream", FlowID: "telegram-chat", FlowInstance: "telegram-chat/instance"}}}},
 			}
 			if _, _, err := fullLifecycleReceiptEvents(events, receipt, 1001, chat); err != nil {
 				t.Fatal(err)

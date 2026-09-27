@@ -872,7 +872,7 @@ func TestRuntimeContextDeactivationCancelsStuckWebhookWithoutPublishing(t *testi
 	}
 	hash := "bundle-v2:sha256:" + strings.Repeat("7", 64)
 	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner})
+	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{WorkOwner: workOwner}, InboundTarget{FlowPath: "chat", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "chat/a", EntityID: "41000000-0000-0000-0000-000000000002"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

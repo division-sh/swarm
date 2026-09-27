@@ -1,9 +1,9 @@
 name: reply full authored path
 steps:
-  - publish: initiator/requester.setup.requested
+  - publish: requester.setup.requested
     payload:
       account_id: account-1
-  - publish: initiator/request.submitted
+  - publish: request.submitted
     payload:
       account_id: account-1
 expect:

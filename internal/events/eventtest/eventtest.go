@@ -63,10 +63,15 @@ func RunCreatingRootIngress(id string, eventType events.EventType, sourceAgent, 
 // admitted producer-source fact. Routing tests use this instead of inferring
 // source authority from event or envelope shape.
 func RunCreatingRootIngressWithRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	return RunCreatingRootIngressWithRoutingSourceAndMode(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt, executionmode.Live)
+}
+
+// RunCreatingRootIngressWithRoutingSourceAndMode preserves admitted source and mode.
+func RunCreatingRootIngressWithRoutingSourceAndMode(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time, mode executionmode.Mode) events.Event {
 	if strings.TrimSpace(parentEventID) != "" {
 		panic("root-ingress fixture cannot carry a causal parent")
 	}
-	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, source, createdAt, executionmode.Live)
+	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode, source)
 	return mustEvent(events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: facts, RunID: runID}))
 }
 
@@ -76,13 +81,17 @@ func RunCreatingRootIngressWithMode(id string, eventType events.EventType, sourc
 	if strings.TrimSpace(parentEventID) != "" {
 		panic("root-ingress fixture cannot carry a causal parent")
 	}
-	return mustEvent(events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode), RunID: runID}))
+	if runID == "" {
+		runID = uuid.NewString()
+	}
+	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode, RootRoutingSource(runID))
+	return mustEvent(events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: facts, RunID: runID}))
 }
 
 // ExistingRunRootIngress builds a root fixture that requires its run to exist
 // and remain active.
 func ExistingRunRootIngress(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
-	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live), RunID: runID}))
+	return ExistingRunRootIngressWithRoutingSource(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, envelope, RootRoutingSource(runID), createdAt)
 }
 
 // ExistingRunRootIngressWithRoutingSource builds an existing-run fixture with
@@ -94,13 +103,18 @@ func ExistingRunRootIngressWithRoutingSource(id string, eventType events.EventTy
 // ExistingRunRootIngressWithRoutingSourceAndMode builds an existing-run
 // fixture with explicit routing authority and causal execution mode.
 func ExistingRunRootIngressWithRoutingSourceAndMode(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time, mode executionmode.Mode) events.Event {
-	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, source, createdAt, mode)
+	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode, source)
 	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID}))
 }
 
 // OperatorInjected builds a root operator event with optional typed reference provenance.
 func OperatorInjected(id string, eventType events.EventType, producerID, taskID string, payload json.RawMessage, chainDepth int, runID string, provenance *events.OperatorReferenceProvenance, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, events.EventProducerExternal, producerID, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return mustEvent(events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{Facts: facts, RunID: runID, Provenance: provenance}))
+}
+
+func OperatorInjectedWithRoutingSource(id string, eventType events.EventType, producerID, taskID string, payload json.RawMessage, chainDepth int, runID string, provenance *events.OperatorReferenceProvenance, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerExternal, producerID, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live, source)
 	return mustEvent(events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{Facts: facts, RunID: runID, Provenance: provenance}))
 }
 
@@ -122,7 +136,7 @@ func RuntimeControl(id string, eventType events.EventType, sourceAgent, taskID s
 // RuntimeControlWithRoutingSource builds a runtime control fixture preserving
 // an exact admitted routing-source fact.
 func RuntimeControlWithRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
-	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, source, createdAt, executionmode.Live)
+	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live, source)
 	return mustEvent(runtimeControlFixture(facts, runID, parentEventID))
 }
 
@@ -162,14 +176,14 @@ func ChildWithLineage(id string, eventType events.EventType, sourceAgent, taskID
 // admitted producer-source fact. Connect tests use it instead of deriving
 // source authority from envelope or event-name shape.
 func ChildWithLineageAndRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
-	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerAgent, sourceAgent, taskID, payload, chainDepth, envelope, source, createdAt, lineage.ExecutionMode)
+	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerAgent, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode, source)
 	return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: lineage}))
 }
 
 // ChildForProducerWithRoutingSource builds a child fixture with exact producer
 // and admitted routing-source facts.
 func ChildForProducerWithRoutingSource(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
-	facts := fixtureFactsWithRoutingSource(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, source, createdAt, lineage.ExecutionMode)
+	facts := fixtureFactsWithRoutingSource(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode, source)
 	return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: lineage}))
 }
 
@@ -353,20 +367,18 @@ func rebuild(evt events.Event, taskID string, mode executionmode.Mode, envelope 
 }
 
 func fixtureFacts(id string, eventType events.EventType, producerType events.EventProducerType, producerID, taskID string, payload json.RawMessage, chainDepth int, envelope events.EventEnvelope, createdAt time.Time, mode executionmode.Mode) events.EventFacts {
-	return fixtureFactsWithRoutingSource(id, eventType, producerType, producerID, taskID, payload, chainDepth, envelope, fixtureRoutingSource(envelope), createdAt, mode)
-}
-
-// Explicit-source fixtures must not infer a competing authority before consuming
-// their admitted source. The event constructor still validates the full facts.
-func fixtureFactsWithRoutingSource(id string, eventType events.EventType, producerType events.EventProducerType, producerID, taskID string, payload json.RawMessage, chainDepth int, envelope events.EventEnvelope, routingSource events.RoutingSource, createdAt time.Time, mode executionmode.Mode) events.EventFacts {
-	producerID = fixtureProducerID(producerID, "eventtest-producer")
+	routingSource := fixtureRoutingSource(envelope)
 	if routingSource.Kind() == events.RoutingSourceExternalIngress {
 		envelope.Source = events.RouteIdentity{}
 	}
+	return fixtureFactsWithRoutingSource(id, eventType, producerType, producerID, taskID, payload, chainDepth, envelope, createdAt, mode, routingSource)
+}
+
+func fixtureFactsWithRoutingSource(id string, eventType events.EventType, producerType events.EventProducerType, producerID, taskID string, payload json.RawMessage, chainDepth int, envelope events.EventEnvelope, createdAt time.Time, mode executionmode.Mode, source events.RoutingSource) events.EventFacts {
 	return events.EventFacts{
-		ID: id, Type: eventType, Producer: events.ProducerClaim{Type: producerType, ID: producerID},
+		ID: id, Type: eventType, Producer: events.ProducerClaim{Type: producerType, ID: fixtureProducerID(producerID, "eventtest-producer")},
 		TaskID: taskID, Payload: payload, ChainDepth: chainDepth, Envelope: envelope,
-		RoutingSource: routingSource, CreatedAt: createdAt, ExecutionMode: mode,
+		RoutingSource: source, CreatedAt: createdAt, ExecutionMode: mode,
 	}
 }
 

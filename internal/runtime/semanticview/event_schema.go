@@ -109,7 +109,7 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 	// Some diagnostic-direct platform catalog rows reference a separate typed
 	// subtype owner instead of declaring an event payload schema. Do not turn
 	// that reference-only row into a closed empty-object schema.
-	if proof.Entry.Source == "platform_spec" && len(proof.Entry.Payload.Properties) == 0 {
+	if runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), proof.CatalogKey) && len(proof.Entry.Payload.Properties) == 0 {
 		return EventSchemaResolution{}
 	}
 	registry := runtimecontracts.EventSchemaRegistryFromCatalog(map[string]runtimecontracts.EventCatalogEntry{
@@ -146,10 +146,8 @@ func bindEventSchemaClassification(source Source, flowID, eventType string, reso
 	switch {
 	case strings.Contains(strings.TrimSpace(proof.CatalogKey), "*"):
 		resolution.Classification = runtimecontracts.CompiledEventSchemaPattern
-	case strings.TrimSpace(proof.Entry.Source) == "platform_spec":
+	case runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), proof.CatalogKey):
 		resolution.Classification = runtimecontracts.CompiledEventSchemaPlatform
-	case strings.HasPrefix(strings.TrimSpace(proof.Entry.Source), "contract_derived_activity") || strings.TrimSpace(proof.Entry.Swarm.Status) == "generated":
-		resolution.Classification = runtimecontracts.CompiledEventSchemaGenerated
 	default:
 		return
 	}

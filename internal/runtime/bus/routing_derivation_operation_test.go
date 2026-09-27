@@ -14,7 +14,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -598,8 +597,8 @@ func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := source.censuses.Load(); got != 1 {
-		t.Fatalf("initial derivation built %d censuses, want 1", got)
+	if got := source.censuses.Load(); got != 0 {
+		t.Fatalf("initial derivation rebuilt %d authored-event catalogs, want none", got)
 	}
 	alpha := topologyOperationIdentity(t, "alpha")
 	beta := topologyOperationIdentity(t, "beta")
@@ -618,7 +617,7 @@ func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := source.censuses.Load(); got != 1 || lister.calls != 1 || len(identities) != 3 {
+	if got := source.censuses.Load(); got != 0 || lister.calls != 1 || len(identities) != 3 {
 		t.Fatalf("topology work: censuses=%d reads=%d identities=%v", got, lister.calls, identities)
 	}
 	independent, err := DeriveRouteTable(source.Source)
@@ -652,7 +651,7 @@ func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 2 || len(nextIDs) != 1 || nextIDs[0] != gamma || next.HasFlowInstanceRoute(alpha) || next.HasFlowInstanceRoute(beta) || !next.HasFlowInstanceRoute(gamma) {
+	if source.censuses.Load() != 0 || lister.calls != 2 || len(nextIDs) != 1 || nextIDs[0] != gamma || next.HasFlowInstanceRoute(alpha) || next.HasFlowInstanceRoute(beta) || !next.HasFlowInstanceRoute(gamma) {
 		t.Fatalf("next operation retained stale membership: censuses=%d reads=%d identities=%v", source.censuses.Load(), lister.calls, nextIDs)
 	}
 }
@@ -751,45 +750,5 @@ func TestRouteTopologyOperationStandaloneReplayAndGenerationLease(t *testing.T) 
 	}
 	if source.censuses.Load() != 0 || table.snapshotGenerationCurrent(before) {
 		t.Fatal("leased addition must reuse supplied preparation and invalidate generation")
-	}
-}
-
-func TestRouteTopologyOperationPreservesIntrinsicIngressAdmission(t *testing.T) {
-	scatter, _ := topologyOperationFixture(t)
-	sources := map[string]semanticview.Source{
-		"scatter":  scatter.Source,
-		"external": loadHarnessRouteSource(t, canonicalrouting.CopyInputPinExternalScope(t)),
-		"harness":  loadHarnessRouteSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)),
-		"root":     loadHarnessRouteSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress)),
-		"parent":   loadHarnessRouteSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect)),
-	}
-	intrinsicInputs := 0
-	for name, source := range sources {
-		t.Run(name, func(t *testing.T) {
-			_, resolver := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
-			for _, scope := range source.FlowScopes() {
-				rootInputs := routeRootInputEventSet(source)
-				want := cloneStringSet(rootInputs)
-				// Frozen pre-hoist admission: only intrinsic non-connect
-				// evidence may add a flow input to the root-input set.
-				for _, localEvent := range scope.InputEvents {
-					flowID := strings.TrimSpace(scope.ID)
-					resolution := semanticview.ResolveNonConnectFlowInputProducer(source, flowID, localEvent)
-					if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
-						continue
-					}
-					intrinsicInputs++
-					if event := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, localEvent)); event != "" {
-						want[event] = struct{}{}
-					}
-				}
-				if got := routeAdmittedFlowIngressEventSet(source, scope, rootInputs, resolver); !reflect.DeepEqual(got, want) {
-					t.Fatalf("scope %s changed ingress admission: got=%v want=%v", scope.ID, got, want)
-				}
-			}
-		})
-	}
-	if intrinsicInputs == 0 {
-		t.Fatal("fixtures must exercise positive intrinsic ingress admission")
 	}
 }

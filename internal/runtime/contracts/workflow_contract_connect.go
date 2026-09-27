@@ -111,9 +111,6 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s: %w", pin.Event, err)
 	}
-	if len(pin.Initialize) > 0 && !initialization.bound && pin.Source != FlowInputPinSourceExternal {
-		return CompiledFlowInputPin{}, fmt.Errorf("input pin %s initialize requires an admitted producer schema", pin.Event)
-	}
 	digest, err := compiledFlowPinDigest("input", context, pin.Event, FlowInputPinSourceCode(pin.Source), "", resolution, context.EventSchema, context.EventSchema, CompiledFlowInputProjection{}, initialization)
 	if err != nil {
 		return CompiledFlowInputPin{}, fmt.Errorf("compile input pin %s digest: %w", pin.Event, err)
@@ -397,6 +394,28 @@ func (p CompiledFlowOutputPin) EventSchema() (CompiledEventSchema, bool) {
 		return CompiledEventSchema{}, false
 	}
 	return p.value.context.EventSchema, true
+}
+
+// BindImportedEventSchema completes an output's schema evidence without
+// changing the authored pin or granting producer authority to a schema import.
+func (p CompiledFlowOutputPin) BindImportedEventSchema(schema CompiledEventSchema) (CompiledFlowOutputPin, error) {
+	if p.value == nil || schema.value == nil {
+		return CompiledFlowOutputPin{}, fmt.Errorf("compiled output pin and imported event schema are required")
+	}
+	if p.value.context.EventSchema.value != nil {
+		return CompiledFlowOutputPin{}, fmt.Errorf("output pin %s already owns event schema evidence", p.value.event)
+	}
+	if schema.Classification() != CompiledEventSchemaImported || schema.EventName() != p.value.event {
+		return CompiledFlowOutputPin{}, fmt.Errorf("output pin %s cannot bind imported event schema %s (%s)", p.value.event, schema.EventName(), schema.Classification())
+	}
+	value := *p.value
+	value.context.EventSchema = schema
+	var err error
+	value.digest, err = compiledFlowPinDigest("output", value.context, value.event, "", FlowOutputSinkCode(value.sink), FlowInputPinResolution{}, schema, CompiledEventSchema{}, CompiledFlowInputProjection{}, ReceiverInitialization{})
+	if err != nil {
+		return CompiledFlowOutputPin{}, fmt.Errorf("compile imported output pin %s digest: %w", value.event, err)
+	}
+	return CompiledFlowOutputPin{value: &value}, nil
 }
 
 func (p CompiledFlowOutputPin) Provenance() CompiledFlowPinProvenance {

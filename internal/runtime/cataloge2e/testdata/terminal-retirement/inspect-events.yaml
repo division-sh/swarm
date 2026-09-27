@@ -1,3 +1,2 @@
 worker.inspect:
-  swarm:
-    source: external
+  worker_id: text

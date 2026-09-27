@@ -69,7 +69,7 @@ func TestAuthoredSelectionRetryReloadsCurrentStateBothStores(t *testing.T) {
 					}
 				}
 				module := f.pc.module.(*previewWorkflowModule)
-				module.workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"source.evt"}, Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}}}}
+				module.workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"source.evt"}}}
 				event := f.event("source.evt")
 				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(f.node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID})}
 				owner := newPipelineTestDeliveryOwnerForDB(t, f.db)

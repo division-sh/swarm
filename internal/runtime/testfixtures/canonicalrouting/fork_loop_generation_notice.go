@@ -34,15 +34,19 @@ stages:
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
-      - {event: root.closed, source: external}
+      - work.requested
+      - root.closed
+      - review.retry
+      - review.closed
   outputs:
-    events: [work.started]
+    events: [work.started, review.retry, review.closed]
 connect:
   - {event: work.started, from: ., to: review}
+  - {event: review.retry, from: ., to: review}
+  - {event: review.closed, from: ., to: review}
 `,
 		"entities.yaml": "root: {}\n",
-		"events.yaml":   "work.requested:\n  token: text\nroot.closed: {}\nwork.started:\n  token: text\n",
+		"events.yaml":   "work.requested:\n  token: text\nroot.closed: {}\nwork.started:\n  token: text\nreview.retry:\n  revision_id: text\n  token: text\nreview.closed:\n  revision_id: text\n",
 		"nodes.yaml": `controller:
   execution_type: system_node
   subscribes_to: [work.requested, root.closed]
@@ -71,18 +75,13 @@ pins:
   inputs:
     events:
       - work.started
-      - {event: review.retry, source: external}
-      - {event: review.closed, source: external}
+      - review.retry
+      - review.closed
 `,
 		"review/entities.yaml": "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n",
 		"review/events.yaml": `review.requested:
   revision_id: text
   token: text
-review.retry:
-  revision_id: text
-  token: text
-review.closed:
-  revision_id: text
 `,
 		"review/nodes.yaml": `controller:
   execution_type: system_node

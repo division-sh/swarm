@@ -8,7 +8,6 @@ import (
 type InboundProjection struct {
 	SubjectType string
 	SubjectID   string
-	Summary     string
 }
 
 type inboundProjectionContextKey struct{}
@@ -19,7 +18,6 @@ func WithInboundProjection(ctx context.Context, projection InboundProjection) co
 	}
 	projection.SubjectType = strings.TrimSpace(projection.SubjectType)
 	projection.SubjectID = strings.TrimSpace(projection.SubjectID)
-	projection.Summary = strings.TrimSpace(projection.Summary)
 	return context.WithValue(ctx, inboundProjectionContextKey{}, projection)
 }
 

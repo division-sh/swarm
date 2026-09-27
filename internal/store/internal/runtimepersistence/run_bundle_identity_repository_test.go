@@ -372,7 +372,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"PublishAndWait":                             operationMutation,
 		"PublishDirect":                              operationMutation,
 		"PublishDirectRoutes":                        operationMutation,
-		"PublishPublicInputAcknowledged":             operationMutation,
 		"RecoverPersistedPipeline":                   operationMutation,
 		"RecoverSelectedRunPipelineToExhaustion":     operationMutation,
 		"RegisterRuntimeActiveAgentDescriptor":       operationRetained,

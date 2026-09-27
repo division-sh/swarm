@@ -8,7 +8,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: batch.opened, source: external}
+      - batch.opened
       - event: item.reported
         resolution:
           mode: fan-in

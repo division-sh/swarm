@@ -3,5 +3,4 @@ mode: static
 pins:
   inputs:
     events:
-      - event: support.requested
-        source: external
+      - support.requested

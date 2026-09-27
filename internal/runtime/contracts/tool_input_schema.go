@@ -147,12 +147,6 @@ func validateToolSchemaValue(path string, schema ToolInputSchema, value semantic
 // requires readback isolation.
 func cloneEventCatalogEntry(in EventCatalogEntry) EventCatalogEntry {
 	out := in
-	out.Swarm.Producer = append([]string(nil), in.Swarm.Producer...)
-	out.Swarm.Consumer = append([]string(nil), in.Swarm.Consumer...)
-	out.Producer = append([]string(nil), in.Producer...)
-	out.AlternateEmitters = append([]string(nil), in.AlternateEmitters...)
-	out.Consumer = append([]string(nil), in.Consumer...)
-	out.ConsumerType = append([]string(nil), in.ConsumerType...)
 	out.Payload.Required = append([]string(nil), in.Payload.Required...)
 	out.admissionProvenance = make(map[string]EffectiveValueProvenance, len(in.admissionProvenance))
 	for path, provenance := range in.admissionProvenance {

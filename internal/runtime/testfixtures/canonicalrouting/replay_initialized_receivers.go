@@ -13,7 +13,7 @@ func CopyReplayInitializedReceivers(t testing.TB) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `name: replay-initialized-receivers
 pins:
   inputs:
-    events: [{event: start, source: external}]
+    events: [start]
   outputs:
     events: [work.ready]
 connect:
@@ -21,7 +21,7 @@ connect:
   - {event: work.ready, from: ., to: right}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "start: {}\nwork.ready: {}\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "source:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      emit: {event: work.ready}\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", "source:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      emit: work.ready\n")
 	for _, flow := range []string{"left", "right"} {
 		writeClosedVariantFile(t, root, flow+"/schema.yaml", fmt.Sprintf("name: %s\nmode: static\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [work.ready]\n", flow))
 		writeClosedVariantFile(t, root, flow+"/entities.yaml", "receipt: {}\n")

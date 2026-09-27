@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -60,7 +61,9 @@ func TestRecipientGuardObservesEffectiveDeliveryContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "review/inst-1/task.started", "", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+			evt := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "review/inst-1/task.started", eventtest.Producer(events.EventProducerNode, node.Key()), "", nil, 0,
+				events.EventLineage{RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live}, events.EventEnvelope{},
+				eventtest.ConcreteTemplateRoutingSource("review", "review/inst-1", eventtest.UUID("review-entity")), time.Now().UTC())
 			plan, err := eb.planSubscribedPublish(events.WithDeliveryContext(context.Background(), inherited), evt)
 			if calls != 1 {
 				t.Fatalf("guard calls = %d, want 1; planning error: %v", calls, err)

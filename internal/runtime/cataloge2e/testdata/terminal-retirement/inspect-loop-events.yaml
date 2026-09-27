@@ -1,6 +1,5 @@
 worker.execute:
   revision_id: {type: text}
 worker.retry:
-  swarm:
-    source: external
+  worker_id: text
   revision_id: {type: text}

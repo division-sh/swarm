@@ -24,6 +24,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -78,7 +79,6 @@ type DeliveryEvent struct {
 	Kind              OutputKind
 	Payload           map[string]any
 	Authorization     runtimeprovideroutput.Authorization
-	AuthorSummary     string
 	AuthorSubjectType string
 	AuthorSubjectID   string
 }
@@ -675,14 +675,33 @@ type AckManifest struct {
 }
 
 func ParseManifest(body []byte) (Manifest, error) {
-	var manifest Manifest
-	if err := yaml.Unmarshal(body, &manifest); err != nil {
-		return Manifest{}, err
-	}
-	return manifest, nil
+	return parseManifestStrict(body)
 }
 
 func parseManifestStrict(body []byte) (Manifest, error) {
+	snapshot, err := yamlsource.Load(body)
+	if err != nil {
+		return Manifest{}, err
+	}
+	outputs, err := snapshot.Document("trigger.yaml").Root().Lookup("normalized_events")
+	if err != nil {
+		return Manifest{}, err
+	}
+	if outputs.Presence == yamlsource.PresenceSequence {
+		items, err := outputs.Value.Sequence()
+		if err != nil {
+			return Manifest{}, err
+		}
+		for _, item := range items {
+			selector, err := item.Lookup("author_summary_field")
+			if err != nil {
+				return Manifest{}, err
+			}
+			if selector.Presence != yamlsource.PresenceMissing {
+				return Manifest{}, fmt.Errorf("RETIRED: author_summary_field at %s is unsupported; remove it and read full content through event payload APIs", selector.Value.Location())
+			}
+		}
+	}
 	var manifest Manifest
 	decoder := yaml.NewDecoder(bytes.NewReader(body))
 	decoder.KnownFields(true)

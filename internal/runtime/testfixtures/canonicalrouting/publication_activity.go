@@ -34,14 +34,14 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		outputs += "      - " + event + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", event, flow)
 	}
-	schema := "name: publication-activity\npins:\n  inputs:\n    events:\n      - {event: activity.requested, source: external}\n  outputs:\n    events:\n" + outputs
+	schema := "name: publication-activity\npins:\n  inputs:\n    events:\n      - activity.requested\n  outputs:\n    events:\n" + outputs
 	if template {
 		schema = strings.Replace(schema, "name: publication-activity\n", "name: publication-activity\nmode: template\ninstance: case_id\n", 1)
-		schema = strings.Replace(schema, "source: external", "resolution: {mode: select-or-create}", 1)
+		schema = strings.Replace(schema, "      - activity.requested\n", "      - {event: activity.requested, resolution: {mode: select-or-create}}\n", 1)
 		writeClosedVariantFile(t, root, "events.yaml", request+"activity.dispatch:\n  key: case_id\n  case_id: text\n  message: text\n")
 		writeClosedVariantFile(t, root, "nodes.yaml", "driver:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      emit: {event: activity.dispatch, fields: {case_id: \"${payload.case_id}\", message: \"${payload.message}\"}}\n")
 		connects += fmt.Sprintf("  - {event: activity.dispatch, from: ., to: %s, rename: activity.requested}\n", flow)
-		writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    events:\n      - {event: activity.requested, source: external}\n  outputs:\n    events: [activity.dispatch]\nconnect:\n"+connects)
+		writeClosedVariantFile(t, root, "schema.yaml", "name: activity-driver\npins:\n  inputs:\n    events: [activity.requested]\n  outputs:\n    events: [activity.dispatch]\nconnect:\n"+connects)
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
 		if mode == "nested_template" {
 			writeClosedVariantFile(t, root, "outer/schema.yaml", "name: outer\n")
@@ -104,7 +104,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	siblingInputs, siblingSchemas := "", ""
 	siblingNode := "local:\n  execution_type: system_node\n  subscribes_to: [" + strings.Join(results, ", ") + "]\n  event_handlers:\n"
 	for _, event := range results {
-		siblingInputs += "      - {event: " + event + ", source: external}\n"
+		siblingInputs += "      - " + event + "\n"
 		siblingSchemas += event + ":\n  activity_id: integer\n"
 		siblingNode += "    " + event + ":\n      guard: {id: sibling_only, check: 'payload.activity_id > 0'}\n"
 	}

@@ -50,13 +50,18 @@ type connectRoutePlanTestFlow struct {
 
 type providerOutputAuthorizedTestSource struct {
 	semanticview.Source
+	declaringFlow  string
 	generation     triggergeneration.Generation
 	authorizations []runtimeprovideroutput.Authorization
 	input          runtimecontracts.CompiledFlowInputPin
 }
 
 func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.Capabilities {
-	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.authorizations)
+	flow := s.declaringFlow
+	if flow == "" {
+		flow = "consumer"
+	}
+	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, map[string][]runtimeprovideroutput.Authorization{flow: s.authorizations})
 }
 
 func (s providerOutputAuthorizedTestSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
@@ -292,7 +297,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 							subscriber := Subscriber{
 								Recipient:    recipient,
 								MatchPattern: localEvent,
-								routeSource:  subscriberRouteSourceRootInputFlow,
+								routeSource:  subscriberRouteSourceSubscription,
 								AgentPlan:    plan,
 							}
 							if subscriber.Recipient.IsNode() {
@@ -302,7 +307,6 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 									t.Fatalf("admit root target handler: %v", err)
 								}
 							}
-							routeTable.rootInputRoutes[localEvent] = appendUniqueRootInputSubscriber(routeTable.rootInputRoutes[localEvent], subscriber)
 							if err := routeTable.addConnectRecipientLocked(".", nil, localEvent, subscriber, runID, ""); err != nil {
 								t.Fatalf("admit root receiver: %v", err)
 							}
@@ -2032,45 +2036,6 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 		if plan.Resolution() != events.ConnectPlanNoRegistration || len(plan.Candidates()) != 0 {
 			t.Fatalf("plan evidence = %#v, want no_registration", plan)
 		}
-	}
-}
-
-func TestEventBusAuthoredDeliberateEmptyUsesOutputConsumerClassification(t *testing.T) {
-	fixture := func(consumer string) semanticview.Source {
-		t.Helper()
-		root := &runtimecontracts.FlowContractView{
-			Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-			Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "root.ready"}}}}},
-			Events: map[string]runtimecontracts.EventCatalogEntry{"root.ready": {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{consumer}}}},
-		}
-		bundle := &runtimecontracts.WorkflowContractBundle{
-			RootSchema: &root.Schema,
-			Events:     root.Events,
-			FlowTree:   runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}},
-		}
-		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-			t.Fatal(err)
-		}
-		return semanticview.Wrap(bundle)
-	}
-	source := fixture("external")
-	store := newConnectRoutePlanStaticStore()
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
-	if err != nil {
-		t.Fatal(err)
-	}
-	evt := connectRoutePlanRootProducerEvent(uuid.NewString(), "root.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	settlement := store.settlements[evt.ID()]
-	if !settlement.NoDelivery() || settlement.Reason() != events.NoDeliveryNoSubscriberByDesign {
-		t.Fatalf("settlement = %#v, want authored deliberate empty", settlement)
-	}
-
-	classification := runtimepinrouting.ClassifyRoutingSourceOutputConsumer(fixture("webhook"), string(evt.Type()), evt.RoutingSource())
-	if classification.DeliberateNoSubscriber() {
-		t.Fatal("free-form webhook spelling authorized deliberate no-delivery")
 	}
 }
 
@@ -4604,27 +4569,17 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 		"sha256:"+strings.Repeat("a", 64), generation,
 	)
 	source := providerOutputAuthorizedTestSource{
-		Source:     loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true)),
-		generation: generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
-	}
-	entry, exists := source.Source.EventEntry(eventName)
-	if !exists {
-		t.Fatal("provider fixture is missing its explicit event schema")
-	}
-	schema, err := runtimecontracts.CompileImportedEventSchema("consumer", eventName, entry, runtimecontracts.CompiledEventSchemaSource{Layer: "provider_fixture"})
-	if err != nil {
-		t.Fatal(err)
+		Source:        loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true)),
+		declaringFlow: ".",
+		generation:    generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
 	}
 	pin, exists := source.Source.FlowInputEventPin("consumer", eventName)
 	if !exists {
 		t.Fatal("provider fixture is missing its exact input pin")
 	}
-	source.input, err = pin.BindImportedEventSchema(schema)
-	if err != nil {
-		t.Fatal(err)
-	}
+	source.input = pin
 	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
-	externalSource, err := events.NewExternalIngressRoutingSource("consumer", eventtest.UUID("provider-ingress"), events.RoutingSourceAuthorityProviderAdmissionPlan)
+	externalSource, err := events.NewExternalIngressRoutingSource(".", eventtest.UUID("provider-ingress"), events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatalf("external routing source: %v", err)
 	}
@@ -4641,238 +4596,61 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 	}
 }
 
-func TestPublicInputAdmissionUsesCanonicalTemplateLifecycleModes(t *testing.T) {
+func TestPrivateTemplateInputCannotBecomePublicAPIEndpoint(t *testing.T) {
 	for _, tc := range []struct {
-		name           string
-		mode           canonicalrouting.TemplateInstanceRouteMode
-		seedExisting   bool
-		wantActivation bool
+		name string
+		mode canonicalrouting.TemplateInstanceRouteMode
 	}{
-		{name: "create", mode: canonicalrouting.TemplateInstanceRouteCreate, wantActivation: true},
-		{name: "select", mode: canonicalrouting.TemplateInstanceRouteSelect, seedExisting: true},
-		{name: "select-or-create", mode: canonicalrouting.TemplateInstanceRouteSelectOrCreate, wantActivation: true},
+		{name: "create", mode: canonicalrouting.TemplateInstanceRouteCreate},
+		{name: "select", mode: canonicalrouting.TemplateInstanceRouteSelect},
+		{name: "select-or-create", mode: canonicalrouting.TemplateInstanceRouteSelectOrCreate},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
 			source := connectRoutePlanTemplateInstanceSource(t, tc.mode, false)
-			bundle, ok := semanticview.Bundle(source)
-			if !ok {
-				t.Fatal("template route source has no contract bundle")
-			}
-			bundle.Semantics.CompositionConnects = nil
-			store := &connectRoutePlanLifecycleStore{
-				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
-					targetRouteMemoryStore: newTargetRouteMemoryStore(),
-				},
-			}
-			if tc.seedExisting {
-				store.flowInstances = []ActiveFlowInstanceDescriptor{{
-					InstanceID: "one", EntityID: eventtest.UUID("ent-public-select"),
-					FlowInstance: "consumer/one", FlowTemplate: "consumer",
-					AddressFields: map[string]string{"entity.vertical_id": "vertical-1"},
-				}}
-			}
-			eventBus, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle:          source,
-				TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate),
-			})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			store.bus = eventBus
-			if tc.seedExisting {
-				if err := eventBus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
-					Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "one")),
-				}); err != nil {
-					t.Fatalf("seed selected flow route: %v", err)
-				}
-			}
-
 			association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy.done")
 			endpoint, ok := association.Endpoint()
 			if !ok {
-				t.Fatalf("resolve public input endpoint: %v", association.Err())
+				t.Fatalf("resolve private template input: %v", association.Err())
 			}
-			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(
-				eventID, events.EventType(endpoint.Event.Canonical), "operator-api", "",
-				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
-			)
-			if err := eventBus.PublishPublicInputAcknowledged(ctx, evt, endpoint); err != nil {
-				t.Fatalf("PublishPublicInputAcknowledged: %v", err)
+			if _, err := NewTemplateAPIEventPublicationEndpoint(source, endpoint); err == nil || !strings.Contains(err.Error(), "selected-root") {
+				t.Fatalf("private template input acquired public API endpoint: %v", err)
 			}
-
-			store.mu.Lock()
-			routes := append([]events.DeliveryRoute(nil), store.routes[eventID]...)
-			store.mu.Unlock()
-			if len(routes) != 1 {
-				t.Fatalf("persisted public-input delivery routes = %#v, want one", routes)
-			}
-			if target := routes[0].Target.Route().Normalized(); target.FlowID != "consumer" || !strings.HasPrefix(target.FlowInstance, "consumer/") {
-				t.Fatalf("public-input target = %#v, want a concrete consumer instance", target)
-			}
-			if got := len(store.activations); (got == 1) != tc.wantActivation {
-				t.Fatalf("committed activations = %d, want activation=%t", got, tc.wantActivation)
+			if _, err := newPublicInputAdmission(source, endpoint); err == nil || !strings.Contains(err.Error(), "selected-root") {
+				t.Fatalf("private template input acquired publication admission: %v", err)
 			}
 		})
 	}
 }
 
-func TestAPIEventPublicationCommittedCompletionSurvivesPostCommitLocalFailures(t *testing.T) {
-	for _, test := range []struct {
-		name             string
-		failFinalization bool
-	}{
-		{name: "activation finalization", failFinalization: true},
-		{name: "dispatch admission"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
-			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
-			bundle, ok := semanticview.Bundle(source)
-			if !ok {
-				t.Fatal("template route source has no contract bundle")
-			}
-			bundle.Semantics.CompositionConnects = nil
-			lifecycleStore := &connectRoutePlanLifecycleStore{
-				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()},
-			}
-			selected := &apiEventPublicationMemoryStore{connectRoutePlanLifecycleStore: lifecycleStore}
-			activationOwner := newTestFlowInstanceActivationOwner(lifecycleStore.Activate)
-			var finalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer = activationOwner
-			if test.failFinalization {
-				finalizer = runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(context.Context, runtimepipeline.CommittedFlowInstanceActivation) error {
-					return errors.New("simulated local activation finalization failure")
-				})
-			}
-			eventBus, err := newScopedTestEventBus(selected, EventBusOptions{
-				ContractBundle:          source,
-				TemplateInstancePlanner: activationOwner,
-				FlowActivationFinalizer: finalizer,
-			})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			lifecycleStore.bus = eventBus
-			association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy.done")
-			endpoint, ok := association.Endpoint()
-			if !ok {
-				t.Fatalf("resolve public input endpoint: %v", association.Err())
-			}
-			apiEndpoint, err := NewTemplateAPIEventPublicationEndpoint(source, endpoint)
-			if err != nil {
-				t.Fatalf("admit API event publication endpoint: %v", err)
-			}
-			eventID := uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(
-				eventID, events.EventType(endpoint.Event.Canonical), "operator-api", "",
-				json.RawMessage(`{"vertical_id":"vertical-1"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
-			)
-			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
-			committed, replay, err := eventBus.PublishAPIEventAcknowledged(ctx, evt, &apiEndpoint, apiidempotency.Request{
-				Method: "event.publish", Actor: apiidempotency.BearerActor("operator"), IdempotencyKey: "post-commit-" + strings.ReplaceAll(test.name, " ", "-"), RequestHash: "request-hash",
-			}, completion)
-			if err != nil {
-				t.Fatalf("PublishAPIEventAcknowledged after committed completion: %v", err)
-			}
-			if replay || committed.ResourceID != eventID {
-				t.Fatalf("committed API publication = %#v replay=%t, want new completion for %s", committed, replay, eventID)
-			}
-			if selected.completion.ResourceID != eventID {
-				t.Fatalf("stored API completion = %#v, want %s", selected.completion, eventID)
-			}
-		})
-	}
-}
-
-func TestPublicInputAdmissionFailsClosedNegativeMatrix(t *testing.T) {
-	validSource := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
-	validAssociation := semanticview.BuildAuthoredEventEndpointCensus(validSource).ResolveDeclaredInputEndpoint("consumer", "deploy.done")
-	validEndpoint, ok := validAssociation.Endpoint()
-	if !ok {
-		t.Fatalf("resolve valid public input endpoint: %v", validAssociation.Err())
-	}
-
-	tests := []struct {
+func TestPublicInputRoutePlanRejectsNoncanonicalOrEmptyDelivery(t *testing.T) {
+	admission := publicInputAdmission{endpointID: "root-input", flowID: ".", pinName: "deploy.done", eventType: "deploy.done"}
+	for _, tc := range []struct {
 		name string
-		run  func(*testing.T) error
+		plan func() RoutePlan
 		want string
 	}{
 		{
-			name: "missing exact endpoint",
-			run: func(*testing.T) error {
-				_, err := newPublicInputAdmission(validSource, semanticview.AuthoredEventEndpoint{})
-				return err
-			},
-			want: "receiver_input_pin_missing",
-		},
-		{
-			name: "unsupported non-template receiver",
-			run: func(t *testing.T) error {
-				staticSource := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
-					id: "consumer", mode: "static",
-					inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.completed"}},
-				}}, nil))
-				association := semanticview.BuildAuthoredEventEndpointCensus(staticSource).ResolveDeclaredInputEndpoint("consumer", "deploy.completed")
-				endpoint, ok := association.Endpoint()
-				if !ok {
-					t.Fatalf("resolve static input endpoint: %v", association.Err())
-				}
-				_, err := newPublicInputAdmission(staticSource, endpoint)
-				return err
-			},
-			want: "receiver_flow_missing",
-		},
-		{
-			name: "runtime target failure",
-			run: func(t *testing.T) error {
-				source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
-				store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
-				eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: newTestFlowInstanceActivationOwner(store.Activate)})
-				if err != nil {
-					t.Fatalf("NewEventBusWithOptions: %v", err)
-				}
-				store.bus = eventBus
-				association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy.done")
-				endpoint, ok := association.Endpoint()
-				if !ok {
-					t.Fatalf("resolve select input endpoint: %v", association.Err())
-				}
-				evt := eventtest.RunCreatingRootIngress(
-					uuid.NewString(), events.EventType(endpoint.Event.Canonical), "operator-api", "",
-					json.RawMessage(`{"vertical_id":"missing"}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC(),
-				)
-				return eventBus.PublishPublicInputAcknowledged(context.Background(), evt, endpoint)
-			},
-			want: "not routable",
-		},
-		{
 			name: "noncanonical route owner",
-			run: func(*testing.T) error {
-				admission := publicInputAdmission{endpointID: validEndpoint.ID, flowID: validEndpoint.FlowID, pinName: validEndpoint.PinName, eventType: events.EventType(validEndpoint.Event.Canonical)}
-				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), events.EventType(validEndpoint.Event.Canonical), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
+			plan: func() RoutePlan {
+				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), "deploy.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
 				plan.MarkLowerPrecedenceRouteProduction(routeIntentProducerAgentPolicy)
-				return requirePublicInputRoutePlan(withPublicInputAdmission(context.Background(), admission), plan)
+				return plan
 			},
 			want: "canonical connect route owner",
 		},
 		{
 			name: "zero durable deliveries",
-			run: func(*testing.T) error {
-				admission := publicInputAdmission{endpointID: validEndpoint.ID, flowID: validEndpoint.FlowID, pinName: validEndpoint.PinName, eventType: events.EventType(validEndpoint.Event.Canonical)}
-				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), events.EventType(validEndpoint.Event.Canonical), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
+			plan: func() RoutePlan {
+				plan := newRoutePlan(connectRoutePlanStaticProducerEvent(uuid.NewString(), "deploy.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
 				plan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
-				return requirePublicInputRoutePlan(withPublicInputAdmission(context.Background(), admission), plan)
+				return plan
 			},
 			want: "zero durable deliveries",
 		},
-	}
-
-	for _, tc := range tests {
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.run(t)
-			if err == nil || !strings.Contains(strings.ToLower(err.Error()), tc.want) {
-				t.Fatalf("public input rejection error = %v, want containing %q", err, tc.want)
+			if err := requirePublicInputRoutePlan(withPublicInputAdmission(context.Background(), admission), tc.plan()); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("public input route-plan error = %v, want %q", err, tc.want)
 			}
 		})
 	}

@@ -185,7 +185,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, selectedSourc
 		if eventIncomplete {
 			disposition = runfork.RunForkSelectedContractDispositionFailClosed
 		}
-		local, err := contractFrontierRecipients(routeTable.ResolveIndependentPubsubForRun(runID, event.eventName), events.EventType(event.eventName))
+		local, err := contractFrontierRecipients(routeTable.ResolveIndependentPubsubFromSource(runID, events.EventType(event.eventName), event.routingSource), events.EventType(event.eventName))
 		if err != nil {
 			return nil, false, err
 		}

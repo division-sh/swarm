@@ -151,7 +151,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	}
 }
 
-func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t *testing.T) {
+func TestSwarmTestSetupEntitiesSeedsRootAliasAndExpectationThroughPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	sourceRoot := writeScenarioSetupFixture(t)
@@ -189,7 +189,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 			if _, err := uuid.Parse(setupEntityID); err != nil {
 				t.Fatalf("test.setup_entities entity_id = %#v, want UUID", entity["entity_id"])
 			}
-			if entity["alias"] != "product" || entity["flow_instance"] != "operating" || entity["entity_type"] != "product" || entity["current_state"] != "waiting" {
+			if entity["alias"] != "product" || entity["flow_instance"] != "" || entity["entity_type"] != "product" || entity["current_state"] != "waiting" {
 				t.Fatalf("test.setup_entities entity = %#v", entity)
 			}
 			if err := assertScenarioJSONEqual("test.setup_entities fields", entity["fields"], map[string]any{"product_id": "p-1", "note": "seeded"}); err != nil {
@@ -203,18 +203,17 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 				"entities": []map[string]any{{
 					"alias":         "product",
 					"entity_id":     setupEntityID,
-					"flow_instance": "operating",
+					"flow_instance": setupRunID,
 					"entity_type":   "product",
 					"current_state": "waiting",
 				}},
 			})
 		case eventPublishMethod:
-			if req.Params["event_name"] != "operating/opco.product_review_requested" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != setupRunID {
+			if req.Params["event_name"] != "opco.product_review_requested" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != setupRunID {
 				t.Fatalf("event.publish params = %#v", req.Params)
 			}
-			target, ok := req.Params["target"].(map[string]any)
-			if !ok || target["flow_instance"] != "operating" || target["entity_id"] != setupEntityID {
-				t.Fatalf("event.publish target = %#v", req.Params["target"])
+			if _, ok := req.Params["target"]; ok {
+				t.Fatalf("event.publish root target = %#v, want omitted", req.Params["target"])
 			}
 			payload, ok := req.Params["payload"].(map[string]any)
 			if !ok || payload["note"] != "approved" {
@@ -228,7 +227,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(setupRunID, true))
 		case "run.trace":
-			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{scenarioTraceRowForEvent("event-setup-follow-up", "operating/opco.product_review_requested")}})
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{scenarioTraceRowForEvent("event-setup-follow-up", "opco.product_review_requested")}})
 		case entityGetMethod:
 			if req.Params["entity_id"] != setupEntityID || req.Params["run_id"] != setupRunID {
 				t.Fatalf("entity.get params = %#v", req.Params)
@@ -860,7 +859,7 @@ func TestSwarmTestRejectsInvalidSetupBeforeMutation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	sourceRoot := writeScenarioSetupFixture(t)
-	scenarioPath := filepath.Join(sourceRoot, "operating", "tests", "bad-setup.yaml")
+	scenarioPath := filepath.Join(sourceRoot, "tests", "bad-setup.yaml")
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: bad setup
 setup:
@@ -892,7 +891,7 @@ steps:
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
-		"test", sourceRoot, filepath.Join("operating", "tests", "bad-setup.yaml"),
+		"test", sourceRoot, filepath.Join("tests", "bad-setup.yaml"),
 	}, &stdout, &stderr, scenarioProtocolTestOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())

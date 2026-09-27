@@ -151,7 +151,7 @@ func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{Node: pipelineNode(t, ".", "node-a"),
-				Subscriptions: []events.EventType{"source.evt"}, Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}}}}
+				Subscriptions: []events.EventType{"source.evt"}}}
 			bus := &recordingPipelineBus{}
 			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()), TestLifecycleProbe: review2460FailedStatusProbe{},
@@ -162,7 +162,7 @@ func TestCommittedAttemptFailureNotificationKeepsRetryContinuationBothStores(t *
 			}
 			owner := configurePipelineTestDeliveryOwner(t, pc)
 			runID, entityID := correlation.RunIDFromContext(ctx), uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
 				dialect = authoractivityfixture.DialectSQLite
@@ -213,7 +213,7 @@ func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(
 			})
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{Node: pipelineNode(t, ".", "node-a"),
-				Subscriptions: []events.EventType{"source.evt"}, Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}}}}
+				Subscriptions: []events.EventType{"source.evt"}}}
 			bus := &recordingPipelineBus{}
 			pc := newPostgresPipelineCoordinatorForTest(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module: module, DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, store.testDB()), TestLifecycleProbe: review2460HandlerCompletedProbe{},
@@ -221,7 +221,7 @@ func TestReview2460HandlerCompletedPanicReleasesCommittedContinuationBothStores(
 			pc.workflowStore = store
 			owner := configurePipelineTestDeliveryOwner(t, pc)
 			runID, entityID := correlation.RunIDFromContext(ctx), uuid.NewString()
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), testWorkflowRoutingSource(".", runID, entityID), time.Now().UTC())
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
 				dialect = authoractivityfixture.DialectSQLite

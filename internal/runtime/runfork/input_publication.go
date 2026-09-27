@@ -30,7 +30,7 @@ func InputPublicationFromEvent(event events.Event) (InputPublication, error) {
 		return InputPublication{}, nil
 	}
 	switch event.RoutingSource().Kind() {
-	case events.RoutingSourceAbsent, events.RoutingSourceExternalIngress:
+	case events.RoutingSourceRoot, events.RoutingSourceExternalIngress:
 	default:
 		return InputPublication{}, nil
 	}

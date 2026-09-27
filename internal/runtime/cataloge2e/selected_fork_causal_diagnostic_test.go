@@ -7,10 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -18,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -135,21 +131,10 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, kind := range []string{"explicit", "subject", "missing"} {
 			t.Run(string(backend)+"/"+kind, func(t *testing.T) {
-				root := selectedForkReadinessCatalogFixture(t, 1, "agent")
+				root := localReadinessFixture(t, 1, "agent")
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
-				selected := runScopedCatalogStore(t, h)
-				path := "worker-flow/worker-001"
-				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
 				ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
-				if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "causal selected diagnostic", ControlledBy: "cataloge2e"}); err != nil {
-					t.Fatal(err)
-				}
-				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/worker.ready"), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entity), path),
-					eventtest.ConcreteTemplateRoutingSource("worker-flow", path, entity), time.Now().UTC())
-				if err := h.rt.Bus.PublishAndWait(ctx, event); err != nil {
-					t.Fatal(err)
-				}
+				frontierID := activateLocalReadinessFrontier(t, ctx, h, "worker.ready")
 				var sourceStore interface {
 					storetest.DurableDataCatalogStore
 					runforkexecution.SourceArtifactSelectedContractSourceStore
@@ -163,10 +148,10 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 				cfg := testRuntimeConfig()
 				cfg.LLM.Backend = "anthropic"
 				options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
-				probe := &causalSelectedProcess{ProcessCapability: options.ProcessCapability, h: h, sourceEvent: event.ID(), kind: kind}
+				probe := &causalSelectedProcess{ProcessCapability: options.ProcessCapability, h: h, sourceEvent: frontierID, kind: kind}
 				options.ProcessCapability = probe
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
+					SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
 					Owner: selectedContractExecutionOwnerForCatalogHarness(t, h), SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 				})
 				if kind != "missing" && (err != nil || result.ExecutedEventCount != 1 || !result.Activation.Activated) {
@@ -192,7 +177,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 						if err := logger.ProjectLifecycleDiagnostic(consumer, item); err != nil {
 							t.Fatal(err)
 						}
-						assertSelectedCausalDiagnosticReadback(t, h, item, kind, activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, event.ID()))
+						assertSelectedCausalDiagnosticReadback(t, h, item, kind, activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, frontierID))
 					}
 				}
 			})

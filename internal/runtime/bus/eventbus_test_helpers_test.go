@@ -248,21 +248,21 @@ func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeaut
 	if source != nil {
 		resolved := source.ResolvedEventCatalog()
 		authored := source.AuthoredResolvedEventCatalog()
-		add := func(name string, summaryField string, disposition runtimeauthoractivity.StoryDisposition) {
+		add := func(name string, disposition runtimeauthoractivity.StoryDisposition) {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				return
 			}
 			byName[name] = runtimeauthoractivity.EventDescriptor{
-				EventType: name, Disposition: disposition, AuthorSummaryField: strings.TrimSpace(summaryField),
+				EventType: name, Disposition: disposition,
 			}
 		}
-		for name, entry := range resolved {
+		for name := range resolved {
 			disposition := runtimeauthoractivity.StoryDifferent
 			if _, ok := authored[name]; ok {
 				disposition = runtimeauthoractivity.StoryAuthored
 			}
-			add(name, entry.AuthorSummaryField, disposition)
+			add(name, disposition)
 		}
 		census := semanticview.BuildAuthoredEventEndpointCensus(source)
 		endpoints := append(census.Producers(), census.Consumers()...)
@@ -274,7 +274,7 @@ func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeaut
 				if endpoint.Event.IsAuthored(source) {
 					disposition = runtimeauthoractivity.StoryAuthored
 				}
-				add(endpoint.Event.EventKey(), endpoint.Event.Entry.AuthorSummaryField, disposition)
+				add(endpoint.Event.EventKey(), disposition)
 			}
 		}
 	}

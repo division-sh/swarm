@@ -60,6 +60,7 @@ func TestTimerFireEventRequiredAgentFulfillmentIsNotExecutableConsumer(t *testin
 	entry := runtimecontracts.EventCatalogEntry{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "timer.legacy_sla"}}}},
 			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
 				Role:         "worker",
 				SubscribesTo: []string{"timer.reminder"},
@@ -94,11 +95,7 @@ func stageTimerValidationBundle(timer runtimecontracts.WorkflowTimerContract) *r
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"timer.legacy_sla": {
-				Swarm: runtimecontracts.EventSwarmMetadata{
-					Consumer: []string{"operator"},
-				},
-			},
+			"timer.legacy_sla": {},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Timers: []runtimecontracts.WorkflowTimerContract{timer},

@@ -495,7 +495,6 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		Provider:          provider,
 		AuthorSubjectType: authorProjection.SubjectType,
 		AuthorSubjectID:   authorProjection.SubjectID,
-		AuthorSummary:     authorProjection.Summary,
 		Events:            published,
 	})
 	if err != nil {
@@ -672,7 +671,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 		}
 		event, err := events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: events.EventFacts{
 			ID: eventID, Type: output.Name, Producer: events.ProducerClaim{Type: events.EventProducerExternal, ID: "inbound-gateway"},
-			Payload: mustJSON(output.Payload), Envelope: envelope, RoutingSource: routingSource,
+			Payload: mustJSON(output.Payload), RoutingSource: routingSource,
 			CreatedAt: now, ExecutionMode: posture.RootMode(),
 		}, RunID: request.ResolvedRunID})
 		if err != nil {
@@ -687,7 +686,6 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 			authorProjection = runtimeauthoractivity.InboundProjection{
 				SubjectType: output.AuthorSubjectType,
 				SubjectID:   output.AuthorSubjectID,
-				Summary:     output.AuthorSummary,
 			}
 		}
 	}

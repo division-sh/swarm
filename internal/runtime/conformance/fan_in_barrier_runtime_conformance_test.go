@@ -878,7 +878,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 	if err != nil {
 		t.Fatalf("marshal %s payload: %v", localEvent, err)
 	}
-	evt := eventtest.ExistingRunRootIngress(
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		eventID,
 		events.EventType(source.ResolveFlowEventReference(flowID, localEvent)),
 		flowID,
@@ -889,7 +889,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID: flowID, FlowInstance: flowID, EntityID: runtimeflowidentity.EntityID(flowID),
 		}),
-		time.Now().UTC(),
+		eventtest.StaticFlowRoutingSource(flowID, flowID, runtimeflowidentity.EntityID(flowID)), time.Now().UTC(),
 	)
 	if err := eventBus.PublishAcknowledged(ctx, evt); err != nil {
 		t.Fatalf("PublishAcknowledged(%s): %v", localEvent, err)

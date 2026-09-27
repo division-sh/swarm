@@ -141,14 +141,15 @@ func TestAPIEventReplayReleaseErrorUsesReplayProofWithoutNewAcknowledgement(t *t
 	fault := errors.New("API replay authority release fault")
 	store := &publicationAcknowledgementProbeStore{replay: true, err: fault}
 	probe := &publicationAcknowledgementProbe{}
-	bus, err := newScopedTestEventBus(store, EventBusOptions{TestLifecycleProbe: probe})
+	source, endpoint := acknowledgedRootInputEndpoint(t)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe})
 	if err != nil {
 		t.Fatal(err)
 	}
 	eventID := uuid.NewString()
 	event := eventtest.ExistingRunRootIngress(eventID, events.EventType("task.requested"), "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
 	completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
-	actual, replayed, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, nil, apiidempotency.Request{Method: "event.publish"}, completion)
+	actual, replayed, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
 	if !errors.Is(err, fault) || !replayed || actual.ResourceID != eventID || probe.dispatched.Load() != 0 {
 		t.Fatalf("replay completion=%#v replayed=%t error=%v dispatches=%d", actual, replayed, err, probe.dispatched.Load())
 	}
@@ -280,14 +281,15 @@ func TestAPIEventPostCommitErrorRetainsCompletionAndDispatchesAcknowledgedResult
 		t.Run(map[bool]string{false: "unacknowledged", true: "acknowledged"}[acknowledged], func(t *testing.T) {
 			store := &publicationAcknowledgementProbeStore{acknowledged: acknowledged, err: fault}
 			probe := &publicationAcknowledgementProbe{started: make(chan struct{}, 1)}
-			bus, err := newScopedTestEventBus(store, EventBusOptions{TestLifecycleProbe: probe})
+			source, endpoint := acknowledgedRootInputEndpoint(t)
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe})
 			if err != nil {
 				t.Fatal(err)
 			}
 			eventID := uuid.NewString()
 			event := eventtest.ExistingRunRootIngress(eventID, events.EventType("task.requested"), "provider", "", json.RawMessage(`{}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
 			completion := apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"event_id":"` + eventID + `"}`)}
-			actual, replay, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, nil, apiidempotency.Request{Method: "event.publish"}, completion)
+			actual, replay, err := bus.PublishAPIEventAcknowledged(testAuthorActivityContext(context.Background()), event, &endpoint, apiidempotency.Request{Method: "event.publish"}, completion)
 			if !errors.Is(err, fault) || replay {
 				t.Fatalf("API publication replay=%t error=%v, want post-commit fault", replay, err)
 			}

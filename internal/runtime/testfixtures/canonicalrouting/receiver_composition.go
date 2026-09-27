@@ -12,7 +12,7 @@ func CopyReceiverOptionalChild(t testing.TB, existing bool) string {
 	activeStage := ""
 	if existing {
 		activeStage = "  active: {}\n"
-		seedPin = "      - {event: work.seeded, source: external}\n"
+		seedPin = "      - work.seeded\n"
 		seedSchema = "work.seeded:\n  seed: boolean\n"
 		seedHandler = "    work.seeded:\n      create_entity: true\n      advances_to: active\n"
 		create = ""
@@ -25,7 +25,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
+      - work.requested
 ` + seedPin + `  outputs:
     events: [work.completed]
 connect:
@@ -131,8 +131,8 @@ stages:
 pins:
   inputs:
     events:
-      - {event: work.seeded, source: external}
-      - {event: work.requested, source: external}
+      - work.seeded
+      - work.requested
 `,
 		"events.yaml":   "work.seeded:\n  seed: boolean\nwork.requested:\n  seed: boolean\n",
 		"entities.yaml": "work:\n  marker: text\n",
@@ -248,27 +248,37 @@ local:
 	return root
 }
 
-func CopyReceiverEntitylessExternal(t testing.TB) string {
+// CopyReceiverEntitylessRootExport proves the public observation boundary
+// without manufacturing either a private receiver or a delivery.
+func CopyReceiverEntitylessRootExport(t testing.TB) string {
 	t.Helper()
-	root := CopyReceiverOptionalChild(t, false)
-	writeClosedVariantFile(t, root, "sink/events.yaml", "child.finished:\n  result: text\n  swarm:\n    consumer: external\n")
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    events: [work.completed]\n  outputs:\n    events: [child.finished]\n")
-	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
+	root := t.TempDir()
+	writeClosedVariantFile(t, root, "schema.yaml", "name: root-export\npins:\n  inputs:\n    events: [work.requested]\n  outputs:\n    events: [child.finished]\n")
+	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nchild.finished:\n  result: text\n")
+	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
-  subscribes_to: [work.completed]
   event_handlers:
-    work.completed:
+    work.requested:
       emit:
         event: child.finished
-        fields: {result: "${payload.result}"}
+        fields: {result: {literal: emitted}}
 `)
 	return root
 }
 
 func CopyReceiverEntitylessUnrouted(t testing.TB) string {
 	t.Helper()
-	root := CopyReceiverEntitylessExternal(t)
+	root := CopyReceiverOptionalChild(t, false)
 	writeClosedVariantFile(t, root, "sink/events.yaml", "child.finished:\n  result: text\n")
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    events: [work.completed]\n  outputs:\n    events: [child.finished]\n")
+	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
+  execution_type: system_node
+  event_handlers:
+    work.completed:
+      emit:
+        event: child.finished
+        fields: {result: {expression: payload.result}}
+`)
 	return root
 }
 
@@ -289,9 +299,12 @@ pins:
     events:
       - child.seeded
       - work.completed
-      - {event: child.closed, source: external}
+      - child.closed
 `)
-	writeClosedVariantFile(t, root, "sink/events.yaml", "child.closed:\n  seed: boolean\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - work.requested\n", "      - work.requested\n      - child.closed\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [work.completed, child.seeded]", "events: [work.completed, child.seeded, child.closed]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: child.closed, from: ., to: sink}\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.seeded:\n", "child.closed:\n  seed: boolean\nwork.seeded:\n")
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", `collector:
   execution_type: system_node
   subscribes_to: [child.seeded, work.completed, child.closed]
@@ -325,12 +338,14 @@ func CopyReceiverEntitylessFork(t testing.TB) string {
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
+      - work.requested
+      - fork.seeded
   outputs:
-    events: [work.completed]
+    events: [work.completed, fork.seeded]
 connect:
   - {event: work.completed, from: ., to: sink}
 `)
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.requested:\n", "fork.seeded: {}\nwork.requested:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
   subscribes_to: [work.requested]

@@ -61,9 +61,8 @@ func TestExplicitSourceFixtureRejectsContradictoryEnvelope(t *testing.T) {
 
 func TestExplicitIngressAndControlFixturesPreserveSource(t *testing.T) {
 	entityID, runID := uuid.NewString(), uuid.NewString()
-	// This is not an inferable ingress envelope. Only the supplied admitted
-	// ingress authority may decide its projection, never the receiver shape.
-	envelope := events.EventEnvelope{Source: events.RouteIdentity{EntityID: entityID}}
+	// Opaque provider authority does not project an execution source envelope.
+	envelope := events.EventEnvelope{}
 	source, err := events.NewExternalIngressRoutingSource("review", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -83,5 +82,28 @@ func TestExplicitIngressAndControlFixturesPreserveSource(t *testing.T) {
 	event := RuntimeControlWithRoutingSource(uuid.NewString(), "review.timer", "workflow", "", []byte(`{}`), 0, runID, "", events.EnvelopeForSourceRoute(events.EventEnvelope{}, control.Route()), control, time.Now().UTC())
 	if !reflect.DeepEqual(event.RoutingSource(), control) {
 		t.Fatal("control fixture changed admitted authority")
+	}
+}
+
+func TestExplicitIngressFixtureRejectsExecutionSourceEnvelope(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(strconv.FormatBool(existing), func(t *testing.T) {
+			entityID, runID := uuid.NewString(), uuid.NewString()
+			source, err := events.NewExternalIngressRoutingSource("review", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if failure := recover(); failure == nil || !strings.Contains(fmt.Sprint(failure), "opaque routing source cannot become envelope source evidence") {
+					t.Fatalf("opaque-source contradiction did not reach event admission: %v", failure)
+				}
+			}()
+			envelope := events.EventEnvelope{Source: events.RouteIdentity{EntityID: entityID}}
+			if existing {
+				ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "review.requested", "provider", "", []byte(`{}`), 0, runID, envelope, source, time.Now().UTC())
+			} else {
+				RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "review.requested", "provider", "", []byte(`{}`), 0, runID, "", envelope, source, time.Now().UTC())
+			}
+		})
 	}
 }

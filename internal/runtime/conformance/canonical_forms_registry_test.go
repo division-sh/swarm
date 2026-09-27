@@ -24,6 +24,87 @@ import (
 
 const canonicalFormsRegistryPath = "internal/runtime/conformance/testdata/canonical_forms_registry.yaml"
 
+func TestCanonicalFormsEventAuthorityRetirement(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	entry := reflect.TypeOf(runtimecontracts.EventCatalogEntry{})
+	for _, name := range []string{"Swarm", "Note", "Emitter", "EmitterType", "Producer", "AlternateEmitters", "Consumer", "ConsumerType", "Source", "Status", "Intercepted", "Passthrough", "RuntimeHandling", "OwningNode", "DeliveryChannel", "AuthorSummaryField"} {
+		if _, exists := entry.FieldByName(name); exists {
+			t.Errorf("retired event metadata carrier %s returned", name)
+		}
+	}
+	if restored := retiredEventAuthorityDeclarations(t, root); len(restored) != 0 {
+		t.Fatalf("retired event authority restored: %v", restored)
+	}
+}
+
+func TestCanonicalFormsEventAuthorityGuardDetectsRestoredPrivateConstructors(t *testing.T) {
+	root := t.TempDir()
+	for _, path := range []string{"internal/runtime/nested/private.go", "cmd/hidden/private.go"} {
+		absolute := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(absolute, []byte("package private\nfunc PublishPublicInputAcknowledged() {}\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if restored := retiredEventAuthorityDeclarations(t, root); len(restored) != 2 {
+		t.Fatalf("retirement guard missed nested/outside-runtime producers: %v", restored)
+	}
+}
+
+func retiredEventAuthorityDeclarations(t *testing.T, root string) []string {
+	t.Helper()
+	retired := map[string]bool{
+		"PublishPublicInputAcknowledged": true,
+		"FlowInputPinSourceExternal":     true,
+		"EventEmitterRef":                true,
+		"EventSwarmMetadata":             true,
+		"EventConsumerBoundary":          true,
+	}
+	var restored []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if _, excluded := canonicalGoCorpusExcludedDirectories[entry.Name()]; excluded {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			var names []*ast.Ident
+			switch declaration := node.(type) {
+			case *ast.FuncDecl:
+				names = []*ast.Ident{declaration.Name}
+			case *ast.TypeSpec:
+				names = []*ast.Ident{declaration.Name}
+			case *ast.ValueSpec:
+				names = declaration.Names
+			}
+			for _, name := range names {
+				if retired[name.Name] {
+					restored = append(restored, path+":"+name.Name)
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return restored
+}
+
 var canonicalGoConnectClassifications = map[string]struct{}{
 	"mutation_base":      {},
 	"non_authoring_text": {},

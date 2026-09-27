@@ -45,7 +45,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					t.Fatalf("first ordinary admission: %#v", initial)
 				}
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "review/review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
+					"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
 					"payload": map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}, "idempotency_key": "accumulator-repeat",
 				})
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, started.RunID)

@@ -1,1 +1,8 @@
 stages: []
+pins:
+  inputs:
+    events: [task.requested]
+  outputs:
+    events: [task.requested]
+connect:
+  - {event: task.requested, from: ., to: worker}

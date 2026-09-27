@@ -26,10 +26,8 @@ func TestHumanRendererBankedAuthorStoryGrammar(t *testing.T) {
 	}
 	emitted := occurrenceFromDraft(testDraft(KindEventEmitted, "emitted", base.Add(52*time.Second)), 3)
 	emitted.Projection = Projection{EventType: "phrase.completed", ProducerType: "agent", ProducerID: "drafter"}
-	emitted.AuthorSafeSummary = "how are you"
 	delivered := occurrenceFromDraft(testDraft(KindDeliveryLifecycle, "delivered", base.Add(53*time.Second)), 4)
 	delivered.Projection = Projection{SubjectType: "agent", SubjectID: "telegram-sender", EventType: "phrase.completed"}
-	delivered.AuthorSafeSummary = "how are you"
 	failed := occurrenceFromDraft(testDraft(KindDeliveryLifecycle, "failed", base.Add(56*time.Second)), 5)
 	failed.RunID = "99e0d8c2-4e75-4e55-a17c-2b887c2a6f31"
 	failed.Projection = Projection{SubjectType: "agent", SubjectID: "telegram-normalizer", EventType: "message.received"}
@@ -41,8 +39,8 @@ func TestHumanRendererBankedAuthorStoryGrammar(t *testing.T) {
 	}
 	want := "19:08:09  telegram → message received (chat 123456)\n" +
 		"19:08:09  chat 123456 created · stage active\n" +
-		"19:09:01  drafter → phrase.completed \"how are you\"\n" +
-		"19:09:02  telegram-sender ✓ sent \"how are you\"\n" +
+		"19:09:01  drafter → phrase.completed\n" +
+		"19:09:02  telegram-sender ✓ sent\n" +
 		"19:09:05  telegram-normalizer ✗ failed — internal error\n" +
 		"          └ swarm logs --run 99e0d8c2-4e75-4e55-a17c-2b887c2a6f31 --level error\n"
 	if out.String() != want {
@@ -287,13 +285,14 @@ func TestHumanSubjectsDoNotExposeInternalEntityEventOrActivityIDs(t *testing.T) 
 	}
 }
 
-func TestNormalizeAuthorSafeSummaryIsSingleLineUnicodeCapped(t *testing.T) {
-	got, err := NormalizeAuthorSafeSummary("  hello\n\tworld \x00 " + strings.Repeat("界", 30))
+func TestAuthorOccurrenceProjectionHasNoPayloadPreview(t *testing.T) {
+	occurrence := occurrenceFromDraft(testDraft(KindEventEmitted, "emitted", time.Now()), 1)
+	encoded, err := json.Marshal(occurrence)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.ContainsAny(got, "\n\t\x00") || utf8.RuneCountInString(got) != 24 || !strings.HasPrefix(got, "hello world ") {
-		t.Fatalf("normalized summary = %q (%d runes)", got, utf8.RuneCountInString(got))
+	if strings.Contains(string(encoded), "author_safe_summary") {
+		t.Fatalf("retired payload preview leaked into occurrence: %s", encoded)
 	}
 }
 
@@ -302,7 +301,7 @@ func occurrenceFromDraft(draft Draft, sequence int64) Occurrence {
 		OccurrenceID: draft.OccurrenceID, Sequence: sequence, Kind: draft.Kind, Version: draft.Version,
 		Transition: draft.Transition, SourceOwner: draft.SourceOwner, SourceIdentity: draft.SourceIdentity,
 		DedupKey: draft.DedupKey, OccurredAt: draft.OccurredAt, RunID: draft.RunID, EntityID: draft.EntityID,
-		AgentID: draft.AgentID, FlowID: draft.FlowID, Scope: draft.Scope, AuthorSafeSummary: draft.AuthorSafeSummary,
+		AgentID: draft.AgentID, FlowID: draft.FlowID, Scope: draft.Scope,
 		Projection: draft.Projection, Failure: draft.Failure,
 	}
 }

@@ -39,7 +39,11 @@ type selectedForkEventFixtureStore interface {
 }
 
 func bindSemanticEventFixturePayload(event events.Event) (events.Event, error) {
-	return eventtest.AdmitPayload(event, event.RoutingSource().Route().FlowID, string(event.Type()))
+	flowID := event.RoutingSource().Route().FlowID
+	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
+		flowID = "."
+	}
+	return eventtest.AdmitPayload(event, flowID, string(event.Type()))
 }
 
 func commitSelectedForkEventOutcome(ctx context.Context, store selectedForkEventFixtureStore, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {

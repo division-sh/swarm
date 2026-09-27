@@ -1442,7 +1442,7 @@ rows:
       - kind: go_test
         name: TestEventPublishSerializesTargetRouteParam
       - kind: go_test
-        name: TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget
+        name: TestOperatorEventPublishPrivateTargetCannotAuthorizePublication
       - kind: go_test
         name: TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence
       - kind: go_test
@@ -1450,11 +1450,11 @@ rows:
       - kind: go_test
         name: TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres
     notes: >
-      #1438 adds the explicit target-route public surface for existing-run
-      event.publish. The proof covers typed CLI serialization, API validation
-      and persistence of event.target plus delivery_target_route, payload-only
-      non-authority, and served SQLite/Postgres state advance/readback through
-      the canonical event.publish/EventBus path.
+      #2304 restricts the #1438 target-route surface to selected-root public
+      inputs. Complete private target addresses and payload identity lookalikes
+      cannot authorize publication. Connected private execution retains receiver
+      resolution; the served tests must exercise root admission and actual
+      compiled connections rather than direct private input injection.
 
   - id: event_publish_dynamic_auto_emit_served_lifecycle
     surface: /v1/rpc event.publish served dynamic auto_emit_on_create lifecycle parity

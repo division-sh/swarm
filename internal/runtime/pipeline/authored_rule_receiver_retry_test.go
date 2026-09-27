@@ -42,7 +42,7 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 				})
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")
-				module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}, Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}}}}
+				module.workflowNodes = []WorkflowNode{{Node: node, Subscriptions: []events.EventType{"source.evt"}}}
 				owner := newPipelineTestDeliveryOwnerForDB(t, store.testDB())
 				observed := &authoredRuleRetryDiagnosticStore{Store: owner}
 				bus := &recordingPipelineBus{}
@@ -65,7 +65,7 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 				t.Logf("source: authored=%v rule=%s condition=%s target=%s ref=%s/%s/%s", handler.Rules[0].Authored(), handler.Rules[0].ID, handler.Rules[0].Condition, handler.Rules[0].AdvancesTo, ref.Flow(), ref.Family(), ref.SemanticPath())
 				runID := runtimecorrelation.RunIDFromContext(ctx)
 				entityID := uuid.NewString()
-				evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+				evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "source.evt", "src", "", []byte(`{}`), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), eventtest.StaticFlowRoutingSource(".", runID, entityID), time.Now().UTC())
 				dialect := authoractivityfixture.DialectPostgres
 				if store.isSQLite() {
 					dialect = authoractivityfixture.DialectSQLite

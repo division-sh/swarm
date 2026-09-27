@@ -169,7 +169,7 @@ func validateSystemNodeContractFields(node *yaml.Node) error {
 	retired := map[string]string{
 		"permissions":       "node permissions are not public node YAML authority",
 		"implementation":    "executor binding is not public node YAML authority",
-		"owned_transitions": "transition ownership is expressed through event owning_node and event_handlers",
+		"owned_transitions": "transition ownership is expressed through executable event_handlers",
 		"idempotency_table": "node idempotency table semantics are not public node YAML authority",
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {

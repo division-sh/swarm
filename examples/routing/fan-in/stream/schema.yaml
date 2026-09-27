@@ -1,5 +1,13 @@
 name: fan-in-stream
+pins:
+  inputs:
+    events: [operating.report.triggered]
+  outputs:
+    events: [operating.report.triggered]
 connect:
+  - event: operating.report.triggered
+    from: .
+    to: ingress
   - event: operating.report.requested
     from: ingress
     to: operating

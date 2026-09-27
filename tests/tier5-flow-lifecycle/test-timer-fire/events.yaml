@@ -1,4 +1,2 @@
-timer.scheduled:
-  swarm:
-    source: external
+timer.scheduled: {}
 timer.check: {}

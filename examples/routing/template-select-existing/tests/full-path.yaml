@@ -1,9 +1,9 @@
 name: select existing full authored path
 steps:
-  - publish: producer/account.setup.requested
+  - publish: account.setup.requested
     payload:
       account_id: account-1
-  - publish: producer/account.work.requested
+  - publish: account.work.requested
     payload:
       account_id: account-1
 expect:

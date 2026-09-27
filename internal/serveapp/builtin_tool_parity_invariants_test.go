@@ -51,8 +51,9 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 			}
 			bundle := testWorkflowValidationBundle()
 			bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
-				"tool.test_started": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external test"}},
+				"tool.test_started": {},
 			}
+			bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "tool.test_started"}}}}}
 			bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 				"agent-1": {
 					ID:             "agent-1",

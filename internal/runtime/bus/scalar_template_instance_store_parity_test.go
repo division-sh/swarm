@@ -198,7 +198,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			eventID := uuid.NewString()
 			eventTime := time.Now().UTC()
 			producerEntityID := uuid.NewString()
-			evt := eventtest.ExistingRunRootIngress(
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID,
 				events.EventType("producer/account.ready"),
 				"producer",
@@ -207,7 +207,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				0,
 				runID,
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
-				eventTime,
+				eventtest.StaticFlowRoutingSource("producer", "producer", producerEntityID), eventTime,
 			)
 			plan, err := eventBus.CheckPublishRecipientPlan(ctx, evt)
 			if err != nil {
@@ -236,7 +236,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {
 				t.Fatalf("duplicate descriptor calls = %d, want durable identity short-circuit", calls)
 			}
-			conflicting := eventtest.ExistingRunRootIngress(
+			conflicting := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID,
 				events.EventType("producer/account.ready"),
 				"producer",
@@ -245,7 +245,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				0,
 				runID,
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
-				eventTime,
+				evt.RoutingSource(), eventTime,
 			)
 			if err := eventBus.Publish(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("Publish conflicting duplicate error = %v, want event identity conflict", err)

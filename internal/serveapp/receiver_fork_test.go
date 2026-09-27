@@ -58,6 +58,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "receiver-fork-pause"})
 					}
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
+				} else {
+					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
+					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "empty-fork-pause"})
+					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				}
 				request := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if surface == "pending_refusal" {
@@ -66,8 +71,16 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					case <-time.After(10 * time.Second):
 						t.Fatal("missing fork frontier barrier")
 					}
-				} else if !admitted {
+				} else if !admitted && surface != "empty_snapshot_refusal" {
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, request.RunID)
+				}
+				if surface == "empty_snapshot_refusal" {
+					// A pending frontier isolates empty entity state without a later
+					// committed receiver scope taking precedence over this refusal.
+					var count int
+					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, request.RunID).Scan(&count); err != nil || count != 0 {
+						t.Fatalf("empty-snapshot fixture has %d entity rows: %v", count, err)
+					}
 				}
 				var forkRunID string
 				forkPoint := request.EventID

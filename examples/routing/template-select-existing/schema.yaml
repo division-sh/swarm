@@ -1,5 +1,16 @@
 name: template-select-existing
+pins:
+  inputs:
+    events: [account.setup.requested, account.work.requested]
+  outputs:
+    events: [account.setup.requested, account.work.requested]
 connect:
+  - event: account.setup.requested
+    from: .
+    to: producer
+  - event: account.work.requested
+    from: .
+    to: producer
   - event: account.setup
     from: producer
     to: account

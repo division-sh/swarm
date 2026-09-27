@@ -1211,7 +1211,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				evt := eventtest.RunCreatingRootIngress(
 					eventID, events.EventType(eventType), "operator", "",
 					payload, 0, runID, "",
-					handlerTestWorkflowEnvelope(".", runID, entityID), eventAt,
+					events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, pipelineNode(t, ".", "observer"), handler, workflowTriggerContext{

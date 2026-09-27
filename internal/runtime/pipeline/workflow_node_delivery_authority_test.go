@@ -129,12 +129,13 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWit
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	target := events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: entityID}
-	evt := eventtest.RunCreatingRootIngress(eventID, "producer/deploy.done", "producer", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
+	producerEntityID := uuid.NewString()
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(eventID, "producer/deploy.done", "producer", "", []byte(`{}`), 0, testPipelineRunID, "", events.EventEnvelope{
 		EntityID:     target.EntityID,
 		FlowInstance: target.FlowInstance,
-		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()},
+		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID},
 		Target:       target,
-	}, time.Now().UTC())
+	}, eventtest.StaticFlowRoutingSource("producer", "producer", producerEntityID), time.Now().UTC())
 	ctx := testAuthorActivityContext(t, runCtx)
 	seedPipelineEventRecord(t, ctx, db, evt)
 	receiverNode := pipelineNode(t, "receiver", "receiver-node")
@@ -256,7 +257,6 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 			module.workflowNodes = []WorkflowNode{{
 				Node: pipelineNode(t, ".", "node-a"), Subscriptions: []events.EventType{"source.evt"},
-				Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}},
 			}}
 			pc := newPostgresPipelineCoordinatorForTest(bus, workflowStore.testDB(), PipelineCoordinatorOptions{
 				Module:        module,
@@ -270,7 +270,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			evt := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), events.EventType("source.evt"), "src", "", []byte(`{}`), 0,
-				runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC(),
+				runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC(),
 			)
 			dialect := authoractivityfixture.DialectPostgres
 			if workflowStore.isSQLite() {
@@ -391,9 +391,6 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 	module.workflowNodes = []WorkflowNode{{
 		Node:          pipelineNode(t, ".", "node-a"),
 		Subscriptions: []events.EventType{"source.evt"},
-		Policies: map[string]WorkflowEventPolicy{
-			"source.evt": {Consume: true},
-		},
 	}}
 	pc := newPostgresPipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		DeliveryStore: newPipelineTestDeliveryOwnerForDB(t, db),
@@ -414,7 +411,7 @@ func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) e
 		0,
 		testPipelineRunID,
 		"",
-		handlerTestWorkflowEnvelope(".", testPipelineRunID, entityID),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID, EntityID: entityID}),
 		time.Now().UTC(),
 	)
 

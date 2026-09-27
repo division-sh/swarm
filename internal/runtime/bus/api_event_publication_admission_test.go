@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -16,46 +17,12 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestOrdinaryFlowAPIEventPublicationAdmissionIsExactAndNonTransferable(t *testing.T) {
+func TestOrdinaryChildHasNoPublicAPIEventPublicationEndpoint(t *testing.T) {
 	source := staticAPIEventPublicationSource()
-	endpoint, err := NewOrdinaryFlowAPIEventPublicationEndpoint(source, "child", "child/work.requested")
-	if err != nil {
-		t.Fatalf("admit exact static endpoint: %v", err)
-	}
-	if got := endpoint.Readback(); got.Kind != "ordinary_flow" || got.FlowID != "child" || got.EventType != "child/work.requested" {
-		t.Fatalf("endpoint readback = %#v, want exact child/work.requested", got)
-	}
-	if _, err := NewOrdinaryFlowAPIEventPublicationEndpoint(source, "child", "child/work.missing"); err == nil || !strings.Contains(err.Error(), "does not own") {
-		t.Fatalf("unknown event error = %v, want exact ownership rejection", err)
-	}
-
-	runID := uuid.NewString()
-	exact := eventtest.RunCreatingRootIngress(
-		uuid.NewString(), "child/work.requested", "operator", "", []byte(`{"work_id":"one"}`),
-		0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
-	)
-	admission, publicInput, err := endpoint.admit(source, exact)
-	if err != nil || publicInput != nil {
-		t.Fatalf("exact admission = %#v public=%#v err=%v", admission, publicInput, err)
-	}
-	if admission.flowID != "child" || admission.flowPath != "child" || admission.eventType != exact.Type() {
-		t.Fatalf("exact admission = %#v, want child owner", admission)
-	}
-
-	mismatch := eventtest.RunCreatingRootIngress(
-		uuid.NewString(), "sibling/work.requested", "operator", "", []byte(`{}`),
-		0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
-	)
-	if _, _, err := endpoint.admit(source, mismatch); err == nil || !strings.Contains(err.Error(), "not sibling/work.requested") {
-		t.Fatalf("cross-flow endpoint reuse error = %v, want exact event rejection", err)
-	}
-	existingRun := eventtest.OperatorInjected(
-		uuid.NewString(), "child/work.requested", "operator", "", []byte(`{}`),
-		0, uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
-	)
-	existingAdmission, publicInput, err := endpoint.admit(source, existingRun)
-	if err != nil || publicInput != nil || existingAdmission.flowID != "child" || existingAdmission.eventType != existingRun.Type() {
-		t.Fatalf("existing-run exact API admission = %#v public=%#v err=%v", existingAdmission, publicInput, err)
+	for _, event := range []string{"child/work.requested", "sibling/work.requested", "work.requested", "child/work.missing"} {
+		if _, err := NewRootInputAPIEventPublicationEndpoint(source, event); err == nil {
+			t.Fatalf("private child event %q acquired public authority", event)
+		}
 	}
 }
 
@@ -71,12 +38,23 @@ func TestRootInputAPIEventPublicationAdmissionIsExactAndClosed(t *testing.T) {
 	if _, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.missing"); err == nil || !strings.Contains(err.Error(), "does not own") {
 		t.Fatalf("unknown root-input error = %v, want exact ownership rejection", err)
 	}
-	existing := eventtest.OperatorInjected(
-		uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
+	runID := uuid.NewString()
+	existing := eventtest.OperatorInjectedWithRoutingSource(
+		uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC(),
 	)
-	admission, publicInput, err := endpoint.admit(source, existing)
-	if err != nil || publicInput != nil || admission.kind != apiEventPublicationEndpointRootInput || admission.eventType != existing.Type() {
-		t.Fatalf("root-input API admission = %#v public=%#v err=%v", admission, publicInput, err)
+	admission, _, err := endpoint.admit(source, existing)
+	if err != nil || admission.eventType != existing.Type() {
+		t.Fatalf("root-input API admission = %#v err=%v", admission, err)
+	}
+	for _, wrongSource := range []events.RoutingSource{
+		events.NoRoutingSource(),
+		eventtest.RootRoutingSource(uuid.NewString()),
+		eventtest.StaticFlowRoutingSource("child", "child", uuid.NewString()),
+	} {
+		forged := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, wrongSource, time.Now().UTC())
+		if _, _, err := endpoint.admit(source, forged); err == nil || !strings.Contains(err.Error(), "exact root routing source") {
+			t.Fatalf("foreign or absent source accepted: %#v, %v", wrongSource, err)
+		}
 	}
 	child := eventtest.ChildForProducerWithRoutingSource(
 		uuid.NewString(), "thing.created", eventtest.Producer(events.EventProducerNode, "child"), "", []byte(`{}`), 0,
@@ -86,61 +64,31 @@ func TestRootInputAPIEventPublicationAdmissionIsExactAndClosed(t *testing.T) {
 	if _, _, err := endpoint.admit(source, child); err == nil || !strings.Contains(err.Error(), "root-ingress or operator-injected") {
 		t.Fatalf("child root-input endpoint error = %v, want admission-class rejection", err)
 	}
-	if got, want := int(apiEventPublicationEndpointKindCount-1), 3; got != want {
-		t.Fatalf("API endpoint variants = %d, want %d closed variants", got, want)
-	}
 }
 
-func TestTemplateAPIEventPublicationEndpointRejectsForgedCensusFacts(t *testing.T) {
+func TestPublicInputAuthorityCannotTargetPrivateChild(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
-	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy.done")
-	endpoint, ok := association.Endpoint()
-	if !ok {
-		t.Fatalf("resolve template endpoint: %v", association.Err())
-	}
-	if _, err := NewTemplateAPIEventPublicationEndpoint(source, endpoint); err != nil {
-		t.Fatalf("seal exact template endpoint: %v", err)
-	}
-	forged := endpoint
-	forged.FlowID = "unrelated"
-	if _, err := NewTemplateAPIEventPublicationEndpoint(source, forged); err == nil || !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("forged template endpoint error = %v, want census mismatch", err)
+	for _, event := range []string{"deploy.done", "consumer/deploy.done"} {
+		if _, err := NewRootInputAPIEventPublicationEndpoint(source, event); err == nil {
+			t.Fatalf("private template input %q acquired public authority", event)
+		}
 	}
 }
 
-func TestOrdinaryFlowAPIEventPublicationAdmissionOwnsOnlyItsExactNodeRoutes(t *testing.T) {
+func TestAPIEventPublicationRequiresEndpointBeforePlanningOrMutation(t *testing.T) {
 	source := staticAPIEventPublicationSource()
-	endpoint, err := NewOrdinaryFlowAPIEventPublicationEndpoint(source, "child", "child/work.requested")
-	if err != nil {
-		t.Fatalf("admit exact static endpoint: %v", err)
-	}
 	store := newTargetRouteMemoryStore()
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
+		t.Fatal(err)
 	}
-	evt := eventtest.RunCreatingRootIngress(
-		uuid.NewString(), "child/work.requested", "operator", "", []byte(`{"work_id":"one"}`),
-		0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
-	)
-	admission, _, err := endpoint.admit(source, evt)
-	if err != nil {
-		t.Fatalf("admit publication event: %v", err)
+	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "child/work.requested", "operator", "", []byte(`{"work_id":"one"}`),
+		0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	if _, err := eventBus.CheckAPIEventPublishRecipientPlan(context.Background(), evt, nil); err == nil {
+		t.Fatal("missing endpoint acquired a public recipient plan")
 	}
-	plan, err := eventBus.CheckPublishRecipientPlan(withAPIEventPublicationAdmission(context.Background(), admission), evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan with exact admission: %v", err)
-	}
-	routes := plan.DeliveryRoutes
-	if len(routes) != 1 || routes[0].Recipient.LocalID() != "child-worker" || !routes[0].Target.EntitylessReceiver() {
-		t.Fatalf("delivery routes = %#v, want one entityless child-worker", routes)
-	}
-	if target := routes[0].Target.Route(); target.FlowID != "child" || target.FlowInstance != "child" || target.EntityID != "" {
-		t.Fatalf("delivery target = %#v, want exact child blueprint without borrowed entity", target)
-	}
-
-	if _, err := eventBus.CheckPublishRecipientPlan(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "without exact same-instance, explicit-target, or compiled-connect authority") {
-		t.Fatalf("unadmitted plan error = %v, want generic subscription rejection", err)
+	if _, _, err := eventBus.PublishAPIEventAcknowledged(context.Background(), evt, nil, apiidempotency.Request{}, apiidempotency.Completion{}); err == nil || !strings.Contains(err.Error(), "requires an admitted endpoint") {
+		t.Fatalf("missing endpoint must fail before store mutation: %v", err)
 	}
 }
 
@@ -178,4 +126,30 @@ func staticAPIEventPublicationSource() semanticview.Source {
 		panic(err)
 	}
 	return semanticview.Wrap(bundle)
+}
+
+func acknowledgedRootInputEndpoint(t testing.TB) (semanticview.Source, APIEventPublicationEndpoint) {
+	t.Helper()
+	schema := runtimecontracts.FlowSchemaDocument{
+		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
+			EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.requested"}},
+		}},
+	}
+	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: schema}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &schema,
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": schema},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "task.requested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source, endpoint
 }

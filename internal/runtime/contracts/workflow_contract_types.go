@@ -190,32 +190,6 @@ func FlowInputProducerEvidenceKindIsProof(kind string) bool {
 	}
 }
 
-func (r FlowInputProducerResolution) BoundaryEvidence() []FlowInputProducerEvidence {
-	out := make([]FlowInputProducerEvidence, 0)
-	for _, evidence := range r.Evidence {
-		switch strings.TrimSpace(evidence.Kind) {
-		case FlowInputProducerBoundaryExternalIngress,
-			FlowInputProducerBoundaryIntrinsicIngress,
-			FlowInputProducerBoundaryParentConnect,
-			FlowInputProducerBoundaryHarnessInjection:
-			out = append(out, evidence)
-		}
-	}
-	return out
-}
-
-func (r FlowInputProducerResolution) HasAmbiguousBoundaryEvidence() bool {
-	seen := map[string]struct{}{}
-	for _, evidence := range r.BoundaryEvidence() {
-		key := strings.TrimSpace(evidence.Kind) + "|" + strings.TrimSpace(evidence.FlowID) + "|" + strings.TrimSpace(evidence.Pin) + "|" + strings.TrimSpace(evidence.EventType)
-		if key == "" {
-			continue
-		}
-		seen[key] = struct{}{}
-	}
-	return len(seen) > 1
-}
-
 func (r FlowInputProducerResolution) HasConflictingHarnessEvidence() bool {
 	if !r.HasEvidenceKind(FlowInputProducerBoundaryHarnessInjection) {
 		return false
@@ -986,10 +960,6 @@ type FlowVariable struct {
 	IsOptional  bool              `yaml:"-"`
 	Refinements SchemaRefinements `yaml:"-"`
 }
-type EventEmitterRef struct {
-	AgentID string `yaml:"agent_id"`
-	NodeID  string `yaml:"node_id"`
-}
 type EventPayloadSpec struct {
 	Type       string                    `yaml:"type"`
 	Properties map[string]EventFieldSpec `yaml:"properties"`
@@ -1330,18 +1300,17 @@ type FlowInputPinSource uint8
 
 const (
 	FlowInputPinSourceNone FlowInputPinSource = iota
-	FlowInputPinSourceExternal
 	FlowInputPinSourceHarness
 )
 
 func ParseFlowInputPinSource(raw string) (FlowInputPinSource, error) {
 	switch raw {
 	case "external":
-		return FlowInputPinSourceExternal, nil
+		return FlowInputPinSourceNone, fmt.Errorf("RETIRED: input event pin source: external is unsupported; selected-root inputs are public, private inputs require connections or an admitted provider ingress")
 	case "harness":
 		return FlowInputPinSourceHarness, nil
 	default:
-		return FlowInputPinSourceNone, fmt.Errorf("input event pin source must be %q or %q", "external", "harness")
+		return FlowInputPinSourceNone, fmt.Errorf("input event pin source must be %q", "harness")
 	}
 }
 
@@ -1349,8 +1318,6 @@ func FlowInputPinSourceCode(source FlowInputPinSource) string {
 	switch source {
 	case FlowInputPinSourceNone:
 		return ""
-	case FlowInputPinSourceExternal:
-		return "external"
 	case FlowInputPinSourceHarness:
 		return "harness"
 	default:
@@ -1360,7 +1327,7 @@ func FlowInputPinSourceCode(source FlowInputPinSource) string {
 
 func (s FlowInputPinSource) Empty() bool { return s == FlowInputPinSourceNone }
 func (s FlowInputPinSource) Valid() bool {
-	return s == FlowInputPinSourceNone || s == FlowInputPinSourceExternal || s == FlowInputPinSourceHarness
+	return s == FlowInputPinSourceNone || s == FlowInputPinSourceHarness
 }
 
 type FlowOutputSink uint8
@@ -1669,74 +1636,9 @@ type SystemNodeEventHandler struct {
 	Clear            *ClearSpec               `yaml:"clear"`
 }
 type EventCatalogEntry struct {
-	Swarm               EventSwarmMetadata `yaml:"swarm"`
-	BusinessKeyField    string             `yaml:"key"`
-	Note                string             `yaml:"_note"`
-	Emitter             EventEmitterRef    `yaml:"emitter"`
-	EmitterType         string             `yaml:"emitter_type"`
-	Producer            []string           `yaml:"producer"`
-	AlternateEmitters   []string           `yaml:"alternate_emitters"`
-	Consumer            []string           `yaml:"consumer"`
-	ConsumerType        []string           `yaml:"consumer_type"`
-	Source              string             `yaml:"_source"`
-	Status              string             `yaml:"_status"`
-	Intercepted         bool               `yaml:"intercepted"`
-	Passthrough         bool               `yaml:"passthrough"`
-	RuntimeHandling     string             `yaml:"runtime_handling"`
-	OwningNode          string             `yaml:"owning_node"`
-	DeliveryChannel     string             `yaml:"delivery_channel"`
-	Payload             EventPayloadSpec   `yaml:"payload"`
-	AuthorSummaryField  string             `yaml:"author_summary_field,omitempty"`
+	BusinessKeyField    string           `yaml:"key"`
+	Payload             EventPayloadSpec `yaml:"payload"`
 	admissionProvenance map[string]EffectiveValueProvenance
-}
-type EventSwarmMetadata struct {
-	Note     string   `yaml:"note,omitempty"`
-	Source   string   `yaml:"source,omitempty"`
-	Producer []string `yaml:"producer,omitempty"`
-	Consumer []string `yaml:"consumer,omitempty"`
-	Status   string   `yaml:"status,omitempty"`
-}
-
-type EventConsumerBoundary uint8
-
-const (
-	EventConsumerBoundaryNone EventConsumerBoundary = iota
-	EventConsumerBoundaryExternal
-)
-
-func EventConsumerBoundaryCode(b EventConsumerBoundary) string {
-	if b == EventConsumerBoundaryExternal {
-		return "external"
-	}
-	return ""
-}
-
-func (e EventCatalogEntry) SwarmNote() string {
-	return strings.TrimSpace(e.Swarm.Note)
-}
-
-func (e EventCatalogEntry) SwarmSource() string {
-	return strings.TrimSpace(e.Swarm.Source)
-}
-
-func (e EventCatalogEntry) SwarmProducer() []string {
-	return normalizeStrings(e.Swarm.Producer)
-}
-
-func (e EventCatalogEntry) SwarmConsumer() []string {
-	return normalizeStrings(e.Swarm.Consumer)
-}
-
-func (e EventCatalogEntry) AcceptedConsumerBoundary() EventConsumerBoundary {
-	consumers := e.SwarmConsumer()
-	if len(consumers) != 1 || !strings.EqualFold(strings.TrimSpace(consumers[0]), EventConsumerBoundaryCode(EventConsumerBoundaryExternal)) {
-		return EventConsumerBoundaryNone
-	}
-	return EventConsumerBoundaryExternal
-}
-
-func (e EventCatalogEntry) SwarmStatus() string {
-	return strings.TrimSpace(e.Swarm.Status)
 }
 
 type AgentRegistryEntry struct {

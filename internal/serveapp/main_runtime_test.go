@@ -1280,7 +1280,7 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	})
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, "postgres", initial.RunID, initial.EventID, probe)
 	hold := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "hold/item.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID,
+		"event_name": "item.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID,
 		"payload": map[string]any{"note": "hold session writer"}, "idempotency_key": "issue-1927-cleanup-hold-" + uuid.NewString(),
 	})
 	var sessionID string
@@ -1978,7 +1978,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	}
 	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, initial.RunID)
 	ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "fork-source/fork.source_message",
+		"event_name":      "fork.source_message",
 		"run_id":          initial.RunID,
 		"source_event_id": initial.EventID,
 		"payload":         map[string]any{"note": "materialize source agent"},
@@ -2401,10 +2401,14 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 
 func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend servedparity.Backend, sourceRoot string, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
-	return startServedTestSetupEntitiesProofRuntimeWithWorkspace(t, backend, sourceRoot, false, hooks...)
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, false, hooks...)
 }
 
 func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
+	return startServedTestSetupEntitiesProofRuntimeConfigured(t, backend, sourceRoot, realWorkspace, hooks...)
+}
+
+func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	forkOptions := captureServedForkRuntimeOptions(t)
 	configureWorkspace := func() {
@@ -2438,8 +2442,9 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		var servedDB *sql.DB
+		var servedSQLite *store.SQLiteRuntimeStore
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
-			servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
+			servedDB, _, servedSQLite = selectedRuntimeStoreForTest(t, persistence)
 		})
 		configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 		if realWorkspace {
@@ -2459,9 +2464,9 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
 		configureWorkspace()
@@ -2483,7 +2488,7 @@ func startServedTestSetupEntitiesProofRuntimeWithWorkspace(t *testing.T, backend
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}
@@ -3221,7 +3226,7 @@ func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string) {
 	t.Helper()
 	root := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "producer/validation.triggered",
+		"event_name":      "validation.triggered",
 		"bundle_hash":     bundleHash,
 		"payload":         map[string]any{"candidate": "candidate-1"},
 		"idempotency_key": "issue-2025-" + backend,
@@ -5120,26 +5125,18 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 		"--payload-json", `{"note":"approved-target"}`,
 		"--idempotency-key", "issue-1438-" + backend + "-target",
 	})
-	if code != 0 {
-		t.Fatalf("target-route event publish code=%d stderr=%s stdout=%s", code, targetStderr, targetStdout)
+	if code == 0 || !strings.Contains(targetStderr+targetStdout, apiv1.EventNotDeclaredCode) {
+		t.Fatalf("private target must be refused: code=%d stderr=%s stdout=%s", code, targetStderr, targetStdout)
 	}
-	targeted := parseServedEventPublishOutput(t, targetStdout)
-	targetEventID := targeted["event_id"]
-	if targeted["run_id"] != runID || targeted["new_run_created"] != "false" || targeted["deliveries"] == "0" || targetEventID == "" {
-		t.Fatalf("target-route event publish fields = %#v, want selected existing run with delivery", targeted)
+	// The selected receiver exists and has executed its creation event, but its
+	// address must never grant public write access to a private input.
+	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
+	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
+	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, "issue-1438-"+backend+"-target"); got != 0 {
+		t.Fatalf("%s rejected private target wrote %d events", backend, got)
 	}
-	requireServedEventPublishTargetRouteRow(t, db, backend, targetEventID, "operating/opco.product_review_requested", targetFlowInstance, entityID)
-	requireServedEventPublishDeliveryTargetRoute(t, db, backend, targetEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), targetFlowInstance, entityID)
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, targetEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "ready")
-	requireServedEntityReadback(t, endpoint, runID, entityID, "ready")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
-	lifecycleNode := identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key()
-	requireServedEventReadback(t, endpoint, targetEventID, runID, entityID, "operating/opco.product_review_requested", lifecycleNode)
-	requireServedTraceReadback(t, endpoint, runID, targetEventID, "operating/opco.product_review_requested", lifecycleNode)
-
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 1 {
-		t.Fatalf("%s target-route idempotency rows = %d, want 1", backend, got)
+	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 0 {
+		t.Fatalf("%s rejected private target wrote %d receipts", backend, got)
 	}
 }
 

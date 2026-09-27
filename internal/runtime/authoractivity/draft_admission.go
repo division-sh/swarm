@@ -2,7 +2,6 @@ package authoractivity
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 )
@@ -23,10 +22,6 @@ func AdmitDraft(ctx context.Context, draft Draft) (Draft, error) {
 		return Draft{}, err
 	}
 	draft.Scope = scope
-	draft.AuthorSafeSummary, err = NormalizeAuthorSafeSummary(draft.AuthorSafeSummary)
-	if err != nil {
-		return Draft{}, fmt.Errorf("normalize author activity summary: %w", err)
-	}
 	if err := ValidateDraft(draft); err != nil {
 		return Draft{}, err
 	}
@@ -48,7 +43,7 @@ func DraftFromOccurrence(occurrence Occurrence) Draft {
 		SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity, DedupKey: occurrence.DedupKey,
 		OccurredAt: occurrence.OccurredAt, RunID: occurrence.RunID, EntityID: occurrence.EntityID,
 		AgentID: occurrence.AgentID, FlowID: occurrence.FlowID, Scope: occurrence.Scope,
-		AuthorSafeSummary: occurrence.AuthorSafeSummary, Projection: occurrence.Projection,
-		Failure: occurrence.Failure,
+		Projection: occurrence.Projection,
+		Failure:    occurrence.Failure,
 	}
 }

@@ -1,0 +1,6 @@
+{
+  "Replace": {
+    "internal/runtime/cataloge2e/selected_fork_readiness_matrix_test.go": "internal/runtime/cataloge2e/testdata/future_capabilities/connected_fork_readiness_success_test.go.txt",
+    "internal/runtime/testfixtures/canonicalrouting/selected_fork_readiness.go": "internal/runtime/cataloge2e/testdata/future_capabilities/connected_fork_readiness_fixture.go.txt"
+  }
+}

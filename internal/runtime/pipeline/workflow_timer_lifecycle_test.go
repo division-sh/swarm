@@ -79,7 +79,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{
 		FlowID: bundle.WorkflowName(), FlowInstance: runID, EntityID: entityID,
 	})
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
 		events.EventType("child/task.done"),
 		"cataloge2e",
@@ -89,6 +89,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		testPipelineRunID,
 		"",
 		envelope,
+		eventtest.StaticFlowRoutingSource("child", "child", entityID),
 		time.Now().UTC(),
 	)
 
@@ -211,7 +212,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	completionEnvelope = events.EnvelopeForTargetRoute(completionEnvelope, events.RouteIdentity{
 		FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: entityID,
 	})
-	completion := eventtest.RunCreatingRootIngress(
+	completion := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(),
 		events.EventType("work.completed"),
 		"cataloge2e",
@@ -221,6 +222,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		testPipelineRunID,
 		"",
 		completionEnvelope,
+		eventtest.StaticFlowRoutingSource("child", "child", entityID),
 		time.Now().UTC(),
 	)
 
@@ -294,7 +296,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		testPipelineRunID,
 		"",
 		events.EnvelopeForTargetRoute(
-			handlerTestWorkflowEnvelope(bundle.WorkflowName(), testPipelineRunID, entityID),
+			events.EventEnvelope{},
 			events.RouteIdentity{FlowID: bundle.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: entityID},
 		),
 		time.Now().UTC(),
@@ -306,8 +308,8 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Intercept: %v", err)
 	}
-	if !passThrough {
-		t.Fatal("expected root-local work.completed to remain visible downstream")
+	if passThrough {
+		t.Fatal("expected the exact parent-listener delivery to be consumed without event-wide passthrough")
 	}
 	if len(emitted) != 0 {
 		t.Fatalf("emitted = %#v, want no retired dead output", emitted)

@@ -36,10 +36,11 @@ const (
 var goldenSmokeCandidateIDs = []string{"alpha", "beta"}
 
 type goldenWorkloadOptions struct {
-	lifecycleBinary   string
-	candidateIDs      []string
-	processGOMAXPROCS int
-	runDeadline       time.Duration
+	lifecycleBinary     string
+	candidateIDs        []string
+	processGOMAXPROCS   int
+	runDeadline         time.Duration
+	publicBoundaryProof bool
 }
 
 func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
@@ -604,6 +605,10 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	process := start()
 	bundleHash := goldenServedBundleHash(t, process.rpc, "mock_only")
+	if options.publicBoundaryProof {
+		assertSelectedRootRejectsPrivatePublication(t, process, bundleHash, binaryPath, projectRoot, configOperand, tokenOperand, env,
+			map[string]any{"candidate_id": "must-not-create"}, "candidate.requested", "candidate/candidate.requested", "scout/scout.requested")
+	}
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, options.candidateIDs)
 	var preRestartRuntimeLog *goldenRuntimeLog
 	if restart {
@@ -616,6 +621,9 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, runDeadline)
 	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog)
+	if options.publicBoundaryProof {
+		assertSelectedRootConnectedReadbacks(t, process, runID, binaryPath, projectRoot, configOperand, tokenOperand, env)
+	}
 }
 
 func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {

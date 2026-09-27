@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -28,19 +29,13 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 		for _, change := range []string{"valid", "runtime_replacement", "submission_failure", "selected_source_cleanup", "original_source_cleanup", "reconstructed_store", "terminal_run", "inactive", "termination_time", "wrong_entity", "wrong_type", "wrong_workflow", "wrong_mode", "wrong_version", "config", "missing_readiness", "readiness_run", "readiness_mode", "agent_revision"} {
 			t.Run(string(backend)+"/"+change, func(t *testing.T) {
 				cleanupFailure := change == "selected_source_cleanup" || change == "original_source_cleanup"
-				root := selectedForkReadinessCatalogFixture(t, 1, "agent")
+				root := localReadinessFixture(t, 1, "agent")
 				h := newRuntimeHarnessForBackend(t, root, backend, true)
 				selected := runScopedCatalogStore(t, h)
 				const path = "worker-flow/worker-001"
-				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				entity := eventtest.UUID("run-scoped-selected-fork-worker")
 				ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
-				if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "recovered readiness proof", ControlledBy: "cataloge2e"}); err != nil {
-					t.Fatal(err)
-				}
-				event := catalogRunScopedWorkerReadyEvent(t, catalogRuntimeRunID, path, entity, uuid.NewString())
-				if err := h.rt.Bus.PublishAndWait(ctx, event); err != nil {
-					t.Fatal(err)
-				}
+				frontierID := activateLocalReadinessFrontier(t, ctx, h, "worker.ready")
 				var sourceStore interface {
 					storetest.DurableDataCatalogStore
 					forkexecution.SourceArtifactSelectedContractSourceStore
@@ -54,7 +49,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				cfg := testRuntimeConfig()
 				cfg.LLM.Backend = "anthropic"
 				options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg)
-				staged := stageCatalogSelectedContractFork(t, ctx, forkStore, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, options, catalogRuntimeRunID, event.ID())
+				staged := stageCatalogSelectedContractFork(t, ctx, forkStore, selectedContractExecutionOwnerForCatalogHarness(t, h), loader, selection, options, catalogRuntimeRunID, frontierID)
 				child := staged.ForkRunID
 				readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, child, flowidentity.RouteForInstancePath(path))
 				if err != nil || !found || readiness.RunStatus != runfork.RunForkMaterializedStatus || !readiness.Eligible() {

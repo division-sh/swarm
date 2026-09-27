@@ -17,7 +17,7 @@ func TestExecutableNodeSemanticScopeUsesExactFilesystemFlow(t *testing.T) {
 			Paths:  FlowContractPaths{FlowPath: "orders", NodesFile: "orders/nodes.yaml"},
 			Path:   "orders",
 			Nodes:  map[string]SystemNodeContract{"shared": node},
-			Events: map[string]EventCatalogEntry{"task.start": {Note: "input"}, "task.done": {Note: "output"}},
+			Events: map[string]EventCatalogEntry{"task.start": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"input": {Type: "text"}}}}, "task.done": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"output": {Type: "text"}}}}},
 			Policy: PolicyDocument{Values: map[string]PolicyValue{"flow_only": {Value: "flow"}}},
 		}},
 	}
@@ -47,7 +47,7 @@ func TestExecutableNodeSemanticScopeUsesExactFilesystemFlow(t *testing.T) {
 	if got := bundle.ResolveExecutableNodeEventReference(ref, "task.done"); got != "orders/task.done" {
 		t.Fatalf("event reference = %q, want orders/task.done", got)
 	}
-	if entry, key, ok := bundle.ResolveExecutableNodeEventCatalogEntry(ref, "task.done"); !ok || key != "orders/task.done" || entry.Note != "output" {
+	if entry, key, ok := bundle.ResolveExecutableNodeEventCatalogEntry(ref, "task.done"); !ok || key != "orders/task.done" || entry.Payload.Properties["output"].Type != "text" {
 		t.Fatalf("flow catalog = key:%q entry:%#v ok:%v", key, entry, ok)
 	}
 }

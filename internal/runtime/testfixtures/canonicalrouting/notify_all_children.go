@@ -156,8 +156,6 @@ auto_emit_on_create:
   account_id: text
   command: text
 portfolio.notify.completed:
-  swarm:
-    consumer: external
   total: integer
   succeeded: integer
   dead_lettered: integer
@@ -169,24 +167,25 @@ portfolio.notify.completed:
 `, `      - account.notify.requested
       - portfolio.notify.completed
 `)
+		applyClosedReplacement(t, ownerNodes, "              canceled: join.dispositions.canceled\n", "              canceled: join.dispositions.canceled\n    portfolio.notify.completed: {}\n")
 	}
 	if opts.NumericRegistrationRows {
 		// Keep row fields addressable under the compiled structural-type contract.
 		// gem_score is deliberately JSON so hostile values reach emitted-schema admission.
-		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
+		writeClosedVariantFile(t, root, "types.yaml", `types:
   NumericAccount:
     account_id: text
     eng_roles: integer
     gem_score: json
     external_id: text?
 `)
-		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `portfolio.opened:
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `portfolio.opened:
   portfolio_id: text
 `, `portfolio.opened:
   portfolio_id: text
   threshold: integer
 `)
-		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `  account_ids: "[text]"
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `  account_ids: "[text]"
 `, `  account_ids: "[NumericAccount]"
 `)
 		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
@@ -297,13 +296,6 @@ portfolio.notify.completed:
     from: portfolio
     to: account
 `, "")
-			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
-  key: account_id
-`, `account.registered:
-  swarm:
-    consumer: external
-  key: account_id
-`)
 		}
 		if opts.NumericInternalSettlement {
 			applyClosedReplacement(t, connectFile, `  - event: account.registered
@@ -320,7 +312,7 @@ portfolio-coordinator:
 `)
 		}
 		if opts.RegistrationUUIDField {
-			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
+			applyClosedReplacement(t, filepath.Join(root, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
 			applyClosedReplacement(t, ownerNodes, `            gem_score: ${account.gem_score}
             eligible: ${entity.threshold >= 70}
 `, `            gem_score: ${account.gem_score}

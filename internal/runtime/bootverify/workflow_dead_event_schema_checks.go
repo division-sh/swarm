@@ -25,7 +25,7 @@ type deadEventSchemaUsage struct {
 	fanOutEmit         int
 	autoEmitOnCreate   bool
 	externalSource     bool
-	externalConsumer   bool
+	rootOutput         bool
 	connectOutputs     int
 	connectInputs      int
 }
@@ -40,7 +40,7 @@ func (u deadEventSchemaUsage) hasAny() bool {
 		u.fanOutEmit > 0 ||
 		u.autoEmitOnCreate ||
 		u.externalSource ||
-		u.externalConsumer ||
+		u.rootOutput ||
 		u.connectOutputs > 0 ||
 		u.connectInputs > 0
 }
@@ -66,7 +66,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 			CheckID:  "semantic_drift_dead_event_schema",
 			Severity: "warning",
 			Message: fmt.Sprintf(
-				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- Resolver-backed input source or non-input source metadata: %s\n- External consumer metadata (swarm.consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n- Parent connect outputs: %d\n- Parent connect inputs: %d\n\nIf this event is no longer used, remove it from %s.\nIf it is produced outside this flow, add input-pin source: external for true ingress, a parent connect, or non-input swarm.source/swarm.consumer metadata as appropriate. For a validation fixture only, set source: harness on the input pin; it will remain non-production-valid.",
+				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- Declared input or provider source: %s\n- Public root output: %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n- Parent connect outputs: %d\n- Parent connect inputs: %d\n\nIf this event is no longer used, remove it from %s.\nIf it is produced outside this flow, declare an actual provider ingress or an explicit parent connection; select this directory as the root for public input admission. For a validation fixture only, set source: harness on the input pin; it will remain non-production-valid.",
 				decl.Canonical,
 				fileLabel,
 				usage.handlerEmits,
@@ -75,7 +75,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 				usage.agentSubscriptions,
 				usage.timerReferences,
 				yesNoLocal(usage.externalSource),
-				yesNoLocal(usage.externalConsumer),
+				yesNoLocal(usage.rootOutput),
 				usage.fanOutEmit,
 				yesNoLocal(usage.autoEmitOnCreate),
 				usage.connectOutputs,
@@ -117,8 +117,8 @@ type deadEventDeclaration struct {
 
 func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) deadEventSchemaUsage {
 	usage := deadEventSchemaUsage{
-		externalSource:   c.deadEventSourceRole(decl),
-		externalConsumer: deadEventExternalConsumer(decl.Entry),
+		externalSource: c.deadEventSourceRole(decl),
+		rootOutput:     eventIsPublicRootOutput(c.source, semanticview.ResolveFlowEventProof(c.source, decl.FlowID, decl.Canonical)),
 	}
 
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
@@ -180,15 +180,17 @@ func deadEventSameScope(a, b string) bool {
 	return strings.TrimSpace(a) == strings.TrimSpace(b)
 }
 
+func endpointMatchesDeadEventDeclaration(endpoint semanticview.AuthoredEventEndpoint, decl deadEventDeclaration) bool {
+	return eventidentity.Normalize(endpoint.Event.Canonical) == eventidentity.Normalize(decl.Canonical) &&
+		deadEventSameScope(decl.FlowID, endpoint.FlowID)
+}
+
 func (c *checkerContext) deadEventSourceRole(decl deadEventDeclaration) bool {
 	if resolution, ok := c.resolveDeclaredInputProducerSource(decl.FlowID, decl.Canonical); ok {
 		return resolution.HasEvidence()
 	}
-	return nonInputEventMetadataProducerSource(decl.Entry)
-}
-
-func deadEventExternalConsumer(entry runtimecontracts.EventCatalogEntry) bool {
-	return entry.AcceptedConsumerBoundary() == runtimecontracts.EventConsumerBoundaryExternal
+	event := semanticview.ResolveFlowEventProof(c.source, decl.FlowID, decl.Canonical)
+	return c.source.SemanticCapabilities().HasProviderIngressEvent(decl.FlowID, event.Local)
 }
 
 func deadEventSchemaFileLabel(path, flowID string) string {

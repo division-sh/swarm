@@ -99,46 +99,14 @@ func PersistedEventDraft(ctx context.Context, resolver EventDescriptorResolver, 
 	if descriptor.Disposition == runtimeauthoractivity.StoryDifferent {
 		return runtimeauthoractivity.Draft{}, false, nil
 	}
-	summary, err := AuthorSafeEventSummary(evt.Payload(), descriptor.AuthorSummaryField)
-	if err != nil {
-		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q author summary: %w", name, err)
-	}
 	return runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindEventEmitted, Transition: "emitted",
 		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "emit:" + evt.ID(),
 		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), EntityID: evt.EntityID(), FlowID: evt.FlowInstance(),
-		AuthorSafeSummary: summary,
 		Projection: runtimeauthoractivity.Projection{
 			EventType: name, ProducerType: strings.TrimSpace(producedByType), ProducerID: strings.TrimSpace(producedBy),
 		},
 	}, true, nil
-}
-
-func AuthorSafeEventSummary(payload []byte, field string) (string, error) {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return "", nil
-	}
-	var object map[string]any
-	decoder := json.NewDecoder(strings.NewReader(string(payload)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&object); err != nil {
-		return "", fmt.Errorf("decode declared summary field %q: %w", field, err)
-	}
-	value, ok := object[field]
-	if !ok || value == nil {
-		return "", nil
-	}
-	switch typed := value.(type) {
-	case string:
-		return runtimeauthoractivity.NormalizeAuthorSafeSummary(typed)
-	case json.Number:
-		return runtimeauthoractivity.NormalizeAuthorSafeSummary(typed.String())
-	case bool:
-		return runtimeauthoractivity.NormalizeAuthorSafeSummary(strconv.FormatBool(typed))
-	default:
-		return "", fmt.Errorf("declared summary field %q must be scalar", field)
-	}
 }
 
 func RecordInbound(ctx context.Context, story runtimeauthoractivity.Mutation, evt events.Event, provider string, projection runtimeauthoractivity.InboundProjection) error {
@@ -149,8 +117,7 @@ func RecordInbound(ctx context.Context, story runtimeauthoractivity.Mutation, ev
 		Kind: runtimeauthoractivity.KindInboundReceived, Transition: "received",
 		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "inbound:" + evt.ID(),
 		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), EntityID: evt.EntityID(), FlowID: evt.FlowInstance(),
-		AuthorSafeSummary: projection.Summary,
-		Projection:        runtimeauthoractivity.Projection{SubjectType: "entity", SubjectID: evt.EntityID(), Provider: strings.TrimSpace(provider), AuthorSubjectType: projection.SubjectType, AuthorSubjectID: projection.SubjectID},
+		Projection: runtimeauthoractivity.Projection{SubjectType: "entity", SubjectID: evt.EntityID(), Provider: strings.TrimSpace(provider), AuthorSubjectType: projection.SubjectType, AuthorSubjectID: projection.SubjectID},
 	}
 	return story.Record(ctx, draft)
 }

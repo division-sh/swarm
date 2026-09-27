@@ -112,6 +112,13 @@ func (h *exactWorkflowJoinHarness) restart() {
 	h.pc = h.newCoordinator()
 }
 
+func exactJoinRoutingSource(flowID, path, entityID string) events.RoutingSource {
+	if flowID == "" {
+		return eventtest.RootRoutingSource(path)
+	}
+	return eventtest.ConcreteTemplateRoutingSource(flowID, path, entityID)
+}
+
 func (h *exactWorkflowJoinHarness) envelope() events.EventEnvelope {
 	h.t.Helper()
 	if h.flowID == "" {
@@ -263,12 +270,12 @@ func deliverExactJoinMember(t *testing.T, pc *PipelineCoordinator, store *workfl
 	t.Helper()
 	envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, scope.entityID)
 	if scope.declarationFlowID != "" {
-		envelope = workflowJoinTestEnvelope(scope.path, scope.entityID)
+		envelope = handlerTestWorkflowEnvelope(scope.declarationFlowID, scope.path, scope.entityID)
 	}
-	event := eventtest.RunCreatingRootIngress(
+	event := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(), events.EventType("item.completed"), "operator", "",
 		mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", envelope, time.Now().UTC(),
+		runtimecorrelation.RunIDFromContext(ctx), "", envelope, exactJoinRoutingSource(scope.declarationFlowID, scope.path, scope.entityID), time.Now().UTC(),
 	)
 	persistExactJoinEvent(t, store, ctx, event)
 	target := events.RouteIdentity{FlowID: scope.executionFlowID, FlowInstance: scope.path, EntityID: scope.entityID}
@@ -541,7 +548,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 					if scope.flowID != "" {
 						envelope = workflowJoinTestEnvelope(path, entityID)
 					}
-					event := eventtest.RunCreatingRootIngress(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", envelope, time.Now().UTC())
+					event := eventtest.RunCreatingRootIngressWithRoutingSource(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", envelope, exactJoinRoutingSource(scope.flowID, path, entityID), time.Now().UTC())
 					_, err := coordinator.executeNodeContractHandler(ctx, joinNode, handler, workflowTriggerContext{Event: event, State: mustCurrentWorkflowState(t, coordinator, ctx, route, entityID), HandlerEventKey: "item.completed"}, false)
 					return err
 				}
@@ -881,10 +888,10 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 					if handler.Join == nil || handler.Loop == nil {
 						t.Fatal("retained-member fixture requires the admitted join and loop handler")
 					}
-					arrival := eventtest.RunCreatingRootIngress(
+					arrival := eventtest.RunCreatingRootIngressWithRoutingSource(
 						uuid.NewString(), events.EventType("item.completed"), "operator", "",
 						mustJSON(map[string]any{"member_id": "a", "result": map[string]any{"value": "retained"}, "revision_id": loop.RevisionID}), 0,
-						runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), time.Now().UTC(),
+						runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), time.Now().UTC(),
 					)
 					persistExactJoinEvent(t, h.store, h.ctx, arrival)
 					if _, err := h.pc.executeNodeContractHandler(h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
@@ -897,11 +904,11 @@ func runRootAndFlowWorkflowJoinLoopSupersession(t *testing.T, verify func(*testi
 				eventID := uuid.NewString()
 				payload := mustJSON(map[string]any{"revision_id": loop.Generation().RevisionID})
 				eventAt := createdAt.Add(time.Minute)
-				event := eventtest.RunCreatingRootIngress(
+				event := eventtest.RunCreatingRootIngressWithRoutingSource(
 					eventID, events.EventType("loop.repeat"), "operator", "", payload, 0,
-					runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), eventAt,
+					runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), eventAt,
 				)
-				persistWorkflowTimerEvent(t, h.store, h.ctx, eventID, "loop.repeat", runtimecorrelation.RunIDFromContext(h.ctx), h.entityID, payload, eventAt)
+				persistExactJoinEvent(t, h.store, h.ctx, event)
 				repeat := runtimecontracts.SystemNodeEventHandler{
 					Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "awaiting"}, AdvancesTo: "awaiting",
 				}
@@ -1063,10 +1070,10 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			firstSchedule := h.armInitial()
 			handler := h.source.ExecutableNodeEventHandlers(mustPipelineNode(h.flowID, "join-node"))["item.completed"]
 			for _, member := range []string{"a", "b"} {
-				event := eventtest.RunCreatingRootIngress(
+				event := eventtest.RunCreatingRootIngressWithRoutingSource(
 					uuid.NewString(), events.EventType("item.completed"), "operator", "",
 					mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": member}, "revision_id": loop.Generation().RevisionID}), 0,
-					runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), time.Now().UTC(),
+					runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), time.Now().UTC(),
 				)
 				persistExactJoinEvent(t, h.store, h.ctx, event)
 				if _, err := h.pc.executeNodeContractHandler(h.ctx, pipelineNode(t, h.flowID, "join-node"), handler, workflowTriggerContext{
@@ -1082,11 +1089,11 @@ func TestReentrantJoinCompletionDoesNotCancelNextGeneration(t *testing.T) {
 			repeatEventID := uuid.NewString()
 			repeatPayload := mustJSON(map[string]any{"revision_id": loop.Generation().RevisionID})
 			repeatAt := createdAt.Add(time.Minute)
-			repeatEvent := eventtest.RunCreatingRootIngress(
+			repeatEvent := eventtest.RunCreatingRootIngressWithRoutingSource(
 				repeatEventID, events.EventType("loop.repeat"), "operator", "", repeatPayload, 0,
-				runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), repeatAt,
+				runtimecorrelation.RunIDFromContext(h.ctx), "", h.envelope(), exactJoinRoutingSource(h.flowID, h.path, h.entityID), repeatAt,
 			)
-			persistWorkflowTimerEvent(t, h.store, h.ctx, repeatEventID, "loop.repeat", runtimecorrelation.RunIDFromContext(h.ctx), h.entityID, repeatPayload, repeatAt)
+			persistExactJoinEvent(t, h.store, h.ctx, repeatEvent)
 			repeat := runtimecontracts.SystemNodeEventHandler{
 				Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "ready"}, AdvancesTo: "awaiting",
 			}

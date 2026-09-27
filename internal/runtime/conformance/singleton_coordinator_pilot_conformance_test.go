@@ -98,6 +98,7 @@ func TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwner
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
+	plans = requireRootInputConnections(t, plans, "coordinator", "lead.observed")
 	if len(plans) != 0 {
 		t.Fatalf("singleton coordinator contained state produced route plans = %#v, want none", plans)
 	}

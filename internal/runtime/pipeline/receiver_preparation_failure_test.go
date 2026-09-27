@@ -71,7 +71,7 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 				configurePipelineTestDeliveryOwner(t, pc)
 				runID := runtimecorrelation.RunIDFromContext(ctx)
 				entityID := uuid.NewString()
-				evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+				evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
 				dialect := authoractivityfixture.DialectPostgres
 				if store.isSQLite() {
 					dialect = authoractivityfixture.DialectSQLite
@@ -214,7 +214,7 @@ func TestReceiverPreparationFailureClaimMatrixBothStores(t *testing.T) {
 					configurePipelineTestDeliveryOwner(t, pc)
 					runID := runtimecorrelation.RunIDFromContext(ctx)
 					entityID := uuid.NewString()
-					evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", handlerTestWorkflowEnvelope(".", runID, entityID), time.Now().UTC())
+					evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "source.evt", "src", "", []byte("{}"), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entityID}), time.Now().UTC())
 					dialect := authoractivityfixture.DialectPostgres
 					if store.isSQLite() {
 						dialect = authoractivityfixture.DialectSQLite

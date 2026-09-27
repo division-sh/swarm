@@ -194,7 +194,8 @@ rows:
     spelling:
       canonical_candidate: scalar_event_by_default_mapping_only_for_non_default_source_or_sink
       retired_duplicates: [authored_name, qualified_event, wildcard_event]
-      distinct_overrides: [external_or_harness_source, harness_sink]
+      distinct_overrides: [harness_source, harness_sink]
+    boundary_retirement: "#2304 retires source: external; selected-root public position and admitted provider declarations own ingress. Private inputs require actual producer relations."
     corpus:
       input: {rows: 280, scalar: 210, mapping: 70, authored_names: 0, qualified_or_wildcard: 0}
       output: {rows: 147, scalar: 16, mapping: 131, authored_names: 0, qualified_or_wildcard: 0}
@@ -307,21 +308,18 @@ rows:
       - template-create-minted-key:validation.requested
 
   - id: event.metadata_roles
-    ruled: mechanical-ratified
-    paths: "events.<event>.swarm.note, events.<event>.swarm.source, events.<event>.swarm.producer, events.<event>.swarm.consumer, events.<event>.swarm.status, events.<event>._note, events.<event>.consumer_type, events.<event>._consumer_type, events.<event>.emitter, events.<event>.alternate_emitters, events.<event>.emitter_type, events.<event>.intercepted, events.<event>.passthrough, events.<event>.runtime_handling, events.<event>.owning_node, events.<event>.delivery_channel, events.<event>.author_summary_field"
-    owner: admitEventMetadata
+    ruled: issue-2304
+    paths: "events.<event>.swarm, events.<event>.emitter, events.<event>.runtime_handling, events.<event>.owning_node, events.<event>.delivery_channel, events.<event>.author_summary_field and all legacy event metadata aliases"
+    owner: admitEventCatalogEntry
     information:
-      derived_projection: [internal producer, internal consumer, owning_node]
-      fact: [external producer/consumer/source/status, emitter identity, delivery channel]
-      choice: [consumer_type, emitter_type, intercepted, passthrough, runtime_handling]
-      annotation: [note, author_summary_field]
+      derived_projection: [executable producers and consumers, selected-root public pins, compiled connections, admitted provider ingress]
+      fact: [payload schema and business key]
     spelling:
-      canonical_candidate: swarm_metadata_plus_mapping_emitter
-      retired_duplicates: [_note, _consumer_type, scalar_emitter, one_item_emitter_sequence, emitter_sequence_alternates, scalar_string_list, yes_on_no_off_boolean_spellings]
-      already_retired: [producer, _producer, consumer, _consumer, _source, _status]
-      distinct_overrides: [alternate_emitters, external role facts]
-    f2_bug: "consumer_type and _consumer_type are unioned without contradiction checking; action-local alternate emitters and top-level alternates are also merged"
-    corpus: {metadata_alias_uses: 0, emitter_uses: 0}
+      canonical: omit_authored_event_metadata
+      retired_duplicates: [swarm, emitter, emitter_type, producer, _producer, alternate_emitters, consumer, _consumer, consumer_type, _consumer_type, _source, _status, _note, intercepted, passthrough, runtime_handling, owning_node, delivery_channel, author_summary_field]
+      distinct_overrides: []
+    closure: "#2304 retires authored role/preview metadata and its consumers; generated platform and activity facts remain canonical producer facts, not authored descriptors. Old stores are unsupported."
+    proofs: [TestEventMetadataRetirementRejectsPresenceBeforeValueInterpretation, TestExecutableEventRolesRemainVisibleWithoutMetadata, TestProviderManifestRetiresSummarySelectorBeforeValueInterpretation]
 
   - id: node.identity_defaults_projections
     ruled: mechanical-ratified
@@ -666,7 +664,7 @@ presence_findings:
     - all optional mapping/sequence/scalar fields currently decoded through Go zero values
     - policy values where null and omitted are currently both PolicyValue zero-ish states
     - expression values where null and empty scalar become zero expression
-    - event metadata booleans where null/empty/no/off collapse to false
+    - retired event metadata is rejected on presence before boolean/null coercion (#2304)
     - stages, loops, rules, carries, schemas, and input/output maps where missing and explicit empty currently often collapse
   required_substrate_outcome: "presence-aware authored node -> admitted effective value with authored/derived/boundary_snapshot provenance"
 

@@ -29,7 +29,8 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	imported := map[string]runtimecontracts.EventCatalogEntry{}
 	owners := map[string]providerTriggerSchemaOwner{}
 	byFlow := map[string]map[string]runtimecontracts.EventCatalogEntry{}
-	targetFree := map[string]runtimeprovideroutput.Authorization{}
+	outputs := map[string][]runtimeprovideroutput.Authorization{}
+	ingressEvents := map[string][]string{}
 	for _, view := range bundle.FlowViews() {
 		flowID := strings.TrimSpace(view.Paths.FlowPath)
 		location := flowSchemaLocation(view)
@@ -85,6 +86,11 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 			}
 			identity, packBacked := plan.PackIdentity()
 			if !packBacked {
+				for _, output := range plan.Outputs() {
+					if output.Kind == providertriggers.OutputKindRaw && output.EventName.Literal != "" {
+						ingressEvents[normalizedProviderTriggerProjectKey(flowID)] = append(ingressEvents[normalizedProviderTriggerProjectKey(flowID)], output.EventName.Literal)
+					}
+				}
 				continue
 			}
 			entry, exists := catalog.EntryByID(identity.ID)
@@ -106,14 +112,16 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 			for eventName, eventEntry := range entries {
 				eventName = strings.TrimSpace(eventName)
 				kind := providertriggers.OutputKindRaw
-				if strings.TrimSpace(eventEntry.Source) == "provider_trigger_pack_normalized" {
+				_, _, normalized := providerTriggerCatalogEvent(entry, eventName)
+				if normalized {
 					kind = providertriggers.OutputKindNormalized
 				}
 				owner := newProviderTriggerSchemaOwner(binding.Provider, eventName, kind, identity, catalog.Generation())
 				if err := addProviderTriggerSchema(source, flowID, eventName, eventEntry, owner, imported, owners, byFlow); err != nil {
 					return nil, err
 				}
-				if strings.TrimSpace(eventEntry.Source) == "provider_trigger_pack_normalized" {
+				ingressEvents[normalizedProviderTriggerProjectKey(flowID)] = append(ingressEvents[normalizedProviderTriggerProjectKey(flowID)], eventName)
+				if normalized {
 					authorization, err := runtimeprovideroutput.NewAuthorization(
 						providertriggers.NormalizeProviderName(binding.Provider),
 						eventName,
@@ -125,13 +133,16 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 					if err != nil {
 						return nil, fmt.Errorf("admit provider trigger output %q: %w", eventName, err)
 					}
-					targetFree[eventName] = authorization
+					outputs[normalizedProviderTriggerProjectKey(flowID)] = append(outputs[normalizedProviderTriggerProjectKey(flowID)], authorization)
 				}
 			}
 		}
 	}
-	if len(imported) == 0 {
+	if len(imported) == 0 && len(ingressEvents) == 0 {
 		return source, nil
+	}
+	for _, bindings := range outputs {
+		sort.Slice(bindings, func(i, j int) bool { return bindings[i].Event() < bindings[j].Event() })
 	}
 	compiledByFlow, err := compileProviderTriggerEventSchemas(byFlow, owners)
 	if err != nil {
@@ -141,15 +152,44 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 	if err != nil {
 		return nil, err
 	}
+	compiledOutputPins, err := bindProviderTriggerOutputPins(source, compiledByFlow)
+	if err != nil {
+		return nil, err
+	}
 	catalogSchemas, err := compileProviderTriggerEventSchemas(map[string]map[string]runtimecontracts.EventCatalogEntry{".": imported}, owners)
 	if err != nil {
 		return nil, err
 	}
 	return providerTriggerEventSource{
 		Source: source, generation: catalog.Generation(), imported: imported, owners: owners,
-		byFlow: byFlow, targetFree: targetFree, compiledInputPins: compiledInputPins, compiledByFlow: compiledByFlow,
+		byFlow: byFlow, outputs: outputs, ingressEvents: ingressEvents, compiledInputPins: compiledInputPins, compiledOutputPins: compiledOutputPins, compiledByFlow: compiledByFlow,
 		compiledCatalog: catalogSchemas["."],
 	}, nil
+}
+
+func bindProviderTriggerOutputPins(source semanticview.Source, compiledByFlow map[string]map[string]runtimecontracts.CompiledEventSchema) (map[string][]runtimecontracts.CompiledFlowOutputPin, error) {
+	out := map[string][]runtimecontracts.CompiledFlowOutputPin{}
+	for _, scope := range source.FlowScopes() {
+		pins := source.FlowOutputEventPins(scope.ID)
+		bound := append([]runtimecontracts.CompiledFlowOutputPin(nil), pins...)
+		schemas := compiledByFlow[normalizedProviderTriggerProjectKey(scope.Path)]
+		for index, pin := range bound {
+			if _, exists := pin.EventSchema(); exists {
+				continue
+			}
+			schema, imported := schemas[pin.EventType()]
+			if !imported {
+				continue
+			}
+			var err error
+			bound[index], err = pin.BindImportedEventSchema(schema)
+			if err != nil {
+				return nil, fmt.Errorf("bind provider-trigger output pin %s.%s: %w", scope.ID, pin.EventType(), err)
+			}
+		}
+		out[normalizedProviderTriggerProjectKey(scope.ID)] = bound
+	}
+	return out, nil
 }
 
 func compileProviderTriggerEventSchemas(byProject map[string]map[string]runtimecontracts.EventCatalogEntry, owners map[string]providerTriggerSchemaOwner) (map[string]map[string]runtimecontracts.CompiledEventSchema, error) {
@@ -194,10 +234,10 @@ func bindProviderTriggerInputPins(source semanticview.Source, compiledByProject 
 				return fmt.Errorf("bind provider-trigger input pin %s.%s: %w", flowID, pin.EventType(), err)
 			}
 		}
-		out[strings.TrimSpace(flowID)] = bound
+		out[normalizedProviderTriggerProjectKey(flowID)] = bound
 		return nil
 	}
-	if err := bind("", "."); err != nil {
+	if err := bind(".", "."); err != nil {
 		return nil, err
 	}
 	for _, scope := range source.FlowScopes() {
@@ -264,11 +304,8 @@ func addProviderTriggerSchema(
 			return fmt.Errorf("provider trigger event %q collision between %s and %s; remove one provider-trigger declaration", eventName, existingOwner.diagnostic(), owner.diagnostic())
 		}
 	} else {
-		if existing, collision := source.EventEntry(eventName); collision {
-			existingOwner := strings.TrimSpace(existing.Source)
-			if existingOwner == "" {
-				existingOwner = "authored event catalog"
-			}
+		if _, collision := source.EventEntry(eventName); collision {
+			existingOwner := "existing event catalog"
 			return fmt.Errorf("provider trigger event %q collision between %s and %s; remove the local redeclaration and inspect the pack with `swarm describe pack %s`", eventName, existingOwner, owner.diagnostic(), owner.identity.ID)
 		}
 		imported[eventName] = cloneProviderTriggerEventCatalogEntry(eventEntry)
@@ -329,14 +366,16 @@ func providerTriggerCatalogEvent(entry providertriggers.CatalogEntry, eventName 
 
 type providerTriggerEventSource struct {
 	semanticview.Source
-	generation        triggergeneration.Generation
-	imported          map[string]runtimecontracts.EventCatalogEntry
-	owners            map[string]providerTriggerSchemaOwner
-	byFlow            map[string]map[string]runtimecontracts.EventCatalogEntry
-	targetFree        map[string]runtimeprovideroutput.Authorization
-	compiledInputPins map[string][]runtimecontracts.CompiledFlowInputPin
-	compiledByFlow    map[string]map[string]runtimecontracts.CompiledEventSchema
-	compiledCatalog   map[string]runtimecontracts.CompiledEventSchema
+	generation         triggergeneration.Generation
+	imported           map[string]runtimecontracts.EventCatalogEntry
+	owners             map[string]providerTriggerSchemaOwner
+	byFlow             map[string]map[string]runtimecontracts.EventCatalogEntry
+	outputs            map[string][]runtimeprovideroutput.Authorization
+	ingressEvents      map[string][]string
+	compiledInputPins  map[string][]runtimecontracts.CompiledFlowInputPin
+	compiledOutputPins map[string][]runtimecontracts.CompiledFlowOutputPin
+	compiledByFlow     map[string]map[string]runtimecontracts.CompiledEventSchema
+	compiledCatalog    map[string]runtimecontracts.CompiledEventSchema
 }
 
 func (s providerTriggerEventSource) ResolveEffectiveCompiledFlowEventSchema(flowID, eventType string) (runtimecontracts.CompiledEventSchema, bool, error) {
@@ -352,14 +391,26 @@ func (s providerTriggerEventSource) ResolveEffectiveCompiledFlowEventSchema(flow
 }
 
 func (s providerTriggerEventSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "." {
-		flowID = ""
-	}
-	if pins, ok := s.compiledInputPins[flowID]; ok {
+	if pins, ok := s.compiledInputPins[normalizedProviderTriggerProjectKey(flowID)]; ok {
 		return append([]runtimecontracts.CompiledFlowInputPin(nil), pins...)
 	}
 	return s.Source.FlowInputEventPins(flowID)
+}
+
+func (s providerTriggerEventSource) FlowOutputEventPins(flowID string) []runtimecontracts.CompiledFlowOutputPin {
+	if pins, ok := s.compiledOutputPins[normalizedProviderTriggerProjectKey(flowID)]; ok {
+		return append([]runtimecontracts.CompiledFlowOutputPin(nil), pins...)
+	}
+	return s.Source.FlowOutputEventPins(flowID)
+}
+
+func (s providerTriggerEventSource) FlowOutputEventPin(flowID, eventType string) (runtimecontracts.CompiledFlowOutputPin, bool) {
+	for _, pin := range s.FlowOutputEventPins(flowID) {
+		if pin.EventType() == eventType {
+			return pin, true
+		}
+	}
+	return runtimecontracts.CompiledFlowOutputPin{}, false
 }
 
 func (s providerTriggerEventSource) FlowInputEventPin(flowID, eventType string) (runtimecontracts.CompiledFlowInputPin, bool) {
@@ -373,16 +424,7 @@ func (s providerTriggerEventSource) FlowInputEventPin(flowID, eventType string) 
 }
 
 func (s providerTriggerEventSource) SemanticCapabilities() semanticview.Capabilities {
-	names := make([]string, 0, len(s.targetFree))
-	for name := range s.targetFree {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	out := make([]runtimeprovideroutput.Authorization, 0, len(names))
-	for _, name := range names {
-		out = append(out, s.targetFree[name])
-	}
-	capabilities := s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, out)
+	capabilities := s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.outputs).WithProviderIngressEvents(s.ingressEvents)
 	return capabilities.WithProviderTriggerEventProvenance(s.provenanceReadback()).WithProviderTriggerSchemaReadback(s.compiledCatalog)
 }
 
@@ -472,12 +514,6 @@ func cloneEventCatalog(in map[string]runtimecontracts.EventCatalogEntry) map[str
 
 func cloneProviderTriggerEventCatalogEntry(in runtimecontracts.EventCatalogEntry) runtimecontracts.EventCatalogEntry {
 	out := in
-	out.Swarm.Producer = append([]string(nil), in.Swarm.Producer...)
-	out.Swarm.Consumer = append([]string(nil), in.Swarm.Consumer...)
-	out.Producer = append([]string(nil), in.Producer...)
-	out.AlternateEmitters = append([]string(nil), in.AlternateEmitters...)
-	out.Consumer = append([]string(nil), in.Consumer...)
-	out.ConsumerType = append([]string(nil), in.ConsumerType...)
 	out.Payload.Required = append([]string(nil), in.Payload.Required...)
 	out.Payload.Properties = make(map[string]runtimecontracts.EventFieldSpec, len(in.Payload.Properties))
 	for name, field := range in.Payload.Properties {

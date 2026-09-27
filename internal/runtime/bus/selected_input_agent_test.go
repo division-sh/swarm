@@ -32,12 +32,18 @@ func TestSelectedInputValidationAgentDeclarationOwnership(t *testing.T) {
 		{"ordinary_child", "child", "child/work.ready"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			original := eventtest.OperatorInjected(uuid.NewString(), events.EventType(tc.event), "operator", "", []byte(`{}`), 0, runID, nil, events.EventEnvelope{}, time.Now().UTC())
+			original := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), events.EventType(tc.event), "operator", "", []byte(`{}`), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
 			original, err = eventtest.AdmitPayload(original, tc.flow, tc.event)
 			if err != nil {
 				t.Fatal(err)
 			}
 			validation, err := RevalidateSelectedInput(source, original)
+			if tc.flow != "." {
+				if err == nil {
+					t.Fatal("root input admitted a non-root schema binding")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

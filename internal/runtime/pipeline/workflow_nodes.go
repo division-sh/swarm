@@ -36,50 +36,14 @@ type WorkflowNode struct {
 	Implementation   string
 	StateTable       string
 	IdempotencyTable string
-	Policies         map[string]WorkflowEventPolicy
 }
 
-func workflowNodePolicyForDelivery(ctx context.Context, source semanticview.Source, node WorkflowNode, evt events.Event) (WorkflowEventPolicy, bool, error) {
-	eventType := strings.TrimSpace(string(evt.Type()))
-	if policy, ok := workflowNodePolicyForEventType(node.Policies, eventType); ok {
-		return policy, true, nil
-	}
+func workflowNodeHandlerApplies(ctx context.Context, source semanticview.Source, node WorkflowNode, evt events.Event) (bool, error) {
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, node.Node, evt)
 	if resolved.Failure != "" {
-		return WorkflowEventPolicy{}, false, fmt.Errorf("resolve workflow handler for node %s: %s", node.Node.Key(), resolved.Failure)
+		return false, fmt.Errorf("resolve workflow handler for node %s: %s", node.Node.Key(), resolved.Failure)
 	}
-	if !resolved.Matched {
-		return WorkflowEventPolicy{}, false, nil
-	}
-	candidates := []string{resolved.HandlerEventKey}
-	if source != nil {
-		candidates = append(candidates, workflowNodeExternalEventType(source, node.Node, resolved.HandlerEventKey))
-	}
-	for _, candidate := range candidates {
-		if policy, ok := workflowNodePolicyForEventType(node.Policies, candidate); ok {
-			return policy, true, nil
-		}
-	}
-	return deriveWorkflowEventPolicy(source, node.Node, resolved.HandlerEventKey), true, nil
-}
-
-func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eventType string) (WorkflowEventPolicy, bool) {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" || policies == nil {
-		return WorkflowEventPolicy{}, false
-	}
-	if policy, ok := policies[eventType]; ok {
-		return policy, true
-	}
-	for pattern, policy := range policies {
-		if strings.TrimSpace(pattern) == eventType {
-			continue
-		}
-		if runtimecontractsHandlerPatternMatches(pattern, eventType) {
-			return policy, true
-		}
-	}
-	return WorkflowEventPolicy{}, false
+	return resolved.Matched, nil
 }
 
 type workflowNodeEventHandlerResolution struct {
@@ -266,7 +230,6 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 			Implementation:   strings.TrimSpace(entry.Implementation),
 			StateTable:       strings.TrimSpace(entry.StateTable),
 			IdempotencyTable: strings.TrimSpace(entry.IdempotencyTable),
-			Policies:         buildWorkflowNodePolicies(source, node, subscriptions),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Node.Key() < out[j].Node.Key() })
@@ -324,32 +287,6 @@ func workflowFlowInputProducerAliases(source semanticview.Source, targetFlowID, 
 	return append([]string{}, runtimepinrouting.ResolveFlowInputProducer(source, targetFlowID, eventType).AutoWireResolution().Patterns...)
 }
 
-func buildWorkflowNodePolicies(source semanticview.Source, node runtimeidentity.ExecutableNode, subscriptions []events.EventType) map[string]WorkflowEventPolicy {
-	allowed := workflowNodeRuntimePolicyEvents(source, node, subscriptions)
-	if len(allowed) == 0 {
-		return nil
-	}
-	subscribed := make(map[string]struct{}, len(subscriptions))
-	for _, evt := range subscriptions {
-		name := strings.TrimSpace(string(evt))
-		if name != "" {
-			subscribed[name] = struct{}{}
-		}
-	}
-	policies := make(map[string]WorkflowEventPolicy, len(allowed))
-	for eventType := range allowed {
-		if _, ok := subscribed[eventType]; !ok {
-			continue
-		}
-		policy := deriveWorkflowEventPolicy(source, node, eventType)
-		policies[eventType] = policy
-	}
-	if len(policies) == 0 {
-		return nil
-	}
-	return policies
-}
-
 func workflowNodeTimerIDs(timers []runtimecontracts.WorkflowTimerContract) []string {
 	if len(timers) == 0 {
 		return nil
@@ -363,62 +300,11 @@ func workflowNodeTimerIDs(timers []runtimecontracts.WorkflowTimerContract) []str
 	return out
 }
 
-func workflowNodeRuntimePolicyEvents(source semanticview.Source, node runtimeidentity.ExecutableNode, subscriptions []events.EventType) map[string]struct{} {
-	if !node.Valid() || source == nil {
-		return nil
-	}
-	out := make(map[string]struct{}, len(subscriptions)+8)
-	for _, evt := range subscriptions {
-		name := strings.TrimSpace(string(evt))
-		if name != "" {
-			out[name] = struct{}{}
-		}
-	}
-	for eventType := range source.ExecutableNodeEventHandlers(node) {
-		eventType = workflowNodeExternalEventType(source, node, eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	flowID := node.FlowPath()
-	if flowID != "" {
-		for _, eventType := range source.FlowInputEvents(flowID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType != "" {
-				out[eventType] = struct{}{}
-			}
-		}
-		for _, eventType := range source.FlowOutputEvents(flowID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType != "" {
-				out[eventType] = struct{}{}
-			}
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func workflowNodeExternalEventType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) string {
 	if source == nil {
 		return eventidentity.Normalize(eventType)
 	}
 	return source.ResolveExecutableNodeEventReference(node, eventType)
-}
-
-func deriveWorkflowEventPolicy(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) WorkflowEventPolicy {
-	eventType = strings.TrimSpace(eventType)
-	entry, _, ok := source.ResolveExecutableNodeEventCatalogEntry(node, eventType)
-	if !ok {
-		return WorkflowEventPolicy{}
-	}
-	consume, visible := deriveWorkflowEventDelivery(entry)
-	return WorkflowEventPolicy{
-		Consume:           consume,
-		VisibleDownstream: visible,
-	}
 }
 
 func (pc *PipelineCoordinator) BackgroundNodes() []BackgroundNode {
@@ -442,12 +328,7 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 		if !pc.workflowNodeDeliveryRouteMatches(ctx, node.Node, evt.RunID(), evt.TargetRoute()) {
 			continue
 		}
-		var (
-			policy WorkflowEventPolicy
-			ok     bool
-		)
-		var err error
-		policy, ok, err = workflowNodePolicyForDelivery(ctx, source, node, evt)
+		ok, err := workflowNodeHandlerApplies(ctx, source, node, evt)
 		if err != nil {
 			applies, authorityErr := pc.workflowNodeConnectedInputFailureApplies(ctx, node.Node, evt)
 			if authorityErr != nil {
@@ -462,13 +343,12 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 			if resolution, refOK, resolveErr := resolveWorkflowJoinOccurrence(source, evt); resolveErr != nil {
 				return false, true, resolveErr
 			} else if refOK && resolution.Ref.Node().Equal(node.Node) {
-				if node.Policies != nil {
-					policy, ok = workflowNodePolicyForEventType(node.Policies, resolution.Ref.HandlerEvent())
-				}
+				_, ok = source.ExecutableNodeEventHandlers(node.Node)[resolution.Ref.HandlerEvent()]
 			}
 		}
 		if ok {
-			return policy.Consume, true, nil
+			// Consumption is scoped to this exact node delivery, never the event catalog.
+			return exactNodeRoute, true, nil
 		}
 	}
 	if deliveryRouted && exactNodeRoute {
@@ -479,7 +359,7 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, 
 		if !targetMatched {
 			return false, true, fmt.Errorf("exact workflow node delivery recipient %s does not own target %#v", deliveryNode.Key(), deliveryRoute.Target.Route())
 		}
-		return false, true, fmt.Errorf("exact workflow node delivery recipient %s has no policy for event %s (connect_claim=%t handler=%s event=%s)", deliveryNode.Key(), eventType, claimed, claimNode.Key(), claimEvent)
+		return false, true, fmt.Errorf("exact workflow node delivery recipient %s has no applicable handler for event %s (connect_claim=%t handler=%s event=%s)", deliveryNode.Key(), eventType, claimed, claimNode.Key(), claimEvent)
 	}
 	return false, false, nil
 }
@@ -639,41 +519,5 @@ func workflowPersistedFlowMode(source semanticview.Source, flowID string) string
 		// Contract admission owns the authored mode vocabulary. Persistence stays fail-closed
 		// to its static/template representation if an invalid source reaches this projection.
 		return ""
-	}
-}
-
-func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (consume bool, visible bool) {
-	switch strings.TrimSpace(entry.RuntimeHandling) {
-	case "consuming":
-		return true, false
-	case "dual_delivery":
-		return false, true
-	case "passthrough":
-		return false, true
-	case "projection", "stage_projection":
-		return false, true
-	}
-	consumerType := normalizeConsumerType(entry.ConsumerType)
-	intercepted := truthyContractFlag(entry.Intercepted)
-	passthrough := truthyContractFlag(entry.Passthrough)
-	if consumerType == ConsumerTypeSystemComponent && intercepted && !passthrough {
-		return true, false
-	}
-	return false, true
-}
-
-func normalizeConsumerType(value any) ConsumerType {
-	return ConsumerType(strings.TrimSpace(asString(value)))
-}
-
-func truthyContractFlag(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		s := strings.ToLower(strings.TrimSpace(t))
-		return s == "true" || s == "conditional" || s == "projection" || s == "consuming"
-	default:
-		return false
 	}
 }

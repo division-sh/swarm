@@ -110,9 +110,8 @@ func TestCompiledLifecycleEmitterDiagnostics(t *testing.T) {
 		{"absent_escape_emit", "loop.escaped", canonicalrouting.LifecycleStaticLoopNoEmit, map[string]int{"semantic_drift_dead_event_schema": 1}},
 		{"shared_gate_dangling_live_schema", "work.completed", canonicalrouting.LifecycleStaticGateSharedDangling, map[string]int{"event_consumer_exists": 1}},
 		{"mixed_connected_output", "work.completed", canonicalrouting.LifecycleStaticMixedOutput, map[string]int{}},
-		{"mixed_disconnected_output", "work.completed", canonicalrouting.LifecycleStaticMixedDisconnected, map[string]int{"event_consumer_exists": 1}},
+		{"mixed_disconnected_output", "work.completed", canonicalrouting.LifecycleStaticMixedDisconnected, map[string]int{}},
 		{"foreign_subscribers_do_not_satisfy_root", "work.completed", canonicalrouting.LifecycleStaticForeignOnly, map[string]int{"event_consumer_exists": 1}},
-		{"external_proof", "work.completed", canonicalrouting.LifecycleStaticGateExternalProof, map[string]int{}},
 		{"two_loops_shared", "loop.escaped", canonicalrouting.LifecycleStaticTwoLoopsShared, map[string]int{}},
 		{"gate_loop_shared", "loop.escaped", canonicalrouting.LifecycleStaticGateLoopShared, map[string]int{}},
 	} {
@@ -138,12 +137,8 @@ func TestCompiledLifecycleEmitterDiagnostics(t *testing.T) {
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("event diagnostic counts = %#v, want %#v; report = %#v", got, tc.want, report.Findings)
 			}
-			if tc.variant == canonicalrouting.LifecycleStaticMixedDisconnected {
-				if !reportContains(report.Findings, "pin_target_resolution", "work.completed") {
-					t.Fatalf("disconnected mixed output accepted: %#v", report.Findings)
-				}
-			} else if tc.variant == canonicalrouting.LifecycleStaticMixedOutput && reportContains(report.Findings, "pin_target_resolution", "work.completed") {
-				t.Fatalf("connected mixed output rejected: %#v", report.Findings)
+			if (tc.variant == canonicalrouting.LifecycleStaticMixedDisconnected || tc.variant == canonicalrouting.LifecycleStaticMixedOutput) && reportContains(report.Findings, "pin_target_resolution", "work.completed") {
+				t.Fatalf("root output rejected despite public export: %#v", report.Findings)
 			}
 		})
 	}
@@ -228,26 +223,31 @@ func TestCompiledLifecycleEmitterHandlerCycleBoundary(t *testing.T) {
 
 func TestCompiledLifecycleEmitterMetadataCoordinates(t *testing.T) {
 	for _, tc := range []struct {
-		name, role string
+		name       string
 		coordinate canonicalrouting.LifecycleEmitterMetadataCoordinate
 	}{
-		{"stage", "review", canonicalrouting.LifecycleMetadataStage},
-		{"verdict", "approve", canonicalrouting.LifecycleMetadataVerdict},
+		{"stage", canonicalrouting.LifecycleMetadataStage},
+		{"verdict", canonicalrouting.LifecycleMetadataVerdict},
 	} {
 		for _, field := range []string{"source", "producer", "consumer"} {
 			t.Run(tc.name+"/"+field, func(t *testing.T) {
 				repo := canonicalrouting.RepoRoot(t)
 				root := canonicalrouting.CopyLifecycleEmitterMetadataCoordinate(t, tc.coordinate, field)
-				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-				if err != nil {
-					t.Fatal(err)
-				}
-				report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-				if !reportContains(report.HardInvalidities(), "event_metadata_authority", "swarm."+field) || !reportContains(report.HardInvalidities(), "event_metadata_authority", tc.role) {
-					t.Fatalf("internal coordinate accepted: %#v", report.Findings)
+				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+				if err == nil || !strings.Contains(err.Error(), "RETIRED: events.yaml metadata field swarm") {
+					t.Fatalf("retired %s metadata accepted: %v", field, err)
 				}
 			})
 		}
+	}
+}
+
+func TestCompiledLifecycleEmitterRetiredExternalMetadataRejected(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyLifecycleEmitterStatic(t, canonicalrouting.LifecycleStaticGateExternalProof)
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED: events.yaml metadata field swarm") {
+		t.Fatalf("retired external source metadata accepted: %v", err)
 	}
 }
 

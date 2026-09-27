@@ -23,10 +23,8 @@ stages:
 pins:
   inputs:
     events:
-      - event: scout.setup
-        source: external
+      - scout.setup
       - event: scout.member.done
-        source: external
         resolution:
           mode: fan-in
           aggregation: barrier

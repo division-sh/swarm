@@ -35,7 +35,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
+      - work.requested
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  result: text\n")
@@ -87,9 +87,9 @@ stages:
 pins:
   inputs:
     events:
-      - {event: work.seeded, source: external}
-      - {event: work.first, source: external}
-      - {event: work.second, source: external}
+      - work.seeded
+      - work.first
+      - work.second
 `)
 		writeClosedVariantFile(t, root, prefix+"events.yaml", "work.seeded:\n  seed: boolean\nwork.first:\n  choice: text\nwork.second:\n  choice: text\nwork.completed:\n  result: text\n")
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  result: text\n")
@@ -255,7 +255,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 		for _, command := range commands {
 			input := side + ".command." + command.name
 			output := side + "." + command.event
-			inputs += fmt.Sprintf("      - {event: %s, source: external}\n", input)
+			inputs += fmt.Sprintf("      - %s\n", input)
 			outputs += "      - " + output + "\n"
 			connects += fmt.Sprintf("  - {event: %s, from: ., to: outer/%s, rename: %s}\n", output, side, command.event)
 			for _, event := range []string{input, output} {
@@ -274,7 +274,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 			t.Fatal(err)
 		}
 		schema := strings.Replace(string(raw), "name: lifecycle-loop\n", "name: lifecycle-loop\nmode: template\ninstance: case_id\n", 1)
-		begin := strings.Index(schema, "      - {event: work.requested")
+		begin := strings.Index(schema, "      - work.requested")
 		end := strings.Index(schema, "  outputs:")
 		if begin < 0 || end <= begin {
 			t.Fatal("loop template input boundary missing")
@@ -303,7 +303,7 @@ func CopyLifecycleNestedTemplates(t testing.TB) string {
 		sink = strings.Replace(sink, "    events: [loop.escaped]\n", "    events:\n      - event: loop.escaped\n        resolution: {mode: select-or-create}\n", 1)
 		writeClosedVariantFile(t, root, prefix+"sink/schema.yaml", sink)
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: template-driver\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\n      - {event: work.observed, source: external}\n      - {event: work.finished, source: external}\n"+inputs+"  outputs:\n    events:\n"+outputs+"connect:\n"+connects)
+	writeClosedVariantFile(t, root, "schema.yaml", "name: template-driver\nstages:\n  active: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\n      - work.observed\n      - work.finished\n"+inputs+"  outputs:\n    events:\n"+outputs+"connect:\n"+connects)
 	writeClosedVariantFile(t, root, "events.yaml", events)
 	writeClosedVariantFile(t, root, "entities.yaml", "driver: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes+"]\n"+handlers)
@@ -330,7 +330,7 @@ func CopyLifecycleForkSource(t testing.TB, gate bool) string {
 		text := string(raw)
 		switch path {
 		case "schema.yaml":
-			text = strings.Replace(text, "      - {event: work.requested, source: external}", "      - {event: work.requested, source: external}\n      - {event: work.observed, source: external}", 1)
+			text = strings.Replace(text, "      - work.requested", "      - work.requested\n      - work.observed", 1)
 		case "events.yaml":
 			text += "work.observed:\n  seed: boolean\n"
 		case "nodes.yaml":
@@ -416,7 +416,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
+      - work.requested
 `
 	events := "work.requested:\n  seed: boolean\nwork.completed:\n  result: text\n"
 	nodes := `requester:
@@ -522,11 +522,11 @@ loops:
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
-      - {event: loop.start, source: external}
-      - {event: loop.admit, source: external}
-      - {event: loop.repeat, source: external}
-      - {event: loop.close, source: external}
+      - work.requested
+      - loop.start
+      - loop.admit
+      - loop.repeat
+      - loop.close
   outputs:
     events: [loop.escaped]
 connect:

@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
+	"gopkg.in/yaml.v3"
 )
 
 var channelOnboardingChallengePattern = regexp.MustCompile(`SWARM-[A-Z2-7]{16}`)
@@ -1107,6 +1108,35 @@ func enableChannelOnboardingRecoveryOnStartup(t *testing.T, configPath string) {
 
 func disableChannelOnboardingBusinessConsumers(t *testing.T, sourceRoot string) {
 	t.Helper()
+	schemaPath := filepath.Join(sourceRoot, "schema.yaml")
+	raw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := yaml.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	connections, ok := schema["connect"].([]any)
+	if !ok || len(connections) != 2 {
+		t.Fatal("onboarding fixture must have exactly the root and provider business-consumer connections")
+	}
+	for i, from := range []string{".", "telegram-ingress"} {
+		connection, ok := connections[i].(map[string]any)
+		if !ok || len(connection) != 3 || connection["from"] != from || connection["to"] != "telegram-chat" || connection["event"] != "inbound.telegram.text_message" {
+			t.Fatalf("unexpected onboarding business-consumer connection: %#v", connections[i])
+		}
+	}
+	delete(schema, "connect")
+	delete(schema, "pins")
+	delete(schema, "imports")
+	raw, err = yaml.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(schemaPath, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.RemoveAll(filepath.Join(sourceRoot, "telegram-chat")); err != nil {
 		t.Fatalf("remove onboarding business-consumer flow: %v", err)
 	}

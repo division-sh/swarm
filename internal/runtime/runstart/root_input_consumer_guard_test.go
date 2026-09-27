@@ -18,12 +18,14 @@ import (
 )
 
 var auditedRootInputConsumers = []string{
+	"internal/apiv1/operator_event_publish.go:executeOperatorEventPublication",
 	"internal/apiv1/operator_event_publish.go:validateEventPublication",
 }
 
 var rootInputProjectionRequirements = map[string]string{
-	"internal/apiv1/operator_event_publish.go:validateEventPublication":  "rootInputApplicationError",
-	"internal/apiv1/operator_event_publish.go:rootInputApplicationError": "AsRootInputValidationError",
+	"internal/apiv1/operator_event_publish.go:executeOperatorEventPublication": "rootInputApplicationError",
+	"internal/apiv1/operator_event_publish.go:validateEventPublication":        "rootInputApplicationError",
+	"internal/apiv1/operator_event_publish.go:rootInputApplicationError":       "AsRootInputValidationError",
 }
 
 func TestValidateInputEventsConsumersAreExhaustivelyRegistered(t *testing.T) {

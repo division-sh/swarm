@@ -44,13 +44,18 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	if mode == "root" {
 		scope = "."
 	}
-	connects, inputPins, outputPins, eventSchemas, handlers := "", "", "", "", ""
+	connects, inputPins, outputPins, eventSchemas, requestSchemas, handlers := "", "", "", "", "", ""
 	for _, family := range families {
 		request, result := family+".requested", "result."+family
-		inputPins += fmt.Sprintf("      - {event: %s, source: external}\n", request)
+		if mode == "template" {
+			inputPins += fmt.Sprintf("      - {event: %s, resolution: {mode: select-or-create}}\n", request)
+		} else {
+			inputPins += "      - " + request + "\n"
+		}
 		outputPins += "      - " + result + "\n"
 		connects += fmt.Sprintf("  - {event: %s, from: %s, to: sink}\n", result, scope)
-		eventSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n%s:\n  case_id: text\n  value: %s\n", request, valueType, result, valueType)
+		requestSchemas += fmt.Sprintf("%s:\n  key: case_id\n  case_id: text\n  choice: integer\n  items: '[%s]'\n", request, valueType)
+		eventSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", result, valueType)
 		emit := fmt.Sprintf("{event: %s, fields: {case_id: \"${payload.case_id}\", value: %s}}", result, valueExpr)
 		body := "      emit: " + emit + "\n"
 		switch family {
@@ -107,14 +112,13 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	sourceSchema := "name: publication-source\npins:\n  inputs:\n    events:\n" + inputPins + "  outputs:\n    events:\n" + outputPins
 	if mode == "root" {
 		writeClosedVariantFile(t, root, "schema.yaml", sourceSchema+"connect:\n"+connects)
-		writeClosedVariantFile(t, root, "events.yaml", eventSchemas)
+		writeClosedVariantFile(t, root, "events.yaml", requestSchemas+eventSchemas)
 		writeClosedVariantFile(t, root, "nodes.yaml", handlers+local+wildcard)
 	} else {
-		rootSchema := "name: publication-driver\n"
+		rootSchema := "name: publication-driver\npins:\n  inputs:\n    events:\n"
 		if mode == "template" {
 			sourceSchema = strings.Replace(sourceSchema, "name: publication-source\n", "name: publication-source\nmode: template\ninstance: case_id\n", 1)
-			sourceSchema = strings.ReplaceAll(sourceSchema, "source: external", "resolution: {mode: select-or-create}")
-			rootSchema += "pins:\n  inputs:\n    events:\n" + inputPins + "  outputs:\n    events:\n"
+			rootSchema += requestSchemasToPins(families) + "  outputs:\n    events:\n"
 			driver, driverSchemas := "", ""
 			for _, family := range families {
 				request, dispatch := family+".requested", family+".dispatch"
@@ -126,17 +130,17 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			}
 			writeClosedVariantFile(t, root, "nodes.yaml", driver)
 			writeClosedVariantFile(t, root, "events.yaml", driverSchemas)
+		} else {
+			rootSchema += inputPins + "  outputs:\n    events:\n" + requestSchemasToPins(families)
+			for _, family := range families {
+				request := family + ".requested"
+				connects += fmt.Sprintf("  - {event: %s, from: ., to: source}\n", request)
+			}
+			writeClosedVariantFile(t, root, "events.yaml", requestSchemas)
 		}
 		writeClosedVariantFile(t, root, "schema.yaml", rootSchema+"connect:\n"+connects)
 		writeClosedVariantFile(t, root, "source/schema.yaml", sourceSchema)
-		sourceEvents := eventSchemas
-		if mode == "template" {
-			sourceEvents = ""
-			for _, family := range families {
-				sourceEvents += "result." + family + ":\n  case_id: text\n  value: " + valueType + "\n"
-			}
-		}
-		writeClosedVariantFile(t, root, "source/events.yaml", sourceEvents)
+		writeClosedVariantFile(t, root, "source/events.yaml", eventSchemas)
 		writeClosedVariantFile(t, root, "source/nodes.yaml", handlers+local+wildcard)
 		if mode == "template" {
 			writeClosedVariantFile(t, root, "source/entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
@@ -145,13 +149,20 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n    events:\n"+outputPins)
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	// A sibling's local subscriptions are not authority for source publications.
-	siblingInputs, siblingEvents := "", ""
+	siblingEvents := ""
 	for _, result := range results {
-		siblingInputs += "      - {event: " + result + ", source: external}\n"
 		siblingEvents += result + ":\n  case_id: text\n  value: " + valueType + "\n"
 	}
-	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n    events:\n"+siblingInputs)
+	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\n")
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingEvents)
-	writeClosedVariantFile(t, root, "sibling/nodes.yaml", local+wildcard)
+	writeClosedVariantFile(t, root, "sibling/nodes.yaml", local)
 	return root
+}
+
+func requestSchemasToPins(families []string) string {
+	var pins string
+	for _, family := range families {
+		pins += "      - " + family + ".requested\n"
+	}
+	return pins
 }

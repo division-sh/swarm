@@ -702,7 +702,7 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 	for _, want := range []string{
 		"has no active role in the authored bundle",
 		"Handler emits: 0",
-		"Resolver-backed input source or non-input source metadata: no",
+		"Declared input or provider source: no",
 	} {
 		if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", want) {
 			t.Fatalf("expected semantic_drift_dead_event_schema warning containing %q, got %#v", want, report.Warnings())
@@ -852,6 +852,13 @@ states: [idle, done]
 			if tc.canonicalRoot {
 				root = canonicalrouting.CopyDeadEventSchemaExternalSource(t)
 			}
+			if strings.HasSuffix(tc.name, "metadata") {
+				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+				if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+					t.Fatalf("metadata-only role admission = %v, want retirement error", err)
+				}
+				return
+			}
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -998,9 +1005,13 @@ func TestRun_DoesNotUsePlatformCatalogOverlapAsProofForDeadEventSchema(t *testin
 	}
 }
 
-func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresAcceptedExternalConsumer(t *testing.T) {
+func TestRun_RootExportNeedsNoInternalConsumer(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Platform: runtimecontracts.PlatformSpecDocument{},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
+			Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.start"}}},
+			Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "task.done"}}},
+		}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"producer": {
@@ -1019,81 +1030,37 @@ func TestRun_DoesNotWarnForEventConsumerExistsWhenCatalogDeclaresAcceptedExterna
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.start": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
-			"task.done":  {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"external"}}},
+			"task.start": {},
+			"task.done":  {},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"
 	bundle.Platform.Platform.Version = "1.0.0"
 	source := semanticviewtest.WrapRootAgents(bundle)
+	recompileBootverifySemantics(t, bundle)
 
 	report := Run(context.Background(), source, Options{})
 
 	if reportContains(report.Warnings(), "event_consumer_exists", "task.done") {
-		t.Fatalf("unexpected event_consumer_exists warning with consumer metadata, got %#v", report.Warnings())
+		t.Fatalf("unexpected event_consumer_exists warning for public root export, got %#v", report.Warnings())
 	}
 }
 
-func TestRun_DoesNotWarnForEventProducerExistsWhenCatalogDeclaresExternalOrPlannedSource(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name  string
-		entry runtimecontracts.EventCatalogEntry
-	}{
-		{
-			name:  "external source",
-			entry: runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Source: "external system"}},
-		},
-		{
-			name:  "planned status",
-			entry: runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Status: "planned"}},
-		},
-		{
-			name:  "exceptional non-agent producer metadata",
-			entry: runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Producer: []string{"mailbox_human"}}},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := &runtimecontracts.WorkflowContractBundle{
-				Platform: runtimecontracts.PlatformSpecDocument{},
-				Semantics: runtimecontracts.WorkflowSemanticView{
-					NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-						"consumer": {
-							"task.requested": {},
-						},
-					},
-				},
-				Nodes: map[string]runtimecontracts.SystemNodeContract{
-					"consumer": {
-						SubscribesTo: []string{"task.requested"},
-						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-							"task.requested": {},
-						},
-					},
-				},
-				Events: map[string]runtimecontracts.EventCatalogEntry{
-					"task.requested": tc.entry,
-				},
-			}
-			bundle.Platform.Platform.Name = "test"
-			bundle.Platform.Platform.Version = "1.0.0"
-			source := semanticview.Wrap(bundle)
-
-			report := Run(context.Background(), source, Options{})
-
-			if reportContains(report.Warnings(), "event_producer_exists", "task.requested") {
-				t.Fatalf("unexpected event_producer_exists warning for %s, got %#v", tc.name, report.Warnings())
-			}
-		})
+func TestRun_WarnsForSubscriptionWithoutProducer(t *testing.T) {
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: consumer-only\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "task.requested: {}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested: {}\n")
+	repo := repoRootForBootverifyTest(t)
+	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Warnings(), "event_producer_exists", "task.requested") {
+		t.Fatalf("missing producer must not be exempted: %#v", report.Warnings())
 	}
 }
 
 func TestRun_DoesNotWarnForPlatformEmittedEventCatalogSubscription(t *testing.T) {
 	t.Parallel()
-
 	cases := []struct {
 		name      string
 		eventType string
@@ -1178,9 +1145,7 @@ payload:
 func TestRun_RejectsProductRedeclarationOfPlatformEmittedEvent(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"mailbox.card_decided": {
-				Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
-			},
+			"mailbox.card_decided": {},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"
@@ -1242,12 +1207,12 @@ func TestLoad_RejectsRetiredPromptRef(t *testing.T) {
 	}
 }
 
-func TestNonInputEventMetadataProducerSource_AllowsAnnotatedSourceText(t *testing.T) {
-	t.Parallel()
-
-	entry := runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Source: "platform (timer system)"}}
-	if !nonInputEventMetadataProducerSource(entry) {
-		t.Fatal("expected platform source annotation to count as externally produced")
+func TestNonInputEventExternalProducerSource_RejectsUnregisteredPlatformLikeName(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{"platform.unregistered": {}},
+	})
+	if nonInputEventExternalProducerSource(source, ".", "platform.unregistered") {
+		t.Fatal("name alone must not manufacture platform producer authority")
 	}
 }
 
@@ -3883,19 +3848,20 @@ func TestRun_ReportsInputPinWiringHardInvalidity(t *testing.T) {
 
 	if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") ||
 		!reportContains(report.Errors(), "input_pin_wiring", "Expected a producer proof for input pin target child.task.feedback") ||
-		!reportContains(report.Errors(), "input_pin_wiring", "Do not rely on events.yaml swarm.source") {
+		!reportContains(report.Errors(), "input_pin_wiring", "Authored event role metadata") {
 		t.Fatalf("expected input_pin_wiring hard invalidity, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotErrorForExternalInputPinWithoutEmitter(t *testing.T) {
-	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-	markFlowInputPinSource(t, bundle, "child", "task.feedback", "external")
+func TestRunSelectedRootInputNeedsNoEmitterAnnotation(t *testing.T) {
+	repo := repoRootForBootverifyTest(t)
+	root := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-missing-pin", "child")
+	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring error for external input, got %#v", report.Errors())
+		t.Fatalf("unexpected input_pin_wiring error for selected-root input, got %#v", report.Errors())
 	}
 }
 
@@ -3967,7 +3933,7 @@ func TestRun_HarnessInputCountsOnlyItsDeclaredDeadEventSourceRole(t *testing.T) 
 	delete(worker.Nodes, "worker-node")
 	delete(bundle.Nodes, "worker-node")
 	delete(bundle.Semantics.NodeHandlers, "worker-node")
-	worker.Events["unrelated.dead"] = runtimecontracts.EventCatalogEntry{Source: "events.yaml"}
+	worker.Events["unrelated.dead"] = runtimecontracts.EventCatalogEntry{}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -3990,14 +3956,14 @@ func TestRun_HarnessInputUsesNoTargetClassificationWithoutDeliveryAuthority(t *t
 	}
 }
 
-func TestRun_RejectsHarnessInputWithRootOrIntrinsicIngress(t *testing.T) {
+func TestRun_RootHarnessInputIsNotPublicIngress(t *testing.T) {
 	bundle := loadHarnessBootverifyBundle(t, canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress))
 	markRootInputPinSource(t, bundle, "item.received", "harness")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "input_pin_wiring", "source: harness and another accepted producer source") {
-		t.Fatalf("expected root/harness exclusivity error, got %#v", report.Errors())
+	if _, public := semanticview.SelectedRootInputPin(semanticview.Wrap(bundle), "item.received"); public || reportContains(report.Errors(), "input_pin_wiring", "another accepted producer source") {
+		t.Fatalf("root harness input acquired public ingress authority: public=%v errors=%#v", public, report.Errors())
 	}
 }
 
@@ -4059,7 +4025,7 @@ func TestRun_MissingInputProducerListsProductionExitsBeforeTestHarness(t *testin
 		t.Fatalf("missing input producer finding absent: %#v", report.Errors())
 	}
 	harness := strings.Index(message, "For a validation fixture only, set source: harness")
-	for _, productionExit := range []string{"nearest common ancestor schema.yaml", "source: external", "platform-owned event", "intra-flow topology"} {
+	for _, productionExit := range []string{"nearest common ancestor schema.yaml", "provider ingress", "platform-owned event", "intra-flow topology"} {
 		index := strings.Index(message, productionExit)
 		if index < 0 || harness < 0 || index > harness {
 			t.Fatalf("remediation order is not production-first for %q:\n%s", productionExit, message)
@@ -4067,32 +4033,12 @@ func TestRun_MissingInputProducerListsProductionExitsBeforeTestHarness(t *testin
 	}
 }
 
-func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
+func TestLoadRejectsExternalInputSourceEvenInConsumingScope(t *testing.T) {
 	root := writeInputPinExternalScopeFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	var (
-		externalCleared bool
-		plainErrored    bool
-	)
-	for _, finding := range report.Errors() {
-		if finding.CheckID != "input_pin_wiring" || !strings.Contains(finding.Message, "ticket.ready") {
-			continue
-		}
-		switch finding.Location {
-		case "external_consumer":
-			externalCleared = true
-		case "plain_consumer":
-			plainErrored = true
-		}
-	}
-	if externalCleared {
-		t.Fatalf("unexpected input_pin_wiring error for external_consumer, got %#v", report.Errors())
-	}
-	if !plainErrored {
-		t.Fatalf("expected input_pin_wiring error for plain_consumer, got %#v", report.Errors())
+	repo := repoRootForBootverifyTest(t)
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err == nil || !strings.Contains(err.Error(), "RETIRED: input event pin source: external") {
+		t.Fatalf("private input marker admission = %v, want retired spelling error", err)
 	}
 }
 
@@ -4142,6 +4088,21 @@ func TestRun_RejectsUnconnectedRootNodeEmitAsChildInputProducerPath(t *testing.T
 
 	if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
 		t.Fatalf("unconnected root handler emit incorrectly proved child input readiness: %#v", report.Errors())
+	}
+}
+
+func TestRun_RootInputDoesNotImplicitlySubscribeSameNamedChild(t *testing.T) {
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root\npins:\n  inputs:\n    events: [work.started]\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.started: {value: text}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nmode: static\npins:\n  inputs:\n    events: [work.started]\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "work.started: {value: text}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), "observer:\n  execution_type: system_node\n  subscribes_to: [work.started]\n  event_handlers:\n    work.started: {}\n")
+	repo := repoRootForBootverifyTest(t)
+	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "input_pin_wiring", "Root input work.started reaches child child only through a connect edge in the parent's schema.yaml") {
+		t.Fatalf("same-name private child lacks a connect teaching error: %#v", report.Errors())
 	}
 }
 
@@ -4198,22 +4159,6 @@ func TestRun_DoesNotUseEventMetadataAsInputProducerPathProof(t *testing.T) {
 				node := bundle.Nodes["dispatcher"]
 				node.Produces = append(node.Produces, "child/task.feedback")
 				bundle.Nodes["dispatcher"] = node
-			},
-		},
-		{
-			name: "planned status",
-			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
-				entry := bundle.Events["task.feedback"]
-				entry.Swarm.Status = "planned"
-				bundle.Events["task.feedback"] = entry
-			},
-		},
-		{
-			name: "event metadata source external",
-			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
-				entry := bundle.Events["task.feedback"]
-				entry.Swarm.Source = "external"
-				bundle.Events["task.feedback"] = entry
 			},
 		},
 	}
@@ -5915,20 +5860,19 @@ func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T)
 	}
 }
 
-func TestRun_DoesNotReportCrossFlowPinAmbiguityForSiblingOutputs(t *testing.T) {
+func TestRun_RejectsUnconnectedInputDespiteSiblingOutputs(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "ticket.ready") {
-		t.Fatalf("unexpected cross_flow_pin_ambiguity_validation error for retired sibling-output inference, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
+		t.Fatalf("sibling declarations supplied authority without a connection: %#v", report.Errors())
 	}
 }
 
-func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testing.T) {
+func TestRun_AllowsDistinctExplicitBoundarySources(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-	markFlowInputPinSource(t, bundle, "child", "task.feedback", "external")
 	if bundle.RootSchema == nil {
 		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{}
 	}
@@ -5957,21 +5901,21 @@ func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testin
 	recompileBootverifySemantics(t, bundle)
 	bundle.Semantics.CompositionConnects = connects
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{"child": {"task.feedback"}}), Options{})
 
-	if !reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "task.feedback") {
-		t.Fatalf("expected cross_flow_pin_ambiguity_validation error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("distinct explicit sources were rejected, got %#v", report.Errors())
 	}
 }
 
-func TestRun_AllowsCrossFlowPinAmbiguityWithScopedEscapeHatch(t *testing.T) {
+func TestRun_RejectsUnconnectedInputDespiteQualifiedSubscription(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, true)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "ticket.ready") {
-		t.Fatalf("unexpected cross_flow_pin_ambiguity_validation error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
+		t.Fatalf("qualified subscription supplied authority without a connection: %#v", report.Errors())
 	}
 }
 
@@ -6141,13 +6085,13 @@ func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
 
 func TestRun_ReportsMissingSemanticHandlerForOwnedRuntimeEvent(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	event := bootverifyFlowEvent(t, bundle, ".", "ticket.opened")
-	event.OwningNode = "dispatcher"
-	setBootverifyFlowEvent(t, bundle, ".", "ticket.opened", event)
+	node := bundle.Nodes["dispatcher"]
+	node.SubscribesTo = append(node.SubscribesTo, "ticket.opened")
+	bundle.Nodes["dispatcher"] = node
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "owning_node flow . node dispatcher missing semantic event_handler") {
+	if !reportContains(report.Errors(), "event_runtime_wiring_validation", "on node flow . node dispatcher has no matching executable handler") {
 		t.Fatalf("expected event_runtime_wiring_validation error, got %#v", report.Errors())
 	}
 }
@@ -6158,22 +6102,18 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 	if !ok || root == nil {
 		t.Fatal("root flow missing")
 	}
-	root.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{}
-	event := bootverifyFlowEvent(t, bundle, ".", "ticket.audit")
-	event.RuntimeHandling = "projection"
-	event.OwningNode = "idle-owner"
-	setBootverifyFlowEvent(t, bundle, ".", "ticket.audit", event)
+	root.Nodes["idle-owner"] = runtimecontracts.SystemNodeContract{SubscribesTo: []string{"ticket.audit"}}
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit owning_node flow . node idle-owner has no runtime executor") {
+	if !reportContains(report.Errors(), "handler_field_compliance", "event ticket.audit on node flow . node idle-owner has no runtime executor") {
 		t.Fatalf("expected handler_field_compliance runtime executor error, got %#v", report.Errors())
 	}
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 71 {
-		t.Fatalf("bootCheckRegistry count = %d, want 71", got)
+	if got := len(bootCheckRegistry); got != 69 {
+		t.Fatalf("bootCheckRegistry count = %d, want 69", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -6357,7 +6297,7 @@ func TestRun_AllowsTimerFireEventWithWildcardConsumer(t *testing.T) {
 	}
 }
 
-func TestRun_AllowsTimerFireEventWithExternalConsumer(t *testing.T) {
+func TestLoadRejectsTimerExternalConsumerMetadata(t *testing.T) {
 	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
 		startOn:           "event:ticket.opened",
 		owner:             "support-node",
@@ -6368,13 +6308,13 @@ func TestRun_AllowsTimerFireEventWithExternalConsumer(t *testing.T) {
 	})
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
-	if reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
-		t.Fatalf("unexpected timer_validation no-consumer error for external consumer, got %#v", report.Errors())
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") {
+		t.Fatalf("external consumer annotation admission = %v, want retirement error", err)
 	}
 }
 
-func TestRun_AllowsTimerFireEventWithOutputBoundary(t *testing.T) {
+func TestRunRejectsPrivateTimerOutputWithoutConsumerRelation(t *testing.T) {
 	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
 		startOn:           "event:ticket.opened",
 		owner:             "support-node",
@@ -6386,8 +6326,8 @@ func TestRun_AllowsTimerFireEventWithOutputBoundary(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
-	if reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
-		t.Fatalf("unexpected timer_validation no-consumer error for output boundary, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
+		t.Fatalf("missing timer_validation no-consumer error for private output, got %#v", report.Errors())
 	}
 }
 
@@ -7262,15 +7202,9 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 		},
 	}
 	events := map[string]runtimecontracts.EventCatalogEntry{
-		"ticket.created": {
-			RuntimeHandling: "consuming",
-			OwningNode:      "dispatcher",
-		},
-		"ticket.opened": {
-			RuntimeHandling: "projection",
-			OwningNode:      "projector",
-		},
-		"ticket.audit": {},
+		"ticket.created": {},
+		"ticket.opened":  {},
+		"ticket.audit":   {},
 	}
 	root := &runtimecontracts.FlowContractView{
 		Path: ".",
@@ -7333,8 +7267,8 @@ func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.start": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
-			"task.done":  {Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"dashboard"}}},
+			"task.start": {},
+			"task.done":  {},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"
@@ -7374,7 +7308,6 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"scan.corpus_dispatch": {
-				Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"scan_id":   {Type: "string"},
@@ -7385,7 +7318,6 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 				},
 			},
 			"market_research.scan_assigned": {
-				Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"dashboard"}},
 				Payload: runtimecontracts.EventPayloadSpec{
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"scan_id":   {Type: "string"},

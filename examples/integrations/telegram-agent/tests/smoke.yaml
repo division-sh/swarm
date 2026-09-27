@@ -1,6 +1,6 @@
 name: Telegram bot smoke
 derive:
-  flow: telegram-chat
+  flow: .
   input: inbound.telegram.text_message
   payload:
     generate: true

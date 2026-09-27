@@ -1070,7 +1070,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabilities {
 	t.Helper()
 	bundle := testSetupValidationBundle(t)
-	if s.method == "run.start" {
+	if s.method == "run.start" || s.method == "event.publish" {
 		bundle = runStartTestBundle("scan.requested")
 	}
 	source := semanticview.Wrap(bundle)

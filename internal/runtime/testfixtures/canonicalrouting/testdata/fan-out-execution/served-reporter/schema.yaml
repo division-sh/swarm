@@ -2,11 +2,24 @@ name: notify-all-children
 pins:
   inputs:
     events:
-      - {event: portfolio.opened, source: external}
+      - portfolio.opened
+      - portfolio.account.register.requested
+      - portfolio.accounts.register.requested
+      - portfolio.membership.seeded
+      - portfolio.notify.requested
   outputs:
-    events: [portfolio.opened.forwarded]
+    events:
+      - portfolio.opened.forwarded
+      - portfolio.account.register.requested
+      - portfolio.accounts.register.requested
+      - portfolio.membership.seeded
+      - portfolio.notify.requested
 connect:
   - {event: portfolio.opened.forwarded, from: ., to: portfolio, rename: portfolio.opened}
+  - {event: portfolio.account.register.requested, from: ., to: portfolio}
+  - {event: portfolio.accounts.register.requested, from: ., to: portfolio}
+  - {event: portfolio.membership.seeded, from: ., to: portfolio}
+  - {event: portfolio.notify.requested, from: ., to: portfolio}
   - event: account.notify.requested
     from: portfolio
     to: account

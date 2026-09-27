@@ -82,7 +82,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if runtimepinrouting.OutputHarnessSink(c.source, ref.FlowID, ref.Authored) {
 			continue
 		}
-		if topologyRoutesProducer(topology, connectGraph, entry) || eventHasExternalConsumerLocal(ref.Entry) {
+		if topologyRoutesProducer(topology, connectGraph, entry) || eventIsPublicRootOutput(c.source, ref) {
 			continue
 		}
 		if invalid := invalidAuthoredConsumersForEvent(census, ref.Canonical); len(invalid) > 0 {
@@ -119,10 +119,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 			if resolution.HasEvidence() {
 				continue
 			}
-		} else if nonInputEventMetadataProducerSource(ref.Entry) {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(ref.Entry.SwarmStatus()), "planned") {
+		} else if nonInputEventExternalProducerSource(c.source, ref.FlowID, ref.Authored) {
 			continue
 		}
 		c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -246,8 +243,12 @@ func topologyRoutesConsumer(topology routingtopology.Topology, graph runtimepinr
 	return false
 }
 
-func eventHasExternalConsumerLocal(entry runtimecontracts.EventCatalogEntry) bool {
-	return entry.AcceptedConsumerBoundary() == runtimecontracts.EventConsumerBoundaryExternal
+func eventIsPublicRootOutput(source semanticview.Source, ref semanticview.FlowEventProof) bool {
+	if ref.FlowID != "." {
+		return false
+	}
+	_, ok := semanticview.SelectedRootOutputPin(source, ref.Authored)
+	return ok
 }
 
 func (c *checkerContext) eventCycleDetection() []Finding {

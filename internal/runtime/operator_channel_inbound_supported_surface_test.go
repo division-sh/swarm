@@ -40,14 +40,14 @@ func TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity(t *
 		runOperatorChannelInboundSupportedSurface(t, selected, db, false,
 			"73000000-0000-0000-0000-000000000001",
 			"73000000-0000-0000-0000-000000000002",
-			"operator-channel-telegram-postgres")
+			boundedProviderFlowID)
 	})
 	t.Run("sqlite", func(t *testing.T) {
 		selected := storetest.StartSQLiteRuntimeStore(t)
 		runOperatorChannelInboundSupportedSurface(t, selected, storetest.DatabaseForTest(selected), true,
 			"74000000-0000-0000-0000-000000000001",
 			"74000000-0000-0000-0000-000000000002",
-			"operator-channel-telegram-sqlite")
+			boundedProviderFlowID)
 	})
 }
 
@@ -108,7 +108,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		t.Fatal(err)
 	}
 
-	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{},
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: providerRawSettlementSemanticSource(t, inboundTarget, providerRawSettlementCase{provider: "telegram", eventName: "inbound.telegram"}, "telegram-secret")},
 		"inbound.telegram", "inbound.telegram.text_message", "inbound.telegram.callback_action")
 	if err != nil {
 		t.Fatal(err)

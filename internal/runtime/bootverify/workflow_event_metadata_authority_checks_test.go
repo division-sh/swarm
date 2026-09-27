@@ -7,192 +7,75 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestEventMetadataAuthorityRejectsInternalSwarmRestatements(t *testing.T) {
+func TestProviderSourceLivenessUsesLocalIdentityInExactDeclaringFlow(t *testing.T) {
+	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
+		name: "provider-local-liveness",
+		flows: map[string]deadEventSchemaFlowFiles{
+			"provider": {events: "ticket.ready: {}\n"},
+			"importer": {events: "ticket.ready: {}\n"},
+		},
+	})
+	repo := repoRootForBootverifyTest(t)
+	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	source := semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{"provider": {"ticket.ready"}})
+	report := Run(context.Background(), source, Options{})
+	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "provider/ticket.ready") {
+		t.Fatal("qualified diagnostic identity hid the exact provider-local producer")
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "importer/ticket.ready") {
+		t.Fatal("provider authority leaked to the same-named unbound flow")
+	}
+}
+
+func TestLoadRejectsRetiredRoleAnnotationsAcrossExecutableContexts(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		variant canonicalrouting.EventMetadataAuthorityVariant
-		want    string
-		wantMsg string
 	}{
-		{
-			name:    "producer names emitting node",
-			variant: canonicalrouting.EventMetadataAuthorityTaskProducerNode,
-			want:    "swarm.producer",
-			wantMsg: "system node worker handler emits",
-		},
-		{
-			name:    "consumer names subscribing node",
-			variant: canonicalrouting.EventMetadataAuthorityTaskConsumerNode,
-			want:    "swarm.consumer",
-			wantMsg: "system node observer handler subscribes",
-		},
-		{
-			name:    "source names internal producer",
-			variant: canonicalrouting.EventMetadataAuthorityTaskSourceNode,
-			want:    "swarm.source",
-			wantMsg: "derived internal producer system node worker handler emits",
-		},
-		{
-			name:    "producer names agent emit_events role",
-			variant: canonicalrouting.EventMetadataAuthorityTaskProducerAgent,
-			want:    "swarm.producer",
-			wantMsg: "agent role reviewer emit_events",
-		},
-		{
-			name:    "consumer names agent subscription role",
-			variant: canonicalrouting.EventMetadataAuthorityTaskConsumerAgent,
-			want:    "swarm.consumer",
-			wantMsg: "agent role reviewer subscriptions",
-		},
-		{
-			name:    "producer names timer",
-			variant: canonicalrouting.EventMetadataAuthorityTaskProducerTimer,
-			want:    "swarm.producer",
-			wantMsg: "timer reminder fires event",
-		},
+		{"node producer", canonicalrouting.EventMetadataAuthorityTaskProducerNode},
+		{"node consumer", canonicalrouting.EventMetadataAuthorityTaskConsumerNode},
+		{"source", canonicalrouting.EventMetadataAuthorityTaskSourceNode},
+		{"agent producer", canonicalrouting.EventMetadataAuthorityTaskProducerAgent},
+		{"agent consumer", canonicalrouting.EventMetadataAuthorityTaskConsumerAgent},
+		{"timer producer", canonicalrouting.EventMetadataAuthorityTaskProducerTimer},
+		{"external and platform labels", canonicalrouting.EventMetadataAuthorityExternalProof},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := loadEventMetadataAuthorityFixture(t, tc.variant)
-
-			report := Run(context.Background(), source, Options{})
-
-			if !reportContains(report.HardInvalidities(), "event_metadata_authority", tc.want) ||
-				!reportContains(report.HardInvalidities(), "event_metadata_authority", tc.wantMsg) {
-				t.Fatalf("expected event_metadata_authority hard invalidity containing %q and %q, got %#v", tc.want, tc.wantMsg, report.HardInvalidities())
+			root := canonicalrouting.CopyEventMetadataAuthority(t, tc.variant)
+			repo := repoRootForBootverifyTest(t)
+			_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "swarm") {
+				t.Fatalf("retired annotations must fail at source admission: %v", err)
 			}
 		})
 	}
 }
 
-func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		invalidity canonicalrouting.ParentConnectEventMetadataInvalidity
-		want       string
-		wantMsg    string
-	}{
-		{
-			name:       "producer names flow auto emit",
-			invalidity: canonicalrouting.ParentConnectMetadataProducerFlowAutoEmit,
-			want:       "swarm.producer",
-			wantMsg:    "flow producer auto_emit_on_create producer",
-		},
-		{
-			name:       "producer names flow output pin",
-			invalidity: canonicalrouting.ParentConnectMetadataProducerFlowOutput,
-			want:       "swarm.producer",
-			wantMsg:    "flow producer output pin producer",
-		},
-		{
-			name:       "consumer names flow input pin",
-			invalidity: canonicalrouting.ParentConnectMetadataConsumerFlowInput,
-			want:       "swarm.consumer",
-			wantMsg:    "flow consumer",
-		},
-		{
-			name:       "producer names parent connect output",
-			invalidity: canonicalrouting.ParentConnectMetadataProducerConnectOutput,
-			want:       "swarm.producer",
-			wantMsg:    "parent connect output producer",
-		},
-		{
-			name:       "consumer names parent connect input",
-			invalidity: canonicalrouting.ParentConnectMetadataConsumerConnectInput,
-			want:       "swarm.consumer",
-			wantMsg:    "parent connect input consumer",
-		},
-		{
-			name:       "producer rejects wrong-event flow output pin",
-			invalidity: canonicalrouting.ParentConnectMetadataProducerWrongFlowEvent,
-			want:       "swarm.producer",
-			wantMsg:    "flow producer output pin producer",
-		},
-		{
-			name:       "consumer rejects wrong-event flow input pin",
-			invalidity: canonicalrouting.ParentConnectMetadataConsumerWrongFlowEvent,
-			want:       "swarm.consumer",
-			wantMsg:    "flow consumer input pin consumer",
-		},
-		{
-			name:       "producer rejects wrong-event parent connect output",
-			invalidity: canonicalrouting.ParentConnectMetadataProducerWrongConnectEvent,
-			want:       "swarm.producer",
-			wantMsg:    "parent connect output producer",
-		},
-		{
-			name:       "consumer rejects wrong-event parent connect input",
-			invalidity: canonicalrouting.ParentConnectMetadataConsumerWrongConnectEvent,
-			want:       "swarm.consumer",
-			wantMsg:    "parent connect input consumer",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := loadEventMetadataFlowAuthorityFixture(t, tc.invalidity)
-
-			report := Run(context.Background(), source, Options{})
-
-			if !reportContains(report.HardInvalidities(), "event_metadata_authority", tc.want) ||
-				!reportContains(report.HardInvalidities(), "event_metadata_authority", tc.wantMsg) {
-				t.Fatalf("expected event_metadata_authority hard invalidity containing %q and %q, got %#v", tc.want, tc.wantMsg, report.HardInvalidities())
-			}
-		})
+func TestExecutableEventRolesRemainVisibleWithoutMetadata(t *testing.T) {
+	root := canonicalrouting.CopyEventMetadataAuthority(t, canonicalrouting.EventMetadataAuthorityDefault)
+	repo := repoRootForBootverifyTest(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestEventMetadataAuthorityAcceptsExternalProof(t *testing.T) {
-	source := loadEventMetadataAuthorityFixture(t, canonicalrouting.EventMetadataAuthorityExternalProof)
-
+	source := semanticview.Wrap(bundle)
 	report := Run(context.Background(), source, Options{})
-
-	if reportContains(report.HardInvalidities(), "event_metadata_authority", "") {
-		t.Fatalf("external/platform metadata proof should be accepted, got %#v", report.HardInvalidities())
-	}
-}
-
-func TestEventMetadataAuthorityNarrowReadbackExplainsDerivedAndExternalProof(t *testing.T) {
-	source := loadEventMetadataAuthorityFixture(t, canonicalrouting.EventMetadataAuthorityDefault)
-	report := Run(context.Background(), source, Options{})
-
 	if reportContains(report.Warnings(), "event_producer_exists", "task.done") ||
-		reportContains(report.Warnings(), "event_consumer_exists", "task.done") {
-		t.Fatalf("derived handler roles should satisfy producer/consumer checks, got warnings %#v", report.Warnings())
+		reportContains(report.Warnings(), "event_consumer_exists", "task.done") ||
+		reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "task.done") {
+		t.Fatalf("real handler relations lost authority: %#v", report.Warnings())
 	}
-	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "task.done") {
-		t.Fatalf("derived handler roles should keep event schema alive, got warnings %#v", report.Warnings())
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	producers := census.MatchingProducers(".", "task.done")
+	consumers := census.MatchingConsumers(".", "task.done")
+	if len(producers) != 1 || producers[0].NodeID != "worker" || producers[0].Kind != semanticview.EventEndpointNodeHandler {
+		t.Fatalf("producer proof: %#v", producers)
 	}
-
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(".", "task.done")
-	if !ok {
-		t.Fatalf("task.done event entry missing")
+	if len(consumers) != 1 || consumers[0].NodeID != "observer" || consumers[0].Kind != semanticview.EventEndpointNodeHandler {
+		t.Fatalf("consumer proof: %#v", consumers)
 	}
-	producers, consumers := eventMetadataRoleNames(source, deadEventDeclaration{
-		Canonical: "task.done",
-		FlowID:    ".",
-		Entry:     entry,
-	})
-	if label, ok := producers.match("worker"); !ok || !strings.Contains(label, "handler emits") {
-		t.Fatalf("producer role readback = %q/%v, want worker handler emit proof", label, ok)
-	}
-	if label, ok := consumers.match("observer"); !ok || !strings.Contains(label, "handler subscribes") {
-		t.Fatalf("consumer role readback = %q/%v, want observer handler subscription proof", label, ok)
-	}
-}
-
-func loadEventMetadataAuthorityFixture(t *testing.T, variant canonicalrouting.EventMetadataAuthorityVariant) semanticview.Source {
-	t.Helper()
-	root := canonicalrouting.CopyEventMetadataAuthority(t, variant)
-	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec))
-}
-
-func loadEventMetadataFlowAuthorityFixture(t *testing.T, invalidity canonicalrouting.ParentConnectEventMetadataInvalidity) semanticview.Source {
-	t.Helper()
-	root := canonicalrouting.CopyParentConnectEventMetadataInvalidity(t, invalidity)
-	repoRoot := repoRootForBootverifyTest(t)
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	return semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec))
 }

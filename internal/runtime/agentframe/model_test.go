@@ -191,7 +191,7 @@ func TestExecutionFrameConsumesAdmittedProviderTriggerEventFactsWithoutNormaliza
 	event := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"00000000-0000-4000-8000-000000000005", "inbound.telegram.text_message", "telegram-provider", "task-1",
 		json.RawMessage(`{"message":"hello","provider_update_id":"42"}`), 0, surface.Authority.RunID,
-		events.EventEnvelope{Source: route}, routingSource, time.Unix(2, 0).UTC(),
+		events.EventEnvelope{}, routingSource, time.Unix(2, 0).UTC(),
 	)
 	frame := completeTestFrame(t, seed, TurnDraft{Kind: TurnInitial, Event: event}, surface)
 	got := frame.Turn.Event

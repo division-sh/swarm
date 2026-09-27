@@ -58,7 +58,7 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 	applyClosedReplacement(t, filepath.Join(root, "provider", "events.yaml"),
 		"provider.replied:\n", "provider.replied:\n  key: provider_request_id\n  provider_request_id: text\n")
 	initiatorEvents := filepath.Join(root, "initiator", "events.yaml")
-	applyClosedReplacement(t, initiatorEvents,
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.submitted:\n  account_id: text\n",
 		"request.submitted:\n  account_id: text\n  provider_request_id: text\n")
 	applyClosedReplacement(t, initiatorEvents,

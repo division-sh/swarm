@@ -18,7 +18,7 @@ func CopyTargetedDeclaredKey(t testing.TB, acquisition string) string {
 	writeClosedVariantFile(t, root, "schema.yaml", `name: declared-key-execution
 pins:
   inputs:
-    events: [{event: work.requested, source: external}]
+    events: [work.requested]
   outputs:
     events: [work.keyed]
 connect:

@@ -122,18 +122,12 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
-	publicAdmission, publicInput := publicInputAdmissionFromContext(ctx)
-	if publicInput {
-		if err := publicAdmission.validateEvent(evt); err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-	}
-	if !publicInput && len(r.graph.Plans()) == 0 && len(r.issues) == 0 {
+	if len(r.graph.Plans()) == 0 && len(r.issues) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
-	if !publicInput {
+	{
 		for _, issue := range r.issues {
-			if r.graph.IssueMatchesEvent(issue, evt) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization()) {
+			if r.graph.IssueMatchesEvent(issue, evt) && issue.AcceptsReceiverTarget(explicitRootPublicationTarget(evt), evt.RunID()) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization()) {
 				return connectRoutePlanDispatch{
 					Matched:    true,
 					Failure:    connectRoutePlanTargetFailure(issue.Failure),
@@ -270,6 +264,13 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 				out.ExtraDetail[key] = value
 			}
 			return out, nil
+		}
+		if target := explicitRootPublicationTarget(evt); !target.Empty() {
+			var selected bool
+			materialized, selected = materialized.SelectReceiverTarget(target)
+			if !selected {
+				continue
+			}
 		}
 		if !decision.Empty() {
 			out.ExtraDetail["connect_route_plan_template_instance_lifecycle"] = decision.Detail()
@@ -565,16 +566,11 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 }
 
 func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.Event) []runtimepinrouting.ConnectRoutePlan {
-	if admission, ok := publicInputAdmissionFromContext(ctx); ok {
-		if admission.validateEvent(evt) == nil {
-			return []runtimepinrouting.ConnectRoutePlan{admission.plan}
-		}
-		return nil
-	}
 	candidates := r.graph.MatchingPlans(evt)
 	out := make([]runtimepinrouting.ConnectRoutePlan, 0, len(candidates))
+	target := explicitRootPublicationTarget(evt)
 	for _, plan := range candidates {
-		if providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization()) {
+		if plan.AcceptsReceiverTarget(target, evt.RunID()) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization()) {
 			out = append(out, plan)
 		}
 	}

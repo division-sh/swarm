@@ -28,10 +28,6 @@ func (*routeSettlementDraftRecorder) PersistedOccurredAt(context.Context, string
 	return time.Time{}, false, nil
 }
 
-func (*routeSettlementDraftRecorder) PersistedAuthorSafeSummary(context.Context, string) (string, bool, error) {
-	return "", false, nil
-}
-
 func TestNoDeliveryDispositionRendersAuthorWarningAndNDJSON(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	runID := uuid.NewString()

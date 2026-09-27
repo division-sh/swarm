@@ -1,5 +1,13 @@
 name: routing-parent-connect
+pins:
+  inputs:
+    events: [work.requested]
+  outputs:
+    events: [work.requested]
 connect:
+  - event: work.requested
+    from: .
+    to: producer
   - event: work.ready
     from: producer
     to: consumer

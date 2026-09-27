@@ -19,4 +19,4 @@ pins:
           priority: payload.priority
           owner: payload.owner
       - event: task.assign
-        source: external
+        resolution: {mode: select}

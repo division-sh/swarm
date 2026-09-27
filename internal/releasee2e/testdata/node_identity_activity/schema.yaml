@@ -3,4 +3,4 @@ stages: []
 pins:
   inputs:
     events:
-      - {event: request, source: external}
+      - request

@@ -26,7 +26,7 @@ func CopyForkLoopRetainedJoinSeparateCheckpoint(t testing.TB) string {
           completed: {literal: 1}
     work.requested:
 `)
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - {event: work.requested, source: external}", "      - {event: work.requested, source: external}\n      - {event: checkpoint.requested, source: external}")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - work.requested", "      - work.requested\n      - checkpoint.requested")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.requested:\n", "checkpoint.requested:\n  revision_id: text\nwork.requested:\n")
 	return root
 }
@@ -52,10 +52,12 @@ loops:
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
-      - {event: work.bootstrap, source: external}
-      - {event: review.retry, source: external}
-      - {event: review.closed, source: external}
+      - work.requested
+      - work.bootstrap
+      - review.retry
+      - review.closed
+  outputs:
+    events: [join.observed]
 `,
 		"entities.yaml": `work:
   members: {type: "[text]"}
@@ -76,8 +78,6 @@ review.closed:
 join.observed:
   revision_id: text
   completed: integer
-  swarm:
-    consumer: external
 `,
 		"nodes.yaml": `initializer:
   execution_type: system_node

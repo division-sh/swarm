@@ -11,6 +11,5 @@ pins:
   inputs:
     events:
       - event: inbound.telegram.text_message
-        source: external
         resolution:
           mode: select-or-create

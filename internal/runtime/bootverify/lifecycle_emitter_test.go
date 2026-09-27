@@ -25,7 +25,7 @@ func TestCompiledLifecycleEmitterSourceMatrix(t *testing.T) {
 		{"gate_dangling", canonicalrouting.LifecycleGateDangling, semanticview.EventEndpointGateOutcome, 1, true, false, false},
 		{"gate_shared", canonicalrouting.LifecycleGateSharedEvent, semanticview.EventEndpointGateOutcome, 2, false, false, false},
 		{"gate_no_emit", canonicalrouting.LifecycleGateNoEmit, semanticview.EventEndpointGateOutcome, 0, false, true, false},
-		{"gate_output_disconnected", canonicalrouting.LifecycleGateOutputDisconnected, semanticview.EventEndpointGateOutcome, 1, true, false, true},
+		{"gate_output_disconnected", canonicalrouting.LifecycleGateOutputDisconnected, semanticview.EventEndpointGateOutcome, 1, true, false, false},
 		{"gate_nested", canonicalrouting.LifecycleGateNested, semanticview.EventEndpointGateOutcome, 1, false, false, false},
 		{"loop_connected", canonicalrouting.LifecycleLoopConnected, semanticview.EventEndpointLoopEscape, 1, false, false, false},
 	} {
@@ -88,7 +88,8 @@ func TestCompiledLifecycleEmitterSourceMatrix(t *testing.T) {
 					t.Errorf("invalid lifecycle fixture: %#v", finding)
 				}
 			}
-			if seen["event_producer_exists"] || seen["event_consumer_exists"] != tc.dangling || seen["semantic_drift_dead_event_schema"] != tc.dead || seen["pin_target_resolution"] != tc.disconnected {
+			wantConsumerWarning := tc.dangling && tc.variant != canonicalrouting.LifecycleGateOutputDisconnected
+			if seen["event_producer_exists"] || seen["event_consumer_exists"] != wantConsumerWarning || seen["semantic_drift_dead_event_schema"] != tc.dead || seen["pin_target_resolution"] != tc.disconnected {
 				t.Fatalf("diagnostics = %#v, report=%#v", seen, report.Findings)
 			}
 		})
@@ -124,26 +125,22 @@ func TestCompiledLifecycleEmitterReservedClaims(t *testing.T) {
 
 func TestCompiledLifecycleEmitterMetadataRoles(t *testing.T) {
 	for _, tc := range []struct {
-		name, event, role string
-		variant           canonicalrouting.LifecycleEmitterVariant
+		name    string
+		variant canonicalrouting.LifecycleEmitterVariant
 	}{
-		{"gate_decision", "work.completed", "review_decision", canonicalrouting.LifecycleGateLocal},
-		{"gate_site", "work.completed", "stages.review.gate.outcomes.approve.emit", canonicalrouting.LifecycleGateLocal},
-		{"loop_id", "loop.escaped", "revision", canonicalrouting.LifecycleLoopConnected},
-		{"loop_site", "loop.escaped", "loops.revision.escape.emit", canonicalrouting.LifecycleLoopConnected},
+		{"gate_decision", canonicalrouting.LifecycleGateLocal},
+		{"gate_site", canonicalrouting.LifecycleGateLocal},
+		{"loop_id", canonicalrouting.LifecycleLoopConnected},
+		{"loop_site", canonicalrouting.LifecycleLoopConnected},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, field := range []string{"producer", "source", "consumer"} {
 				t.Run(field, func(t *testing.T) {
 					root := canonicalrouting.CopyLifecycleEmitterMetadata(t, tc.variant, field, strings.Contains(tc.name, "site"))
 					repo := canonicalrouting.RepoRoot(t)
-					bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
-					if err != nil {
-						t.Fatal(err)
-					}
-					report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-					if !reportContains(report.HardInvalidities(), "event_metadata_authority", tc.role) {
-						t.Fatalf("internal %s role not rejected: %#v", field, report.Findings)
+					_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+					if err == nil || !strings.Contains(err.Error(), "RETIRED: events.yaml metadata field swarm") {
+						t.Fatalf("retired %s metadata accepted: %v", field, err)
 					}
 				})
 			}

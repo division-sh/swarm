@@ -137,14 +137,20 @@ func TestHarnessInputCreatesNoStandingTargetProviderIngressOrTargetFreeRoute(t *
 }
 
 func testRuntimeWorkflowValidationBundle(localEvents ...string) *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{}
+	bundle := &runtimecontracts.WorkflowContractBundle{RootSchema: &runtimecontracts.FlowSchemaDocument{
+		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "test.input"}}}},
+	}}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
 	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
-		"test.input": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
+		"test.input": {},
 	}
 	for _, eventName := range localEvents {
 		bundle.Events[eventName] = runtimecontracts.EventCatalogEntry{}
+	}
+	semanticviewtest.WrapRootAgents(bundle)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
 	}
 	return bundle
 }
@@ -950,7 +956,7 @@ func TestRuntimeDepsValidatedDerivesCanonicalBootGraph(t *testing.T) {
 func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	bundle := testRuntimeWorkflowValidationBundle()
+	bundle := testRuntimeWorkflowValidationBundle("ready.event")
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"agent-1": func() runtimecontracts.AgentRegistryEntry {
 			entry := testRuntimeWorkflowValidationAgent("agent-1")
@@ -990,7 +996,7 @@ func TestValidateWorkflowContractSurface_AllowsExplicitEventSchemas(t *testing.T
 func TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	bundle := testRuntimeWorkflowValidationBundle()
+	bundle := testRuntimeWorkflowValidationBundle("ready.event")
 	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
 		"agent-1": func() runtimecontracts.AgentRegistryEntry {
 			entry := testRuntimeWorkflowValidationAgent("agent-1")
@@ -1015,6 +1021,7 @@ func TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema(t *testi
 			},
 		},
 	}
+	bundle.FlowTree.Root.Events = bundle.Events
 	semanticviewtest.WrapRootAgents(bundle)
 	err := runtimecontracts.CompileWorkflowSemantics(bundle)
 	if err == nil || !strings.Contains(err.Error(), `compile event .:ready.event: compiled structural schema: structural schema field unsupported: unsupported structural schema type "NotDeclared"`) {
@@ -1028,7 +1035,7 @@ func TestWorkflowContractAdmissionRejectsInvalidGeneratedEmitToolSchema(t *testi
 func TestValidateWorkflowContractSurfaceAllowsPrecisionQualifiedGeneratedEmitToolSchema(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	bundle := testRuntimeWorkflowValidationBundle()
+	bundle := testRuntimeWorkflowValidationBundle("ready.event")
 	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
 		Types: map[string]runtimecontracts.NamedTypeDecl{
 			"RequiredCapabilities": {

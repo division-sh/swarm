@@ -61,7 +61,7 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 			continue
 		}
 		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, endpoint.FlowID, eventType)
-		if !consumer.HasRuntimeConsumer() {
+		if !consumer.HasRuntimeConsumer() && !consumer.Has(runtimepinrouting.OutputConsumerRootExport) {
 			findings = append(findings, Finding{
 				CheckID: "pin_target_resolution", Severity: "error", Location: endpoint.FlowID,
 				Message: fmt.Sprintf("%s emits pin-declared output %s without valid target mechanism: %s", endpoint.ProducerDescription(), eventType, runtimepinrouting.FailureTargetRequiredMissing.Code()),

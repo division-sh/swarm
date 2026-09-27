@@ -715,7 +715,7 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 	}
 }
 
-func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
+func TestHandleEmitTool_RejectsNestedStaticOutputWithOnlyParentAddress(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"vertical.discovered": {
@@ -777,22 +777,15 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 	_, err := exec.handleEmitTool(ctx, actor, "emit_vertical_discovered", map[string]any{
 		"name": "Law firm AP automation",
 	})
-	if err != nil {
-		t.Fatalf("handleEmitTool: %v", err)
+	if err == nil || !strings.Contains(failures.Format(err), "target_required_missing") {
+		t.Fatalf("handleEmitTool error = %v, want missing consumer despite complete parent address", err)
 	}
-
-	if got, want := string(bus.event.Type()), "root/discovery/vertical.discovered"; got != want {
-		t.Fatalf("published event type = %q, want %q", got, want)
-	}
-	if got := bus.event.TargetRoute(); got != parentOwner {
-		t.Fatalf("published target route = %#v, want parent owner %#v", got, parentOwner)
-	}
-	if bus.count != 1 {
-		t.Fatalf("publish count = %d, want 1", bus.count)
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want no mutation", bus.count)
 	}
 }
 
-func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
+func TestHandleEmitTool_RejectsCompleteParentWithoutConsumer(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"analysis.done": {
@@ -865,23 +858,21 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 		FlowInstance: "wrong-root",
 		EntityID:     "33333333-3333-3333-3333-333333333333",
 	}
-	inbound := toolTestInboundEvent(
+	inbound := toolTestInboundEventWithSource(
 		events.EventType("analyzer-flow/analysis.requested"),
 		nil,
 		events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, wrongInboundParent), childRoute),
 		executionmode.Live,
+		eventtest.ConcreteTemplateRoutingSource(wrongInboundParent.FlowID, wrongInboundParent.FlowInstance, wrongInboundParent.EntityID),
 	)
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
-	if err != nil {
-		t.Fatalf("handleEmitTool: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("handleEmitTool error = %v, want missing consumer rejection", err)
 	}
-	if got := bus.event.TargetRoute(); got != parentRoute {
-		t.Fatalf("target route = %#v, want parent route %#v", got, parentRoute)
-	}
-	if got := bus.event.SourceRoute(); got.Empty() || got.FlowID != "analyzer-flow" || got.FlowInstance != "analyzer-flow/inst-1" {
-		t.Fatalf("source route = %#v, want analyzer-flow/inst-1 source", got)
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want none despite complete parent address", bus.count)
 	}
 }
 
@@ -946,17 +937,17 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
 	if err == nil {
-		t.Fatal("handleEmitTool error = nil, want parent_route_incomplete")
+		t.Fatal("handleEmitTool error = nil, want missing consumer rejection")
 	}
-	if !strings.Contains(err.Error(), "parent_route_incomplete") {
-		t.Fatalf("handleEmitTool error = %v, want parent_route_incomplete", err)
+	if !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("handleEmitTool error = %v, want missing consumer rejection", err)
 	}
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
 	}
 }
 
-func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) {
+func TestHandleEmitTool_StaticChildRejectsCompleteDeliveryWithoutConsumer(t *testing.T) {
 	source := staticChildPinOutputTestSource(t)
 	emitRegistry := NewEmitRegistry(source, nil)
 
@@ -976,7 +967,7 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 	currentOwner := events.RouteIdentity{
 		FlowID: "root", FlowInstance: "root/run-1", EntityID: "44444444-4444-4444-4444-444444444444",
 	}
-	inbound := toolTestInboundEvent(
+	inbound := toolTestInboundEventWithSource(
 		events.EventType("root/analyzer-flow/analysis.requested"),
 		nil,
 		events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
@@ -985,6 +976,7 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 			EntityID:     sourceEntityID,
 		}), events.RouteIdentity{FlowID: "inbound", FlowInstance: "inbound/one", EntityID: inboundEntityID}),
 		executionmode.Live,
+		eventtest.ConcreteTemplateRoutingSource("wrong-root", "wrong-root", sourceEntityID),
 	)
 
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), inbound)
@@ -995,14 +987,11 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 	})
 
 	_, err := exec.handleEmitTool(ctx, actor, "emit_analysis_done", map[string]any{})
-	if err != nil {
-		t.Fatalf("handleEmitTool: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "target_required_missing") {
+		t.Fatalf("handleEmitTool error = %v, want missing consumer rejection", err)
 	}
-	if got := bus.event.TargetRoute(); got != currentOwner {
-		t.Fatalf("target route = %#v, want exact current delivery route %#v", got, currentOwner)
-	}
-	if got := bus.event.TargetRoute().EntityID; got == inboundEntityID || got == sourceEntityID {
-		t.Fatalf("target entity = %q, must not use inbound=%q or source=%q", got, inboundEntityID, sourceEntityID)
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want none despite current delivery address", bus.count)
 	}
 }
 
@@ -1140,7 +1129,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 	}
 }
 
-func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
+func TestHandleEmitTool_RootExportDoesNotInventTarget(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
@@ -1171,14 +1160,11 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 	}
 
 	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_root_ready", map[string]any{})
-	if err == nil {
-		t.Fatal("handleEmitTool error = nil, want target_required_missing")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "target_required_missing") {
-		t.Fatalf("handleEmitTool error = %v, want target_required_missing", err)
-	}
-	if bus.count != 0 {
-		t.Fatalf("publish count = %d, want 0", bus.count)
+	if bus.count != 1 || !bus.event.TargetRoute().Empty() || len(bus.event.TargetRoutes()) != 0 {
+		t.Fatalf("root export: count=%d target=%#v, want one targetless publication", bus.count, bus.event.TargetRoute())
 	}
 }
 

@@ -529,7 +529,7 @@ func fanInStreamEvent(eventType, id, flowInstance, periodID string, revenue int)
 		"operating_id": flowInstance,
 		"revenue":      revenue,
 	})
-	return eventtest.ExistingRunRootIngress(
+	return eventtest.ExistingRunRootIngressWithRoutingSource(
 		eventtest.UUID(id),
 		events.EventType(eventType),
 		"",
@@ -542,6 +542,7 @@ func fanInStreamEvent(eventType, id, flowInstance, periodID string, revenue int)
 			FlowInstance: flowInstance,
 			EntityID:     runtimeflowidentity.EntityID(flowInstance + "-entity"),
 		}),
+		eventtest.ConcreteTemplateRoutingSource(templatefanin.ProducerFlowID, flowInstance, runtimeflowidentity.EntityID(flowInstance+"-entity")),
 		time.Now().UTC(),
 	)
 }

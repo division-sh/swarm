@@ -33,8 +33,8 @@ func workflowLifecycleEventForTest(t *testing.T, store *workflowInstanceStore, c
 	if !ok {
 		mode = runtimeeffects.ExecutionModeLive
 	}
-	inbound := eventtest.RunCreatingRootIngressWithMode(uuid.NewString(), events.EventType(eventType), "operator", "", []byte(`{}`), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", handlerTestWorkflowEnvelope(flowID, instanceID, entityID), at, mode)
+	inbound := eventtest.RunCreatingRootIngressWithRoutingSourceAndMode(uuid.NewString(), events.EventType(eventType), "operator", "", []byte(`{}`), 0,
+		runtimecorrelation.RunIDFromContext(ctx), "", handlerTestWorkflowEnvelope(flowID, instanceID, entityID), testWorkflowRoutingSource(flowID, instanceID, entityID), at, mode)
 	dialect := authoractivityfixture.DialectPostgres
 	if store.isSQLite() {
 		dialect = authoractivityfixture.DialectSQLite

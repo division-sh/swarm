@@ -170,7 +170,7 @@ func TestRunScopedTemplateFlowAndAgentExecutionSupportedSurfaceBothStores(t *tes
 
 func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/tier12-runtime-fork/test-run-scoped-flow-agent-fork"))
-	fixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-run-scoped-flow-agent-fork").Root
+	fixtureRoot := localReadinessFixture(t, 1, "agent")
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
@@ -178,7 +178,16 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			selected := runScopedCatalogStore(t, h)
 			flowPath := "worker-flow/worker-001"
 			sourceRunID := catalogRuntimeRunID
-			flowEntityID := materializeCatalogSelectedForkSourceFlow(t, h, sourceRunID, flowPath)
+			flowEntityID := eventtest.UUID("run-scoped-selected-fork-worker")
+			frontierID := activateLocalReadinessFrontier(t, catalogRunContext(h, sourceRunID), h, "worker.ready")
+			observed, err := catalogRunScopedOperatorEvents(h, sourceRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workerReady, err := observed[frontierID].EventSnapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
 			resolvedWorkerRoutes := h.rt.Bus.RouteTable().ResolveForRun(sourceRunID, flowPath+"/worker.ready")
 			hasWorkerAgentPlan := false
 			for _, route := range resolvedWorkerRoutes {
@@ -195,7 +204,6 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			}); err != nil {
 				t.Fatalf("pause selected-fork source run: %v", err)
 			}
-			workerReady := catalogRunScopedWorkerReadyEvent(t, sourceRunID, flowPath, flowEntityID, uuid.NewString())
 			workerPlan, err := h.rt.Bus.CheckPublishRecipientPlan(catalogRunContext(h, sourceRunID), workerReady)
 			if err != nil {
 				t.Fatalf("plan selected-fork source worker event: %v", err)
@@ -209,12 +217,6 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			if !hasWorkerDelivery {
 				t.Fatalf("selected-fork source worker plan has no exact agent delivery: %#v", workerPlan.DeliveryRoutes)
 			}
-			ctx, cancel := context.WithTimeout(catalogRunContext(h, sourceRunID), catalogRuntimePublishTimeout)
-			if err := h.rt.Bus.PublishAndWait(ctx, workerReady); err != nil {
-				cancel()
-				t.Fatalf("publish paused source flow instance: %v", err)
-			}
-			cancel()
 			sourceEvent := workerReady
 
 			sourceOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(sourceRunID, runtimeflowidentity.RouteForInstancePath(flowPath))
@@ -229,7 +231,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			if err != nil || len(sourceRoutesBefore) == 0 {
 				t.Fatalf("source routes before fork = %#v err=%v", sourceRoutesBefore, err)
 			}
-			sourceAgent := catalogRunScopedAgentDeliveryIdentity(t, h, sourceRunID, flowPath, "pending")
+			sourceAgent := catalogRunScopedAgentDeliveryIdentity(t, h, sourceRunID, flowPath, string(sourceEvent.Type()), "pending")
 
 			var sourceStore interface {
 				storetest.DurableDataCatalogStore
@@ -280,7 +282,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			}
 			forkRunID := materialization.ForkRunID
 			assertCatalogRunScopedFlowOwner(t, h, selected, forkRunID, flowPath, "complete", false)
-			forkAgent := catalogRunScopedAgentDeliveryIdentity(t, h, forkRunID, flowPath, "delivered")
+			forkAgent := catalogRunScopedAgentDeliveryIdentity(t, h, forkRunID, flowPath, string(sourceEvent.Type()), "delivered")
 			if sourceAgent.RunID == forkAgent.RunID || sourceAgent.Name != forkAgent.Name || sourceAgent.Route != forkAgent.Route {
 				t.Fatalf("source/fork agent identity = %#v/%#v, want equal declaration+route and distinct run", sourceAgent, forkAgent)
 			}
@@ -297,7 +299,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 				!reflect.DeepEqual(sourceBefore.Fields, sourceAfter.Fields) || !reflect.DeepEqual(sourceRoutesBefore, sourceRoutesAfter) {
 				t.Fatalf("source flow changed across fork: before=%#v routes=%#v after=%#v routes=%#v", sourceBefore, sourceRoutesBefore, sourceAfter, sourceRoutesAfter)
 			}
-			_ = catalogRunScopedAgentDeliveryIdentity(t, h, sourceRunID, flowPath, "pending")
+			_ = catalogRunScopedAgentDeliveryIdentity(t, h, sourceRunID, flowPath, string(sourceEvent.Type()), "pending")
 		})
 	}
 }
@@ -425,21 +427,14 @@ func materializeCatalogSelectedForkSourceFlow(t testing.TB, h *runtimeHarness, r
 	return entityID
 }
 
-func catalogRunScopedWorkerReadyEvent(t testing.TB, runID, flowPath, entityID, eventID string) events.Event {
+func catalogRunScopedWorkerReadyEvent(t testing.TB, runID, eventID string) events.Event {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{"worker_id": "worker-001"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowPath)
-	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
-		FlowID: "worker-flow", FlowInstance: flowPath, EntityID: entityID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return eventtest.ExistingRunRootIngressWithRoutingSource(
-		eventID, events.EventType(flowPath+"/worker.ready"), "cataloge2e", "", payload, 0, runID, envelope, routingSource, time.Now().UTC(),
+		eventID, "worker.ready", "cataloge2e", "", payload, 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC(),
 	)
 }
 
@@ -501,7 +496,7 @@ func assertCatalogRunScopedAgent(
 	wantDeliveryStatus string,
 ) {
 	t.Helper()
-	identity := catalogRunScopedAgentDeliveryIdentity(t, h, runID, flowPath, wantDeliveryStatus)
+	identity := catalogRunScopedAgentDeliveryIdentity(t, h, runID, flowPath, flowPath+"/worker.ready", wantDeliveryStatus)
 	if identity.RunID != runID || identity.FlowInstance() != flowPath {
 		t.Fatalf("worker-agent identity = %#v, want run=%s flow=%s", identity, runID, flowPath)
 	}
@@ -531,14 +526,14 @@ func assertCatalogRunScopedAgent(
 	t.Fatalf("worker-agent %s missing from public list", identity.Description())
 }
 
-func catalogRunScopedAgentDeliveryIdentity(t testing.TB, h *runtimeHarness, runID, flowPath, wantStatus string) agentidentity.Identity {
+func catalogRunScopedAgentDeliveryIdentity(t testing.TB, h *runtimeHarness, runID, flowPath, eventName, wantStatus string) agentidentity.Identity {
 	t.Helper()
 	observed, err := catalogRunScopedOperatorEvents(h, runID)
 	if err != nil {
 		t.Fatalf("read worker-agent delivery for run %s: %v", runID, err)
 	}
 	for _, event := range observed {
-		if event.RunID != runID || event.EventName != flowPath+"/worker.ready" {
+		if event.RunID != runID || event.EventName != eventName {
 			continue
 		}
 		for _, delivery := range event.Deliveries {
@@ -552,7 +547,7 @@ func catalogRunScopedAgentDeliveryIdentity(t testing.TB, h *runtimeHarness, runI
 			return identity
 		}
 	}
-	t.Fatalf("worker-agent for run %s flow %s has no public worker.ready delivery", runID, flowPath)
+	t.Fatalf("worker-agent for run %s flow %s has no public %s delivery", runID, flowPath, eventName)
 	return agentidentity.Identity{}
 }
 

@@ -53,7 +53,7 @@ func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T)
 	}
 
 	missingPin, registry := standingTelegramDeclarationSource(t, "lead.observed")
-	if _, err := ResolveStandingTargetDeclarations(missingPin, registry); err == nil || !strings.Contains(err.Error(), `add an exact external input pin for "inbound.telegram"`) {
+	if _, err := ResolveStandingTargetDeclarations(missingPin, registry); err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {
 		t.Fatalf("missing pin error = %v, want exact inbound.telegram teaching error", err)
 	}
 }
@@ -62,13 +62,13 @@ func TestResolveStandingTargetDeclarationsConsumesCanonicalInputAssociation(t *t
 	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
 	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceNone
+	schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceHarness
 	bundle.FlowSchemas["coordinator"] = schema
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile non-external input semantics: %v", err)
+		t.Fatalf("compile harness-only input semantics: %v", err)
 	}
 	_, err := ResolveStandingTargetDeclarations(source, registry)
-	if err == nil || !strings.Contains(err.Error(), `add an exact external input pin for "inbound.telegram"`) {
+	if err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {
 		t.Fatalf("canonical input-association error = %v", err)
 	}
 }
@@ -312,7 +312,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandingPins(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "lead.observed")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newRuntimeTestEventBus(t, eventStore)
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/a", EntityID: "41000000-0000-0000-0000-000000000002"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -343,7 +343,7 @@ func TestInboundGatewayConsumesCompiledTelegramRouteWithoutReinterpretingStandin
 func TestInboundGatewayConsumesCompiledGitHubRouteWithoutReinterpretingDynamicPins(t *testing.T) {
 	source, catalog := standingProviderDeclarationSource(t, "github", "inbound.github.raw.issues")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newRuntimeTestEventBus(t, eventStore)
+	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "coordinator", RunID: "42000000-0000-0000-0000-000000000001", FlowInstance: "coordinator/b", EntityID: "42000000-0000-0000-0000-000000000002"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -388,6 +388,10 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 		alias = "chat"
 	}
 	root := singletoncoordinatorpilot.Write(t, singletoncoordinatorpilot.Options{})
+	// This fixture's producer is the admitted provider, not the pilot's root connection.
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: standing-provider-declaration\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	standingYAML := fmt.Sprintf("mode: singleton\nactivation: standing\ningress:\n  alias: %s\n  providers:\n    - provider: %s\n      signing_secret: webhook_signing.%s", alias, provider, provider)
 	schemaPath := filepath.Join(root, "coordinator", "schema.yaml")
 	schemaBytes, err := os.ReadFile(schemaPath)
@@ -395,7 +399,7 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 		t.Fatalf("read schema: %v", err)
 	}
 	schemaText := strings.Replace(string(schemaBytes), "mode: singleton", strings.TrimSpace(standingYAML), 1)
-	schemaText = strings.Replace(schemaText, "event: lead.observed", "event: "+inputEvent, 1)
+	schemaText = strings.Replace(schemaText, "- lead.observed", "- "+inputEvent, 1)
 	if err := os.WriteFile(schemaPath, []byte(schemaText), 0o600); err != nil {
 		t.Fatalf("write schema: %v", err)
 	}

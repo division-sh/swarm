@@ -391,9 +391,6 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				nodes: []runtimepipeline.WorkflowNode{{
 					Node: controllerNode, Subscriptions: []events.EventType{"timer-proof/timer.cancel"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-						"timer-proof/timer.cancel": {Consume: true},
-					},
 				}},
 			}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{

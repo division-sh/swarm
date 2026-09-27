@@ -96,7 +96,7 @@ func TestEntitylessNodeContractEmissionDoesNotMaterializeWorkflowStateOnSQLiteAn
 			instancePath := runID
 			evt := handlerTestRootIngress(
 				uuid.NewString(), "work.ready", "", "", json.RawMessage(`{"item_id":"a"}`), 0, runID, "",
-				handlerTestWorkflowEnvelope(".", instancePath, ""), time.Now().UTC(),
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: instancePath}), time.Now().UTC(),
 			)
 			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {

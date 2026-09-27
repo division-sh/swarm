@@ -8,4 +8,4 @@ states: [ready]
 pins:
   inputs:
     events:
-      - {event: automation.requested, source: external}
+      - automation.requested

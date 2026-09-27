@@ -212,7 +212,7 @@ func TestReceiverMaterializationChildToRootBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			h := newRuntimeHarnessForBackend(t, canonicalrouting.CopyReceiverMaterializationIntoRoot(t), backend, true)
-			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "child/work.requested", Payload: map[string]any{"token": "root-owned"}}, 20*time.Second, true); err != nil {
+			if err := h.publishRuntimeEventResultForStep(catalogTriggerStep{Event: "work.requested", Payload: map[string]any{"token": "root-owned"}}, 20*time.Second, true); err != nil {
 				t.Fatal(err)
 			}
 			ctx := catalogRunContext(h, catalogRuntimeRunID)

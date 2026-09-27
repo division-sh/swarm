@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -424,7 +423,7 @@ func validateStandingIngressRawPin(source semanticview.Source, flowID, provider 
 		if _, err := resolveStandingInputEndpoint(source, flowID, literal); err == nil {
 			return nil
 		}
-		return fmt.Errorf("ingress provider %q emits %q; add an exact external input pin for %q to flow %s", provider, literal, literal, flowID)
+		return fmt.Errorf("ingress provider %q emits %q; add an exact production input pin for %q to flow %s", provider, literal, literal, flowID)
 	}
 	if template == "" {
 		return fmt.Errorf("ingress provider %q has no canonical event-name policy", provider)
@@ -456,10 +455,11 @@ func resolveStandingInputEndpointWithCensus(source semanticview.Source, census s
 	if !ok {
 		return semanticview.AuthoredEventEndpoint{}, association.Err()
 	}
-	producer := runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventName)
-	if !producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) &&
-		!producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
-		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("event endpoint %q in flow %s is not declared as external ingress", eventName, flowID)
+	// The caller already compiled this flow's provider admission plan. Its exact
+	// raw output needs a production pin, not a second inferred producer claim.
+	pin, present := source.FlowInputEventPin(flowID, endpoint.PinName)
+	if !present || pin.Source() == runtimecontracts.FlowInputPinSourceHarness {
+		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("event endpoint %q in flow %s is not a production input of its admitted provider ingress", eventName, flowID)
 	}
 	return endpoint, nil
 }
