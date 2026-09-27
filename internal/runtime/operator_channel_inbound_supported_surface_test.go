@@ -120,21 +120,22 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		name            string
 		body            string
 		normalizedEvent string
+		actionIntent    bool
 	}{
 		{
-			name:            "private callback is not text ownership proof",
-			body:            fmt.Sprintf(`{"update_id":7301,"callback_query":{"id":"callback-1","from":{"id":41},"data":"%s","message":{"message_id":7,"chat":{"id":42,"type":"private"}}}}`, operation.Challenge),
-			normalizedEvent: "inbound.telegram.callback_action",
+			name:         "private callback is not text ownership proof",
+			body:         fmt.Sprintf(`{"update_id":7301,"callback_query":{"id":"callback-1","from":{"id":41},"data":"%s","message":{"message_id":7,"chat":{"id":42,"type":"private"}}}}`, operation.Challenge),
+			actionIntent: true,
 		},
 		{
-			name:            "group callback is not text ownership proof",
-			body:            fmt.Sprintf(`{"update_id":7302,"callback_query":{"id":"callback-2","from":{"id":41},"data":"%s","message":{"message_id":8,"chat":{"id":-42,"type":"group"}}}}`, operation.Challenge),
-			normalizedEvent: "inbound.telegram.callback_action",
+			name:         "group callback is not text ownership proof",
+			body:         fmt.Sprintf(`{"update_id":7302,"callback_query":{"id":"callback-2","from":{"id":41},"data":"%s","message":{"message_id":8,"chat":{"id":-42,"type":"group"}}}}`, operation.Challenge),
+			actionIntent: true,
 		},
 		{
-			name:            "supergroup callback is not text ownership proof",
-			body:            fmt.Sprintf(`{"update_id":7303,"callback_query":{"id":"callback-3","from":{"id":41},"data":"%s","message":{"message_id":9,"chat":{"id":-43,"type":"supergroup"}}}}`, operation.Challenge),
-			normalizedEvent: "inbound.telegram.callback_action",
+			name:         "supergroup callback is not text ownership proof",
+			body:         fmt.Sprintf(`{"update_id":7303,"callback_query":{"id":"callback-3","from":{"id":41},"data":"%s","message":{"message_id":9,"chat":{"id":-43,"type":"supergroup"}}}}`, operation.Challenge),
+			actionIntent: true,
 		},
 		{
 			name: "group missing sender cannot prove account",
@@ -165,11 +166,21 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		t.Run(tc.name, func(t *testing.T) {
 			response := publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx, []byte(tc.body))
 			wantEvents := []string{"inbound.telegram"}
+			if tc.actionIntent {
+				wantEvents = nil
+			}
 			if tc.normalizedEvent != "" {
 				wantEvents = append(wantEvents, tc.normalizedEvent)
 			}
-			if response.ClaimDisposition != "" || response.OperationID != "" || !slices.Equal(response.EventNames, wantEvents) {
+			if response.ClaimDisposition != "" || response.OperationID != "" || !slices.Equal(response.EventNames, wantEvents) ||
+				(response.ActionDisposition == "pending") != tc.actionIntent {
 				t.Fatalf("non-proof response = %#v, want events %v without setup claim", response, wantEvents)
+			}
+			if tc.actionIntent {
+				var count int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_channel_action_intents`).Scan(&count); err != nil || count < 1 {
+					t.Fatalf("verified callback intent count = %d, err=%v", count, err)
+				}
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingClaim, 1)
 		})
@@ -225,10 +236,11 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 }
 
 type operatorChannelInboundResponse struct {
-	EventIDs         []string `json:"event_ids"`
-	EventNames       []string `json:"event_names"`
-	ClaimDisposition string   `json:"operator_channel_claim_disposition"`
-	OperationID      string   `json:"operator_channel_operation_id"`
+	EventIDs          []string `json:"event_ids"`
+	EventNames        []string `json:"event_names"`
+	ClaimDisposition  string   `json:"operator_channel_claim_disposition"`
+	ActionDisposition string   `json:"operator_channel_action_disposition"`
+	OperationID       string   `json:"operator_channel_operation_id"`
 }
 
 func publishOperatorChannelTelegramUpdate(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, target runtimepkg.InboundTarget, ctx context.Context, body []byte) operatorChannelInboundResponse {

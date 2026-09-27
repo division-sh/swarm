@@ -162,11 +162,12 @@ type Finalization struct {
 // every event before entering storage; the selected store owns the one atomic
 // transaction and cannot call back into runtime or borrow transaction context.
 type CommitCommand struct {
-	Request              Request
-	Finalization         Finalization
-	Publications         []runtimebus.PublicationCommand
-	AuthorProjection     runtimeauthoractivity.InboundProjection
-	OperatorChannelClaim *operatorchannel.InboundClaim
+	Request               Request
+	Finalization          Finalization
+	Publications          []runtimebus.PublicationCommand
+	AuthorProjection      runtimeauthoractivity.InboundProjection
+	OperatorChannelClaim  *operatorchannel.InboundClaim
+	OperatorChannelAction *operatorchannel.InboundAction
 }
 
 func (c CommitCommand) Validate() error {
@@ -177,18 +178,30 @@ func (c CommitCommand) Validate() error {
 	if len(c.Finalization.Events) > 2 {
 		return fmt.Errorf("inbound publication requires raw plus zero or one normalized event")
 	}
+	if c.OperatorChannelClaim != nil && c.OperatorChannelAction != nil {
+		return fmt.Errorf("inbound publication cannot contain both operator channel claim and action")
+	}
 	if len(c.Finalization.Events) == 0 {
-		if c.OperatorChannelClaim == nil {
-			return fmt.Errorf("zero-event inbound publication requires an operator channel claim")
+		switch {
+		case c.OperatorChannelClaim != nil:
+			if err := c.OperatorChannelClaim.Validate(); err != nil {
+				return err
+			}
+			if c.OperatorChannelClaim.PublicationID != request.PublicationID || c.OperatorChannelClaim.Provider != request.Provider || c.OperatorChannelClaim.ProviderEventID != request.ProviderEventID {
+				return fmt.Errorf("operator channel claim provenance does not match inbound request")
+			}
+		case c.OperatorChannelAction != nil:
+			if err := c.OperatorChannelAction.Validate(); err != nil {
+				return err
+			}
+			if c.OperatorChannelAction.PublicationID != request.PublicationID || c.OperatorChannelAction.Provider != request.Provider || c.OperatorChannelAction.ProviderEventID != request.ProviderEventID {
+				return fmt.Errorf("operator channel action provenance does not match inbound request")
+			}
+		default:
+			return fmt.Errorf("zero-event inbound publication requires an operator channel claim or action")
 		}
-		if err := c.OperatorChannelClaim.Validate(); err != nil {
-			return err
-		}
-		if c.OperatorChannelClaim.PublicationID != request.PublicationID || c.OperatorChannelClaim.Provider != request.Provider || c.OperatorChannelClaim.ProviderEventID != request.ProviderEventID {
-			return fmt.Errorf("operator channel claim provenance does not match inbound request")
-		}
-	} else if c.OperatorChannelClaim != nil {
-		return fmt.Errorf("operator channel claim publication must contain zero business events")
+	} else if c.OperatorChannelClaim != nil || c.OperatorChannelAction != nil {
+		return fmt.Errorf("operator channel publication must contain zero business events")
 	}
 	if len(c.Publications) != len(c.Finalization.Events) {
 		return fmt.Errorf("inbound publication event and publication command counts differ")
