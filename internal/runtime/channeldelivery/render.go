@@ -101,7 +101,7 @@ func (f Frozen) Validate() error {
 		return err
 	}
 	if uuid.Validate(f.SourceID) != nil || f.Revision < 1 || f.FullText == "" ||
-		(f.SourceKind != "notice" && f.SourceKind != "card" && f.SourceKind != "summary") {
+		(f.SourceKind != "notice" && f.SourceKind != "card" && f.SourceKind != "summary" && f.SourceKind != "response") {
 		return fmt.Errorf("channel render source is incomplete")
 	}
 	canonical, err := canonicaljson.Canonicalize(f.Input)
@@ -317,6 +317,50 @@ func FreezeSummary(firstOperationID string, count int64, audience Audience) (Fro
 		"full_text": fullText,
 	}
 	return freeze(input, "summary", firstOperationID, 1, audience, fullText, nil)
+}
+
+// FreezeResponse records a requested readback, not a notice or card mutation.
+// Its source identity is the verified inbound publication that requested it.
+func FreezeResponse(publicationID, fullText string, audience Audience) (Frozen, error) {
+	if err := audience.Validate(); err != nil {
+		return Frozen{}, err
+	}
+	if uuid.Validate(publicationID) != nil || strings.TrimSpace(fullText) == "" {
+		return Frozen{}, fmt.Errorf("channel response requires an inbound publication and content")
+	}
+	input := map[string]any{
+		"projection_version": ProjectionVersion, "source_kind": "response", "source_id": publicationID,
+		"source_revision": 1, "audience": audienceProjection(audience), "full_text": fullText,
+	}
+	return freeze(input, "response", publicationID, 1, audience, fullText, nil)
+}
+
+// InboxText presents only canonical list metadata; draft answers and card
+// context are deliberately absent from this requested readback.
+func InboxText(unread int, cards []decisioncard.ListItem, more bool) (string, error) {
+	if unread < 0 {
+		return "", fmt.Errorf("inbox unread count is invalid")
+	}
+	lines := []string{"Inbox", fmt.Sprintf("Unread notices: %d", unread)}
+	if len(cards) == 0 {
+		lines = append(lines, "No open decisions")
+	} else {
+		lines = append(lines, "Open decisions:")
+		for _, card := range cards {
+			if card.CardID == "" || card.Status != decisioncard.StatusPending {
+				return "", fmt.Errorf("inbox card list is not a pending canonical projection")
+			}
+			title := strings.TrimSpace(card.Title)
+			if title == "" {
+				title = string(card.Anchor.Kind())
+			}
+			lines = append(lines, "- "+title)
+		}
+		if more {
+			lines = append(lines, "More open decisions are available")
+		}
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func freeze(input map[string]any, kind, id string, revision int64, audience Audience, fullText string, choices []Choice) (Frozen, error) {
