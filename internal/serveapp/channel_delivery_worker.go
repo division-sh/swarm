@@ -97,7 +97,12 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 		defer func() { _ = lease.Done() }()
 		workCtx := lease.Context()
 		ticker := time.NewTicker(time.Second)
+		nativeTicker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
+		defer nativeTicker.Stop()
+		if err := dispatcher.reconcileNativeInboxSettings(workCtx); err != nil && workCtx.Err() == nil {
+			log.Printf("native inbox setting reconciliation: %v", err)
+		}
 		for {
 			if err := dispatcher.reconcileInitialDeliveries(workCtx); err != nil && workCtx.Err() == nil {
 				log.Printf("channel delivery reconciliation: %v", err)
@@ -105,6 +110,10 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 			select {
 			case <-workCtx.Done():
 				return
+			case <-nativeTicker.C:
+				if err := dispatcher.reconcileNativeInboxSettings(workCtx); err != nil && workCtx.Err() == nil {
+					log.Printf("native inbox setting reconciliation: %v", err)
+				}
 			case <-ticker.C:
 			}
 		}

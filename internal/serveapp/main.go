@@ -1906,8 +1906,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 	}
 	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
-		store: stores.ChannelDelivery(), cards: storeDeps.DecisionCards,
+		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
+		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
 	}); err != nil {
