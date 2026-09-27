@@ -98,8 +98,36 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 			return fmt.Errorf("canonicalize channel delivery receipt: %w", err)
 		}
 		var object map[string]json.RawMessage
-		if err := json.Unmarshal(canonical, &object); err != nil || len(object) == 0 {
+		if err := json.Unmarshal(canonical, &object); err != nil || len(object) != 1 {
 			return fmt.Errorf("channel delivery receipt is not a nonempty object")
+		}
+		if authority.PreviousReceiptOperationID == "" {
+			if len(object["delivery_reference"]) == 0 {
+				return fmt.Errorf("channel send receipt lacks delivery reference")
+			}
+		} else {
+			if len(object["delivery_receipt"]) == 0 {
+				return fmt.Errorf("channel edit receipt lacks edit acknowledgment")
+			}
+			previousQuery := `SELECT provider_reference FROM channel_delivery_receipts
+				WHERE effect_operation_id=? AND delivery_id=? AND state='sent'`
+			if postgres {
+				previousQuery = `SELECT provider_reference FROM channel_delivery_receipts
+					WHERE effect_operation_id=$1::uuid AND delivery_id=$2::uuid AND state='sent'`
+			}
+			var previousRaw []byte
+			if err := tx.QueryRowContext(ctx, previousQuery, authority.PreviousReceiptOperationID, authority.DeliveryID).Scan(&previousRaw); err != nil {
+				return fmt.Errorf("load exact channel edit predecessor: %w", err)
+			}
+			var previous map[string]json.RawMessage
+			if err := json.Unmarshal(previousRaw, &previous); err != nil || len(previous["delivery_reference"]) == 0 {
+				return fmt.Errorf("channel edit predecessor lacks delivery reference")
+			}
+			object["delivery_reference"] = previous["delivery_reference"]
+			canonical, err = canonicaljson.Bytes(object)
+			if err != nil {
+				return err
+			}
 		}
 		providerReference = string(canonical)
 		state = "sent"
@@ -153,7 +181,20 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 				state=CASE WHEN current_render_id=$2::uuid THEN 'sent' ELSE 'rendered' END
 				WHERE delivery_id=$3::uuid AND current_receipt_operation_id IS NULL AND state='rendered'`
 		}
-		result, err = tx.ExecContext(ctx, query, settlement.OperationID, authority.RenderID, authority.DeliveryID)
+		args := []any{settlement.OperationID, authority.RenderID, authority.DeliveryID}
+		if authority.PreviousReceiptOperationID != "" {
+			if postgres {
+				query = `UPDATE channel_delivery_plans SET current_receipt_operation_id=$1::uuid,
+					state=CASE WHEN current_render_id=$2::uuid THEN 'sent' ELSE 'rendered' END
+					WHERE delivery_id=$3::uuid AND current_receipt_operation_id=$4::uuid AND state='rendered'`
+			} else {
+				query = `UPDATE channel_delivery_plans SET current_receipt_operation_id=?,
+					state=CASE WHEN current_render_id=? THEN 'sent' ELSE 'rendered' END
+					WHERE delivery_id=? AND current_receipt_operation_id=? AND state='rendered'`
+			}
+			args = append(args, authority.PreviousReceiptOperationID)
+		}
+		result, err = tx.ExecContext(ctx, query, args...)
 	} else {
 		query = `UPDATE channel_delivery_plans SET state='uncertain'
 			WHERE delivery_id=? AND current_receipt_operation_id IS NULL AND state='rendered'`
@@ -161,7 +202,18 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 			query = `UPDATE channel_delivery_plans SET state='uncertain'
 				WHERE delivery_id=$1::uuid AND current_receipt_operation_id IS NULL AND state='rendered'`
 		}
-		result, err = tx.ExecContext(ctx, query, authority.DeliveryID)
+		args := []any{authority.DeliveryID}
+		if authority.PreviousReceiptOperationID != "" {
+			if postgres {
+				query = `UPDATE channel_delivery_plans SET state='uncertain'
+					WHERE delivery_id=$1::uuid AND current_receipt_operation_id=$2::uuid AND state='rendered'`
+			} else {
+				query = `UPDATE channel_delivery_plans SET state='uncertain'
+					WHERE delivery_id=? AND current_receipt_operation_id=? AND state='rendered'`
+			}
+			args = append(args, authority.PreviousReceiptOperationID)
+		}
+		result, err = tx.ExecContext(ctx, query, args...)
 	}
 	if err != nil {
 		return fmt.Errorf("settle channel delivery plan: %w", err)
@@ -185,7 +237,8 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 	if state == "sent" && currentRenderID != authority.RenderID {
 		wantState = "rendered"
 	}
-	if storedState != wantState || (state == "sent" && currentReceiptID != settlement.OperationID) {
+	if storedState != wantState || (state == "sent" && currentReceiptID != settlement.OperationID) ||
+		(state == "uncertain" && currentReceiptID != authority.PreviousReceiptOperationID) {
 		return fmt.Errorf("channel delivery plan state %q contradicts settled receipt %q", storedState, state)
 	}
 	return nil

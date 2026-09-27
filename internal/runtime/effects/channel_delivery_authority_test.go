@@ -35,6 +35,11 @@ func TestChannelDeliveryAuthorityRequiresExactFrozenIntent(t *testing.T) {
 	if !authority.Valid() {
 		t.Fatal("exact channel delivery authority rejected")
 	}
+	edit := authority
+	edit.ChannelDelivery.PreviousReceiptOperationID = uuid.NewString()
+	if !edit.Valid() || edit.Evidence()["previous_receipt_operation_id"] != edit.ChannelDelivery.PreviousReceiptOperationID {
+		t.Fatal("exact predecessor receipt was not retained in edit authority")
+	}
 	if _, err := BeginChannelDelivery(WithAuthority(context.Background(), authority), []byte("request"), nil); err == nil {
 		t.Fatal("channel delivery without a selected-store controller was admitted")
 	}
@@ -45,6 +50,9 @@ func TestChannelDeliveryAuthorityRequiresExactFrozenIntent(t *testing.T) {
 		"retired_epoch":     func(a *Authority) { a.ChannelDelivery.DeliveryEpoch = 0 },
 		"missing_binding":   func(a *Authority) { a.ChannelDelivery.BindingRevision = 0 },
 		"wrong_generation":  func(a *Authority) { a.FenceGeneration++ },
+		"invalid_previous_receipt": func(a *Authority) {
+			a.ChannelDelivery.PreviousReceiptOperationID = "not-an-operation"
+		},
 		"missing_activation": func(a *Authority) {
 			a.ChannelDelivery.ActivationID = ""
 		},

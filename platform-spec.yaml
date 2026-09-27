@@ -14977,7 +14977,10 @@ platform_tables:
     channel_delivery_receipts:
       description: >-
         Immutable domain projection of one exact managed channel-delivery effect settlement. Known accepted output
-        carries the complete compiled provider-neutral delivery reference; uncertainty carries no invented reference.
+        carries the complete compiled provider-neutral delivery reference; an edit additionally retains its distinct
+        provider acknowledgment alongside the predecessor's original message reference. An edit names the exact
+        current sent predecessor operation in its effect authority and advances the current receipt only when that
+        predecessor remains current. Uncertainty carries no invented reference and blocks automatic resend or re-edit.
         The effect journal remains the launch/attempt authority. Receipt and plan state commit atomically with that
         journal's terminal settlement, so restart never infers success from a missing receipt or resends uncertain work.
         Historical receipts survive rebind and retirement but confer no current destination authority.
@@ -38932,11 +38935,14 @@ managed_external_effect_authority:
       request identity. Read-only identify, readback, and reachability observations are operator infrastructure and never
       create effect rows.
     channel_delivery: >
-      A runless channel-delivery send has one typed authority over an exact selected-store delivery plan and immutable
+      A runless channel-delivery send or edit has one typed authority over an exact selected-store delivery plan and immutable
       render, current explicit default and verified binding, succeeded connected activation, principal, destination,
       delivery epoch, bundle, and compiled plan generation. Its stable effect operation identity derives from the
-      delivery and render IDs. The selected store rechecks and locks that authority at authorization and prelaunch;
-      a terminal source, retired or replaced default/binding/activation, or changed render fails before dispatch.
+      delivery and render IDs. An initial send requires a pending source and no predecessor receipt. An edit requires
+      the exact current sent predecessor receipt, retains its provider message reference separately from the edit
+      acknowledgment, and admits a terminal card only when the new render matches that exact current canonical source.
+      The selected store rechecks and locks that authority at authorization and prelaunch;
+      a stale source, retired or replaced default/binding/activation, or changed render fails before dispatch.
       An authorized attempt proven unlaunched may resume under the journal's exact prelaunch retry rule. Launched,
       response-observed, and uncertain attempts never redispatch automatically. Confirmation authority cannot
       authorize notice or card delivery, and no agent, run, entity, or synthetic token is required.
