@@ -200,11 +200,13 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				outputs, delivered := 0, 0
+				var observedNames []string
 				for _, item := range observed {
+					observedNames = append(observedNames, fmt.Sprintf("%s:%d", item.EventName, len(item.Deliveries)))
 					if item.EventName == path+"/worker.observed" {
 						outputs++
 					}
-					if item.EventName != "worker-flow/worker.ready" {
+					if item.EventName != path+"/worker.ready" {
 						continue
 					}
 					for _, delivery := range item.Deliveries {
@@ -218,7 +220,7 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 					}
 				}
 				if outputs != 2 || delivered != 2 {
-					t.Fatalf("terminal public readback: outputs=%d delivered=%d, want exactly two each", outputs, delivered)
+					t.Fatalf("terminal public readback: outputs=%d delivered=%d, want exactly two each; events=%v", outputs, delivered, observedNames)
 				}
 				beforeDuplicate := selectedForkReadinessSnapshot(t, ctx, h, catalogRuntimeRunID, owner.Route)
 				for i := 0; i < 2; i++ {

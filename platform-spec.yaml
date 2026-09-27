@@ -8815,10 +8815,10 @@ engine:
       trigger: Output-pin key or carries is present; producer guarantees belong to event schema/business key.
       when: load-only
     - id: input_pin_wiring
-      severity: warning
+      severity: hard_invalidity
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
-        source on the static verify surface. The warning consumes internal/runtime/core/pinrouting.ResolveFlowInputProducer
+        source on the static verify surface. The hard invalidity consumes internal/runtime/core/pinrouting.ResolveFlowInputProducer
         evidence: boundary external ingress, flow-local admitted provider ingress, parent connect, validation-only input-pin
         source:harness,
         platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
@@ -20861,9 +20861,9 @@ static_analyzer:
       emitted payload.
   slice_3_input_pin_producer_path_satisfaction:
     id: input_pin_wiring
-    domain: semantic_drift
-    authority: semantic_drift_warning
-    severity: warning
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
     canonical_owner: internal/runtime/bootverify
     supported_surface: cmd/swarm verify
     spec_basis:
@@ -20904,7 +20904,7 @@ static_analyzer:
         rule: Unique same-name sibling output pin inference is not producer-pattern authority and MUST NOT create auto-wire aliases.
       event_swarm_source_external:
         rule: 'Both events.yaml swarm metadata and input pin source: external are retired on presence; no compatibility interpretation.'
-    rule: Emit warning when none of the accepted producer-source forms are found. The finding message must say no accepted producer
+    rule: Emit hard invalidity when none of the accepted producer-source forms are found. The finding message must say no accepted producer
       source was found in the authored bundle and list the checked source classes.
   slice_3a_pin_target_resolution:
     id: pin_target_resolution
@@ -20945,15 +20945,6 @@ static_analyzer:
           consumer and creates no fabricated target or delivery. A matching failed connection still fails closed.
       lowered_parent_connect:
         rule: Parent connect plus receiver-owned scalar instance/source/resolution lowering provides concrete route-plan facts before runtime dispatch.
-      structural_parent_route:
-        rule: Child-to-parent structural binding is valid only when no lowered parent connect route applies and only for
-          child/template instances that will record full ParentRoute at receiver creation.
-      static_child_delivery_entity:
-        rule: Nested static child outputs may use an exact current receiver-owned entity-bearing delivery context as
-          the implicit entity target route for pin-declared outputs. Entityless child execution does not qualify and
-          requires explicit connect, typed-local consumption or an accepted external boundary; root static flows
-          likewise require their supported typed consumer, lowered root connect or external boundary.
-          This mechanism is distinct from complete persisted ParentRoute and never borrows inbound parent state or event.source.
       harness_sink:
         rule: A structured output pin may declare sink:harness only for explicit validation/catalog observation. Production
           admission rejects it, and it creates no runtime recipient or route fact.

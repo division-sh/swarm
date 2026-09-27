@@ -22,14 +22,6 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := semanticNumericIngressFixture(t)
-			eventFile := filepath.Join(root, "events.yaml")
-			raw, err := os.ReadFile(eventFile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(eventFile, []byte(strings.Replace(string(raw), "source: external", "source: platform schedule", 1)), 0600); err != nil {
-				t.Fatal(err)
-			}
 			nodeFile := filepath.Join(root, "nodes.yaml")
 			nodes, err := os.ReadFile(nodeFile)
 			if err != nil {
@@ -38,7 +30,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			if err := os.WriteFile(nodeFile, []byte(strings.Replace(string(nodes), "      create_entity: true\n", "", 1)), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: numeric-schedule\ninitial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\n"), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: numeric-schedule\ninitial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events: [numeric.requested]\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			unsetStoreSelectorEnv(t)

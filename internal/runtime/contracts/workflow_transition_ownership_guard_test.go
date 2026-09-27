@@ -349,9 +349,14 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDelivery::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                    1,
 		"internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext::call internal/runtime/pipeline.workflowNodeDeliveryRoute":                                        1,
 		"internal/runtime/pipeline.workflowNodeHandlerEventKeyForExecution::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                          1,
-		"internal/runtime/pipeline.workflowNodePolicyForDelivery::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                                    1,
+		"internal/runtime/pipeline.workflowNodeHandlerApplies::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":                                       1,
 		"internal/runtime/pipeline.workflowNodeProducerSource::call internal/runtime/pipeline.DeliveryTargetApplication.Validate":                                                         1,
 		"internal/runtime/pipeline.workflowNodeProducerSource::call internal/runtime/pipeline.deliveryTargetApplicationFromContext":                                                       1,
+		// Missing-executor verification reads the compiled transition inventory;
+		// it does not admit or reconstruct a transition.
+		"internal/runtime/bootverify.runtimeHandledEventRequirements::call internal/runtime/semanticview.WorkflowStageTopology": 1,
+		"internal/runtime/bootverify.runtimeHandledEventRequirements::carrier fields":                                           4,
+		"internal/runtime/bootverify.runtimeHandledEventRequirements::edge inventory":                                           1,
 		// Trigger projections originate at execution/lifecycle producers; validation
 		// and persistence consume them without deriving a replacement accepted event.
 		"internal/runtime/engine.EngineMutation.ValidateTransitionEvidence::accepted trigger TriggerEventID":              1,

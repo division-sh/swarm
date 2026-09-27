@@ -20,8 +20,6 @@ pins:
     events: [numeric.requested]
 `,
 		"events.yaml": `numeric.requested:
-  swarm:
-    source: external
   value: integer
   nested: NumericInput
 numeric.completed:

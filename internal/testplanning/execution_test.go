@@ -68,6 +68,29 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				if err := validateLocalBusCoverage(plan, inventory, policy.Module+"/internal/runtime/bus"); err != nil {
 					t.Fatal(err)
 				}
+				for _, id := range []string{"catalog-required-verify", "local-generated-fanout-fixture", "local-api-routing-canaries", "local-routing-reporter"} {
+					if _, err := plan.Unit(id); err != nil {
+						t.Fatalf("local proof coverage missing %s: %v", id, err)
+					}
+				}
+				fixtureCovered := false
+				for _, unit := range plan.Units {
+					if unit.ID == "broad-01" && slices.Contains(unit.Packages, policy.Module+"/internal/runtime/testfixtures/canonicalrouting") {
+						fixtureCovered = true
+					}
+				}
+				if !fixtureCovered {
+					t.Fatal("local broad shard lost generated fixture admission coverage")
+				}
+				for id, proof := range map[string]string{
+					"local-api-routing-canaries": "TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores",
+					"local-routing-reporter":     "TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends",
+				} {
+					unit, _ := plan.Unit(id)
+					if !unitRequires(unit, proof) {
+						t.Fatalf("local proof %s did not require %s", id, proof)
+					}
+				}
 			}
 			if profile == ProfilePRCommon || profile == ProfileFull {
 				golden, err := plan.Unit("hitl-releasee2e-golden")

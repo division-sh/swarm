@@ -8,7 +8,11 @@ pins:
   outputs:
     events:
       - spawn.done
+      - task.assign
 connect:
   - event: spawn.done
+    from: .
+    to: worker
+  - event: task.assign
     from: .
     to: worker

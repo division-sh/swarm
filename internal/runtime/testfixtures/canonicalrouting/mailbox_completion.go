@@ -9,12 +9,16 @@ import (
 func CopyMailboxNoticeCompletion(t testing.TB) string {
 	t.Helper()
 	root := CopyMailboxCompletionMatrix(t)
-	applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "      - {event: observer.requested, source: external}", "      - {event: observer.requested, source: external}\n      - {event: notice.requested, source: external}")
-	applyClosedReplacement(t, filepath.Join(root, "observers/events.yaml"), "observer.started:\n", "notice.requested:\n  seed: boolean\nobserver.started:\n")
-	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.started,", "subscriptions: [notice.requested, observer.started,")
-	applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), `        if frame["event"]["type"].endswith("observer.started"):`, `        if frame["event"]["type"].endswith("notice.requested"):
+	applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "    events: [observer.requested]\n", "    events: [observer.requested, notice.requested]\n")
+	applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "    observer.requested:\n      create_entity: true\n", "    observer.requested:\n      create_entity: true\n    notice.requested:\n      create_entity: true\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - observer.requested\n", "      - observer.requested\n      - notice.requested\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    events: [observer.requested]\nconnect:\n", "    events: [observer.requested, notice.requested]\nconnect:\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers}\n  - {event: notice.requested, from: ., to: observers}\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\nnotice.requested:\n  seed: boolean\n")
+	applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [notice.requested, observer.requested,")
+	applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), `        if frame["event"]["type"].endswith("observer.requested"):`, `        if frame["event"]["type"].endswith("notice.requested"):
             return {"calls": [{"name": "notify_human", "arguments": {"summary": "Observed notice", "context": {"proof": "mailbox-completion"}}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
-        if frame["event"]["type"].endswith("observer.started"):`)
+        if frame["event"]["type"].endswith("observer.requested"):`)
 	return root
 }
 
@@ -23,7 +27,7 @@ func CopyMailboxCompletionMatrix(t testing.TB) string {
 	root := CopyGateCompletionDiagnostic(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "        reject:\n", "        reject:\n          input:\n            reason: {type: text, required: true}\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "stages:\n", "imports:\n  connector_packs:\n    - provider: telegram\n      tool: telegram.send_message\nstages:\n")
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - {event: work.requested, source: external}\n", "      - {event: work.requested, source: external}\n      - {event: effect.requested, source: external}\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - work.requested\n", "      - work.requested\n      - effect.requested\n      - observer.requested\n  outputs:\n    events: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n")
 	nodes, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -52,10 +56,8 @@ initial_state: active
 states: [active]
 pins:
   inputs:
-    events:
-      - {event: observer.requested, source: external}
+    events: [observer.requested]
 `)
-	writeClosedVariantFile(t, root, "observers/events.yaml", "observer.requested:\n  seed: boolean\nobserver.started:\n  seed: boolean\n")
 	writeClosedVariantFile(t, root, "observers/entities.yaml", "observer: {}\n")
 	writeClosedVariantFile(t, root, "observers/nodes.yaml", `start:
   execution_type: system_node
@@ -64,9 +66,6 @@ pins:
     observer.requested:
       create_entity: true
       advances_to: active
-      emit:
-        event: observer.started
-        fields: {seed: {literal: true}}
 `)
 	writeClosedVariantFile(t, root, "observers/agents.yaml", `observer:
   role: observer
@@ -74,7 +73,7 @@ pins:
   model: regular
   memory: false
   permissions: [ask_human]
-  subscriptions: [observer.started, human_task.approved, human_task.rejected, human_task.deferred, human_task.expired]
+  subscriptions: [observer.requested, human_task.approved, human_task.rejected, human_task.deferred, human_task.expired]
   mock:
     kind: python
     module: mocks/observer.py
@@ -84,7 +83,7 @@ pins:
 def handle(input):
     if input["round"] == 1:
         frame = json.loads(input["messages"][-1]["content"])
-        if frame["event"]["type"].endswith("observer.started"):
+        if frame["event"]["type"].endswith("observer.requested"):
             return {"calls": [{"name": "ask_human", "arguments": {"scope": "flow", "category": "review", "description": "Review the observed work."}}], "usage": {"input_tokens": 1, "output_tokens": 1}}
     return {"text": "Observed.", "usage": {"input_tokens": 1, "output_tokens": 1}}
 `)
@@ -93,6 +92,8 @@ def handle(input):
 work.completed:
   result: text
 effect.requested:
+  seed: boolean
+observer.requested:
   seed: boolean
 `)
 	return root
@@ -108,9 +109,12 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	case "singleton":
 	case "static":
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "mode: singleton", "mode: static")
-		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n      advances_to: active\n", "")
+		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n      advances_to: active\n", "      emit:\n        event: observer.started\n        fields: {seed: payload.seed, deadline_at: payload.deadline_at}\n")
+		writeClosedVariantFile(t, root, "observers/events.yaml", "observer.started:\n  seed: boolean\n  deadline_at: text\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/agents.yaml"), "subscriptions: [observer.requested,", "subscriptions: [observer.started,")
+		applyClosedReplacement(t, filepath.Join(root, "observers/mocks/observer.py"), "endswith(\"observer.requested\")", "endswith(\"observer.started\")")
 	case "root":
-		for _, name := range []string{"events.yaml", "nodes.yaml"} {
+		for _, name := range []string{"nodes.yaml"} {
 			parent, err := os.ReadFile(filepath.Join(root, name))
 			if err != nil {
 				t.Fatal(err)
@@ -130,19 +134,17 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 			}
 			writeClosedVariantFile(t, root, name, string(child))
 		}
-		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - {event: work.requested, source: external}\n", "      - {event: work.requested, source: external}\n      - {event: observer.requested, source: external}\n")
-		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/events.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs:\n    events: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
+		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: \"${payload.case_id}\"}\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "mode: singleton", "mode: template\ninstance: case_id")
-		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "      - {event: observer.requested, source: external}", "      - {event: observer.requested, resolution: {mode: create}}")
-		applyClosedReplacement(t, filepath.Join(root, "observers/events.yaml"), "observer.requested:\n  seed: boolean\n", "")
-		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - {event: work.requested, source: external}\n", "      - {event: work.requested, source: external}\n      - {event: observer.seed, source: external}\n")
-		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "pins:\n", "pins:\n  outputs:\n    events: [observer.requested]\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "    events: [observer.requested]", "    events:\n      - {event: observer.requested, resolution: {mode: create}}")
+		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - observer.requested\n", "      - observer.requested\n      - observer.seed\n")
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  case_id: text\n  seed: boolean\n")
 		for name, suffix := range map[string]string{
-			"schema.yaml": "connect:\n  - {event: observer.requested, from: ., to: observers}\n",
-			"events.yaml": "observer.seed:\n  case_id: text\nobserver.requested:\n  case_id: text\n  seed: boolean\n",
+			"events.yaml": "observer.seed:\n  case_id: text\n",
 			"nodes.yaml": `human-template-launcher:
   execution_type: system_node
   subscribes_to: [observer.seed]
@@ -167,17 +169,14 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 	if mode == "root" {
 		agentRoot = "."
 	}
-	applyClosedReplacement(t, filepath.Join(root, agentRoot, "events.yaml"), "observer.started:\n  seed: boolean\n", "observer.started:\n  seed: boolean\n  deadline_at: text\n")
-	requestRoot := agentRoot
 	if mode == "template" {
-		requestRoot = "."
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.seed:\n  case_id: text\n", "observer.seed:\n  case_id: text\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  case_id: text\n", "observer.requested:\n  case_id: text\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "fields: {case_id: \"${payload.case_id}\", seed: {literal: true}}", "fields: {case_id: \"${payload.case_id}\", seed: {literal: true}, deadline_at: \"${payload.deadline_at}\"}")
 	} else {
-		applyClosedReplacement(t, filepath.Join(root, requestRoot, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\n  deadline_at: text\n")
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\n  deadline_at: text\n")
 	}
-	applyClosedReplacement(t, filepath.Join(root, agentRoot, "nodes.yaml"), "fields: {seed: {literal: true}}", "fields: {seed: {literal: true}, deadline_at: \"${payload.deadline_at}\"}")
+
 	applyClosedReplacement(t, filepath.Join(root, agentRoot, "mocks/observer.py"), `"description": "Review the observed work."`, `"description": "Review the observed work.", "deadline_at": frame["event"]["payload"]["deadline_at"]`)
 	return root
 }

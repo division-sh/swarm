@@ -56,11 +56,16 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 			case PendingInputDuplicateEndpoint:
 				files["schema.yaml"] += "      - work.first\n"
 			case PendingInputMixedCompletion:
-				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "done: {terminal: true}", "done: {}\n  archived: {terminal: true}") + "      - work.marked\n"
+				files["schema.yaml"] = strings.ReplaceAll(files["schema.yaml"], "done: {terminal: true}", "archived: {terminal: true}") + "      - work.marked\n"
 				files["events.yaml"] += "work.marked:\n  token: text\n"
+				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "subscribes_to: [work.seeded, work.first]", "subscribes_to: [work.seeded]", 1)
+				files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "    work.first:\n      advances_to: done\n", "", 1)
 				files["nodes.yaml"] += "marker:\n  execution_type: system_node\n  subscribes_to: [work.marked]\n  event_handlers:\n    work.marked:\n      advances_to: archived\n"
 			}
 			files["schema.yaml"] += "  outputs:\n    events: [work.seeded, " + eventName + "]\nconnect:\n  - {event: work.seeded, from: ., to: child}\n  - {event: " + eventName + ", from: ., to: child}\n"
+			if variant == PendingInputMixedCompletion {
+				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "connect:\n", "connect:\n  - {event: work.seeded, from: ., to: a_finished}\n  - {event: work.first, from: ., to: a_finished}\n", 1)
+			}
 			if variant == PendingInputConnectedSiblings {
 				files["schema.yaml"] += "  - {event: work.seeded, from: ., to: sibling}\n  - {event: " + eventName + ", from: ., to: sibling}\n  - {event: " + eventName + ", from: ., to: on_demand}\n"
 			}
@@ -70,6 +75,11 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 		for name, body := range files {
 			writeClosedVariantFile(t, root, filepath.Join(scope, name), body)
 		}
+	}
+	if variant == PendingInputMixedCompletion {
+		writeClosedVariantFile(t, root, "a_finished/schema.yaml", "name: finished\nstages:\n  ready: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events: [work.seeded, work.first]\n")
+		writeClosedVariantFile(t, root, "a_finished/entities.yaml", "work: {}\n")
+		writeClosedVariantFile(t, root, "a_finished/nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, work.first]\n  event_handlers:\n    work.seeded:\n      create_entity: true\n      advances_to: ready\n    work.first:\n      advances_to: done\n")
 	}
 	if variant == PendingInputConnectedSiblings {
 		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "name: on_demand\nmode: template\ninstance: token\nstages:\n  ready: {initial: true}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\n      - event: work.first\n        resolution: {mode: select-or-create}\n")

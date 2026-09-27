@@ -162,7 +162,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 	if kind != decisioncard.AnchorKindHumanTask {
 		t.Fatalf("unknown anchor %s", kind)
 	}
-	requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "observers/observer.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "observer-seed-" + f.base.RunID})
+	requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "observer.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "observer-seed-" + f.base.RunID})
 	waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, f.base.RunID)
 	var id string
 	if err := f.rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND anchor_kind='human_task'`, f.base.RunID).Scan(&id); err != nil {
@@ -177,7 +177,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 
 func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture) string {
 	t.Helper()
-	seed := requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "observers/notice.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "notice-seed-" + uuid.NewString()})
+	seed := requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "notice.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "notice-seed-" + uuid.NewString()})
 	waitServedRunDeliveryQuiescence(t, f.rt.DB, f.rt.Backend, f.base.RunID)
 	waitPublicationSiteCompletion(t, f.rt, f.base.RunID)
 	var id, summary, from string

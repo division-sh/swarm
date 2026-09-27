@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -663,7 +664,9 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 			"declared_events": declaredEventNames(opts.Source),
 		})
 	}
-	if params.PayloadEntityIDPresent && eventPublicationHasCreateEntityHandler(opts.Source, params.EventName) {
+	createEntityHandler := (params.PayloadEntityIDPresent || params.TargetRouteSet) &&
+		eventPublicationHasCreateEntityHandler(opts.Source, params.EventName, params.TargetRoute, params.RunID)
+	if params.PayloadEntityIDPresent && createEntityHandler {
 		return params, NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
 				"field_path": "$.entity_id",
@@ -673,7 +676,7 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 			"event_name": params.EventName,
 		})
 	}
-	if params.TargetRouteSet && eventPublicationHasCreateEntityHandler(opts.Source, params.EventName) {
+	if params.TargetRouteSet && createEntityHandler {
 		return params, NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
 				"field_path": "$.target.entity_id",
@@ -890,31 +893,42 @@ func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts 
 	return nil
 }
 
-func eventPublicationHasCreateEntityHandler(source semanticview.Source, eventName string) bool {
+func eventPublicationHasCreateEntityHandler(source semanticview.Source, eventName string, target events.RouteIdentity, runID string) bool {
 	if source == nil {
 		return false
 	}
 	eventName = runtimeeventidentity.Normalize(eventName)
-	for _, node := range source.RuntimeEventOwners(eventName) {
-		resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventName)
-		if resolution.Matched && resolution.Handler.CreateEntity {
+	target = target.Normalized()
+	if (target.Empty() || target.FlowID == "." && target.FlowInstance == runID) &&
+		eventPublicationFlowHasCreateEntityHandler(source, ".", eventName) {
+		return true
+	}
+	outputPin, ok := semanticview.SelectedRootOutputPin(source, eventName)
+	if !ok {
+		return false
+	}
+	for _, plan := range runtimepinrouting.CompileConnectGraph(source).PlansFromOutputPin(".", outputPin) {
+		if !plan.AcceptsReceiverTarget(target, runID) {
+			continue
+		}
+		flowID := plan.ReceiverRoute("", "").FlowID
+		if eventPublicationFlowHasCreateEntityHandler(source, flowID, string(plan.ReceiverLocalEvent())) {
 			return true
 		}
 	}
+	return false
+}
+
+func eventPublicationFlowHasCreateEntityHandler(source semanticview.Source, flowID, eventName string) bool {
+	flowPath := source.FlowPath(flowID)
 	for _, record := range source.ExecutableNodeRecords() {
 		node, err := record.Identity()
-		if err != nil {
+		if err != nil || node.FlowPath() != flowPath {
 			continue
 		}
-		for authoredEventName, handler := range source.ExecutableNodeEventHandlers(node) {
-			if !handler.CreateEntity {
-				continue
-			}
-			canonical := runtimeeventidentity.Normalize(source.ResolveExecutableNodeEventReference(node, authoredEventName))
-			authored := runtimeeventidentity.Normalize(authoredEventName)
-			if canonical == eventName || authored == eventName {
-				return true
-			}
+		resolution := semanticview.ResolveExecutableNodeSubscriptionHandler(source, node, eventName)
+		if resolution.Matched && resolution.Handler.CreateEntity {
+			return true
 		}
 	}
 	return false

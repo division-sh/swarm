@@ -5,9 +5,7 @@ pins:
   outputs:
     events: [worker.requested]
   inputs:
-    events:
-      - event: flow.created
-        source: external
+    events: [flow.created]
 connect:
   - event: worker.requested
     from: .

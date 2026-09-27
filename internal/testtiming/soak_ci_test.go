@@ -50,8 +50,17 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 				}
 			}
 			if profile == testplanning.ProfileLocal {
-				if len(units) != 0 {
-					t.Fatalf("local profile has conformance units: %+v", units)
+				allowed := map[string]string{
+					"local-generated-fanout-fixture": "^TestFanOutSemanticProofFixtureAdmitsExactProducerSites$",
+					"local-routing-reporter":         "^TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends$",
+				}
+				if len(units) != len(allowed) {
+					t.Fatalf("local conformance canaries = %+v, want %d exact units", units, len(allowed))
+				}
+				for _, unit := range units {
+					if unit.Run != allowed[unit.ID] || unit.Skip != "" || unit.CountMode != "count-1" {
+						t.Fatalf("local conformance unit widened beyond short canary: %+v", unit)
+					}
 				}
 				return
 			}

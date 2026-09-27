@@ -8,3 +8,5 @@ spawn.done:
   name: text
   priority: integer
   owner: text
+task.assign:
+  worker_id: text

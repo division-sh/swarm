@@ -181,8 +181,8 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 			t.Fatalf("parent public completion %s=%#v, want 0", field, completion.Payload[field])
 		}
 	}
-	if completion.NoDelivery == nil || len(completion.Deliveries) != 0 {
-		t.Fatalf("parent completion must have exact external settlement: %+v", completion)
+	if completion.NoDelivery != nil || len(completion.Deliveries) != 1 || completion.Deliveries[0].SubscriberType != "node" || !completion.Deliveries[0].Terminal {
+		t.Fatalf("parent completion must reach its declared node handler: %+v", completion)
 	}
 	var childCompletions []string
 	for _, parent := range parents {

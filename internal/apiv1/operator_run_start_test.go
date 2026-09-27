@@ -906,7 +906,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: eventName}}},
 			},
-			Connect: []runtimecontracts.FlowConnect{{Event: eventName, From: ".", To: "discovery"}},
+			Connect: []runtimecontracts.FlowConnect{{Event: eventName, From: ".", To: "discovery", SourceFile: "schema.yaml", SourceLine: 1}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{eventName: {Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}},

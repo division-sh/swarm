@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"sync"
@@ -148,6 +149,19 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatalf("cancellation requires a held, partially dispatched two-member child group: %+v", counts)
 			}
 			handlers.assertOnlyHeld(t, held.EventID)
+			triggerDeadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(triggerDeadline) {
+				var outcome string
+				err := db.QueryRowContext(ctx, `SELECT outcome FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, notifyID).Scan(&outcome)
+				if err == nil && outcome == "success" {
+					break
+				}
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					t.Fatal(err)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			assertNestedPipelineReceipt(t, ctx, db, notifyID, true)
 			// Stop cannot steal a live foreground publication claim. Cancel the
 			// actual runtime occurrence and join its interrupted group first;
 			// then issue one parent stop, never retry busy as cancellation success.

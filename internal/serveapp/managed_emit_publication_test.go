@@ -19,10 +19,10 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				rt, _, restart := newRetainedMailboxCompletionRuntime(t, backend, source)
 				scope, instance, request := ".", "", "work.requested"
 				if mode == "imported" {
-					scope, instance, request = "source", "source", "source/work.requested"
+					scope, instance = "source", "source"
 				}
 				if mode == "nested" {
-					scope, instance, request = "outer/source", "outer/source", "outer/source/work.requested"
+					scope, instance = "outer/source", "outer/source"
 				}
 				if mode == "template" {
 					scope = "source"
@@ -98,7 +98,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 					}
 				}
 				assertResult(accepted.RunID, scope, instance, "source-writer", "exact")
-				siblingParams := map[string]any{"event_name": "sibling/sibling.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "sibling"}, "idempotency_key": "managed-sibling"}
+				siblingParams := map[string]any{"event_name": "sibling.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "sibling"}, "idempotency_key": "managed-sibling"}
 				sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, siblingParams)
 				waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, sibling.RunID)
 				assertResult(sibling.RunID, "sibling", "sibling", "sibling-writer", true)

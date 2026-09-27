@@ -39,8 +39,12 @@ profiles:
     environment_id: local-postgres-gateway-empty-v1
     units:
       - catalog-required-inventory
+      - catalog-required-verify
       - local-catalog-smoke
-      - local-api-parity
+      - local-generated-fanout-fixture
+      - local-api-matrix-registry
+      - local-api-routing-canaries
+      - local-routing-reporter
       - local-release-golden-restart
       - local-release-lifecycle-smoke
       - local-serveapp-canaries
@@ -290,9 +294,31 @@ units:
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
-  local-api-parity:
+  local-generated-fanout-fixture:
+    packages: [github.com/division-sh/swarm/internal/runtime/conformance]
+    run: '^TestFanOutSemanticProofFixtureAdmitsExactProducerSites$'
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-api-matrix-registry:
     packages: [github.com/division-sh/swarm/internal/apiv1]
     run: '^TestPublicSurfaceBackendMatrixCoversSelectedBackendRows$'
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-api-routing-canaries:
+    packages: [github.com/division-sh/swarm/internal/apiv1]
+    run: '^(TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores|TestEventPublishCanonicalClassAndProvenanceReadbackParity)$'
+    required_children:
+      TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores: [sqlite, postgres]
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-routing-reporter:
+    packages: [github.com/division-sh/swarm/internal/runtime/conformance]
+    run: '^TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends$'
+    required_children:
+      TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends: [sqlite, postgres]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
