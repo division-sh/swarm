@@ -41,18 +41,18 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 	case PlanSummary:
 		return channeldelivery.FreezeSummary(plan.SourceID, plan.SummaryCount, audience)
 	case PlanNotice:
-		query := `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'),
+		query := `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'), COALESCE(notified, false),
 			COALESCE(payload, '{}'), COALESCE(from_agent, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, '')
 			FROM mailbox WHERE item_id=?`
 		if postgres {
-			query = `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'),
+			query = `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'), COALESCE(notified, false),
 				COALESCE(payload, '{}'), COALESCE(from_agent, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, '')
 				FROM mailbox WHERE item_id=$1::uuid FOR UPDATE`
 		}
 		notice := channeldelivery.Notice{ID: plan.SourceID}
 		var payload any
 		if err := tx.QueryRowContext(ctx, query, plan.SourceID).Scan(&notice.Type, &notice.Summary,
-			&notice.Priority, &payload, &notice.FromAgent, &notice.EntityID, &notice.FlowInstance); err != nil {
+			&notice.Priority, &notice.Acknowledged, &payload, &notice.FromAgent, &notice.EntityID, &notice.FlowInstance); err != nil {
 			return channeldelivery.Frozen{}, fmt.Errorf("load exact channel notice: %w", err)
 		}
 		switch value := payload.(type) {
