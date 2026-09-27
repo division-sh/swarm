@@ -9,5 +9,7 @@ test-node:
           advances_to: done
       rules:
         route_a:
-          condition: "payload.type == \"a\""
+          when: "payload.type == \"a\""
           advances_to: routed
+        unmatched:
+          else: true

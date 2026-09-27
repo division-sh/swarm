@@ -6,10 +6,12 @@ test-node:
     item.received:
       rules:
         type_a:
-          condition: "payload.kind == 'a'"
+          when: "payload.kind == 'a'"
           data_accumulation:
             writes:
               - value
+        unmatched:
+          else: true
   state_schema:
     fields:
       value: integer

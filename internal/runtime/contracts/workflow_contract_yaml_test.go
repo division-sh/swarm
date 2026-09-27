@@ -888,8 +888,10 @@ func TestSystemNodeEventHandlerDecode_RejectsTopLevelEmitWhenRulesExistWithoutRu
 emit: root.done
 rules:
   pass:
-    condition: "payload.ok"
+    when: "payload.ok"
     advances_to: done
+  unmatched:
+    else: true
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-EMIT") {
 		t.Fatalf("yaml.Unmarshal error = %v, want AMBIGUOUS-EMIT", err)
@@ -901,7 +903,7 @@ func TestSystemNodeEventHandlerDecode_RejectsRuleLevelSetsGate(t *testing.T) {
 	err := yaml.Unmarshal([]byte(`
 rules:
   gated:
-    condition: "else"
+    else: true
     sets_gate: approved
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), `rule field "sets_gate" is not supported.`) {
@@ -1186,10 +1188,10 @@ func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap
 	if err := yaml.Unmarshal([]byte(`
 rules:
   case:
-    condition: payload.mode == "case"
+    when: payload.mode == "case"
     emit: scan.case_requested
   default:
-    condition: else
+    else: true
     emit: scan.default_requested
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -1200,14 +1202,17 @@ rules:
 	if got := handler.Rules[0].ID; got != "case" {
 		t.Fatalf("rules[0].ID = %q, want case", got)
 	}
-	if got := handler.Rules[0].PolicyRow.Kind; got != "" {
-		t.Fatalf("rules[0].PolicyRow.Kind = %q, want empty", got)
+	if got := handler.Rules[0].PolicyRow.Kind; got != PolicySheetRowKindWhen {
+		t.Fatalf("rules[0].PolicyRow.Kind = %q, want when", got)
 	}
 	if got := handler.Rules[1].ID; got != "default" {
 		t.Fatalf("rules[1].ID = %q, want default", got)
 	}
 	if got := handler.Rules[1].Condition; got != "else" {
 		t.Fatalf("rules[1].Condition = %q, want else", got)
+	}
+	if got := handler.Rules[1].PolicyRow.Kind; got != PolicySheetRowKindDefault {
+		t.Fatalf("rules[1].PolicyRow.Kind = %q, want default", got)
 	}
 }
 
@@ -1611,7 +1616,7 @@ func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *
 			t.Run(context+"/"+label, func(t *testing.T) {
 				raw := fmt.Sprintf(`%s:
   %s:
-    condition: else
+    else: true
     advances_to: done
 `, context, label)
 				var handler SystemNodeEventHandler
@@ -1681,13 +1686,13 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 		raw  string
 		want string
 	}{
-		{name: "empty label", raw: "rules:\n  \"\": {condition: else}\n", want: "label must not be empty"},
-		{name: "whitespace label", raw: "rules:\n  \"   \": {condition: else}\n", want: "label must not be empty"},
+		{name: "empty label", raw: "rules:\n  \"\": {else: true}\n", want: "label must not be empty"},
+		{name: "whitespace label", raw: "rules:\n  \"   \": {else: true}\n", want: "label must not be empty"},
 		{name: "scalar child", raw: "rules:\n  selected: else\n", want: "must be a mapping"},
 		{name: "empty collection", raw: "rules: {}\n", want: "must contain at least one row"},
 		{name: "null rules", raw: "rules: null\n", want: "rules handler rule collection must not be null"},
 		{name: "null on complete", raw: "on_complete: null\n", want: "on_complete handler rule collection must not be null"},
-		{name: "duplicate keyed label", raw: "rules:\n  selected: {condition: else}\n  selected: {condition: else}\n", want: "duplicate normalized key"},
+		{name: "duplicate keyed label", raw: "rules:\n  selected: {else: true}\n  selected: {else: true}\n", want: "duplicate normalized key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
@@ -1707,7 +1712,7 @@ func TestSystemNodeEventHandlerDecode_ResolvesAliasedRowsIndependentOfKeyLabel(t
 	for _, label := range labels {
 		t.Run(label, func(t *testing.T) {
 			raw := fmt.Sprintf(`template: &rule
-  condition: else
+  else: true
   advances_to: done
 handler:
   rules:
@@ -2653,7 +2658,7 @@ func TestSystemNodeEventHandlerDecode_RejectsEventlessRuleEmitWithoutTemplate(t 
 	err := yaml.Unmarshal([]byte(`
 rules:
   done:
-    condition: "else"
+    else: true
     emit:
       fields:
         scan_id: payload.scan_id
@@ -2987,19 +2992,21 @@ on_success:
         literal: ok
 rules:
   needs_human:
-    condition: "payload.amount >= 100"
+    when: "payload.amount >= 100"
     emit:
       event: rule.needs_human
       fields:
         amount: payload.amount
+  unmatched:
+    else: true
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := handler.OnSuccess.Emit.EventType(); got != "handler.succeeded" {
 		t.Fatalf("OnSuccess.Emit.EventType = %q, want handler.succeeded", got)
 	}
-	if got := len(handler.Rules); got != 1 {
-		t.Fatalf("Rules len = %d, want 1", got)
+	if got := len(handler.Rules); got != 2 {
+		t.Fatalf("Rules len = %d, want 2", got)
 	}
 	if got := HandlerEmitEvents(handler, nil); !reflect.DeepEqual(got, []string{"rule.needs_human", "handler.succeeded"}) {
 		t.Fatalf("HandlerEmitEvents = %#v", got)
@@ -3016,17 +3023,17 @@ emit:
     score: ${payload.score}
 rules:
   high:
-    condition: payload.score >= 80
+    when: payload.score >= 80
     emit:
       fields:
         bucket: high
   medium:
-    condition: payload.score >= 40
+    when: payload.score >= 40
     emit:
       fields:
         bucket: medium
   low:
-    condition: else
+    else: true
     emit:
       fields:
         bucket: low
@@ -3069,12 +3076,12 @@ emit:
   event: account.bucketed
 rules:
   high:
-    condition: payload.score >= 80
+    when: payload.score >= 80
     emit:
       fields:
         bucket: '"high"'
 `,
-			contains: "requires an else rule",
+			contains: "require an else/default row",
 		},
 		{
 			name: "field_conflict",
@@ -3085,7 +3092,7 @@ emit:
     bucket: '"base"'
 rules:
   low:
-    condition: else
+    else: true
     emit:
       fields:
         bucket: '"low"'
@@ -3099,12 +3106,12 @@ emit:
   event: account.bucketed
 rules:
   high:
-    condition: payload.score >= 80
+    when: payload.score >= 80
     emit:
       fields:
         bucket: '"high"'
   low:
-    condition: else
+    else: true
     emit:
       event: account.dropped
       fields:
@@ -3119,7 +3126,7 @@ emit:
   event: account.bucketed
 rules:
   low:
-    condition: else
+    else: true
     emit:
       target: sender
       fields:
@@ -3136,7 +3143,7 @@ on_success:
   emit: account.audit
 rules:
   low:
-    condition: else
+    else: true
     emit:
       fields:
         bucket: '"low"'
@@ -3177,7 +3184,7 @@ on_success:
   emit: handler.succeeded
 rules:
   done:
-    condition: "else"
+    else: true
     emit: rule.done
 `,
 			contains: "handler-top-level emit is only allowed on single-emit handlers",
@@ -3189,7 +3196,7 @@ on_success:
   emit: handler.succeeded
 rules:
   done:
-    condition: "else"
+    else: true
     emit: rule.done
 on_complete:
   - id: complete
@@ -3204,7 +3211,7 @@ on_success:
   emit: handler.succeeded
 rules:
   done:
-    condition: "else"
+    else: true
     emit: rule.done
 fan_out:
   items_from: payload.items
@@ -3221,7 +3228,7 @@ on_success:
   emit: handler.succeeded
 rules:
   done:
-    condition: "else"
+    else: true
     fan_out:
       items_from: payload.items
       as: line_item
@@ -3237,7 +3244,7 @@ on_success:
   action: notify
 rules:
   done:
-    condition: "else"
+    else: true
     emit: rule.done
 `,
 			contains: "on_success field",

@@ -6,8 +6,10 @@ test-node:
     item.received:
       rules:
         type_a:
-          condition: "payload.kind == 'a'"
+          when: "payload.kind == 'a'"
           emit:
             event: routed.a
         type_b:
-          condition: "payload.kind == 'b'"
+          when: "payload.kind == 'b'"
+        unmatched:
+          else: true

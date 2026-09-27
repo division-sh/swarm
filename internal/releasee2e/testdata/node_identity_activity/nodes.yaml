@@ -9,8 +9,12 @@ activity-node:
     send.succeeded:
       rules:
         - id: observe_success
-          condition: payload.result != null
+          when: payload.result != null
+        - id: unmatched_success
+          else: true
     send.failed:
       rules:
         - id: observe_failure
-          condition: payload.failure != null
+          when: payload.failure != null
+        - id: unmatched_failure
+          else: true

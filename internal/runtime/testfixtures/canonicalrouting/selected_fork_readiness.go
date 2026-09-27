@@ -82,9 +82,9 @@ func CopySelectedForkReadiness(t testing.TB, declarations int, frontier string) 
 			addition = []byte(strings.ReplaceAll(string(addition), "terminal_probe.succeeded", "terminal_probe.failed"))
 		}
 		if frontier == "activity_loop_rule" && path == "worker-flow/nodes.yaml" {
-			addition = []byte(strings.ReplaceAll(string(addition), "      advances_to: executing\n", "      advances_to: working\n      rules:\n        - condition: else\n          advances_to: executing\n"))
+			addition = []byte(strings.ReplaceAll(string(addition), "      advances_to: executing\n", "      advances_to: working\n      rules:\n        - else: true\n          advances_to: executing\n"))
 			addition = []byte(strings.ReplaceAll(string(addition), "      activity:\n        id: terminal_probe\n        tool: terminal_probe\n        input: {}", "          activity:\n            id: terminal_probe\n            tool: terminal_probe\n            input: {}"))
-			addition = []byte(strings.ReplaceAll(string(addition), "            input: {}\n", "            input: {}\n        - condition: else\n          advances_to: executing\n          activity:\n            id: unselected_probe\n            tool: terminal_probe\n            input: {}\n"))
+			addition = []byte(strings.ReplaceAll(string(addition), "            input: {}\n", "            input: {}\n        - else: true\n          advances_to: executing\n          activity:\n            id: unselected_probe\n            tool: terminal_probe\n            input: {}\n"))
 		}
 		file := filepath.Join(root, path)
 		data, err := os.ReadFile(file)

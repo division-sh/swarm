@@ -3879,15 +3879,13 @@ handler_specification:
       purpose: Type-based routing and policy-sheet selection. Match rule conditions or typed selection rows over the
         rule-condition handler context; common dispatch reads payload fields, but selection is not payload-only.
       rule_fields:
-        condition: string — CEL expression evaluated against the rule-condition handler context. Allowed roots
-          are payload.*, entity.*, policy.*, event.*, computed.*, and query_entities(...). accumulated.*, fan_out.*,
-          and item.* are unavailable in rules.condition. entity.* reads use the pre-rule entity state and the same
-          declared-field validation as other rule-phase handler conditions. computed.* reads are turn-scoped
-          values written earlier in the handler compute phase, including lookup and validate value rows.
         when: >-
-          string — first-class policy-sheet selection row for compound relational conditions. Lowers to condition
-          and otherwise uses the ordinary selected-branch rule fields. Must not be combined with condition, case, range,
-          else, or default.
+          string — the sole authored rule predicate, evaluated as CEL against the rule-condition handler context.
+          Allowed roots are payload.*, entity.*, policy.*, event.*, computed.*, and query_entities(...).
+          accumulated.*, fan_out.*, and item.* are unavailable. entity.* reads use the pre-rule entity state;
+          computed.* reads are turn-scoped values written earlier in the handler compute phase. `when` lowers to
+          the internal Condition carrier with PolicyRow kind when, and uses ordinary selected-branch fields.
+          It cannot be combined with case, range, else, or default.
         case: >-
           object — first-class policy-sheet selection row for scalar or tuple dispatch. Shape is
           `{selector: <path>, equals: <scalar>}` or `{selectors: [<path>, ...], equals: [<scalar>, ...]}`. Selectors
@@ -3929,6 +3927,12 @@ handler_specification:
         advances_to: string — optional state change
         data_accumulation: object — optional data write (same format as handler-level)
         description: string — human-readable note
+      retired_fields:
+        condition: >-
+          Any authored `handler.rules[].condition`, including empty, null, aliased or merged occurrences,
+          fails admission with a teaching error. Use `when` for a predicate or `else: true` for a default.
+          Ordinary `on_complete.condition` remains its distinct ordered completion-rule predicate; join outcomes
+          and timeouts reject both `condition` and `when`.
       policy_sheet_selection_rows:
         scope: Selection rows are `when`, `case`, `range`, and explicit else/default rows. Lookup value rows are specified
           under `policy_sheet_value_rows`; validate value rows are governed by policy_validation_contracts. Arithmetic/expression
@@ -4661,7 +4665,7 @@ handler_specification:
       limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
   expression_context:
     description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
-      rules.condition, data_accumulation.writes[].value, query.filter, and filter.condition. Each namespace resolves to a specific
+      rules.when, data_accumulation.writes[].value, query.filter, and filter.condition. Each namespace resolves to a specific
       data source. Declared bare entity values require program-point definite assignment; optional values require
       a presence decision. Undeclared field references are contract errors.'
     namespaces:
@@ -4725,7 +4729,7 @@ handler_specification:
           policy-sheet compute_module value rows lowering to internal deterministic module execution plans.'
         persistence_model: 'Read/write handler context only. computed.* is not persisted entity state, not event payload,
           and not replay authority unless a separate declared owner explicitly writes a computed value to a durable surface.'
-        available_in: 'rules.condition, emit.fields CEL expressions, mailbox/action expression values, activity inputs,
+        available_in: 'rules.when, emit.fields CEL expressions, mailbox/action expression values, activity inputs,
           fan_out inputs, and query_entities scoped operands when the runtime context contains the value.'
         not_available_as: 'lookup.into may write computed.*; validate.into may write computed.validation.*; compute_module.into
           may write computed.*; entity.* durable cache fallback for lookup, validation, or module values is forbidden.'
@@ -4753,7 +4757,7 @@ handler_specification:
       event:
         resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads the supported
           platform-populated event context fields supplied by the runtime.'
-        available_in: 'rules.condition and other handler expression surfaces when the runtime supplies current
+        available_in: 'rules.when and other handler expression surfaces when the runtime supplies current
           event context. event.* is read-only handler context, not payload.'
         read_model:
           supported_top_level_fields: 'event.id, event.type, event.trigger_event_type, event.source_agent, event.task_id, event.source, event.target, event.target_set, event.source_event_id, event.emitted_at, event.current_state, event.run_id, and event.scope.'

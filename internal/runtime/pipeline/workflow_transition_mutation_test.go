@@ -30,11 +30,11 @@ func transitionMutationSource(t *testing.T) semanticview.Source {
     advance:
       advances_to: done
       rules:
-        - {id: chosen, condition: else}
+        - {id: chosen, else: true}
     foreign:
       advances_to: other
       rules:
-        - {id: other, condition: else}
+        - {id: other, else: true}
 `,
 	})
 }

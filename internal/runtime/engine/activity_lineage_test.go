@@ -81,7 +81,7 @@ func TestActivityLoopLineageRetainsHistoryWithoutReadmission(t *testing.T) {
 	check(t, intent, nil, false)
 	// The selected rule, not another reachable rule or the loop's present stage,
 	// owns the transition before the activity dispatch.
-	if err := yaml.Unmarshal([]byte("loop: {admit: revision, from: working}\nadvances_to: executing\nrules:\n  - condition: else\n    advances_to: selected\n  - condition: else\n    advances_to: unselected\n"), &handler); err != nil {
+	if err := yaml.Unmarshal([]byte("loop: {admit: revision, from: working}\nadvances_to: executing\nrules:\n  - when: 'true'\n    advances_to: selected\n  - else: true\n    advances_to: unselected\n"), &handler); err != nil {
 		t.Fatal(err)
 	}
 	node, err := identity.AdmitExecutableNodeDeclaration("validation", "validator")

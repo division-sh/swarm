@@ -6,7 +6,9 @@ test-node:
     item.reviewed:
       rules:
         approve:
-          condition: "payload.decision == 'approve'"
+          when: "payload.decision == 'approve'"
           advances_to: approved
           emit:
             event: item.approved
+        unmatched:
+          else: true

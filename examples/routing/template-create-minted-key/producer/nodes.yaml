@@ -11,4 +11,6 @@ producer-node:
     validation.started:
       rules:
         - id: observe_validation_started
-          condition: payload.validation_case_id != ""
+          when: payload.validation_case_id != ""
+        - id: unmatched
+          else: true

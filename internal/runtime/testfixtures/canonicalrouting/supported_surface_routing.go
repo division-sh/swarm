@@ -13,14 +13,14 @@ pins:
   inputs:
     events:
       - rules.selected
-      - rules.no_match
+      - rules.fallback
       - rules.evaluation_failed
       - complete.selected
       - complete.no_match
       - direct
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `rules.selected: {}
-rules.no_match: {}
+rules.fallback: {}
 rules.evaluation_failed: {}
 complete.selected: {}
 complete.no_match: {}
@@ -28,21 +28,25 @@ direct: {}
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `selection-node:
   execution_type: system_node
-  subscribes_to: [rules.selected, rules.no_match, rules.evaluation_failed, complete.selected, complete.no_match, direct]
+  subscribes_to: [rules.selected, rules.fallback, rules.evaluation_failed, complete.selected, complete.no_match, direct]
   event_handlers:
     rules.selected:
       rules:
         selected:
           id: rules-label
-          condition: else
-    rules.no_match:
+          else: true
+    rules.fallback:
       rules:
         - id: never-rules
-          condition: "false"
+          when: "false"
+        - id: unmatched-rules
+          else: true
     rules.evaluation_failed:
       rules:
         - id: failed-rules
-          condition: "payload.proof > 0"
+          when: "payload.proof > 0"
+        - id: unmatched-evaluation
+          else: true
     complete.selected:
       on_complete:
         - id: complete-label

@@ -87,10 +87,17 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				if family == "specialized" {
 					selected = fmt.Sprintf("{fields: {value: {literal: %s}}}", literal)
 				}
-				body += fmt.Sprintf("        - id: %s\n          condition: '%s'\n          emit: %s\n", choice.name, choice.condition, selected)
+				predicate := fmt.Sprintf("condition: '%s'", choice.condition)
+				if placement == "rules" {
+					predicate = fmt.Sprintf("when: '%s'", choice.condition)
+					if choice.condition == "else" {
+						predicate = "else: true"
+					}
+				}
+				body += fmt.Sprintf("        - id: %s\n          %s\n          emit: %s\n", choice.name, predicate, selected)
 			}
 		case "success":
-			body = "      rules:\n        - {id: selected, condition: else}\n      on_success:\n        emit: " + emit + "\n"
+			body = "      rules:\n        - {id: selected, else: true}\n      on_success:\n        emit: " + emit + "\n"
 		case "fanout", "rulefanout", "completefanout":
 			indent := "      "
 			body = ""
@@ -99,7 +106,11 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				if family == "completefanout" {
 					placement = "on_complete"
 				}
-				body = "      " + placement + ":\n        - id: dispatch\n          condition: else\n"
+				predicate := "condition: else"
+				if placement == "rules" {
+					predicate = "else: true"
+				}
+				body = "      " + placement + ":\n        - id: dispatch\n          " + predicate + "\n"
 				indent = "          "
 			}
 			body += indent + "fan_out:\n" + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, `value: "${element}"`, 1) + "\n"

@@ -6224,7 +6224,50 @@
               "Description": "",
               "Condition": "payload.validation_case_id != \"\"",
               "PolicyRow": {
-                "Kind": "",
+                "Kind": "when",
+                "Selectors": null,
+                "CaseValues": null,
+                "RangeValue": "",
+                "RangeLower": {
+                  "Operator": "",
+                  "Value": "",
+                  "Kind": ""
+                },
+                "RangeUpper": {
+                  "Operator": "",
+                  "Value": "",
+                  "Kind": ""
+                },
+                "Monotonicity": null,
+                "Lookup": null,
+                "Validation": null,
+                "Module": null
+              },
+              "AdvancesTo": "",
+              "Emit": {
+                "Event": "",
+                "From": "",
+                "Fields": null
+              },
+              "Activity": {
+                "ID": "",
+                "Tool": "",
+                "Input": null,
+                "Approval": null
+              },
+              "DataAccumulation": {
+                "Writes": null,
+                "SourceEvent": ""
+              },
+              "Compute": null,
+              "FanOut": null
+            },
+            {
+              "ID": "unmatched",
+              "Description": "",
+              "Condition": "else",
+              "PolicyRow": {
+                "Kind": "default",
                 "Selectors": null,
                 "CaseValues": null,
                 "RangeValue": "",
@@ -6475,7 +6518,50 @@
                   "ID": "observe_validation_started",
                   "PolicyRow": {
                     "CaseValues": null,
-                    "Kind": "",
+                    "Kind": "when",
+                    "Lookup": null,
+                    "Module": null,
+                    "Monotonicity": null,
+                    "RangeLower": {
+                      "Kind": "",
+                      "Operator": "",
+                      "Value": ""
+                    },
+                    "RangeUpper": {
+                      "Kind": "",
+                      "Operator": "",
+                      "Value": ""
+                    },
+                    "RangeValue": "",
+                    "Selectors": null,
+                    "Validation": null
+                  }
+                },
+                {
+                  "Activity": {
+                    "Approval": null,
+                    "ID": "",
+                    "Input": null,
+                    "Tool": ""
+                  },
+                  "AdvancesTo": "",
+                  "Compute": null,
+                  "Condition": "else",
+                  "DataAccumulation": {
+                    "SourceEvent": "",
+                    "Writes": null
+                  },
+                  "Description": "",
+                  "Emit": {
+                    "Event": "",
+                    "Fields": null,
+                    "From": ""
+                  },
+                  "FanOut": null,
+                  "ID": "unmatched",
+                  "PolicyRow": {
+                    "CaseValues": null,
+                    "Kind": "default",
                     "Lookup": null,
                     "Module": null,
                     "Monotonicity": null,
@@ -6758,7 +6844,50 @@
             "Description": "",
             "Condition": "payload.validation_case_id != \"\"",
             "PolicyRow": {
-              "Kind": "",
+              "Kind": "when",
+              "Selectors": null,
+              "CaseValues": null,
+              "RangeValue": "",
+              "RangeLower": {
+                "Operator": "",
+                "Value": "",
+                "Kind": ""
+              },
+              "RangeUpper": {
+                "Operator": "",
+                "Value": "",
+                "Kind": ""
+              },
+              "Monotonicity": null,
+              "Lookup": null,
+              "Validation": null,
+              "Module": null
+            },
+            "AdvancesTo": "",
+            "Emit": {
+              "Event": "",
+              "From": "",
+              "Fields": null
+            },
+            "Activity": {
+              "ID": "",
+              "Tool": "",
+              "Input": null,
+              "Approval": null
+            },
+            "DataAccumulation": {
+              "Writes": null,
+              "SourceEvent": ""
+            },
+            "Compute": null,
+            "FanOut": null
+          },
+          {
+            "ID": "unmatched",
+            "Description": "",
+            "Condition": "else",
+            "PolicyRow": {
+              "Kind": "default",
               "Selectors": null,
               "CaseValues": null,
               "RangeValue": "",

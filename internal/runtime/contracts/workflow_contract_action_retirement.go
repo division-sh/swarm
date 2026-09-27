@@ -7,8 +7,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func retiredHandlerActionFieldError(context, key string) error {
+func retiredHandlerFieldError(context, key string) error {
 	switch strings.TrimSpace(key) {
+	case "condition":
+		if context == "rules" {
+			return fmt.Errorf("RETIRED-POLICY-SHEET-ROW: handler.rules.condition is retired; use when for a predicate or else: true for a default row")
+		}
+		return nil
 	case "action", "evidence_target", "template", "instance_id_from", "config_from":
 		return fmt.Errorf("RETIRED-HANDLER-ACTION: %s field %q is retired, including null or empty values; remove authored actions and their options; use declarative emit/connect with receiver input initialize for creation, typed data_accumulation for state writes, or supported activities; emit template specialization and timer actions remain supported", context, key)
 	default:
@@ -18,7 +23,7 @@ func retiredHandlerActionFieldError(context, key string) error {
 
 // Inspect presence before decoding values; YAML aliases and merged mappings
 // cannot erase a retired declaration, even when another key overrides it.
-func validateRetiredHandlerActionFields(node *yaml.Node, context string) error {
+func validateRetiredHandlerFields(node *yaml.Node, context string) error {
 	resolved, err := resolveHandlerRuleYAMLNode(node)
 	if err != nil {
 		return err
@@ -31,7 +36,7 @@ func validateRetiredHandlerActionFields(node *yaml.Node, context string) error {
 		if err != nil {
 			return err
 		}
-		if err := retiredHandlerActionFieldError(context, key.Value); err != nil {
+		if err := retiredHandlerFieldError(context, key.Value); err != nil {
 			return err
 		}
 		if key.Value != "<<" || key.Tag != "!!merge" {
@@ -43,11 +48,11 @@ func validateRetiredHandlerActionFields(node *yaml.Node, context string) error {
 		}
 		if merged.Kind == yaml.SequenceNode {
 			for _, entry := range merged.Content {
-				if err := validateRetiredHandlerActionFields(entry, context); err != nil {
+				if err := validateRetiredHandlerFields(entry, context); err != nil {
 					return err
 				}
 			}
-		} else if err := validateRetiredHandlerActionFields(merged, context); err != nil {
+		} else if err := validateRetiredHandlerFields(merged, context); err != nil {
 			return err
 		}
 	}

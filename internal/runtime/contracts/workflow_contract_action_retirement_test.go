@@ -33,10 +33,10 @@ func TestRetiredHandlerActionsRejectedOnPresence(t *testing.T) {
 func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 	contexts := []struct{ name, pattern string }{
 		{"handler", "%s: %s\n"},
-		{"rules_sequence", "rules: [{condition: 'true', %s: %s}]\n"},
-		{"rules_singleton", "rules: {condition: 'true', %s: %s}\n"},
+		{"rules_sequence", "rules: [{else: true, %s: %s}]\n"},
+		{"rules_singleton", "rules: {else: true, %s: %s}\n"},
 		{"rules_lone_field", "rules: {%s: %s}\n"},
-		{"rules_keyed", "rules: {chosen: {condition: 'true', %s: %s}}\n"},
+		{"rules_keyed", "rules: {chosen: {else: true, %s: %s}}\n"},
 		{"completion", "on_complete: [{condition: 'true', %s: %s}]\n"},
 		{"success", "on_success: {%s: %s}\n"},
 		{"join", "join: {%s: %s}\n"},
@@ -115,9 +115,9 @@ func TestHandlerActionRetirementPreservesOtherActionConcepts(t *testing.T) {
 		var handler SystemNodeEventHandler
 		err := yaml.Unmarshal([]byte(`emit: {event: scored, fields: {id: "${payload.id}"}}
 rules:
-  - condition: payload.score > 0
+  - when: payload.score > 0
     emit: {fields: {label: positive}}
-  - condition: else
+  - else: true
     emit: {fields: {label: other}}
 `), &handler)
 		if err != nil {
@@ -151,7 +151,7 @@ rules:
 	t.Run("retired_names_are_not_reserved_rule_labels", func(t *testing.T) {
 		for _, label := range []string{"action", "template", "config_from", "evidence_target", "instance_id_from"} {
 			var handler SystemNodeEventHandler
-			err := yaml.Unmarshal([]byte("rules: {"+label+": {condition: 'true', emit: result}}\n"), &handler)
+			err := yaml.Unmarshal([]byte("rules: {"+label+": {else: true, emit: result}}\n"), &handler)
 			if err != nil || len(handler.Rules) != 1 || handler.Rules[0].ID != label || handler.Rules[0].Emit.EventType() != "result" {
 				t.Fatalf("display label %q became reserved: %#v, %v", label, handler.Rules, err)
 			}

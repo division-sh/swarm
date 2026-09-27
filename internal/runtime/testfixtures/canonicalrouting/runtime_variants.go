@@ -43,11 +43,11 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	if subscribeResults {
 		prefix := ""
 		resultSubscriptions = ", " + prefix + "send.succeeded, " + prefix + "send.failed"
-		resultHandlers = "    " + prefix + "send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result != null\n    " + prefix + "send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
+		resultHandlers = "    " + prefix + "send.succeeded:\n      rules:\n        - id: observe_success\n          when: payload.result != null\n        - id: unmatched_success\n          else: true\n    " + prefix + "send.failed:\n      rules:\n        - id: observe_failure\n          when: payload.failure != null\n        - id: unmatched_failure\n          else: true\n"
 	}
 	nodes := "activity-node:\n  execution_type: system_node\n  subscribes_to: [request" + resultSubscriptions + "]\n  event_handlers:\n    request:\n      activity:\n        id: send\n        tool: send\n        input:\n          message: \"${payload.message}\"\n" + resultHandlers
 	if nested {
-		nodes += "observer-node:\n  execution_type: system_node\n  subscribes_to: [send.succeeded, send.failed]\n  event_handlers:\n    send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result.delivered == true\n    send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
+		nodes += "observer-node:\n  execution_type: system_node\n  subscribes_to: [send.succeeded, send.failed]\n  event_handlers:\n    send.succeeded:\n      rules:\n        - id: observe_success\n          when: payload.result.delivered == true\n        - id: unmatched_success\n          else: true\n    send.failed:\n      rules:\n        - id: observe_failure\n          when: payload.failure != null\n        - id: unmatched_failure\n          else: true\n"
 	}
 	writeClosedVariantFile(t, root, flowRoot+"nodes.yaml", nodes)
 	return root
