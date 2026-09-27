@@ -132,19 +132,37 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 		if err := tx.QueryRowContext(ctx, query, settlement.OperationID).Scan(&attemptID, &deliveryID, &renderID, &storedState, &storedReference); err != nil {
 			return err
 		}
+		matchingReference := !storedReference.Valid && providerReference == nil
+		if storedReference.Valid && providerReference != nil {
+			canonical, canonicalErr := canonicaljson.Canonicalize([]byte(storedReference.String))
+			matchingReference = canonicalErr == nil && string(canonical) == providerReference
+		}
 		if attemptID != settlement.AttemptID || deliveryID != authority.DeliveryID || renderID != authority.RenderID ||
-			storedState != state || storedReference.Valid != (providerReference != nil) ||
-			(storedReference.Valid && storedReference.String != providerReference) {
+			storedState != state || !matchingReference {
 			return fmt.Errorf("existing channel delivery receipt contradicts settled effect")
 		}
 	} else if inserted != 1 {
 		return fmt.Errorf("channel delivery receipt insert affected %d rows", inserted)
 	}
-	query = `UPDATE channel_delivery_plans SET state=? WHERE delivery_id=? AND state='rendered'`
-	if postgres {
-		query = `UPDATE channel_delivery_plans SET state=$1 WHERE delivery_id=$2::uuid AND state='rendered'`
+	if state == "sent" {
+		query = `UPDATE channel_delivery_plans SET current_receipt_operation_id=?,
+			state=CASE WHEN current_render_id=? THEN 'sent' ELSE 'rendered' END
+			WHERE delivery_id=? AND current_receipt_operation_id IS NULL AND state='rendered'`
+		if postgres {
+			query = `UPDATE channel_delivery_plans SET current_receipt_operation_id=$1::uuid,
+				state=CASE WHEN current_render_id=$2::uuid THEN 'sent' ELSE 'rendered' END
+				WHERE delivery_id=$3::uuid AND current_receipt_operation_id IS NULL AND state='rendered'`
+		}
+		result, err = tx.ExecContext(ctx, query, settlement.OperationID, authority.RenderID, authority.DeliveryID)
+	} else {
+		query = `UPDATE channel_delivery_plans SET state='uncertain'
+			WHERE delivery_id=? AND current_receipt_operation_id IS NULL AND state='rendered'`
+		if postgres {
+			query = `UPDATE channel_delivery_plans SET state='uncertain'
+				WHERE delivery_id=$1::uuid AND current_receipt_operation_id IS NULL AND state='rendered'`
+		}
+		result, err = tx.ExecContext(ctx, query, authority.DeliveryID)
 	}
-	result, err = tx.ExecContext(ctx, query, state, authority.DeliveryID)
 	if err != nil {
 		return fmt.Errorf("settle channel delivery plan: %w", err)
 	}
@@ -155,15 +173,19 @@ func projectChannelDeliverySettlementTx(ctx context.Context, tx *sql.Tx, settlem
 	if updated == 1 {
 		return nil
 	}
-	query = `SELECT state FROM channel_delivery_plans WHERE delivery_id=?`
+	query = `SELECT state, COALESCE(current_receipt_operation_id, ''), COALESCE(current_render_id, '') FROM channel_delivery_plans WHERE delivery_id=?`
 	if postgres {
-		query = `SELECT state FROM channel_delivery_plans WHERE delivery_id=$1::uuid`
+		query = `SELECT state, COALESCE(current_receipt_operation_id::text, ''), COALESCE(current_render_id::text, '') FROM channel_delivery_plans WHERE delivery_id=$1::uuid`
 	}
-	var storedState string
-	if err := tx.QueryRowContext(ctx, query, authority.DeliveryID).Scan(&storedState); err != nil {
+	var storedState, currentReceiptID, currentRenderID string
+	if err := tx.QueryRowContext(ctx, query, authority.DeliveryID).Scan(&storedState, &currentReceiptID, &currentRenderID); err != nil {
 		return err
 	}
-	if storedState != state {
+	wantState := state
+	if state == "sent" && currentRenderID != authority.RenderID {
+		wantState = "rendered"
+	}
+	if storedState != wantState || (state == "sent" && currentReceiptID != settlement.OperationID) {
 		return fmt.Errorf("channel delivery plan state %q contradicts settled receipt %q", storedState, state)
 	}
 	return nil

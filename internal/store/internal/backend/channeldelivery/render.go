@@ -75,12 +75,24 @@ func PersistRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, frozen 
 		return "", false, err
 	}
 	if rows == 1 {
-		query = `UPDATE channel_delivery_plans SET state = 'rendered' WHERE delivery_id = ? AND state = 'planned'`
+		query = `UPDATE channel_delivery_plans SET current_render_id = ?,
+			state = CASE WHEN state = 'uncertain' THEN 'uncertain' ELSE 'rendered' END
+			WHERE delivery_id = ? AND state IN ('planned','rendered','sent','uncertain')`
 		if postgres {
-			query = `UPDATE channel_delivery_plans SET state = 'rendered' WHERE delivery_id = $1::uuid AND state = 'planned'`
+			query = `UPDATE channel_delivery_plans SET current_render_id = $1::uuid,
+				state = CASE WHEN state = 'uncertain' THEN 'uncertain' ELSE 'rendered' END
+				WHERE delivery_id = $2::uuid AND state IN ('planned','rendered','sent','uncertain')`
 		}
-		if _, err := tx.ExecContext(ctx, query, deliveryID); err != nil {
+		updated, err := tx.ExecContext(ctx, query, id, deliveryID)
+		if err != nil {
 			return "", false, err
+		}
+		count, err := updated.RowsAffected()
+		if err != nil {
+			return "", false, err
+		}
+		if count != 1 {
+			return "", false, fmt.Errorf("current channel render plan did not advance")
 		}
 		return id, true, nil
 	}
