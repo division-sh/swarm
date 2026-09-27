@@ -26,6 +26,7 @@ const (
 	AuthorityStartupProbe         AuthorityKind = "startup_probe"
 	AuthorityServeRegistration    AuthorityKind = "serve_registration"
 	AuthorityChannelConfirmation  AuthorityKind = "channel_confirmation"
+	AuthorityChannelDelivery      AuthorityKind = "channel_delivery"
 )
 
 type UsageTargetKind string
@@ -203,6 +204,36 @@ type ChannelConfirmationAuthority struct {
 	TargetGeneration             uint64
 }
 
+type ChannelDeliveryAuthority struct {
+	EffectOperationID            string
+	DeliveryID                   string
+	RenderID                     string
+	RenderHash                   string
+	PrincipalID                  string
+	InterfaceKey                 string
+	DeliveryEpoch                int64
+	BindingRevision              int64
+	ExternalAccountRef           string
+	ConversationRef              string
+	ActivationID                 string
+	ActivationRevision           int64
+	BundleHash                   string
+	BundleIdentity               string
+	PackInventoryGeneration      string
+	RuntimeInstanceID            string
+	ContextPublicationGeneration uint64
+	PlanGeneration               plangeneration.Generation
+	TargetGeneration             uint64
+}
+
+func ChannelDeliveryOperationID(deliveryID, renderID string) (string, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(deliveryID))
+	if err != nil || !validUUIDs(renderID) {
+		return "", fmt.Errorf("channel delivery operation requires exact delivery and render ids")
+	}
+	return uuid.NewSHA1(parsed, []byte("deliver:"+strings.TrimSpace(renderID))).String(), nil
+}
+
 type Authority struct {
 	Kind                AuthorityKind
 	ID                  string
@@ -212,6 +243,7 @@ type Authority struct {
 	StartupProbe        StartupProbeAuthority
 	ServeRegistration   ServeRegistrationAuthority
 	ChannelConfirmation ChannelConfirmationAuthority
+	ChannelDelivery     ChannelDeliveryAuthority
 	ExecutionOwner      string
 	LeaseExpiresAt      time.Time
 	FenceGeneration     uint64
@@ -265,7 +297,7 @@ func (a Authority) Valid() bool {
 				nonEmpty(a.StartupProbe.ActorID) && a.Target == (UsageTarget{}) && len(a.BudgetScopes) == 0 &&
 				a.Normal == (LifecycleToken{}) && a.SelectedFork == (SelectedContractForkAuthority{}) &&
 				a.ForkChat == (ConversationForkChatAuthority{}) && a.ServeRegistration == (ServeRegistrationAuthority{}) &&
-				a.ChannelConfirmation == (ChannelConfirmationAuthority{})
+				a.ChannelConfirmation == (ChannelConfirmationAuthority{}) && a.ChannelDelivery == (ChannelDeliveryAuthority{})
 		}
 		return validUUIDs(a.StartupProbe.ProbeID, a.StartupProbe.StartupAuthorityID) &&
 			a.ID == strings.TrimSpace(a.StartupProbe.ProbeID) && a.StartupProbe.StartupStateVersion > 0 &&
@@ -295,6 +327,15 @@ func (a Authority) Valid() bool {
 			confirmation.ContextPublicationGeneration == a.FenceGeneration &&
 			nonEmpty(confirmation.BundleHash, confirmation.BundleIdentity,
 				confirmation.PackInventoryGeneration) && confirmation.PlanGeneration.Valid() && confirmation.TargetGeneration > 0
+	case AuthorityChannelDelivery:
+		delivery := a.ChannelDelivery
+		operationID, err := ChannelDeliveryOperationID(delivery.DeliveryID, delivery.RenderID)
+		return err == nil && delivery.EffectOperationID == operationID && a.ID == operationID &&
+			validUUIDs(delivery.PrincipalID, delivery.ActivationID, delivery.RuntimeInstanceID) &&
+			delivery.DeliveryEpoch > 0 && delivery.BindingRevision > 0 && delivery.ActivationRevision > 0 &&
+			delivery.ContextPublicationGeneration == a.FenceGeneration && delivery.TargetGeneration > 0 &&
+			nonEmpty(delivery.InterfaceKey, delivery.ExternalAccountRef, delivery.ConversationRef, delivery.RenderHash,
+				delivery.BundleHash, delivery.BundleIdentity, delivery.PackInventoryGeneration) && delivery.PlanGeneration.Valid()
 	default:
 		return false
 	}
@@ -306,7 +347,7 @@ func (a Authority) Generation() uint64 {
 		return a.Normal.Generation
 	case AuthoritySelectedContractFork:
 		return a.SelectedFork.Generation
-	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation:
+	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation, AuthorityChannelDelivery:
 		return a.FenceGeneration
 	case AuthorityStartupProbe:
 		return a.FenceGeneration
@@ -401,6 +442,27 @@ func (a Authority) Evidence() map[string]any {
 		evidence["context_publication_generation"] = confirmation.ContextPublicationGeneration
 		evidence["plan_generation"] = confirmation.PlanGeneration.Diagnostic()
 		evidence["target_generation"] = confirmation.TargetGeneration
+	case AuthorityChannelDelivery:
+		delivery := a.ChannelDelivery
+		evidence["effect_operation_id"] = delivery.EffectOperationID
+		evidence["delivery_id"] = delivery.DeliveryID
+		evidence["render_id"] = delivery.RenderID
+		evidence["render_hash"] = delivery.RenderHash
+		evidence["principal_id"] = delivery.PrincipalID
+		evidence["interface_key"] = delivery.InterfaceKey
+		evidence["delivery_epoch"] = delivery.DeliveryEpoch
+		evidence["binding_revision"] = delivery.BindingRevision
+		evidence["external_account_reference"] = delivery.ExternalAccountRef
+		evidence["conversation_reference"] = delivery.ConversationRef
+		evidence["activation_id"] = delivery.ActivationID
+		evidence["activation_revision"] = delivery.ActivationRevision
+		evidence["bundle_hash"] = delivery.BundleHash
+		evidence["bundle_identity"] = delivery.BundleIdentity
+		evidence["pack_inventory_generation"] = delivery.PackInventoryGeneration
+		evidence["runtime_instance_id"] = delivery.RuntimeInstanceID
+		evidence["context_publication_generation"] = delivery.ContextPublicationGeneration
+		evidence["plan_generation"] = delivery.PlanGeneration.Diagnostic()
+		evidence["target_generation"] = delivery.TargetGeneration
 	}
 	return evidence
 }
