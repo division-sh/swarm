@@ -74,7 +74,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				}
 				selected := fmt.Sprintf("{event: %s, fields: {case_id: \"${payload.case_id}\", value: {literal: %s}}}", result, literal)
 				if family == "specialized" {
-					selected = fmt.Sprintf("{fields: {value: {literal: '%s'}}}", literal)
+					selected = fmt.Sprintf("{fields: {value: {literal: %s}}}", literal)
 				}
 				body += fmt.Sprintf("        - id: %s\n          condition: '%s'\n          emit: %s\n", choice.name, choice.condition, selected)
 			}

@@ -62,9 +62,9 @@ worker.requested:
       emit:
         event: worker.requested
         fields:
-          worker_id: payload.worker_id
-          label: payload.label
-          count: payload.count
+          worker_id: ${payload.worker_id}
+          label: ${payload.label}
+          count: ${payload.count}
 `,
 		"worker/schema.yaml": `name: worker
 mode: template
@@ -111,9 +111,9 @@ leaf.requested:
       emit:
         event: leaf.requested
         fields:
-          worker_id: "payload.worker_id + '-leaf'"
-          label: "'leaf-' + payload.label"
-          count: payload.count + 1
+          worker_id: "${payload.worker_id + '-leaf'}"
+          label: "${'leaf-' + payload.label}"
+          count: ${payload.count + 1}
 `,
 		"worker/leaf/schema.yaml": `name: leaf
 mode: template
