@@ -745,11 +745,7 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	if !ok {
 		return decisioncard.InputDraft{}, decisioncard.ErrInvalidVerdict
 	}
-	requiresInput := false
-	for _, field := range outcome.Input {
-		requiresInput = requiresInput || field.Required
-	}
-	if !requiresInput {
+	if len(outcome.Input) == 0 {
 		return decisioncard.InputDraft{}, fmt.Errorf("verdict %s does not require an input draft", req.Verdict)
 	}
 	actor := strings.TrimSpace(req.PrincipalID)

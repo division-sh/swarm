@@ -29122,6 +29122,8 @@ api_specification:
       status_storage_model: 'Typed cards are pending, decided, or superseded. Defer is non-terminal: status remains pending and
         deferred_until is updated independently. An input draft is never a verdict. Notice acknowledgment mutates only notice
         notification state.'
+      input_draft_admission: 'Any verdict with a declared input field, including an optional-only field set, may start a durable
+        principal-owned input draft. A verdict with no declared input fields cannot start a draft.'
       decision_input_types: >
         Stage-gate verdict inputs use one closed scalar vocabulary: text,
         integer, numeric, boolean, timestamp, and uuid. Gate authoring rejects
