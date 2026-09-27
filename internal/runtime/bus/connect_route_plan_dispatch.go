@@ -594,6 +594,9 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 	}
 	if evt.RoutingSource().Kind() == events.RoutingSourceRoot || evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
 		paths["."] = struct{}{}
+		if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+			paths[runID] = struct{}{}
+		}
 	}
 	matched := r.matchedPlans(ctx, evt)
 	for _, plan := range matched {

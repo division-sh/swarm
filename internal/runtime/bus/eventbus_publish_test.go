@@ -1111,6 +1111,14 @@ func (s *routeSetEventStore) ListActiveFlowInstanceDescriptors(context.Context, 
 	return nil, nil
 }
 
+func (s *routeSetEventStore) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func (s *routeSetEventStore) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
 type replayCapableAtomicStoreMissingScope struct {
 	mu         sync.Mutex
 	deliveries []string

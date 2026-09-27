@@ -3631,6 +3631,16 @@ func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context
 	return append([]ActiveTargetDescriptor(nil), s.owners...), nil
 }
 
+func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, paths []string) ([]ActiveTargetDescriptor, error) {
+	var selected []ActiveTargetDescriptor
+	for _, owner := range s.owners {
+		if slices.Contains(paths, owner.FlowInstance) {
+			selected = append(selected, owner)
+		}
+	}
+	return selected, nil
+}
+
 func (rejectingDeliveryRouteStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
 	if len(command.Commit.DeliveryRoutes) > 0 {
 		return CommittedPublication{}, errors.New("typed delivery route persistence is unavailable")
