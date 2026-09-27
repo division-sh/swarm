@@ -197,15 +197,41 @@ type TextFact struct {
 	ConversationRef     string            `json:"conversation_reference"`
 	ConversationScope   ConversationScope `json:"conversation_scope"`
 	Text                string            `json:"text"`
+	MessageReference    string            `json:"provider_message_reference"`
+	ReplyToReference    string            `json:"reply_to_message_reference,omitempty"`
 	AccountPresentation string            `json:"account_presentation,omitempty"`
+}
+
+type ActionFact struct {
+	Interface          InterfaceIdentity `json:"interface"`
+	ExternalAccountRef string            `json:"external_account_reference"`
+	ConversationRef    string            `json:"conversation_reference"`
+	ConversationScope  ConversationScope `json:"conversation_scope"`
+	MessageReference   string            `json:"provider_message_reference"`
+	InteractionRef     string            `json:"interaction_reference"`
+	Token              string            `json:"token"`
+}
+
+func (f ActionFact) Validate() error {
+	if err := f.Interface.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(f.ExternalAccountRef) == "" || strings.TrimSpace(f.ConversationRef) == "" ||
+		strings.TrimSpace(f.MessageReference) == "" || strings.TrimSpace(f.InteractionRef) == "" || strings.TrimSpace(f.Token) == "" {
+		return fmt.Errorf("%w: action fact requires complete identity, message, interaction, and token", ErrInvalidRequest)
+	}
+	if !f.ConversationScope.Valid() {
+		return fmt.Errorf("%w: conversation_scope must be direct or shared", ErrInvalidRequest)
+	}
+	return nil
 }
 
 func (f TextFact) Validate() error {
 	if err := f.Interface.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(f.ExternalAccountRef) == "" || strings.TrimSpace(f.ConversationRef) == "" || strings.TrimSpace(f.Text) == "" {
-		return fmt.Errorf("%w: text claim requires account, conversation, and text", ErrInvalidRequest)
+	if strings.TrimSpace(f.ExternalAccountRef) == "" || strings.TrimSpace(f.ConversationRef) == "" || strings.TrimSpace(f.Text) == "" || strings.TrimSpace(f.MessageReference) == "" {
+		return fmt.Errorf("%w: text fact requires account, conversation, text, and message reference", ErrInvalidRequest)
 	}
 	if !f.ConversationScope.Valid() {
 		return fmt.Errorf("%w: conversation_scope must be direct or shared", ErrInvalidRequest)
