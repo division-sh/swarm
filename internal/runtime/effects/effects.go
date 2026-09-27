@@ -48,6 +48,7 @@ const (
 	KindServeRegistration     Kind = "serve_registration"
 	KindChannelConfirmation   Kind = "channel_confirmation"
 	KindChannelDelivery       Kind = "channel_delivery"
+	KindChannelActionAck      Kind = "channel_action_ack"
 	KindChannelNativeSetting  Kind = "channel_native_setting"
 )
 
@@ -194,6 +195,7 @@ var registrations = []Registration{
 	registration(KindServeRegistration, EffectWriteOrUnknown, "provider_registration", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestProviderRegistrationApplyEffectOutcomes"),
 	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelConfirmationEffectOutcomes"),
 	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelDeliveryEffectOutcomes"),
+	registration(KindChannelActionAck, EffectWriteOrUnknown, "channel_action_ack", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelDeliveryVerdictAcknowledgmentE2E"),
 	registration(KindChannelNativeSetting, EffectWriteOrUnknown, "channel_native_setting", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelNativeSettingEffectOutcomes"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes"),
@@ -966,6 +968,28 @@ func BeginChannelDelivery(ctx context.Context, request []byte, lineage map[strin
 	return authorizedHandle(controller, attempt, err)
 }
 
+func BeginChannelActionAck(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
+	const adapter = "channel_action_ack"
+	if err := admitExecutionMode(ctx, adapter); err != nil {
+		return nil, err
+	}
+	if _, differentOwner := DifferentOwnerFromContext(ctx); differentOwner {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_owner_conflict", "external-effects", "authorize_channel_action_ack", nil)
+	}
+	controller, ok := ControllerFromContext(ctx)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_channel_action_ack", nil)
+	}
+	authority, ok := AuthorityFromContext(ctx)
+	if !ok || authority.Kind != AuthorityChannelActionAck {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_action_ack_authority_missing", "external-effects", "authorize_channel_action_ack", nil)
+	}
+	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
+		OperationID: authority.ChannelActionAck.EffectOperationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
+	})
+	return authorizedHandle(controller, attempt, err)
+}
+
 // BeginChannelNativeSetting admits one physical setting generation. Runtime
 // contexts are execution witnesses, not independent owners of that setting.
 func BeginChannelNativeSetting(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
@@ -1470,6 +1494,10 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	} else if registration.Kind == KindChannelDelivery {
 		if authority.Kind != AuthorityChannelDelivery || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelDelivery.EffectOperationID {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_delivery_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		}
+	} else if registration.Kind == KindChannelActionAck {
+		if authority.Kind != AuthorityChannelActionAck || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelActionAck.EffectOperationID {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_action_ack_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else if registration.Kind == KindChannelNativeSetting {
 		if authority.Kind != AuthorityChannelNativeSetting || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelNativeSetting.EffectOperationID {
