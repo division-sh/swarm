@@ -1,9 +1,25 @@
 package contracts
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestWorkflowGateAuthoredInputOrderSurvivesPlanLowering(t *testing.T) {
+	var outcome FlowStageGateOutcomeDeclaration
+	err := yaml.Unmarshal([]byte("label: Review\ninput:\n  zeta: {type: text, required: true}\n  alpha: {type: integer, required: true}\nadvances_to: done\n"), &outcome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations := FlowStageDeclarations{Entries: []FlowStageDeclaration{{ID: "review", Gate: &FlowStageGateDeclaration{
+		Decision: "approve", Outcomes: map[string]FlowStageGateOutcomeDeclaration{"approve": outcome},
+	}}}}
+	plans := declarations.GatePlans("root")
+	if len(plans) != 1 || !reflect.DeepEqual(plans[0].Outcomes["approve"].InputOrder, []string{"zeta", "alpha"}) {
+		t.Fatalf("authored input order lost during lowering: %#v", plans)
+	}
+}
 
 func TestWorkflowGateInputTypeOwnerAdmitsCanonicalScalarsEndToEnd(t *testing.T) {
 	tests := []struct {
