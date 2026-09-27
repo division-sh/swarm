@@ -36,6 +36,9 @@ func (c channelDeliveryWorkerCards) ListDecisionCardChanges(_ context.Context, o
 	for _, change := range c.changes {
 		if change.Sequence > opts.After {
 			out = append(out, change)
+			if len(out) == opts.Limit {
+				break
+			}
 		}
 	}
 	return out, nil
@@ -126,6 +129,28 @@ func TestChannelDeliveryChangeCursorResumesAfterPlanningFailure(t *testing.T) {
 	}
 	if selected.changeCursor != 2 || !reflect.DeepEqual(selected.changed, []string{"first", "second"}) {
 		t.Fatalf("resumed progress = cursor %d, cards %v", selected.changeCursor, selected.changed)
+	}
+}
+
+func TestChannelDeliveryChangeCursorCrossesPageBoundaryAndResumes(t *testing.T) {
+	changes := make([]decisioncard.Change, 205)
+	for i := range changes {
+		changes[i] = decisioncard.Change{Sequence: int64(i + 1), CardID: fmt.Sprintf("card-%d", i+1)}
+	}
+	selected := &channelDeliveryWorkerStore{failOnSequence: 201}
+	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{changes: changes}}
+	if err := d.reconcileCardChanges(context.Background()); err == nil {
+		t.Fatal("failure at the second page was ignored")
+	}
+	if selected.changeCursor != 200 || len(selected.changed) != 200 {
+		t.Fatalf("first committed page = cursor %d, planned %d", selected.changeCursor, len(selected.changed))
+	}
+	selected.failOnSequence = 0
+	if err := d.reconcileCardChanges(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if selected.changeCursor != 205 || len(selected.changed) != 205 || selected.changed[200] != "card-201" {
+		t.Fatalf("resumed second page = cursor %d, planned %d", selected.changeCursor, len(selected.changed))
 	}
 }
 

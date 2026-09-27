@@ -29,15 +29,16 @@ const (
 	DraftStatusConsumed  = "consumed"
 	DraftStatusExpired   = "expired"
 
-	ChangeCreated        = "created"
-	ChangeDecided        = "decided"
-	ChangeDeferred       = "deferred"
-	ChangeExpired        = "expired"
-	ChangeSuperseded     = "superseded"
-	ChangeDraftStarted   = "input_draft_started"
-	ChangeDraftCancelled = "input_draft_cancelled"
-	ChangeDraftExpired   = "input_draft_expired"
-	ChangeDraftConsumed  = "input_draft_consumed"
+	ChangeCreated         = "created"
+	ChangeDecided         = "decided"
+	ChangeDeferred        = "deferred"
+	ChangeExpired         = "expired"
+	ChangeSuperseded      = "superseded"
+	ChangeDraftStarted    = "input_draft_started"
+	ChangeDraftProgressed = "input_draft_progressed"
+	ChangeDraftCancelled  = "input_draft_cancelled"
+	ChangeDraftExpired    = "input_draft_expired"
+	ChangeDraftConsumed   = "input_draft_consumed"
 
 	DefaultInputDraftTTL    = 15 * time.Minute
 	DefaultFirstReminder    = 4 * time.Hour
