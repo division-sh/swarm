@@ -84,6 +84,17 @@ operations:
     tool: telegram.answer_callback
     input:
       callback_query_id: input.interaction_reference
+  install_inbox_entry:
+    tool: telegram.install_inbox_commands
+    input:
+      chat_id: context.destination
+      commands: input.commands
+  read_inbox_entry:
+    tool: telegram.read_inbox_commands
+    input:
+      chat_id: context.destination
+    output:
+      commands: result.commands
 events:
   action:
     event: inbound.telegram.callback_action
