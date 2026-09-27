@@ -651,10 +651,6 @@ func (s *PostgresStore) ListStandingServiceStatuses(ctx context.Context) ([]pipe
 	return s.pipelinePostgresOwner.ListStandingServiceStatuses(ctx)
 }
 
-func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]tools.MailboxItem, error) {
-	return s.mailboxPostgresOwner.ListUnnotifiedCriticalMailboxItems(ctx, limit)
-}
-
 func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxPostgresOwner.ListV1MailboxItems(ctx, opts)
 }
@@ -1881,10 +1877,6 @@ func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwnersForScope(ctx context.Con
 
 func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
 	return s.pipelineSQLiteOwner.ListStandingServiceStatuses(ctx)
-}
-
-func (s *SQLiteRuntimeStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]tools.MailboxItem, error) {
-	return s.mailboxSQLiteOwner.ListUnnotifiedCriticalMailboxItems(ctx, limit)
 }
 
 func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
