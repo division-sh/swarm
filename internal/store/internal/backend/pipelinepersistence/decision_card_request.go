@@ -7,10 +7,12 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
+	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
@@ -57,6 +59,57 @@ func admitDecisionCardRequest(ctx context.Context, owner decisionCardRequestSour
 	return card.RunID, fact, nil
 }
 
+func requireChannelCardActionTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request, mutation pipeline.DecisionCardMutation, postgres, lock bool) error {
+	fact, present := mutation.ChannelAction()
+	if !present {
+		return nil
+	}
+	if _, err := storechanneldelivery.RequireActionIntentTx(ctx, tx, fact, postgres, lock); err != nil {
+		return err
+	}
+	demand := channeldelivery.CardActionDemand{CardID: req.ResourceID, PrincipalID: req.Actor.ID, Method: req.Method}
+	switch mutation.Kind() {
+	case pipeline.DecisionCardMutationDecide:
+		decision, _ := mutation.Decision()
+		demand.Verdict, demand.ReceiptOperationID, demand.RenderHash = decision.Verdict, decision.DeliveryReceiptID, decision.DeliveryRenderHash
+	case pipeline.DecisionCardMutationBeginInput:
+		begin, _, _ := mutation.InputBegin()
+		demand.Verdict, demand.ReceiptOperationID = begin.Verdict, begin.DeliveryReceiptID
+	default:
+		return fmt.Errorf("channel action does not authorize this card method")
+	}
+	return storechanneldelivery.RequireCardActionTx(ctx, tx, fact.ActionFact, demand, postgres, lock)
+}
+
+func settleChannelCardActionTx(ctx context.Context, tx *sql.Tx, mutation pipeline.DecisionCardMutation, postgres bool) error {
+	fact, present := mutation.ChannelAction()
+	if !present {
+		return nil
+	}
+	var disposition channeldelivery.ActionDisposition
+	switch mutation.Kind() {
+	case pipeline.DecisionCardMutationDecide:
+		disposition = channeldelivery.ActionApplied
+	case pipeline.DecisionCardMutationBeginInput:
+		disposition = channeldelivery.ActionInputStarted
+	default:
+		return fmt.Errorf("channel action does not authorize this card method")
+	}
+	return storechanneldelivery.SettleAppliedActionIntentTx(ctx, tx, fact, disposition, postgres)
+}
+
+func (s *PipelinePostgresOwner) requireChannelCardAction(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) error {
+	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return requireChannelCardActionTx(txctx, tx, req, mutation, true, false)
+	})
+}
+
+func (s *PipelineSQLiteOwner) requireChannelCardAction(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) error {
+	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return requireChannelCardActionTx(txctx, tx, req, mutation, false, false)
+	})
+}
+
 func (s *PipelinePostgresOwner) AcquireDecisionCardMutation(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) (pipeline.DecisionCardMutationLease, error) {
 	if err := mutation.ValidateRequest(req); err != nil {
 		return nil, err
@@ -65,11 +118,17 @@ func (s *PipelinePostgresOwner) AcquireDecisionCardMutation(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	if err := s.requireChannelCardAction(ctx, req, mutation); err != nil {
+		return nil, err
+	}
 	lease, err := storeapiidempotency.AcquirePostgresRequest(ctx, s.apiIdempotency, req)
 	if err != nil {
 		return nil, err
 	}
 	if _, _, err := admitDecisionCardRequest(ctx, s, req); err != nil {
+		return nil, errors.Join(err, lease.Release(ctx))
+	}
+	if err := s.requireChannelCardAction(ctx, req, mutation); err != nil {
 		return nil, errors.Join(err, lease.Release(ctx))
 	}
 	return &decisionCardRequestLease{request: req, mutation: mutation, runID: runID, source: source, postgres: s, pgLease: lease}, nil
@@ -83,11 +142,18 @@ func (s *PipelineSQLiteOwner) AcquireDecisionCardMutation(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	if err := s.requireChannelCardAction(ctx, req, mutation); err != nil {
+		return nil, err
+	}
 	lease, err := storeapiidempotency.AcquireSQLiteRequest(ctx, s.apiIdempotency, req)
 	if err != nil {
 		return nil, err
 	}
 	if _, _, err := admitDecisionCardRequest(ctx, s, req); err != nil {
+		lease.Release()
+		return nil, err
+	}
+	if err := s.requireChannelCardAction(ctx, req, mutation); err != nil {
 		lease.Release()
 		return nil, err
 	}
@@ -148,6 +214,9 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 					if !current.Matches(l.source) {
 						return fmt.Errorf("card source changed at commit")
 					}
+					if err := requireChannelCardActionTx(txctx, tx, l.request, l.mutation, true, true); err != nil {
+						return err
+					}
 					return nil
 				})
 				if err != nil {
@@ -156,6 +225,9 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 				return write(txctx, attempt)
 			})
 		}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
+			if err := settleChannelCardActionTx(ctx, tx, l.mutation, true); err != nil {
+				return err
+			}
 			return storeapiidempotency.StorePostgresCompletionTx(ctx, l.pgLease, tx, completion)
 		})
 	}
@@ -173,6 +245,9 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 				if !current.Matches(l.source) {
 					return fmt.Errorf("card source changed at commit")
 				}
+				if err := requireChannelCardActionTx(txctx, tx, l.request, l.mutation, false, true); err != nil {
+					return err
+				}
 				return nil
 			})
 			if err != nil {
@@ -181,6 +256,9 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 			return write(txctx, attempt)
 		})
 	}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
+		if err := settleChannelCardActionTx(ctx, tx, l.mutation, false); err != nil {
+			return err
+		}
 		return storeapiidempotency.StoreSQLiteCompletionTx(ctx, l.sqLease, tx, completion)
 	})
 }

@@ -3,13 +3,17 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
@@ -240,6 +244,189 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			}
 			if rebound.Revision <= reconnected.Revision {
 				t.Fatalf("rebind did not advance binding revision: %#v", rebound)
+			}
+		})
+	}
+}
+
+func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			cards, runID := decisionCardTestStore(t, backend)
+			selected := cards.(selectedChannelDeliveryTestStore)
+			postgres := backend == "postgres"
+			var runTx func(func(context.Context, *sql.Tx) error) error
+			var settleClaim func(operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+			switch store := cards.(type) {
+			case *PostgresStore:
+				runTx = func(fn func(context.Context, *sql.Tx) error) error {
+					return store.backend.RunTransaction(ctx, fn)
+				}
+				settleClaim = func(claim operatorchannel.InboundClaim, at time.Time) (operatorchannel.ClaimSettlement, error) {
+					var out operatorchannel.ClaimSettlement
+					err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+						var err error
+						out, err = store.operatorChannelPostgresOwner.SettleInboundClaimTx(txctx, tx, claim, at)
+						return err
+					})
+					return out, err
+				}
+			case *SQLiteRuntimeStore:
+				runTx = func(fn func(context.Context, *sql.Tx) error) error {
+					return store.backend.RunTransaction(ctx, "channel card action admission", fn)
+				}
+				settleClaim = func(claim operatorchannel.InboundClaim, at time.Time) (operatorchannel.ClaimSettlement, error) {
+					var out operatorchannel.ClaimSettlement
+					err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+						var err error
+						out, err = store.operatorChannelSQLiteOwner.SettleInboundClaimTx(txctx, tx, claim, at)
+						return err
+					})
+					return out, err
+				}
+			default:
+				t.Fatalf("unsupported selected card store %T", cards)
+			}
+			now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+			onboarding, activation := selectedChannelConfirmationAuthorityFixture(t, selected, now, runtimeeffects.StateAuthorized)
+			principal, err := selected.EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bindingOperation, err := selected.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+				OperationID: onboarding.IdentityOperationID, Kind: operatorchannel.OperationConnect,
+				PrincipalID: principal.ID, Interface: activation.Interface, ExpectedRevision: 0,
+				RequestKeyHash: onboarding.IdentityOperationID, RequestHash: onboarding.IdentityOperationID,
+				ProviderCredential: operatorChannelProviderEvidence(), RequestedAt: now,
+				ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			claimed, err := settleClaim(operatorChannelContractClaim(bindingOperation, operatorchannel.ConversationScopeDirect,
+				"account", activation.ConversationRef, uuid.NewString()), now.Add(time.Second))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, binding, err := selected.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+				OperationID: bindingOperation.OperationID, PrincipalID: principal.ID, ExpectedRevision: claimed.Operation.Revision,
+				Approve: true, ProviderCredentialCurrent: true, ConfirmedAt: now.Add(2 * time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			onboarding, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+				OperationID: onboarding.OperationID, ExpectedRevision: onboarding.Revision,
+				Phase: channelonboarding.PhaseSucceeded, Now: now.Add(20 * time.Second),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entityID, stageActivationID := uuid.NewString(), uuid.NewString()
+			card, err := decisioncard.New(decisioncard.Card{
+				CardID: uuid.NewString(), RunID: runID,
+				Anchor:        newDecisionCardTestStageAnchor("review/check-1", "review", entityID, "awaiting_review", stageActivationID),
+				ExecutionMode: "live", BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
+				Snapshot: freezeDecisionCardTestSnapshot(t, "review_check", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"accept": {Verdict: "accept", AdvancesTo: "done"},
+				}), CreatedAt: now,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cards.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			created, err := selected.PlanOpenChannelCard(ctx, card.CardID)
+			if err != nil || !created {
+				t.Fatalf("plan card = %t, %v", created, err)
+			}
+			plans, err := selected.ListCurrentChannelDeliveryPlans(ctx, "", 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var candidate render.Candidate
+			for _, plan := range plans {
+				if plan.SourceID == card.CardID {
+					candidate = plan
+				}
+			}
+			if candidate.DeliveryID == "" {
+				t.Fatalf("planned card missing: %#v", plans)
+			}
+			prepared, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID)
+			if err != nil || len(prepared.Actions) != 1 || prepared.Actions[0].Kind != "verdict" {
+				t.Fatalf("prepared card = %#v, err=%v", prepared, err)
+			}
+			operationID, err := runtimeeffects.ChannelDeliveryOperationID(candidate.DeliveryID, prepared.RenderID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			authority := runtimeeffects.Authority{
+				Kind: runtimeeffects.AuthorityChannelDelivery, ID: operationID, ExecutionOwner: "channel-card-action-test",
+				LeaseExpiresAt: time.Now().Add(5 * time.Minute), FenceGeneration: activation.Coordinate.ContextPublicationGeneration,
+				ExecutionMode: runtimeeffects.ExecutionModeLive,
+				ChannelDelivery: runtimeeffects.ChannelDeliveryAuthority{
+					EffectOperationID: operationID, DeliveryID: candidate.DeliveryID, RenderID: prepared.RenderID,
+					RenderHash: prepared.Frozen.Hash, PrincipalID: principal.ID, InterfaceKey: binding.Interface.Key(),
+					DeliveryEpoch: candidate.Audience.DeliveryEpoch, BindingRevision: binding.Revision,
+					ExternalAccountRef: candidate.Audience.ExternalAccountRef, ConversationRef: candidate.Audience.ConversationRef,
+					ActivationID: activation.ActivationID, ActivationRevision: activation.Revision,
+					BundleHash: activation.Coordinate.BundleHash, BundleIdentity: activation.Coordinate.BundleIdentity,
+					PackInventoryGeneration:      activation.Coordinate.PackInventoryGeneration,
+					RuntimeInstanceID:            activation.Coordinate.RuntimeInstanceID,
+					ContextPublicationGeneration: activation.Coordinate.ContextPublicationGeneration,
+					PlanGeneration:               activation.Coordinate.PlanGeneration, TargetGeneration: activation.Coordinate.TargetGeneration,
+				},
+			}
+			if !authority.Valid() {
+				t.Fatal("card delivery authority is invalid")
+			}
+			effectCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
+				testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), authority),
+				runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+			handle, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("card"), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := handle.MarkLaunched(effectCtx); err != nil {
+				t.Fatal(err)
+			}
+			if err := handle.MarkResponseObserved(effectCtx, map[string]any{"provider": "accepted"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := handle.Succeed(effectCtx, map[string]any{"projected_output": map[string]any{"delivery_reference": map[string]any{"id": 91}}}); err != nil {
+				t.Fatal(err)
+			}
+			fact := operatorchannel.ActionFact{
+				Interface: binding.Interface, ExternalAccountRef: candidate.Audience.ExternalAccountRef,
+				ConversationRef: candidate.Audience.ConversationRef, ConversationScope: candidate.Audience.ConversationScope,
+				MessageReference: `{"id":91}`, InteractionRef: "callback-card-91", Token: prepared.Actions[0].Token,
+			}
+			demand := render.CardActionDemand{CardID: card.CardID, PrincipalID: principal.ID, Method: "mailbox.decide",
+				Verdict: "accept", ReceiptOperationID: operationID, RenderHash: prepared.Frozen.Hash}
+			require := func(fact operatorchannel.ActionFact, demand render.CardActionDemand) error {
+				return runTx(func(txctx context.Context, tx *sql.Tx) error {
+					return channeldelivery.RequireCardActionTx(txctx, tx, fact, demand, postgres, true)
+				})
+			}
+			if err := require(fact, demand); err != nil {
+				t.Fatalf("exact current card action rejected: %v", err)
+			}
+			foreign := demand
+			foreign.Verdict = "reject"
+			if err := require(fact, foreign); err == nil || !strings.Contains(err.Error(), "not current card authority") {
+				t.Fatalf("foreign verdict admission = %v", err)
+			}
+			if err := cards.SupersedeDecisionCardsForStage(ctx, runID, entityID, stageActivationID, "moved", now.Add(time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID); err != nil {
+				t.Fatal(err)
+			}
+			if err := require(fact, demand); err == nil || !strings.Contains(err.Error(), "not current card authority") {
+				t.Fatalf("predecessor render admission = %v", err)
 			}
 		})
 	}

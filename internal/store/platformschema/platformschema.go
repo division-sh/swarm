@@ -247,6 +247,8 @@ func platformTableOrder(name string) int {
 		return 22
 	case "inbound_publication_events":
 		return 23
+	case "operator_channel_action_intents":
+		return 23
 	case "dead_letters":
 		return 24
 	case "flow_instances":
