@@ -118,3 +118,47 @@ func BenchmarkSQLiteRouteTopologyOneNew(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkSQLiteRouteTopologySelectedOwnerPopulation(b *testing.B) {
+	for _, owners := range []int{128, 512, 1362} {
+		b.Run(fmt.Sprintf("owners_%d", owners), func(b *testing.B) {
+			db, sets := sqliteRouteStatementFixture(b, owners)
+			ctx := context.Background()
+			seed := sets[:len(sets)-1]
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if _, err := replaceFlowInstanceRouteTopologyTx(ctx, tx, false, seed); err != nil {
+				_ = tx.Rollback()
+				b.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				b.Fatal(err)
+			}
+			for _, scope := range []struct {
+				name string
+				sets []runtimebus.FlowInstanceRouteRecordSet
+			}{
+				{"full", sets},
+				{"selected", sets[len(sets)-1:]},
+			} {
+				b.Run(scope.name, func(b *testing.B) {
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						tx, err := db.BeginTx(ctx, nil)
+						if err != nil {
+							b.Fatal(err)
+						}
+						_, replaceErr := replaceFlowInstanceRouteTopologyTx(ctx, tx, false, scope.sets)
+						rollbackErr := tx.Rollback()
+						if replaceErr != nil || rollbackErr != nil {
+							b.Fatalf("replace=%v rollback=%v", replaceErr, rollbackErr)
+						}
+					}
+				})
+			}
+		})
+	}
+}
