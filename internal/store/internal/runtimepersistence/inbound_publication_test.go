@@ -261,6 +261,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOperatorChannelClaimProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOperatorChannelActionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationOperatorChannelTextProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	if _, err := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "inbound-proof"}); err != nil {
 		t.Fatalf("suspend inbound standing service: %v", err)
 	}
@@ -332,6 +333,65 @@ func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.C
 	changed.Request.RequestFingerprint = strings.Repeat("e", 64)
 	if _, err := store.CommitInboundPublication(ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
 		t.Fatalf("changed action intent replay error = %v", err)
+	}
+}
+
+func runInboundPublicationOperatorChannelTextProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
+	t.Helper()
+	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "operator-channel-text-fault")
+	fact := operatorchannel.TextFact{
+		Interface:          operatorChannelContractIdentity("inbound-text-generation"),
+		ExternalAccountRef: "account-text", ConversationRef: "conversation-text",
+		ConversationScope: operatorchannel.ConversationScopeShared,
+		Text:              "decision reason", MessageReference: `{"id":92}`, ReplyToReference: `{"id":91}`,
+	}
+	command := runtimeinbound.CommitCommand{
+		Request: request, Finalization: runtimeinbound.Finalization{EvidenceEvent: inboundPublicationZeroOutputEvidence(t, request)},
+		OperatorChannelText: &operatorchannel.InboundText{
+			TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+			PublicationID: request.PublicationID, ProviderAuthorization: "verified-text-auth",
+		},
+	}
+	drop := installOperatorChannelClaimFailureTrigger(t, db, sqlite, "operator_channel_text_intents", "INSERT")
+	if _, err := store.CommitInboundPublication(ctx, command); err == nil {
+		drop()
+		t.Fatal("failed text intent insert committed inbound publication")
+	}
+	drop()
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE publication_id = `, request.PublicationID, 0)
+	result, err := store.CommitInboundPublication(ctx, command)
+	if err != nil || !result.Acknowledged || !result.Record.Created || result.Record.OutputCount != 0 {
+		t.Fatalf("text intent clean retry = %#v, err=%v", result, err)
+	}
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM operator_channel_text_intents WHERE publication_id = `, request.PublicationID, 1)
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, request.PublicationID, 0)
+	texts, ok := any(store).(interface {
+		ListPendingChannelTexts(context.Context, string, int) ([]runtimechanneldelivery.PendingText, error)
+	})
+	if !ok {
+		t.Fatalf("selected store %T lacks pending channel text readback", store)
+	}
+	pending, err := texts.ListPendingChannelTexts(ctx, "", 500)
+	if err != nil || len(pending) != 1 || pending[0].PublicationID != request.PublicationID || pending[0].Fact.TextFact != fact {
+		t.Fatalf("pending verified channel text = %#v, err=%v", pending, err)
+	}
+	query := `SELECT fact FROM operator_channel_text_intents WHERE publication_id=?`
+	if !sqlite {
+		query = `SELECT fact FROM operator_channel_text_intents WHERE publication_id=$1::uuid`
+	}
+	var raw []byte
+	if err := db.QueryRowContext(ctx, query, request.PublicationID).Scan(&raw); err != nil || !strings.Contains(string(raw), `"reply_to_message_reference"`) {
+		t.Fatalf("durable text reply reference = %s, err=%v", raw, err)
+	}
+	replayed, err := store.CommitInboundPublication(ctx, command)
+	if err != nil || !replayed.Acknowledged || replayed.Record.Created || replayed.Record.OutputCount != 0 {
+		t.Fatalf("text intent duplicate = %#v, err=%v", replayed, err)
+	}
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM operator_channel_text_intents WHERE publication_id = `, request.PublicationID, 1)
+	changed := command
+	changed.Request.RequestFingerprint = strings.Repeat("e", 64)
+	if _, err := store.CommitInboundPublication(ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
+		t.Fatalf("changed text intent replay error = %v", err)
 	}
 }
 
