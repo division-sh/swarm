@@ -82,6 +82,7 @@ type ResolvedNativeEntry struct {
 	BindingRevision   int64
 	ActivationID      string
 	SettingID         string
+	ResourceSlotID    string
 	SettingGeneration int64
 	EntryReference    string
 }
