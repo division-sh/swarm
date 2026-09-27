@@ -79,6 +79,36 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 	}
 }
 
+func TestTelegramCommandInvocationIsOptionalTypedTriggerEvidence(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	for _, tc := range []struct {
+		name, text string
+		want       any
+	}{
+		{name: "direct entry", text: "/inbox_abc123", want: map[string]any{"reference": "inbox_abc123"}},
+		{name: "addressed shared entry", text: "/inbox_abc123@SampleBot", want: map[string]any{"reference": "inbox_abc123", "address": "SampleBot"}},
+		{name: "plain prose", text: "show my inbox"},
+		{name: "command with argument", text: "/inbox_abc123 extra"},
+		{name: "invalid command", text: "/inbox-abc123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
+				"update_id": 501,
+				"message": map[string]any{
+					"message_id": 7, "from": map[string]any{"id": 12345},
+					"chat": map[string]any{"id": 12345, "type": "private"}, "text": tc.text,
+				},
+			}))
+			if err != nil || len(delivery.Events) != 2 {
+				t.Fatalf("Accept = %#v, %v", delivery.Events, err)
+			}
+			if got := delivery.Events[1].Payload["command_invocation"]; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("command_invocation = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTelegramSelectedCallbackActionContractUsesShippedPack(t *testing.T) {
 	_, _, plan := telegramPlatformContract(t)
 	delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
@@ -525,6 +555,7 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 		{
 			Event: "inbound.telegram.text_message", Kind: "normalized",
 			Fields: []packs.TriggerEventFieldDescriptor{
+				{Name: "command_invocation", Type: "object"},
 				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "conversation_scope", Type: "text", Required: true, CarryEligible: true},
 				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},

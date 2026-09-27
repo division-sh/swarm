@@ -199,6 +199,8 @@ type TextFact struct {
 	Text                string            `json:"text"`
 	MessageReference    string            `json:"provider_message_reference"`
 	ReplyToReference    string            `json:"reply_to_message_reference,omitempty"`
+	EntryReference      string            `json:"entry_reference,omitempty"`
+	EntryAddress        string            `json:"entry_address,omitempty"`
 	AccountPresentation string            `json:"account_presentation,omitempty"`
 }
 
@@ -235,6 +237,9 @@ func (f TextFact) Validate() error {
 	}
 	if !f.ConversationScope.Valid() {
 		return fmt.Errorf("%w: conversation_scope must be direct or shared", ErrInvalidRequest)
+	}
+	if f.EntryAddress != "" && f.EntryReference == "" {
+		return fmt.Errorf("%w: addressed entry requires an entry reference", ErrInvalidRequest)
 	}
 	return nil
 }
