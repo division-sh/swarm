@@ -134,6 +134,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 				}
 				continue
 			}
+			if err := d.acknowledgeChannelAction(ctx, intent, resolved); err != nil {
+				failures = errors.Join(failures, fmt.Errorf("acknowledge channel action %s: %w", intent.PublicationID, err))
+			}
 			if resolved.SourceKind != "card" || resolved.Action.Kind != "verdict" {
 				continue
 			}

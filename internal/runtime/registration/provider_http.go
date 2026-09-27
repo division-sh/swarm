@@ -170,6 +170,10 @@ func (e HTTPExecutor) DeliverChannelMessage(ctx context.Context, toolID string, 
 	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelDelivery, "channel_delivery", project)
 }
 
+func (e HTTPExecutor) AcknowledgeChannelAction(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
+	return e.deliverChannelWrite(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelActionAck, "channel_action_ack", nil)
+}
+
 func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string, project func(any) (map[string]any, error)) (DeliveryResult, error) {
 	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return DeliveryResult{}, fmt.Errorf("%s tool %q has an invalid contract", source, strings.TrimSpace(toolID))
