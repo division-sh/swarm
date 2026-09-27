@@ -478,6 +478,8 @@ func TestCapabilitySubjectsEnumerateExactInstalledInventoryWithoutMakingToolsEff
 		"slack.post_message",
 		"telegram.answer_callback",
 		"telegram.edit_message",
+		"telegram.install_inbox_commands",
+		"telegram.install_shared_inbox_commands",
 		"telegram.send_interactive",
 		"telegram.send_message",
 	}
@@ -505,7 +507,7 @@ func TestCapabilitySubjectsEffectiveFlowLocalIdentityReplacesAvailableTeachingRo
 	if err != nil {
 		t.Fatalf("CapabilitySubjects: %v", err)
 	}
-	if len(subjects) != 10 {
+	if len(subjects) != 12 {
 		t.Fatalf("subjects = %#v, want one effective identity replacing its installed row", subjects)
 	}
 	for _, subject := range subjects {
