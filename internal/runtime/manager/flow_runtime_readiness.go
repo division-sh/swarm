@@ -175,23 +175,37 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
 	if am.roles.StandingRestarts == nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, errors.New("dynamic flow runtime readiness requires standing restart disposition reader")
 	}
 	cache := make(map[string]runtimepipeline.StandingRestartDisposition)
+	// This read-only inspection shares observations, never mutation authority.
+	ownershipCache := make(map[string]RunExecutionOwnership)
 	filter := func(items []runtimepipeline.DynamicFlowRuntimeReadiness) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 		filtered := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(items))
 		for _, item := range items {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			runID := strings.TrimSpace(item.Plan.RunID)
-			ownership, err := am.inspectRunExecutionOwnership(ctx, runID)
-			if err != nil {
-				return nil, fmt.Errorf("admit dynamic flow readiness run %s: %w", runID, err)
+			ownership, ok := ownershipCache[runID]
+			if !ok {
+				var err error
+				ownership, err = am.inspectRunExecutionOwnership(ctx, runID)
+				if err != nil {
+					return nil, fmt.Errorf("admit dynamic flow readiness run %s: %w", runID, err)
+				}
+				ownershipCache[runID] = ownership
 			}
 			if ownership != RunExecutionOwned {
 				continue
 			}
 			disposition, ok := cache[runID]
 			if !ok {
+				var err error
 				disposition, err = am.roles.StandingRestarts.StandingRunRestartDisposition(ctx, runID)
 				if err != nil {
 					return nil, fmt.Errorf("classify dynamic flow runtime readiness run %s: %w", runID, err)
@@ -211,6 +225,9 @@ func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
 	if projection.SourceTransitionRequired, err = filter(projection.SourceTransitionRequired); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, err
 	}
 	return projection, nil

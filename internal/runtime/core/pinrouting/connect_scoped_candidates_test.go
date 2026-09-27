@@ -167,8 +167,8 @@ func TestCompiledGraphDependencySelectionFollowsNestedConnectChain(t *testing.T)
 		context  []string
 		affected []string
 	}{
-		{changed: "outer", context: []string{"middle"}, affected: []string{"middle"}},
-		{changed: "middle", context: []string{"inner", "outer"}, affected: []string{"inner"}},
+		{changed: "outer", context: []string{"middle", "outer"}, affected: []string{"middle"}},
+		{changed: "middle", context: []string{"inner", "middle", "outer"}, affected: []string{"inner"}},
 		{changed: "inner", context: []string{"middle"}},
 		{changed: "unrelated"},
 	} {
@@ -178,5 +178,27 @@ func TestCompiledGraphDependencySelectionFollowsNestedConnectChain(t *testing.T)
 				t.Fatalf("selection = %#v, want context=%#v affected=%#v", selected, tc.context, tc.affected)
 			}
 		})
+	}
+}
+
+func TestCompiledGraphDependencySelectionLoadsCompleteAffectedObserverContext(t *testing.T) {
+	graph := CompiledConnectGraph{}
+	dependencies := []RouteOwnerDependency{
+		{SourceFlowPath: "producer", ReceiverFlowPath: "observer"},
+		{SourceFlowPath: "other", ReceiverFlowPath: "observer"},
+		{SourceFlowPath: "unrelated", ReceiverFlowPath: "elsewhere"},
+	}
+	for _, changed := range []string{"producer", "other"} {
+		t.Run(changed, func(t *testing.T) {
+			selected := graph.SelectRouteDependencies([]string{changed}, dependencies)
+			if !slices.Equal(selected.AffectedFlowPaths, []string{"observer"}) ||
+				!slices.Equal(selected.ContextFlowPaths, []string{"observer", "other", "producer"}) {
+				t.Fatalf("selected %#v: complete observer context required without unrelated owners", selected)
+			}
+		})
+	}
+	selected := graph.SelectRouteDependencies([]string{"observer"}, dependencies)
+	if len(selected.AffectedFlowPaths) != 0 || !slices.Equal(selected.ContextFlowPaths, []string{"other", "producer"}) {
+		t.Fatalf("observer activation selected %#v", selected)
 	}
 }
