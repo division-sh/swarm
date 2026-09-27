@@ -25,6 +25,17 @@ func requireChannelDeliveryAuthorityTx(ctx context.Context, tx *sql.Tx, authorit
 	if !current {
 		return invalidExternalAuthority(authority, "stale")
 	}
+	plan, found, err := channeldelivery.LoadPlan(ctx, tx, delivery.DeliveryID, postgres)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return invalidExternalAuthority(authority, "source_missing")
+	}
+	frozen, err := channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
+	if err != nil || frozen.Hash != delivery.RenderHash {
+		return invalidExternalAuthority(authority, "source_changed")
+	}
 	return nil
 }
 
@@ -41,7 +52,7 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		JOIN connected_channel_activations activation ON activation.activation_id=?
 		JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 		WHERE p.delivery_id=? AND r.render_id=? AND p.current_render_id=r.render_id AND r.render_hash=?
-		  AND p.state='rendered' AND p.current_receipt_operation_id IS NULL
+		  AND p.state='rendered'
 		  AND p.principal_id=? AND p.interface_key=? AND p.delivery_epoch=?
 		  AND p.external_account_reference=? AND p.conversation_reference=?
 		  AND selected.state='current' AND selected.principal_id=p.principal_id
@@ -69,10 +80,7 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		         AND json_extract(other.authority_evidence, '$.delivery_id')=p.delivery_id
 		         AND other.operation_id<>?
 		         AND other.state IN ('authorized','launched','response_observed'))
-		  AND (p.source_kind='summary' OR (p.source_kind='notice' AND EXISTS
-		       (SELECT 1 FROM mailbox notice WHERE notice.item_id=p.source_id AND notice.status='pending'))
-		       OR (p.source_kind='card' AND EXISTS
-		       (SELECT 1 FROM decision_cards card WHERE card.card_id=p.source_id AND card.status='pending')))`
+		  AND p.source_kind IN ('summary','notice','card')`
 	args := []any{d.ActivationID, d.DeliveryID, d.RenderID, d.RenderHash, d.PrincipalID,
 		d.InterfaceKey, d.DeliveryEpoch, d.ExternalAccountRef, d.ConversationRef,
 		d.BindingRevision, d.ActivationRevision, d.BundleHash, d.BundleIdentity,
@@ -87,7 +95,7 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			JOIN connected_channel_activations activation ON activation.activation_id=$1::uuid
 			JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 			WHERE p.delivery_id=$2::uuid AND r.render_id=$3::uuid AND p.current_render_id=r.render_id AND r.render_hash=$4
-			  AND p.state='rendered' AND p.current_receipt_operation_id IS NULL
+			  AND p.state='rendered'
 			  AND p.principal_id=$5::uuid AND p.interface_key=$6 AND p.delivery_epoch=$7
 			  AND p.external_account_reference=$8 AND p.conversation_reference=$9
 			  AND selected.state='current' AND selected.principal_id=p.principal_id
@@ -115,10 +123,26 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			         AND other.authority_evidence->>'delivery_id'=p.delivery_id::text
 			         AND other.operation_id<>$19::uuid
 			         AND other.state IN ('authorized','launched','response_observed'))
-			  AND (p.source_kind='summary' OR (p.source_kind='notice' AND EXISTS
-			       (SELECT 1 FROM mailbox notice WHERE notice.item_id=p.source_id AND notice.status='pending'))
-			       OR (p.source_kind='card' AND EXISTS
-			       (SELECT 1 FROM decision_cards card WHERE card.card_id=p.source_id AND card.status='pending')))`
+			  AND p.source_kind IN ('summary','notice','card')`
+	}
+	if d.PreviousReceiptOperationID == "" {
+		query += ` AND p.current_receipt_operation_id IS NULL
+			AND (p.source_kind='summary' OR (p.source_kind='notice' AND EXISTS
+			(SELECT 1 FROM mailbox notice WHERE notice.item_id=p.source_id AND notice.status='pending'))
+			OR (p.source_kind='card' AND EXISTS
+			(SELECT 1 FROM decision_cards card WHERE card.card_id=p.source_id AND card.status='pending')))`
+	} else if postgres {
+		query += ` AND p.current_receipt_operation_id=$20::uuid
+			AND EXISTS (SELECT 1 FROM channel_delivery_receipts previous
+			WHERE previous.effect_operation_id=$20::uuid AND previous.delivery_id=p.delivery_id AND previous.state='sent')`
+		args = append(args, d.PreviousReceiptOperationID)
+	} else {
+		query += ` AND p.current_receipt_operation_id=?
+			AND EXISTS (SELECT 1 FROM channel_delivery_receipts previous
+			WHERE previous.effect_operation_id=? AND previous.delivery_id=p.delivery_id AND previous.state='sent')`
+		args = append(args, d.PreviousReceiptOperationID, d.PreviousReceiptOperationID)
+	}
+	if postgres {
 		if lock {
 			query += ` FOR UPDATE OF p, selected, binding, activation`
 		}
