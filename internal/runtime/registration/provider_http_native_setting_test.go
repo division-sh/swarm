@@ -19,6 +19,8 @@ import (
 
 type nativeSettingHarness struct{ *effecttest.Harness }
 
+const nativeSettingTestID = "11111111-1111-4111-8111-111111111111"
+
 func (h *nativeSettingHarness) IsExternalEffectAuthorityCurrent(_ context.Context, authority runtimeeffects.Authority) (bool, error) {
 	return authority.Kind == runtimeeffects.AuthorityChannelNativeSetting && authority.Valid(), nil
 }
@@ -28,7 +30,7 @@ func nativeSettingTestContext(h *nativeSettingHarness) context.Context {
 	if err != nil {
 		panic(err)
 	}
-	settingID := uuid.NewString()
+	settingID := nativeSettingTestID
 	operationID, err := channelnative.InstallOperationID(settingID, 1)
 	if err != nil {
 		panic(err)
@@ -40,6 +42,7 @@ func nativeSettingTestContext(h *nativeSettingHarness) context.Context {
 		ChannelNativeSetting: runtimeeffects.ChannelNativeSettingAuthority{
 			EffectOperationID: operationID, SettingID: settingID, SettingGeneration: 1,
 			Provider: "telegram", ResourceSlotID: "telegram:bot_webhook:42", ConversationRef: "42",
+			ScopeKind: "chat", EntryCommand: mustNativeSettingTestCommand(),
 			PrincipalID: uuid.NewString(), EntryContractHash: "sha256:contract", PackID: "telegram",
 			PackVersion: "2", PackManifestHash: "sha256:pack", ActivationID: uuid.NewString(),
 			ActivationRevision: 1, BindingRevision: 1, BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64),
@@ -55,7 +58,11 @@ func nativeSettingTestContext(h *nativeSettingHarness) context.Context {
 
 func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 	tool := packfixture.ConnectorTool(t, "telegram", "telegram.install_inbox_commands").Tool
-	input := map[string]any{"chat_id": "42", "commands": []any{map[string]any{"command": "inbox", "description": "Open inbox"}}}
+	desired, err := channelnative.DesiredCommands(nativeSettingTestID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"chat_id": "42", "commands": []any{map[string]any{"command": mustNativeSettingTestCommand(), "description": "Open inbox"}}}
 	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
 	t.Run("exact readback settles", func(t *testing.T) {
 		h := &nativeSettingHarness{Harness: effecttest.New()}
@@ -72,11 +79,7 @@ func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 		if err := h.RequireState("channel_native_setting", runtimeeffects.StateResponseObserved); err != nil {
 			t.Fatal(err)
 		}
-		desired, err := channelnative.DesiredCommands()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := result.Pending.SettleNativeSettingReadback(context.Background(), desired, nil); err != nil {
+		if err := result.Pending.SettleNativeSettingReadback(context.Background(), desired, desired, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := h.RequireState("channel_native_setting", runtimeeffects.StateSettled); err != nil {
@@ -92,7 +95,7 @@ func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 		if err != nil || result.Pending == nil {
 			t.Fatalf("native setting apply = %#v, %v", result, err)
 		}
-		if err := result.Pending.SettleNativeSettingReadback(context.Background(), []byte(`[]`), nil); err != nil {
+		if err := result.Pending.SettleNativeSettingReadback(context.Background(), []byte(`[]`), desired, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := h.RequireState("channel_native_setting", runtimeeffects.StateOutcomeUncertain); err != nil {
@@ -108,11 +111,7 @@ func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 		if err == nil || result.Acknowledged || result.Pending == nil {
 			t.Fatalf("rejected native setting apply = %#v, %v", result, err)
 		}
-		desired, err := channelnative.DesiredCommands()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := result.Pending.SettleNativeSettingReadback(context.Background(), desired, nil); err != nil {
+		if err := result.Pending.SettleNativeSettingReadback(context.Background(), desired, desired, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := h.RequireState("channel_native_setting", runtimeeffects.StateOutcomeUncertain); err != nil {
@@ -129,11 +128,7 @@ func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 		if err == nil || result.Pending == nil || strings.Contains(err.Error(), "bot-secret") {
 			t.Fatalf("lost native setting acknowledgment = %#v, %v", result, err)
 		}
-		desired, err := channelnative.DesiredCommands()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := result.Pending.SettleNativeSettingReadback(ctx, desired, nil); err != nil {
+		if err := result.Pending.SettleNativeSettingReadback(ctx, desired, desired, nil); err != nil {
 			t.Fatal(err)
 		}
 		if err := h.RequireState("channel_native_setting", runtimeeffects.StateOutcomeUncertain); err != nil {
@@ -143,4 +138,12 @@ func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 			t.Fatal("launched native setting was redispatched")
 		}
 	})
+}
+
+func mustNativeSettingTestCommand() string {
+	command, err := channelnative.EntryCommand(nativeSettingTestID, 1)
+	if err != nil {
+		panic(err)
+	}
+	return command
 }
