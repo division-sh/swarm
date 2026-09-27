@@ -12,7 +12,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	t.Helper()
 	root := CopyNotifyAllChildren(t, NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "nodes.yaml"),
-		"            command: payload.command\n", "            command: payload.command\n            task_ids: {literal: [prepare, publish]}\n")
+		"            command: ${payload.command}\n", "            command: ${payload.command}\n            task_ids: {literal: [prepare, publish]}\n")
 	applyClosedReplacement(t, filepath.Join(root, "portfolio", "events.yaml"),
 		"  command: text\nportfolio.notify.completed:", "  command: text\n  task_ids: '[text]'\nportfolio.notify.completed:")
 	// This closed variant uses business system-node recipients, not the example's

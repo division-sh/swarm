@@ -179,9 +179,9 @@ func writePresenceLastFieldFixture(t *testing.T, root string) {
       emit:
         event: work.completed
         fields:
-          business_brief: "'An assessed brief'"
-          attempt_count: "1"
-          note_supplied: has(entity.review_note)
+          business_brief: An assessed brief
+          attempt_count: 1
+          note_supplied: ${has(entity.review_note)}
     work.completed:
       guard: {check: "_entity.current_state == 'consume' && !payload.note_supplied && !has(entity.review_note)"}
       advances_to: done

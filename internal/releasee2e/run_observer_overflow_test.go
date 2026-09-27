@@ -333,7 +333,7 @@ worker-completion:
         emit:
           event: completion.item
           fields:
-            request: completed_request
+            request: ${completed_request}
 
 completion-sink:
   execution_type: system_node
