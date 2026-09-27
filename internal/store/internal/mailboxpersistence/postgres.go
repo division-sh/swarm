@@ -152,22 +152,6 @@ func (s *MailboxPostgresOwner) ExpireMailboxItems(ctx context.Context, limit int
 	return s.expireMailboxItemsSpec(ctx, limit)
 }
 
-func (s *MailboxPostgresOwner) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("postgres store is required")
-	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return nil, err
-	}
-	return s.listUnnotifiedCriticalMailboxItemsSpec(ctx, limit)
-}
-
 func coalesceMailboxEntityID(item runtimetools.MailboxItem) string {
 	return strings.TrimSpace(item.EntityID)
 }
@@ -329,38 +313,6 @@ func (s *MailboxPostgresOwner) expireMailboxItemsSpec(ctx context.Context, limit
 		return nil, err
 	}
 	return items, err
-}
-
-func (s *MailboxPostgresOwner) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	rows, err := s.backend.QueryContext(ctx, `
-		SELECT
-			item_id::text,
-			COALESCE(source_event_id::text, ''),
-			COALESCE(entity_id::text, ''),
-			COALESCE(flow_instance, ''),
-			COALESCE(from_agent, ''),
-			item_type,
-			COALESCE(severity, 'normal'),
-			status,
-			COALESCE(notified, false),
-			COALESCE(payload, '{}'::jsonb),
-			COALESCE(summary, ''),
-			expires_at,
-			COALESCE(decision, ''),
-			COALESCE(decision_notes, ''),
-			COALESCE(reply_context_id, '')
-		FROM mailbox
-		WHERE status = 'pending'
-		  AND severity = 'critical'
-		  AND COALESCE(notified, false) = false
-		ORDER BY created_at ASC
-		LIMIT $1
-	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query unnotified critical mailbox items: %w", err)
-	}
-	defer rows.Close()
-	return scanSpecMailboxItems(rows)
 }
 
 func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
