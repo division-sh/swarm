@@ -18,12 +18,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -870,25 +872,18 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
-	sessionID := uuid.NewString()
 	at := time.Unix(1700003605, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	identity := mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1")
-	fields := testAgentIdentityStorageFields(t, identity)
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, memory_source,
-			status, created_at, updated_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
-			'active', $10, $10)
-	`, sessionID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		at.Add(time.Minute)); err != nil {
-		t.Fatalf("seed post-T source session: %v", err)
+	receiptCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+	identity := agentmemory.Identity(mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"))
+	seedTestAgentRow(t, receiptCtx, db, true, identity, "active")
+	if _, _, err := pg.AcquireLiveSession(receiptCtx, identity, "fork-worker"); err != nil {
+		t.Fatalf("acquire post-T source session: %v", err)
+	}
+	receiptKey := uuid.NewString()
+	receipt, err := pg.Rotate(receiptCtx, identity, "fork-worker", sessions.RotationMetadata{OperationID: receiptKey})
+	if err != nil {
+		t.Fatalf("rotate post-T source session: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -911,11 +906,21 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 		FROM agent_sessions
 		WHERE run_id = $1::uuid
 		   OR session_id = $2::uuid
-	`, materialized.ForkRunID, sessionID).Scan(&copiedSessions); err != nil {
+	`, materialized.ForkRunID, receipt.SessionID).Scan(&copiedSessions); err != nil {
 		t.Fatalf("count copied source session: %v", err)
 	}
 	if copiedSessions != 1 {
 		t.Fatalf("conversation session fork/copy count = %d, want original source row only", copiedSessions)
+	}
+	var sourceReceipts, forkReceipts int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE run_id=$1 AND rotation_operation_id=$2`, sourceRunID, receiptKey).Scan(&sourceReceipts); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE run_id=$1 AND rotation_operation_id=$2`, materialized.ForkRunID, receiptKey).Scan(&forkReceipts); err != nil {
+		t.Fatal(err)
+	}
+	if sourceReceipts != 1 || forkReceipts != 0 {
+		t.Fatalf("source/fork receipt rows=%d/%d, want 1/0", sourceReceipts, forkReceipts)
 	}
 }
 

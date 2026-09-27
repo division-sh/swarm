@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
@@ -70,16 +72,38 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		if err := selected.db.QueryRowContext(ctx, `SELECT termination_reason FROM agent_sessions WHERE session_id=$1`, rotatedID).Scan(&reason); err != nil || reason != "failed" {
 			t.Fatalf("parse-failure reason=%q err=%v", reason, err)
 		}
+		known := sessions.RotationMetadata{OperationID: "committed-lifecycle-key"}
+		committed, err := owner.Rotate(ctx, identity, "managed-worker", known)
+		if err != nil {
+			t.Fatalf("commit known receipt: %v", err)
+		}
+		beforeReplay := snapshotRotationEffects(t, ctx, selected.db, fixture.runID)
+		replayed, err := owner.Rotate(ctx, identity, "managed-worker", known)
+		if err != nil || replayed == nil || *replayed != *committed {
+			t.Fatalf("healthy known receipt replay=%+v first=%+v err=%v", replayed, committed, err)
+		}
+		requireRotationEffectsUnchanged(t, beforeReplay, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
+		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
+		_, err = owner.Rotate(staleCtx, identity, "managed-worker", known)
+		if err == nil {
+			t.Fatal("stale lifecycle token consumed known receipt")
+		}
+		if rows, facts := rotationCounts(t, ctx, selected.db, fixture.runID); rows != beforeRows || facts != beforeFacts {
+			t.Fatalf("stale known receipt mutated rows/facts: before=%d/%d after=%d/%d", beforeRows, beforeFacts, rows, facts)
+		}
+		requireRotationEffectsUnchanged(t, beforeReplay, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
 		if _, err := markRunTerminalStatusForTest(ctx, selected.selected, fixture.runID, "cancelled", nil, time.Now().UTC()); err != nil {
 			t.Fatalf("cancel run through lifecycle owner: %v", err)
 		}
 		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
-		if _, err := owner.Rotate(ctx, identity, "managed-worker", sessions.RotationMetadata{OperationID: "terminal-replay"}); err == nil {
-			t.Fatal("terminal run admitted rotation")
+		beforeTerminalReplay := snapshotRotationEffects(t, ctx, selected.db, fixture.runID)
+		if _, err := owner.Rotate(ctx, identity, "managed-worker", known); err == nil {
+			t.Fatal("terminal run consumed known receipt")
 		}
 		if rows, facts := rotationCounts(t, ctx, selected.db, fixture.runID); rows != beforeRows || facts != beforeFacts {
 			t.Fatalf("terminal run mutated rows/facts: before=%d/%d after=%d/%d", beforeRows, beforeFacts, rows, facts)
 		}
+		requireRotationEffectsUnchanged(t, beforeTerminalReplay, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
 	})
 }
 
@@ -92,6 +116,63 @@ func rotationCounts(t *testing.T, ctx context.Context, db *sql.DB, runID string)
 		t.Fatal(err)
 	}
 	return
+}
+
+type rotationEffectSnapshot struct {
+	Sessions []string
+	Run      []string
+	Story    []string
+	Revision mutationProtocolHistorySnapshot
+}
+
+func snapshotRotationEffects(t *testing.T, ctx context.Context, db *sql.DB, runID string) rotationEffectSnapshot {
+	t.Helper()
+	return rotationEffectSnapshot{
+		Sessions: snapshotRotationTableRows(t, ctx, db, `SELECT * FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`, runID),
+		Run:      snapshotRotationTableRows(t, ctx, db, `SELECT * FROM runs WHERE run_id=$1`, runID),
+		Story:    snapshotRotationTableRows(t, ctx, db, `SELECT * FROM author_activity_occurrences WHERE run_id=$1 ORDER BY sequence`, runID),
+		Revision: snapshotMutationProtocolHistory(t, ctx, db, runID),
+	}
+}
+
+func snapshotRotationTableRows(t *testing.T, ctx context.Context, db *sql.DB, query, runID string) []string {
+	t.Helper()
+	rows, err := db.QueryContext(ctx, query, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result []string
+	for rows.Next() {
+		values := make([]any, len(columns))
+		pointers := make([]any, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result = append(result, string(encoded))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func requireRotationEffectsUnchanged(t *testing.T, before, after rotationEffectSnapshot) {
+	t.Helper()
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("rotation replay/refusal changed durable effects:\nbefore=%+v\nafter=%+v", before, after)
+	}
 }
 
 func TestSelectedRotationReceiptBothStores(t *testing.T) {
@@ -132,11 +213,19 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 			t.Fatal("registry replay key survived in runtime_state as a second authority")
 		}
 		beforeRows, beforeFacts := rotationCounts(t, ctx, selected.db, fixture.runID)
+		beforeReplay := snapshotRotationEffects(t, ctx, selected.db, fixture.runID)
 		var reopened llmSessionAttemptJourneyOwner
 		if selected.postgres {
 			reopened = newPostgresStoreWithBackend(mustPostgresBackend(selected.db))
 		} else {
 			reopened = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
+		}
+		refuseWithoutEffects := func(runID string, target agentmemory.Identity, lockOwner string, metadata sessions.RotationMetadata, want sessions.RotationRefusalReason) {
+			t.Helper()
+			before := snapshotRotationEffects(t, ctx, selected.db, runID)
+			_, err := reopened.Rotate(ctx, target, lockOwner, metadata)
+			requireSelectedRotationRefusal(t, err, want)
+			requireRotationEffectsUnchanged(t, before, snapshotRotationEffects(t, ctx, selected.db, runID))
 		}
 		replayed, err := reopened.Rotate(ctx, identity, "receipt-worker", sessions.RotationMetadata{
 			OperationID: " receipt-a ", CheckpointSummary: " checkpoint ", RetryReason: " session in use ",
@@ -152,40 +241,36 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 			{OperationID: "receipt-a", CheckpointSummary: "checkpoint", RetryReason: "different"},
 			{OperationID: "receipt-a", CheckpointSummary: "checkpoint", RetryReason: "session in use", TerminationReason: sessions.TerminationReasonFailed},
 		} {
-			_, err := reopened.Rotate(ctx, identity, "receipt-worker", changed)
-			requireSelectedRotationRefusal(t, err, sessions.RotationRequestConflict)
+			refuseWithoutEffects(fixture.runID, identity, "receipt-worker", changed, sessions.RotationRequestConflict)
 		}
-		_, err = reopened.Rotate(ctx, identity, "different-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationRequestConflict)
+		refuseWithoutEffects(fixture.runID, identity, "different-worker", request, sessions.RotationRequestConflict)
 		if rows, facts := rotationCounts(t, ctx, selected.db, fixture.runID); rows != beforeRows || facts != beforeFacts {
 			t.Fatalf("replay/conflict mutated rows/facts: before=%d/%d after=%d/%d", beforeRows, beforeFacts, rows, facts)
 		}
+		requireRotationEffectsUnchanged(t, beforeReplay, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
 		other := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "other-agent", ""))
 		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, other, "active")
 		if _, _, err := owner.AcquireLiveSession(ctx, other, "receipt-worker"); err != nil {
 			t.Fatal(err)
 		}
 		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
-		_, err = reopened.Rotate(ctx, other, "receipt-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationRequestConflict)
-		flow := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "flow-agent", "support/instance-1"))
+		refuseWithoutEffects(fixture.runID, other, "receipt-worker", request, sessions.RotationRequestConflict)
+		flow := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", "support/instance-1"))
 		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, flow, "active")
 		if _, _, err := owner.AcquireLiveSession(ctx, flow, "receipt-worker"); err != nil {
 			t.Fatal(err)
 		}
-		_, err = reopened.Rotate(ctx, flow, "receipt-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationRequestConflict)
+		refuseWithoutEffects(fixture.runID, flow, "receipt-worker", request, sessions.RotationRequestConflict)
 		otherRunID := uuid.NewString()
 		requireRunFixtureForTest(t, testAuthorActivityContext(), selected.selected, semanticRunFixture{
 			Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: time.Now().UTC(),
 		})
-		otherRun := agentmemory.Identity(mustTestAgentIdentityForRun(otherRunID, "other-run-agent", ""))
+		otherRun := agentmemory.Identity(mustTestAgentIdentityForRun(otherRunID, "revision-matrix-agent", ""))
 		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, otherRun, "active")
 		if _, _, err := owner.AcquireLiveSession(ctx, otherRun, "receipt-worker"); err != nil {
 			t.Fatal(err)
 		}
-		_, err = reopened.Rotate(ctx, otherRun, "receipt-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationRequestConflict)
+		refuseWithoutEffects(otherRunID, otherRun, "receipt-worker", request, sessions.RotationRequestConflict)
 		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
 		for _, invalid := range []sessions.RotationMetadata{
 			{OperationID: "receipt-a", TerminationReason: "unknown"},
@@ -204,8 +289,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		if released, err := owner.ReleaseOutcome(ctx, first); err != nil || !released.Acknowledged {
 			t.Fatalf("release=%+v err=%v", released, err)
 		}
-		_, err = reopened.Rotate(ctx, identity, "receipt-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		refuseWithoutEffects(fixture.runID, identity, "receipt-worker", request, sessions.RotationSuccessorNotCurrent)
 		if rows, _ := rotationCounts(t, ctx, selected.db, fixture.runID); rows != beforeRows {
 			t.Fatalf("stale replay created row: %d want=%d", rows, beforeRows)
 		}
@@ -213,21 +297,18 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		if err != nil || otherLease == nil {
 			t.Fatalf("other-owner acquire=%+v err=%v", otherLease, err)
 		}
-		_, err = reopened.Rotate(ctx, identity, "receipt-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		refuseWithoutEffects(fixture.runID, identity, "receipt-worker", request, sessions.RotationSuccessorNotCurrent)
 		if released, err := owner.ReleaseOutcome(ctx, otherLease); err != nil || !released.Acknowledged {
 			t.Fatalf("other-owner release=%+v err=%v", released, err)
 		}
 		if _, _, err := owner.AcquireLiveSession(ctx, identity, "receipt-worker"); err != nil {
 			t.Fatal(err)
 		}
-		_, err = reopened.Rotate(ctx, identity, "receipt-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		refuseWithoutEffects(fixture.runID, identity, "receipt-worker", request, sessions.RotationSuccessorNotCurrent)
 		if _, err := owner.Rotate(ctx, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-b"}); err != nil {
 			t.Fatal(err)
 		}
-		_, err = reopened.Rotate(ctx, identity, "receipt-worker", request)
-		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		refuseWithoutEffects(fixture.runID, identity, "receipt-worker", request, sessions.RotationSuccessorNotCurrent)
 		third, err := owner.Rotate(ctx, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-c"})
 		if err != nil {
 			t.Fatal(err)
@@ -238,8 +319,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		if err := adopter.AdoptSessionID(ctx, identity, "receipt-worker", "provider-child-c"); err != nil {
 			t.Fatal(err)
 		}
-		_, err = reopened.Rotate(ctx, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-c"})
-		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		refuseWithoutEffects(fixture.runID, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-c"}, sessions.RotationSuccessorNotCurrent)
 		if third.SessionID == "" {
 			t.Fatal("missing third successor")
 		}
@@ -250,8 +330,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		if _, _, err := owner.AcquireLiveSession(ctx, identity, "receipt-worker"); err != nil {
 			t.Fatal(err)
 		}
-		_, err = reopened.Rotate(ctx, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-d"})
-		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		refuseWithoutEffects(fixture.runID, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-d"}, sessions.RotationSuccessorNotCurrent)
 		fifth, err := owner.Rotate(ctx, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-e"})
 		if err != nil || fifth == nil {
 			t.Fatalf("fifth rotation=%+v err=%v", fifth, err)
@@ -260,8 +339,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 			t.Fatal(err)
 		}
 		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
-		_, err = reopened.Rotate(ctx, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-e"})
-		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		refuseWithoutEffects(fixture.runID, identity, "receipt-worker", sessions.RotationMetadata{OperationID: "receipt-e"}, sessions.RotationSuccessorNotCurrent)
 		if rows, facts := rotationCounts(t, ctx, selected.db, fixture.runID); rows != beforeRows || facts != beforeFacts {
 			t.Fatalf("expired replay mutated rows/facts: before=%d/%d after=%d/%d", beforeRows, beforeFacts, rows, facts)
 		}
@@ -334,6 +412,225 @@ func TestSelectedRotationSameKeyConcurrentBothStores(t *testing.T) {
 					t.Fatalf("concurrent same-key rows=%d want=2", rows)
 				}
 			})
+		}
+	})
+}
+
+func TestSelectedRotationReceiptPrecisionBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		fixture := newExactFactFixture(t, selected)
+		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
+		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(time.Minute + 123*time.Nanosecond)
+		owner := selected.selected.(llmSessionAttemptJourneyOwner)
+		if _, _, err := owner.AcquireLiveSession(ctx, identity, "precision-worker"); err != nil {
+			t.Fatal(err)
+		}
+		request := sessions.RotationMetadata{OperationID: "precision-key"}
+		first, err := owner.Rotate(ctx, identity, "precision-worker", request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var reopened llmSessionAttemptJourneyOwner
+		if selected.postgres {
+			reopened = newPostgresStoreWithBackend(mustPostgresBackend(selected.db))
+		} else {
+			reopened = newBootstrappedSQLiteRuntimeStoreForPath(t, selected.selected.(*SQLiteRuntimeStore).Path())
+		}
+		replayed, err := reopened.Rotate(ctx, identity, "precision-worker", request)
+		if err != nil || replayed == nil || *replayed != *first {
+			t.Fatalf("non-microsecond TTL replay=%+v first=%+v err=%v", replayed, first, err)
+		}
+	})
+}
+
+func TestSelectedRotationElapsedExpiryBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		fixture := newExactFactFixture(t, selected)
+		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
+		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(150 * time.Millisecond)
+		owner := selected.selected.(llmSessionAttemptJourneyOwner)
+		if _, _, err := owner.AcquireLiveSession(ctx, identity, "expiry-worker"); err != nil {
+			t.Fatal(err)
+		}
+		request := sessions.RotationMetadata{OperationID: "elapsed-expiry-key"}
+		first, err := owner.Rotate(ctx, identity, "expiry-worker", request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rawExpiry any
+		if err := selected.db.QueryRowContext(ctx, `SELECT lease_expires_at FROM agent_sessions WHERE session_id=$1`, first.SessionID).Scan(&rawExpiry); err != nil {
+			t.Fatal(err)
+		}
+		storedExpiry, valid, err := sqliteTimeValue(rawExpiry)
+		if err != nil || !valid {
+			t.Fatalf("parse stored lease expiry: value=%v err=%v", rawExpiry, err)
+		}
+		if !storedExpiry.Equal(first.ExpiresAt) {
+			t.Fatalf("receipt/current expiry differs before time advances: stored=%s first=%s", storedExpiry, first.ExpiresAt)
+		}
+		time.Sleep(max(0, time.Until(first.ExpiresAt)) + 10*time.Millisecond)
+		beforeRows, beforeFacts := rotationCounts(t, ctx, selected.db, fixture.runID)
+		beforeReplay := snapshotRotationEffects(t, ctx, selected.db, fixture.runID)
+		_, err = owner.Rotate(ctx, identity, "expiry-worker", request)
+		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		if rows, facts := rotationCounts(t, ctx, selected.db, fixture.runID); rows != beforeRows || facts != beforeFacts {
+			t.Fatalf("elapsed expiry replay mutated rows/facts: before=%d/%d after=%d/%d", beforeRows, beforeFacts, rows, facts)
+		}
+		requireRotationEffectsUnchanged(t, beforeReplay, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
+	})
+}
+
+func TestSelectedUnkeyedRotationUsesCanonicalNormalBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		fixture := newExactFactFixture(t, selected)
+		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
+		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		owner := selected.selected.(llmSessionAttemptJourneyOwner)
+		initial, _, err := owner.AcquireLiveSession(ctx, identity, "unkeyed-worker")
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, err := owner.Rotate(ctx, identity, "unkeyed-worker", sessions.RotationMetadata{RetryReason: "session not found"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := owner.Rotate(ctx, identity, "unkeyed-worker", sessions.RotationMetadata{OperationID: " ", RetryReason: "session not found"})
+		if err != nil || second.SessionID == first.SessionID {
+			t.Fatalf("second unkeyed rotation=%+v first=%+v err=%v", second, first, err)
+		}
+		for _, predecessor := range []string{initial.SessionID, first.SessionID} {
+			var reason, detail string
+			if err := selected.db.QueryRowContext(ctx, `SELECT termination_reason, termination_detail FROM agent_sessions WHERE session_id=$1`, predecessor).Scan(&reason, &detail); err != nil {
+				t.Fatal(err)
+			}
+			if reason != sessions.TerminationReasonNormal.String() || detail != "session not found" {
+				t.Fatalf("unkeyed predecessor %s reason=%q detail=%q", predecessor, reason, detail)
+			}
+		}
+		var receipts int
+		if err := selected.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE run_id=$1 AND rotation_operation_id IS NOT NULL`, fixture.runID).Scan(&receipts); err != nil {
+			t.Fatal(err)
+		}
+		if rows, _ := rotationCounts(t, ctx, selected.db, fixture.runID); rows != 3 || receipts != 0 {
+			t.Fatalf("unkeyed rotation rows=%d receipts=%d", rows, receipts)
+		}
+	})
+}
+
+func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		fixture := newExactFactFixture(t, selected)
+		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
+		owner := selected.selected.(llmSessionAttemptJourneyOwner)
+		reset := selected.selected.(interface {
+			ResetAll(sessions.ResetMetadata) (sessions.ResetSummary, error)
+		})
+		if _, _, err := owner.AcquireLiveSession(ctx, identity, "reset-worker"); err != nil {
+			t.Fatal(err)
+		}
+		request := sessions.RotationMetadata{OperationID: "retained-before-reset"}
+		first, err := owner.Rotate(ctx, identity, "reset-worker", request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reset.ResetAll(sessions.ResetMetadata{Source: "rotation-receipt-test"}); err != nil {
+			t.Fatal(err)
+		}
+		var status, retainedKey string
+		if err := selected.db.QueryRowContext(ctx, `SELECT status, rotation_operation_id FROM agent_sessions WHERE session_id=$1`, first.SessionID).Scan(&status, &retainedKey); err != nil || status != "terminated" || retainedKey != request.OperationID {
+			t.Fatalf("reset receipt status=%q key=%q err=%v", status, retainedKey, err)
+		}
+		if _, _, err := owner.AcquireLiveSession(ctx, identity, "reset-worker"); err != nil {
+			t.Fatal(err)
+		}
+		before := snapshotRotationEffects(t, ctx, selected.db, fixture.runID)
+		_, err = owner.Rotate(ctx, identity, "reset-worker", request)
+		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		_, err = owner.Rotate(ctx, identity, "reset-worker", sessions.RotationMetadata{OperationID: request.OperationID, CheckpointSummary: "changed"})
+		requireSelectedRotationRefusal(t, err, sessions.RotationRequestConflict)
+		requireRotationEffectsUnchanged(t, before, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
+
+		other := newExactFactFixture(t, selected)
+		otherIdentity := agentmemory.Identity(mustTestAgentIdentityForRun(other.runID, "revision-matrix-agent", ""))
+		if _, _, err := owner.AcquireLiveSession(ctx, otherIdentity, "reset-worker"); err != nil {
+			t.Fatal(err)
+		}
+		otherReceipt, err := owner.Rotate(ctx, otherIdentity, "reset-worker", sessions.RotationMetadata{OperationID: "unrelated-retained-key"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := reset.ResetAll(sessions.ResetMetadata{Source: "prepare-discard"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := transitionRunForTest(ctx, selected.selected, runlifecycle.ActiveTransitionRequest{RunID: fixture.runID, State: runlifecycle.StatePaused}); err != nil {
+			t.Fatal(err)
+		}
+		discard := selected.selected.(interface {
+			DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error
+		})
+		if err := discard.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.runID); err != nil {
+			t.Fatal(err)
+		}
+		var deleted, untouched int
+		if err := selected.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE rotation_operation_id=$1`, request.OperationID).Scan(&deleted); err != nil {
+			t.Fatal(err)
+		}
+		if err := selected.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE session_id=$1 AND rotation_operation_id=$2`, otherReceipt.SessionID, "unrelated-retained-key").Scan(&untouched); err != nil {
+			t.Fatal(err)
+		}
+		if deleted != 0 || untouched != 1 {
+			t.Fatalf("discard receipt ownership: deleted-key rows=%d unrelated rows=%d", deleted, untouched)
+		}
+	})
+}
+
+func TestPostgresRotationReciprocalKeysConflictWithoutDeadlock(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		if !selected.postgres {
+			t.Skip("PostgreSQL row-lock ordering")
+		}
+		ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), 20*time.Second)
+		defer cancel()
+		owner := selected.selected.(llmSessionAttemptJourneyOwner)
+		var identities [2]agentmemory.Identity
+		for i := range identities {
+			fixture := newExactFactFixture(t, selected)
+			identities[i] = agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
+			if _, _, err := owner.AcquireLiveSession(ctx, identities[i], "reciprocal-worker"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := owner.Rotate(ctx, identities[i], "reciprocal-worker", sessions.RotationMetadata{OperationID: identities[i].RunID}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var before [2][2]int
+		for i := range identities {
+			before[i][0], before[i][1] = rotationCounts(t, ctx, selected.db, identities[i].RunID)
+		}
+		for attempt := 0; attempt < 20; attempt++ {
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			var errs [2]error
+			for i := range identities {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					<-start
+					_, errs[i] = owner.Rotate(ctx, identities[i], "reciprocal-worker", sessions.RotationMetadata{OperationID: identities[1-i].RunID})
+				}(i)
+			}
+			close(start)
+			wg.Wait()
+			for i, err := range errs {
+				requireSelectedRotationRefusal(t, err, sessions.RotationRequestConflict)
+				rows, facts := rotationCounts(t, ctx, selected.db, identities[i].RunID)
+				if rows != before[i][0] || facts != before[i][1] {
+					t.Fatalf("reciprocal conflict changed run %d on attempt %d: before=%v after=%d/%d", i, attempt, before[i], rows, facts)
+				}
+			}
 		}
 	})
 }

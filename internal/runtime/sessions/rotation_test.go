@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
 func requireRotationRefusal(t *testing.T, err error, want RotationRefusalReason) {
@@ -82,8 +84,34 @@ func TestInMemoryRotationReceipts(t *testing.T) {
 	}
 	_, err = registry.Rotate(ctx, other, "owner", metadata)
 	requireRotationRefusal(t, err, RotationRequestConflict)
+	for _, sibling := range []struct {
+		name     string
+		identity agentmemory.Identity
+	}{
+		{"other-run", testIdentity(t, "agent-a", "run-b", "chat-a")},
+		{"other-flow", testIdentity(t, "agent-a", "run-a", "chat-b")},
+	} {
+		t.Run(sibling.name, func(t *testing.T) {
+			if _, err := registry.Acquire(ctx, sibling.identity, "owner"); err != nil {
+				t.Fatal(err)
+			}
+			_, err := registry.Rotate(ctx, sibling.identity, "owner", metadata)
+			requireRotationRefusal(t, err, RotationRequestConflict)
+		})
+	}
 	_, err = registry.Rotate(ctx, identity, "different-owner", metadata)
 	requireRotationRefusal(t, err, RotationRequestConflict)
+	for _, invalid := range []RotationMetadata{
+		{OperationID: metadata.OperationID, TerminationReason: "unknown"},
+		{OperationID: metadata.OperationID, TerminationReason: TerminationReasonLegacy},
+	} {
+		if _, err := registry.Rotate(ctx, identity, "owner", invalid); err == nil {
+			t.Fatalf("accepted invalid reason %q against committed key", invalid.TerminationReason)
+		}
+	}
+	if _, err := registry.Rotate(ctx, identity, " ", metadata); err == nil {
+		t.Fatal("accepted blank owner against committed key")
+	}
 	if len(registry.History(identity)) != 1 {
 		t.Fatal("conflict mutated history")
 	}
@@ -170,5 +198,113 @@ func TestInMemoryRotationReceiptSurvivesReset(t *testing.T) {
 	requireRotationRefusal(t, err, RotationRequestConflict)
 	if got := len(registry.History(identity)); got != historyLen {
 		t.Fatalf("reset replay changed history: got=%d want=%d", got, historyLen)
+	}
+}
+
+func TestInMemoryRotationElapsedExpiry(t *testing.T) {
+	ctx := context.Background()
+	registry := NewInMemoryRegistry(25 * time.Millisecond)
+	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
+	if _, err := registry.Acquire(ctx, identity, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	metadata := RotationMetadata{OperationID: "elapsed-expiry"}
+	lease, err := registry.Rotate(ctx, identity, "owner", metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(max(0, time.Until(lease.ExpiresAt)) + 5*time.Millisecond)
+	_, err = registry.Rotate(ctx, identity, "owner", metadata)
+	requireRotationRefusal(t, err, RotationSuccessorNotCurrent)
+	if got := len(registry.History(identity)); got != 1 {
+		t.Fatalf("expired replay changed history: %d", got)
+	}
+}
+
+func TestInMemoryRotationProviderHeadChangeWithoutRenewal(t *testing.T) {
+	ctx := context.Background()
+	registry := NewInMemoryRegistry(time.Minute)
+	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
+	if _, err := registry.Acquire(ctx, identity, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	metadata := RotationMetadata{OperationID: "provider-head"}
+	lease, err := registry.Rotate(ctx, identity, "owner", metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.mu.Lock()
+	registry.byKey[registryKey(identity)].ProviderSessionID = "provider-child"
+	registry.mu.Unlock()
+	current, ok := registry.Snapshot(identity)
+	if !ok || !current.LockExpiresAt.Equal(lease.ExpiresAt) {
+		t.Fatal("provider-only test change also renewed the lease")
+	}
+	_, err = registry.Rotate(ctx, identity, "owner", metadata)
+	requireRotationRefusal(t, err, RotationSuccessorNotCurrent)
+	if got := len(registry.History(identity)); got != 1 {
+		t.Fatalf("provider-head replay changed history: %d", got)
+	}
+}
+
+func TestInMemoryRotationChangedKeyConcurrent(t *testing.T) {
+	ctx := context.Background()
+	registry := NewInMemoryRegistry(time.Minute)
+	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
+	if _, err := registry.Acquire(ctx, identity, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	var errs [2]error
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			_, errs[i] = registry.Rotate(ctx, identity, "owner", RotationMetadata{OperationID: "changed-key", CheckpointSummary: []string{"one", "two"}[i]})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	successes, conflicts := 0, 0
+	for _, err := range errs {
+		if err == nil {
+			successes++
+		} else {
+			var refusal *RotationRefusal
+			if errors.As(err, &refusal) && refusal.Reason == RotationRequestConflict {
+				conflicts++
+			}
+		}
+	}
+	if successes != 1 || conflicts != 1 || len(registry.History(identity)) != 1 {
+		t.Fatalf("changed-request concurrency: errs=%v history=%d", errs, len(registry.History(identity)))
+	}
+}
+
+func TestInMemoryUnkeyedRotationUsesCanonicalNormal(t *testing.T) {
+	ctx := context.Background()
+	registry := NewInMemoryRegistry(time.Minute)
+	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
+	if _, err := registry.Acquire(ctx, identity, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"", " "} {
+		if _, err := registry.Rotate(ctx, identity, "owner", RotationMetadata{OperationID: key, RetryReason: "session not found"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(registry.rotationReceipts); got != 0 {
+		t.Fatalf("unkeyed rotations minted %d receipts", got)
+	}
+	history := registry.History(identity)
+	if len(history) != 2 {
+		t.Fatalf("unkeyed rotations made %d predecessors", len(history))
+	}
+	for _, predecessor := range history {
+		if predecessor.TerminationReason != TerminationReasonNormal.String() || predecessor.TerminationDetail != "session not found" {
+			t.Fatalf("unkeyed termination=%+v", predecessor)
+		}
 	}
 }
