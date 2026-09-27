@@ -15234,6 +15234,9 @@ platform_tables:
         events. This row is an intent, not verdict or principal authority: processing must recheck the
         current binding, exact provider receipt, render, card and selected-source authority before
         replay or mutation. A committed pending row survives callback acknowledgement loss and restart.
+        Applied verdict and input-start dispositions settle atomically with the canonical human mutation;
+        stale, rejected and unsupported dispositions settle the same exact verified fact without mutation.
+        A negative disposition grants neither private response content nor later action authority.
       ddl: |
         CREATE TABLE operator_channel_action_intents (
             publication_id UUID PRIMARY KEY,
