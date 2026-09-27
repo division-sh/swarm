@@ -20,9 +20,9 @@ func TestExpressionValueR2Authoring(t *testing.T) {
 		{"empty string", `""`, ExpressionKindLiteral, "", ""},
 		{"number", "42", ExpressionKindLiteral, 42, ""},
 		{"typed expression", `"${payload.count}"`, ExpressionKindCEL, nil, "payload.count"},
-		{"mixed string", `"count=${payload.count}!"`, ExpressionKindCEL, nil, `"count=" + __swarm_r2_format((payload.count)) + "!"`},
+		{"mixed string", `"count=${payload.count}!"`, ExpressionKindCEL, nil, "\"count=\" + __swarm_r2_format((payload.count\n)) + \"!\""},
 		{"escaped", `{literal: "${payload.count}"}`, ExpressionKindLiteral, "${payload.count}", ""},
-		{"object", `{a: "${payload.count}", b: [true, "x"]}`, ExpressionKindCEL, nil, `{"a": (payload.count), "b": [true, "x"]}`},
+		{"object", `{a: "${payload.count}", b: [true, "x"]}`, ExpressionKindCEL, nil, "{\"a\": (payload.count\n), \"b\": [true, \"x\"]}"},
 		{"escaped nested", `{a: {literal: "${payload.count}"}}`, ExpressionKindLiteral, map[string]any{"a": "${payload.count}"}, ""},
 	}
 	for _, test := range tests {
@@ -156,7 +156,7 @@ func TestExpressionValueR2SharedAuthoringSurfaces(t *testing.T) {
 		{"empty list", "[]", "", []any{}, ExpressionKindLiteral},
 		{"empty object", "{}", "", map[string]any{}, ExpressionKindLiteral},
 		{"typed", `"${payload.count}"`, "payload.count", nil, ExpressionKindCEL},
-		{"mixed", `"count=${payload.count}"`, `"count=" + __swarm_r2_format((payload.count))`, nil, ExpressionKindCEL},
+		{"mixed", `"count=${payload.count}"`, "\"count=\" + __swarm_r2_format((payload.count\n))", nil, ExpressionKindCEL},
 		{"escaped", `{literal: "${payload.count}"}`, "", "${payload.count}", ExpressionKindLiteral},
 	}
 	for _, surface := range surfaces {

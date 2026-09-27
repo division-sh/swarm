@@ -2,6 +2,7 @@ package workflowexpr
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -93,6 +94,139 @@ func TestR2RecursiveRecordResultUsesDeclaredType(t *testing.T) {
 	objectMap := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeMap, Key: &key, Value: &record}
 	if _, err := EvalValueExpressionWithOptions(`{"first": {"name": "Ada", "count": 1}}`, ValueContext{}, ValueExpressionOptions{ResultType: &objectMap}); err != nil {
 		t.Fatalf("nested record map rejected: %v", err)
+	}
+}
+
+func TestR2ConstructorDestinationCrossProduct(t *testing.T) {
+	integer := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}
+	textType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}
+	child := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "n", Type: integer},
+	}}
+	pair := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "left", Type: integer}, {Name: "right", Type: integer},
+	}}
+	envelope := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "child", Type: child}, {Name: "label", Type: textType},
+	}}
+	optional := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "label", Type: textType}, {Name: "n", Type: integer, IsOptional: true},
+	}}
+	optionalChild := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "label", Type: textType}, {Name: "child", Type: child, IsOptional: true},
+	}}
+	childList := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &child}
+	childMap := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeMap, Key: &textType, Value: &child}
+	integerList := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &integer}
+	integerMap := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeMap, Key: &textType, Value: &integer}
+	payload := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "item_id", Type: child}, {Name: "wrong", Type: optional}, {Name: "maybe_child", Type: child, IsOptional: true},
+	}}
+	for _, tc := range []struct {
+		name, expression string
+		target           *runtimecontracts.ResolvedCatalogType
+		valid            bool
+	}{
+		{"one field", `{"n": 1}`, &child, true},
+		{"same-typed pair", `{"left": 1, "right": 2}`, &pair, true},
+		{"nested literal", `{"child": {"n": 1}, "label": "ok"}`, &envelope, true},
+		{"one-field typed wrapper", `{"child": payload.item_id}`, &runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "child", Type: child}}}, true},
+		{"nested typed", `{"child": payload.item_id, "label": "ok"}`, &envelope, true},
+		{"typed record", `payload.item_id`, &child, true},
+		{"wrong typed record", `payload.wrong`, &child, false},
+		{"nested wrong typed record", `{"child": payload.wrong, "label": "ok"}`, &envelope, false},
+		{"record list", `[{"n": 1}]`, &childList, true},
+		{"typed record list", `[payload.item_id]`, &childList, true},
+		{"record map", `{"first": {"n": 1}}`, &childMap, true},
+		{"optional present", `{"label": "ok", ?"n": optional.of(1)}`, &optional, true},
+		{"optional absent", `{"label": "ok", ?"n": optional.none()}`, &optional, true},
+		{"optional wrong type", `{"label": "ok", ?"n": optional.of("1")}`, &optional, false},
+		{"optional required field", `{"left": 1, ?"right": optional.of(2)}`, &pair, false},
+		{"optional nested constructor", `{"label": "ok", ?"child": optional.of({"n": 1})}`, &optionalChild, true},
+		{"optional nested absent", `{"label": "ok", ?"child": optional.none()}`, &optionalChild, true},
+		{"optional typed selection", `{"label": "ok", ?"child": payload.?maybe_child}`, &optionalChild, true},
+		{"optional nested wrong type", `{"label": "ok", ?"child": optional.of({"n": "1"})}`, &optionalChild, false},
+		{"optional list entries", `[?optional.of(1), ?optional.none()]`, &integerList, true},
+		{"optional record list entries", `[?optional.of({"n": 1}), ?optional.none()]`, &childList, true},
+		{"optional list wrong type", `[?optional.of("1")]`, &integerList, false},
+		{"optional map entries", `{"first": 1, ?"second": optional.of(2), ?"absent": optional.none()}`, &integerMap, true},
+		{"optional record map entries", `{"first": {"n": 1}, ?"second": optional.of({"n": 2})}`, &childMap, true},
+		{"optional map wrong type", `{"first": 1, ?"second": optional.of("2")}`, &integerMap, false},
+		{"missing required", `{"label": "ok"}`, &envelope, false},
+		{"extra field", `{"child": {"n": 1}, "label": "ok", "extra": 1}`, &envelope, false},
+		{"wrong nested type", `{"child": {"n": 1.5}, "label": "ok"}`, &envelope, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateValueExpressionWithOptions(tc.expression, ValueExpressionOptions{PayloadType: &payload, ResultType: tc.target})
+			if (err == nil) != tc.valid {
+				t.Fatalf("ValidateValueExpressionWithOptions(%s) = %v, valid=%t", tc.expression, err, tc.valid)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		expression string
+		want       map[string]any
+	}{
+		{`{"label": "ok", ?"n": optional.of(1)}`, map[string]any{"label": "ok", "n": int64(1)}},
+		{`{"label": "ok", ?"n": optional.none()}`, map[string]any{"label": "ok"}},
+	} {
+		got, err := EvalValueExpressionWithOptions(tc.expression, ValueContext{}, ValueExpressionOptions{ResultType: &optional})
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("optional record %s = %#v, %v; want %#v", tc.expression, got, err, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		name, expression string
+		target           *runtimecontracts.ResolvedCatalogType
+		payload          map[string]any
+		want             any
+	}{
+		{"typed nested leaf", `{"child": payload.item_id, "label": "ok"}`, &envelope, map[string]any{"item_id": map[string]any{"n": int64(1)}}, map[string]any{"child": map[string]any{"n": int64(1)}, "label": "ok"}},
+		{"optional typed present", `{"label": "ok", ?"child": payload.?maybe_child}`, &optionalChild, map[string]any{"item_id": map[string]any{"n": int64(1)}, "maybe_child": map[string]any{"n": int64(2)}}, map[string]any{"label": "ok", "child": map[string]any{"n": int64(2)}}},
+		{"optional typed absent", `{"label": "ok", ?"child": payload.?maybe_child}`, &optionalChild, map[string]any{"item_id": map[string]any{"n": int64(1)}}, map[string]any{"label": "ok"}},
+		{"optional list entries", `[?optional.of(1), ?optional.none()]`, &integerList, nil, []any{int64(1)}},
+		{"optional map entries", `{"first": 1, ?"second": optional.of(2), ?"absent": optional.none()}`, &integerMap, nil, map[string]any{"first": int64(1), "second": int64(2)}},
+		{"optional record list entries", `[?optional.of({"n": 1}), ?optional.none()]`, &childList, nil, []any{map[string]any{"n": int64(1)}}},
+		{"optional record map entries", `{"first": {"n": 1}, ?"second": optional.of({"n": 2})}`, &childMap, nil, map[string]any{"first": map[string]any{"n": int64(1)}, "second": map[string]any{"n": int64(2)}}},
+	} {
+		t.Run(tc.name+" runtime", func(t *testing.T) {
+			got, err := EvalValueExpressionWithOptions(tc.expression, ValueContext{Payload: tc.payload}, ValueExpressionOptions{PayloadType: &payload, ResultType: tc.target})
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("%s = %#v, %v; want %#v", tc.expression, got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestR2GeneratedCELPreservesTrailingCommentBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, source string
+		want         any
+	}{
+		{"mixed", "v=${1 // comment\n}", "v=1"},
+		{"multiple fragments", "v=${1 // comment\n}:${2}", "v=1:2"},
+		{"unicode around comment", "caf\u00e9=${1 // comment\n}\u2713", "caf\u00e9=1\u2713"},
+		{"leading and trailing whitespace", " ${ 1 // comment\n } ", " 1 "},
+		{"nested container", "n: |-\n  ${1 // comment\n  }\n", map[string]any{"n": int64(1)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := strconv.Quote(tc.source)
+			if tc.name == "nested container" {
+				source = tc.source
+			}
+			var expression runtimecontracts.ExpressionValue
+			if err := yaml.Unmarshal([]byte(source), &expression); err != nil {
+				t.Fatal(err)
+			}
+			got, err := EvalValueExpression(expression.CEL, ValueContext{})
+			if err != nil || !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("%s lowered to %q and evaluated to %#v, %v; want %#v", source, expression.CEL, got, err, tc.want)
+			}
+		})
+	}
+	var malformed runtimecontracts.ExpressionValue
+	if err := yaml.Unmarshal([]byte("|-\n  v=${1 // comment}\n"), &malformed); err == nil {
+		t.Fatal("unterminated line-comment interpolation was admitted")
 	}
 }
 
