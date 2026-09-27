@@ -122,6 +122,7 @@ type Store interface {
 	FreezeAndPersistChannelRender(context.Context, string) (PreparedRender, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
+	SettleUnappliedChannelAction(context.Context, operatorchannel.InboundAction, ActionDisposition) error
 	ListPendingChannelTexts(context.Context, string, int) ([]PendingText, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (ResolvedText, bool, error)
 	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (ResolvedNativeEntry, bool, error)
