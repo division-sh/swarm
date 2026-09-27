@@ -9,9 +9,10 @@ import (
 )
 
 type FrozenOutcome struct {
-	Verdict string
-	Label   string
-	Input   map[string]runtimecontracts.WorkflowGateInputField
+	Verdict    string
+	Label      string
+	Input      map[string]runtimecontracts.WorkflowGateInputField
+	InputOrder []string
 }
 
 func FreezeSnapshot(decision, title string, context map[string]any, outcomes map[string]runtimecontracts.WorkflowGateOutcomePlan) (Snapshot, error) {
@@ -27,7 +28,13 @@ func FreezeSnapshot(decision, title string, context map[string]any, outcomes map
 	}
 	frozen := make(map[string]FrozenOutcome, len(outcomes))
 	for verdict, outcome := range outcomes {
-		frozen[verdict] = FrozenOutcome{Verdict: outcome.Verdict, Label: outcome.Label, Input: cloneGateInputs(outcome.Input)}
+		if err := validateInputOrder(outcome.Input, outcome.InputOrder); err != nil {
+			return Snapshot{}, fmt.Errorf("decision card outcome %s: %w", verdict, err)
+		}
+		frozen[verdict] = FrozenOutcome{
+			Verdict: outcome.Verdict, Label: outcome.Label, Input: cloneGateInputs(outcome.Input),
+			InputOrder: append([]string(nil), outcome.InputOrder...),
+		}
 	}
 	return Snapshot{Decision: decision, Title: title, Context: contextValue, Outcomes: frozen}, nil
 }
@@ -38,6 +45,23 @@ func cloneGateInputs(input map[string]runtimecontracts.WorkflowGateInputField) m
 		out[name] = field
 	}
 	return out
+}
+
+func validateInputOrder(input map[string]runtimecontracts.WorkflowGateInputField, order []string) error {
+	if len(order) != len(input) {
+		return fmt.Errorf("input_order must name each declared input field exactly once")
+	}
+	seen := make(map[string]struct{}, len(order))
+	for _, name := range order {
+		if _, exists := input[name]; !exists {
+			return fmt.Errorf("input_order names undeclared field %q", name)
+		}
+		if _, duplicate := seen[name]; duplicate {
+			return fmt.Errorf("input_order repeats field %q", name)
+		}
+		seen[name] = struct{}{}
+	}
+	return nil
 }
 
 func (s Snapshot) SemanticValue() (semanticvalue.Value, error) {
@@ -60,6 +84,9 @@ func (s Snapshot) SemanticValue() (semanticvalue.Value, error) {
 }
 
 func (o FrozenOutcome) semanticValue() (semanticvalue.Value, error) {
+	if err := validateInputOrder(o.Input, o.InputOrder); err != nil {
+		return semanticvalue.Value{}, err
+	}
 	inputs := make(map[string]semanticvalue.Value, len(o.Input))
 	for name, input := range o.Input {
 		encoded, err := semanticObjectWithText(
@@ -75,9 +102,17 @@ func (o FrozenOutcome) semanticValue() (semanticvalue.Value, error) {
 	if err != nil {
 		return semanticvalue.Value{}, err
 	}
+	order := make([]semanticvalue.Value, 0, len(o.InputOrder))
+	for _, name := range o.InputOrder {
+		value, err := semanticvalue.String(name)
+		if err != nil {
+			return semanticvalue.Value{}, err
+		}
+		order = append(order, value)
+	}
 	return semanticObjectWithText(
 		map[string]string{"Verdict": o.Verdict, "Label": o.Label},
-		map[string]semanticvalue.Value{"Input": inputValue},
+		map[string]semanticvalue.Value{"Input": inputValue, "InputOrder": semanticvalue.Array(order)},
 	)
 }
 
@@ -148,7 +183,7 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 	if !ok {
 		return FrozenOutcome{}, fmt.Errorf("outcome must be an object")
 	}
-	if err := requireExactSemanticFields(root, "outcome", "Verdict", "Label", "Input"); err != nil {
+	if err := requireExactSemanticFields(root, "outcome", "Verdict", "Label", "Input", "InputOrder"); err != nil {
 		return FrozenOutcome{}, err
 	}
 	verdict, err := requiredSemanticString(root, "Verdict")
@@ -190,7 +225,23 @@ func frozenOutcomeFromSemanticValue(value semanticvalue.Value) (FrozenOutcome, e
 		}
 		inputs[name] = runtimecontracts.WorkflowGateInputField{Type: kind, Required: required, Label: label}
 	}
-	return FrozenOutcome{Verdict: verdict, Label: label, Input: inputs}, nil
+	orderValue := root["InputOrder"]
+	if orderValue.Kind() != semanticvalue.KindArray {
+		return FrozenOutcome{}, fmt.Errorf("outcome input order must be an array")
+	}
+	order := make([]string, 0, orderValue.Len())
+	for i := 0; i < orderValue.Len(); i++ {
+		item, _ := orderValue.At(i)
+		name, ok := item.String()
+		if !ok {
+			return FrozenOutcome{}, fmt.Errorf("outcome input order item %d must be a string", i)
+		}
+		order = append(order, name)
+	}
+	if err := validateInputOrder(inputs, order); err != nil {
+		return FrozenOutcome{}, err
+	}
+	return FrozenOutcome{Verdict: verdict, Label: label, Input: inputs, InputOrder: order}, nil
 }
 
 func requireExactSemanticFields(values map[string]semanticvalue.Value, label string, expected ...string) error {
