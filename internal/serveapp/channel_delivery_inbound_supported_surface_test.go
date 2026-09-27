@@ -58,6 +58,14 @@ func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryVerdictAcknowledgmentLossE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "verdict_ack_loss")
+		})
+	}
+}
+
 type telegramNoticeLLMRuntime struct{ telegramPhraseBotLLMRuntime }
 
 func (r telegramNoticeLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
@@ -153,7 +161,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			"chat": map[string]any{"id": 1001, "type": "private"}, "text": inputText,
 		},
 	}
-	if scenario == "verdict" {
+	if scenario == "verdict" || scenario == "verdict_ack_loss" {
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(1) == nil {
 			if time.Now().After(deadline) {
@@ -186,6 +194,9 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				"data":    control["callback_data"],
 			},
 		}
+		if scenario == "verdict_ack_loss" {
+			provider.LoseNextCallbackAcknowledgment()
+		}
 	}
 	requestBody, err := json.Marshal(update)
 	if err != nil {
@@ -215,15 +226,21 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if err := json.Unmarshal(responseBody, &admitted); err != nil {
 		t.Fatal(err)
 	}
-	if (scenario == "inbox" || scenario == "inbox_loss" || scenario == "verdict") && len(admitted.EventNames) != 0 {
+	if (scenario == "inbox" || scenario == "inbox_loss" || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {
 		t.Fatalf("native inbox entry leaked into business events: %v", admitted.EventNames)
 	}
-	if scenario != "inbox" && scenario != "inbox_loss" && scenario != "verdict" && len(admitted.EventNames) == 0 {
+	if scenario != "inbox" && scenario != "inbox_loss" && scenario != "verdict" && scenario != "verdict_ack_loss" && len(admitted.EventNames) == 0 {
 		t.Fatalf("ordinary text was consumed without a business event: status=%d events=%v", response.StatusCode, admitted.EventNames)
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		if scenario == "verdict" && len(provider.Acknowledgments()) > 0 && len(provider.Edits()) > 0 {
+		if (scenario == "verdict" || scenario == "verdict_ack_loss") && len(provider.Acknowledgments()) > 0 && len(provider.Edits()) > 0 {
+			if scenario == "verdict_ack_loss" {
+				time.Sleep(2300 * time.Millisecond)
+				if got := len(provider.Acknowledgments()); got != 1 {
+					t.Fatalf("lost callback acknowledgment was sent %d times", got)
+				}
+			}
 			return
 		}
 		for index := 1; ; index++ {
