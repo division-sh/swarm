@@ -13,19 +13,23 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 )
 
 type serveChannelDeliveryDispatcher struct {
 	store             runtimechanneldelivery.Store
+	native            runtimechannelnative.Store
 	cards             decisioncard.Store
 	activations       channelonboarding.Store
 	manager           *runtime.RuntimeContextManager
+	ingress           *runtimepublicingress.ReadinessOwner
 	effects           runtimeeffects.Store
 	credentials       *runtimecredentials.SnapshotOwner
 	posture           executionposture.Posture
@@ -113,6 +117,9 @@ func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, ca
 		selected.BindingRevision != candidate.BindingRevision ||
 		selected.ConversationRef != candidate.Audience.ConversationRef {
 		return fmt.Errorf("channel delivery activation contradicts selected destination")
+	}
+	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
+		return fmt.Errorf("channel delivery recovery entry is unavailable: %w", err)
 	}
 	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
 	if err != nil {

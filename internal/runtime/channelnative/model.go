@@ -99,4 +99,5 @@ type Setting struct {
 type Store interface {
 	AttachNativeInboxSetting(context.Context, Admission) (Setting, error)
 	RetireStaleNativeInboxConsumers(context.Context) error
+	MarkNativeInboxSettingUnavailable(context.Context, string, int64) error
 }

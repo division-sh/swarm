@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	runtimechannelnative "github.com/division-sh/swarm/internal/runtime/channelnative"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -37,6 +38,7 @@ func (o *Owner) AuthorActivity() runtimeauthoractivity.Reader    { return o.requ
 func (o *Owner) OperatorChannels() operatorchannel.Store         { return o.required.operatorChannels }
 func (o *Owner) ChannelOnboarding() channelonboarding.Store      { return o.required.channelOnboarding }
 func (o *Owner) ChannelDelivery() runtimechanneldelivery.Store   { return o.required.channelDelivery }
+func (o *Owner) ChannelNative() runtimechannelnative.Store       { return o.required.channelNative }
 func (o *Owner) StartupOwnership() runtimestartupownership.Store { return o.required.startupOwnership }
 func (o *Owner) RunQuiescence() runtimerunquiescence.ServeAbandonStore {
 	return o.required.runQuiescence
