@@ -1826,6 +1826,7 @@ type PackInterfaceOperation struct {
 
 type PackInterfaceEvent struct {
 	RequiredFields map[string]PackInterfaceField `yaml:"required_fields"`
+	OptionalFields map[string]PackInterfaceField `yaml:"optional_fields,omitempty"`
 }
 
 type PackInterfaceField struct {
