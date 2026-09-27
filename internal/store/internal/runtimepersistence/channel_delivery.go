@@ -101,6 +101,35 @@ func (s *PostgresStore) CurrentChannelDeliveryActivationID(ctx context.Context) 
 	return id, found, err
 }
 
+func (s *PostgresStore) CurrentChannelCardChangeCursor(ctx context.Context) (int64, bool, error) {
+	if s == nil || s.backend == nil {
+		return 0, false, fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return 0, false, err
+	}
+	var cursor int64
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		cursor, found, err = channeldelivery.CurrentCardChangeCursor(txctx, tx)
+		return err
+	})
+	return cursor, found, err
+}
+
+func (s *PostgresStore) PlanChangedChannelCard(ctx context.Context, sequence int64, cardID string) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.PlanChangedCardTx(txctx, tx, sequence, cardID, true)
+	})
+}
+
 func (s *PostgresStore) ResolveChannelActionFact(ctx context.Context, fact operatorchannel.ActionFact) (render.ResolvedAction, bool, error) {
 	if s == nil || s.backend == nil {
 		return render.ResolvedAction{}, false, fmt.Errorf("postgres channel delivery store is unavailable")
@@ -471,6 +500,35 @@ func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID str
 		return err
 	})
 	return created, err
+}
+
+func (s *SQLiteRuntimeStore) CurrentChannelCardChangeCursor(ctx context.Context) (int64, bool, error) {
+	if s == nil || s.backend == nil {
+		return 0, false, fmt.Errorf("sqlite channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return 0, false, err
+	}
+	var cursor int64
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		cursor, found, err = channeldelivery.CurrentCardChangeCursor(txctx, tx)
+		return err
+	})
+	return cursor, found, err
+}
+
+func (s *SQLiteRuntimeStore) PlanChangedChannelCard(ctx context.Context, sequence int64, cardID string) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("sqlite channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, "plan changed channel card", func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.PlanChangedCardTx(txctx, tx, sequence, cardID, false)
+	})
 }
 
 func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string) (render.PreparedRender, error) {
