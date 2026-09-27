@@ -166,11 +166,13 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 		"approve": {Verdict: "approve", Label: "Approve"},
 		"revise": {
 			Verdict: "revise", Label: "Request revision",
-			Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Label: "Feedback", Required: true}},
+			Input:      map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Label: "Feedback", Required: true}},
+			InputOrder: []string{"feedback"},
 		},
 		"reject": {
 			Verdict: "reject", Label: "Reject",
-			Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Label: "Reason"}},
+			Input:      map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Label: "Reason"}},
+			InputOrder: []string{"reason"},
 		},
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(intent.ApprovalDecision, "", map[string]any{

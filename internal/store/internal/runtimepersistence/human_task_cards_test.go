@@ -452,7 +452,8 @@ func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string
 		"approve": {Verdict: "approve", Label: "Approve"},
 		"reject": {
 			Verdict: "reject", Label: "Reject",
-			Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true, Label: "Reason"}},
+			Input:      map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true, Label: "Reason"}},
+			InputOrder: []string{"reason"},
 		},
 	})
 	if err != nil {

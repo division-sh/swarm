@@ -607,7 +607,7 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 		ExecutionMode: "live",
 		Anchor:        newDecisionCardTestStageAnchor("launch/review", "launch", entityID, sourceActivation.Stage, sourceActivation.ActivationID),
 		Snapshot: freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"safe_integer": safeInteger}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-			"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}},
+			"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}},
 		}),
 		BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1", CreatedAt: now,
 		Provenance: admitDecisionCardTestObject(t, map[string]any{"safe_integer": safeInteger}),

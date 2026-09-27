@@ -73,7 +73,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 				ExecutionMode: "live",
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"accept": {Verdict: "accept", AdvancesTo: "operating"},
-					"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+					"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}},
 				}),
 				BundleHash:      authorActivityTestBundleHash,
 				WorkflowVersion: "1", EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
@@ -224,8 +224,9 @@ func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothS
 				ExecutionMode: "live",
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"revise": {
-						Verdict: "revise",
-						Input:   map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
+						Verdict:    "revise",
+						Input:      map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
+						InputOrder: []string{"feedback"},
 					},
 				}),
 				BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
@@ -277,7 +278,8 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"large_integer": safeInteger, "subnormal": math.SmallestNonzeroFloat64}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {
 						Verdict: "approve", AdvancesTo: "operating",
-						Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}},
+						Input:      map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}},
+						InputOrder: []string{"score"},
 						Emit: runtimecontracts.EmitSpec{Event: outcomeEvent, Fields: map[string]runtimecontracts.ExpressionValue{
 							"large_integer": runtimecontracts.LiteralExpression(safeInteger),
 							"score":         runtimecontracts.CELExpression("decision.score"),
@@ -451,6 +453,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 						Input: map[string]runtimecontracts.WorkflowGateInputField{
 							"code": {Type: "text", Required: true}, "component": {Type: "text", Required: true}, "owner": {Type: "text", Required: true},
 						},
+						InputOrder: []string{"code", "component", "owner"},
 					},
 				}),
 				BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
@@ -1500,7 +1503,7 @@ func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decision
 		ExecutionMode: "live",
 		Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"accept": {Verdict: "accept", AdvancesTo: "operating"},
-			"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+			"revise": {Verdict: "revise", AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}},
 		}),
 		BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
 		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, CreatedAt: now,
