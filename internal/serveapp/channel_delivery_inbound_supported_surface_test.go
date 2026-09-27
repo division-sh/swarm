@@ -1230,7 +1230,13 @@ func proveChannelSharedAudience(t *testing.T, provider *telegramapi.Double, call
 	}
 	markup, _ := card["reply_markup"].(map[string]any)
 	rows, _ := markup["inline_keyboard"].([]any)
+	if len(rows) == 0 {
+		t.Fatalf("shared card has no verdict controls: %v", card)
+	}
 	first, _ := rows[0].([]any)
+	if len(first) == 0 {
+		t.Fatalf("shared card has an empty verdict row: %v", card)
+	}
 	button, _ := first[0].(map[string]any)
 	verdictToken, _ := button["callback_data"].(string)
 	if verdictToken == "" {
@@ -1254,6 +1260,30 @@ func proveChannelSharedAudience(t *testing.T, provider *telegramapi.Double, call
 	for _, edit := range provider.Edits() {
 		if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
 			t.Fatalf("foreign group member decided the card: %v", edit)
+		}
+	}
+	beforeForeignEntry := 0
+	for provider.Delivery(beforeForeignEntry) != nil {
+		beforeForeignEntry++
+	}
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 2050,
+		"message": map[string]any{
+			"message_id": 9129, "from": map[string]any{"id": 7001},
+			"chat": map[string]any{"id": -1001, "type": "group"},
+			"text": "/" + command + "@SwarmTestBot",
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("foreign group native entry escaped into business events: %v", admitted)
+	}
+	time.Sleep(350 * time.Millisecond)
+	for index := beforeForeignEntry; ; index++ {
+		delivery := provider.Delivery(index)
+		if delivery == nil {
+			break
+		}
+		if strings.HasPrefix(fmt.Sprint(delivery["text"]), "Inbox\n") {
+			t.Fatalf("foreign group member received operator inbox: %v", delivery)
 		}
 	}
 	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
