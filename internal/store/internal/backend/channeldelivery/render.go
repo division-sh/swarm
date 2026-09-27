@@ -37,21 +37,11 @@ func PersistRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, frozen 
 	if !found {
 		return "", false, fmt.Errorf("channel render principal is unavailable")
 	}
-	selected, found, err := LoadDefault(ctx, tx, postgres)
+	plan, found, err := LoadCurrentPlan(ctx, tx, deliveryID, postgres)
 	if err != nil {
 		return "", false, err
 	}
-	if !found || selected.State != StateCurrent || selected.PrincipalID != principalID {
-		return "", false, fmt.Errorf("channel render default is unavailable")
-	}
-	plan, found, err := LoadPlan(ctx, tx, deliveryID, postgres)
-	if err != nil {
-		return "", false, err
-	}
-	if !found || plan.State == "retired" || !renderMatchesPlan(verified, plan) ||
-		selected.DeliveryEpoch != plan.DeliveryEpoch || selected.InterfaceKey != plan.InterfaceKey ||
-		selected.ExternalAccountRef != plan.ExternalAccountRef || selected.ConversationRef != plan.ConversationRef ||
-		selected.ConversationScope != plan.ConversationScope {
+	if !found || plan.PrincipalID != principalID || !renderMatchesPlan(verified, plan) {
 		return "", false, fmt.Errorf("channel render plan is not exact-current")
 	}
 	if err := requireExactSourceRenderTx(ctx, tx, plan, verified, postgres); err != nil {
