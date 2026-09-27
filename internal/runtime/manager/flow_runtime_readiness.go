@@ -64,6 +64,10 @@ type dynamicFlowActiveAttempt struct {
 	receipt         runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	publication     runtimebus.FlowRoutePublicationHandle
 	retiring        bool
+	retirementSet   *terminalFlowRetirement
+	retirementKind  flowActivationRetirementDisposition
+	locallyRetired  bool
+	timersRetired   bool
 	complete        bool
 	timersProjected bool
 }
