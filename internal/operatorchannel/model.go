@@ -248,6 +248,27 @@ type InboundClaim struct {
 	Challenge             string `json:"challenge"`
 }
 
+// InboundAction records a verified callback as an intent. Its token is only a
+// lookup key; current binding, receipt, render, and card admission happen later.
+type InboundAction struct {
+	ActionFact
+	Provider              string `json:"provider"`
+	ProviderEventID       string `json:"provider_event_id"`
+	PublicationID         string `json:"publication_id"`
+	ProviderAuthorization string `json:"provider_authorization"`
+}
+
+func (a InboundAction) Validate() error {
+	if err := a.ActionFact.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(a.Provider) == "" || strings.TrimSpace(a.ProviderEventID) == "" ||
+		strings.TrimSpace(a.ProviderAuthorization) == "" || uuid.Validate(a.PublicationID) != nil {
+		return fmt.Errorf("%w: inbound action provenance is required", ErrInvalidRequest)
+	}
+	return nil
+}
+
 func (c InboundClaim) Validate() error {
 	if err := c.TextFact.Validate(); err != nil {
 		return err
