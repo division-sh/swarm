@@ -59,6 +59,22 @@ func TestChannelDeliveryNativeInboxLostAcknowledgmentE2E(t *testing.T) {
 	}
 }
 
+func TestChannelNativeInboxUnknownWriteBlocksReadinessE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_install_loss")
+		})
+	}
+}
+
+func TestChannelNativeInboxReadbackFailureBlocksReadinessE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_readback_failure")
+		})
+	}
+}
+
 func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -132,6 +148,7 @@ func (r telegramLongNoticeLLMRuntime) ContinueManagedSession(ctx context.Context
 
 func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario string) {
 	t.Helper()
+	nativeInboxScenario := scenario == "inbox" || scenario == "inbox_loss" || scenario == "inbox_install_loss" || scenario == "inbox_readback_failure"
 	isolateCLIAPIConfigEnv(t)
 	configureStandingLifecycleCredentials(t)
 	provider := &telegramapi.Double{}
@@ -212,6 +229,11 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 		}
 	}
+	if scenario == "inbox_install_loss" {
+		provider.LoseNextCommandWriteAcknowledgment()
+	} else if scenario == "inbox_readback_failure" {
+		provider.FailCommandReadbackAfterWrite()
+	}
 	runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", 1001, "private", 0)
 	if scenario == "summary_open" || scenario == "summary_open_many" {
 		callbackURL, signing, _ := provider.Registration()
@@ -223,7 +245,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		return
 	}
 	inputText := "ordinary business text"
-	if scenario == "inbox" || scenario == "inbox_loss" {
+	if nativeInboxScenario {
 		deadline := time.Now().Add(15 * time.Second)
 		for {
 			for _, write := range provider.CommandWrites() {
@@ -245,6 +267,17 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
+	}
+	if scenario == "inbox_install_loss" || scenario == "inbox_readback_failure" {
+		time.Sleep(5500 * time.Millisecond)
+		if writes := provider.CommandWrites(); len(writes) != 1 {
+			t.Fatalf("unknown native setting write caused %d writes, want one", len(writes))
+		}
+		if delivery := provider.Delivery(1); delivery != nil {
+			reads, failures := provider.CommandReadbackCounts()
+			t.Fatalf("unknown native setting write admitted channel delivery: %v; readbacks=%d failures=%d writes=%v", delivery, reads, failures, provider.CommandWrites())
+		}
+		return
 	}
 	if scenario == "inbox_loss" {
 		deadline := time.Now().Add(15 * time.Second)
@@ -344,10 +377,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		proveChannelNoticeAcknowledgment(t, provider, callbackURL, signing, endpoint+"/v1/rpc")
 		return
 	}
-	if (scenario == "inbox" || scenario == "inbox_loss" || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {
+	if (nativeInboxScenario || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {
 		t.Fatalf("native inbox entry leaked into business events: %v", admitted.EventNames)
 	}
-	if scenario != "inbox" && scenario != "inbox_loss" && scenario != "verdict" && scenario != "verdict_ack_loss" && len(admitted.EventNames) == 0 {
+	if !nativeInboxScenario && scenario != "verdict" && scenario != "verdict_ack_loss" && len(admitted.EventNames) == 0 {
 		t.Fatalf("ordinary text was consumed without a business event: status=%d events=%v", response.StatusCode, admitted.EventNames)
 	}
 	deadline := time.Now().Add(15 * time.Second)
@@ -367,7 +400,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				break
 			}
 			message := fmt.Sprint(delivery["text"])
-			if (scenario == "inbox" || scenario == "inbox_loss") && fmt.Sprint(delivery["chat_id"]) == "1001" &&
+			if nativeInboxScenario && fmt.Sprint(delivery["chat_id"]) == "1001" &&
 				strings.HasPrefix(message, "Inbox\nUnread notices: ") && strings.Contains(message, "Retire service") {
 				if scenario == "inbox_loss" {
 					_, before := provider.Counts()
@@ -383,7 +416,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				if scenario == "notice" && !strings.Contains(message, "Observed ordinary business text") {
 					continue
 				}
-				if scenario != "inbox" && scenario != "inbox_loss" {
+				if !nativeInboxScenario {
 					return
 				}
 			}
