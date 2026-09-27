@@ -15,15 +15,18 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -378,6 +381,10 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 }
 
 func seedSelectedActivityProjectionFixture(t *testing.T, fixture authorActivityReceiptFixture, postgres, root, independentTarget, wrongFlow bool, input json.RawMessage) (string, runfork.RunForkMaterialization, events.Event) {
+	return seedSelectedActivityProjectionFixtureWithPostEvent(t, fixture, postgres, root, independentTarget, wrongFlow, input, nil)
+}
+
+func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture authorActivityReceiptFixture, postgres, root, independentTarget, wrongFlow bool, input json.RawMessage, postEvent func(context.Context, string)) (string, runfork.RunForkMaterialization, events.Event) {
 	t.Helper()
 	runID, parentID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	declarations := selectedActivityProducerSource(t)
@@ -431,12 +438,46 @@ func seedSelectedActivityProjectionFixture(t *testing.T, fixture authorActivityR
 	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, nil); err != nil {
 		t.Fatal(err)
 	}
+	if postEvent != nil {
+		postEvent(ctx, runID)
+	}
 	fixture.advance()
 	child := materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, eventID)
 	if child.MaterializedEntityCount != 1 {
 		t.Fatalf("activity fixture did not materialize its producer state: count=%d", child.MaterializedEntityCount)
 	}
 	return runID, child, event
+}
+
+func TestSelectedContractForkDoesNotCopyRotationReceiptBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			receiptKey := uuid.NewString()
+			sourceRunID, child, _ := seedSelectedActivityProjectionFixtureWithPostEvent(t, fixture, backend.name == "postgres", false, true, false, json.RawMessage(`{"value":"unchanged"}`), func(ctx context.Context, runID string) {
+				receiptCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+				identity := agentmemory.Identity(mustTestAgentIdentityForRun(runID, "fork-receipt-agent", ""))
+				seedTestAgentRow(t, receiptCtx, fixture.db, backend.name == "postgres", identity, "active")
+				owner := fixture.store.(llmSessionAttemptJourneyOwner)
+				if _, _, err := owner.AcquireLiveSession(receiptCtx, identity, "fork-worker"); err != nil {
+					t.Fatalf("acquire source receipt session: %v", err)
+				}
+				if _, err := owner.Rotate(receiptCtx, identity, "fork-worker", sessions.RotationMetadata{OperationID: receiptKey}); err != nil {
+					t.Fatalf("seed source receipt: %v", err)
+				}
+			})
+			var sourceReceipts, forkReceipts int
+			if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM agent_sessions WHERE run_id=$1 AND rotation_operation_id=$2`, sourceRunID, receiptKey).Scan(&sourceReceipts); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM agent_sessions WHERE run_id=$1 AND rotation_operation_id=$2`, child.ForkRunID, receiptKey).Scan(&forkReceipts); err != nil {
+				t.Fatal(err)
+			}
+			if sourceReceipts != 1 || forkReceipts != 0 {
+				t.Fatalf("source/fork receipt rows=%d/%d, want 1/0", sourceReceipts, forkReceipts)
+			}
+		})
+	}
 }
 
 func selectedActivityPersistedSourceEvidence(t *testing.T, db *sql.DB, eventID string) []string {
