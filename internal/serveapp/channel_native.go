@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -360,11 +361,18 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 		return applyErr
 	}
 	if applyErr != nil {
-		return fmt.Errorf("native inbox write acknowledgment is uncertain: %w", result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), nil, desired, applyErr))
+		settleErr := result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), nil, desired, applyErr)
+		return errors.Join(fmt.Errorf("native inbox write acknowledgment is uncertain: %w", applyErr), settleErr)
 	}
 	observed, readErr := d.readNativeInboxCommands(ctx, plan, activation.CredentialAdmissions, setting)
 	if err := result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), observed, desired, readErr); err != nil {
-		return err
+		return errors.Join(readErr, err)
+	}
+	if readErr != nil {
+		return fmt.Errorf("native inbox setting readback is unavailable: %w", readErr)
+	}
+	if !bytes.Equal(observed, desired) {
+		return fmt.Errorf("native inbox setting readback contradicts desired commands")
 	}
 	return nil
 }
