@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
@@ -60,6 +61,23 @@ func (s *PostgresStore) CurrentChannelDeliveryActivationID(ctx context.Context) 
 		return err
 	})
 	return id, found, err
+}
+
+func (s *PostgresStore) ResolveChannelActionFact(ctx context.Context, fact operatorchannel.ActionFact) (render.ResolvedAction, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedAction{}, false, fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedAction{}, false, err
+	}
+	var resolved render.ResolvedAction
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		resolved, found, err = channeldelivery.ResolveActionFactTx(txctx, tx, fact, true)
+		return err
+	})
+	return resolved, found, err
 }
 
 func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
@@ -144,6 +162,23 @@ func (s *SQLiteRuntimeStore) CurrentChannelDeliveryActivationID(ctx context.Cont
 		return err
 	})
 	return id, found, err
+}
+
+func (s *SQLiteRuntimeStore) ResolveChannelActionFact(ctx context.Context, fact operatorchannel.ActionFact) (render.ResolvedAction, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.ResolvedAction{}, false, fmt.Errorf("sqlite channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.ResolvedAction{}, false, err
+	}
+	var resolved render.ResolvedAction
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		resolved, found, err = channeldelivery.ResolveActionFactTx(txctx, tx, fact, false)
+		return err
+	})
+	return resolved, found, err
 }
 
 func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {

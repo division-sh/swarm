@@ -1,6 +1,10 @@
 package channeldelivery
 
-import "context"
+import (
+	"context"
+
+	"github.com/division-sh/swarm/internal/operatorchannel"
+)
 
 // Candidate is a selected-store projection for one current destination.
 // Dispatch must still acquire current activation and effect authority.
@@ -29,10 +33,26 @@ type Action struct {
 	Label   string
 }
 
+type ResolvedAction struct {
+	Action             Action
+	DeliveryID         string
+	RenderID           string
+	RenderHash         string
+	ReceiptOperationID string
+	SourceKind         string
+	SourceID           string
+	PrincipalID        string
+	BindingRevision    int64
+	ActivationID       string
+	ActivationRevision int64
+	CurrentRender      bool
+}
+
 type Store interface {
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]Candidate, error)
 	GetCurrentChannelDeliveryPlan(context.Context, string) (Candidate, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	FreezeAndPersistChannelRender(context.Context, string) (PreparedRender, error)
+	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
 }
