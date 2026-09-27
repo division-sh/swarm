@@ -175,6 +175,22 @@ func (s *PostgresStore) ResolveCurrentNativeInboxEntry(ctx context.Context, text
 	return entry, found, err
 }
 
+func (s *PostgresStore) PlanNativeInboxResponse(ctx context.Context, text operatorchannel.InboundText, entry render.ResolvedNativeEntry, fullText string) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("postgres channel response store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanNativeInboxResponseTx(txctx, tx, text, entry, fullText, true)
+		return err
+	})
+	return deliveryID, err
+}
+
 func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
 	if s == nil || s.backend == nil {
 		return false, fmt.Errorf("postgres channel delivery store is unavailable")
@@ -249,7 +265,8 @@ func projectDeliveryCandidates(plans []channeldelivery.Plan) []render.Candidate 
 	for _, plan := range plans {
 		candidates = append(candidates, render.Candidate{
 			DeliveryID: plan.DeliveryID, SourceKind: plan.SourceKind, SourceID: plan.SourceID,
-			BindingRevision: plan.CurrentBindingRevision,
+			EntryActivationID: plan.EntryActivationID,
+			BindingRevision:   plan.CurrentBindingRevision,
 			Audience: render.Audience{PrincipalID: plan.PrincipalID, InterfaceKey: plan.InterfaceKey,
 				DeliveryEpoch: plan.DeliveryEpoch, ExternalAccountRef: plan.ExternalAccountRef,
 				ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope},
@@ -369,6 +386,22 @@ func (s *SQLiteRuntimeStore) ResolveCurrentNativeInboxEntry(ctx context.Context,
 		return err
 	})
 	return entry, found, err
+}
+
+func (s *SQLiteRuntimeStore) PlanNativeInboxResponse(ctx context.Context, text operatorchannel.InboundText, entry render.ResolvedNativeEntry, fullText string) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("sqlite channel response store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, "plan native inbox response", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanNativeInboxResponseTx(txctx, tx, text, entry, fullText, false)
+		return err
+	})
+	return deliveryID, err
 }
 
 func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {

@@ -10,14 +10,15 @@ import (
 // Candidate is a selected-store projection for one current destination.
 // Dispatch must still acquire current activation and effect authority.
 type Candidate struct {
-	DeliveryID       string
-	SourceKind       string
-	SourceID         string
-	BindingRevision  int64
-	Audience         Audience
-	State            string
-	CurrentRenderID  string
-	CurrentReceiptID string
+	DeliveryID        string
+	SourceKind        string
+	SourceID          string
+	EntryActivationID string
+	BindingRevision   int64
+	Audience          Audience
+	State             string
+	CurrentRenderID   string
+	CurrentReceiptID  string
 }
 
 type PreparedRender struct {
@@ -126,4 +127,5 @@ type Store interface {
 	ListPendingChannelTexts(context.Context, string, int) ([]PendingText, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (ResolvedText, bool, error)
 	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (ResolvedNativeEntry, bool, error)
+	PlanNativeInboxResponse(context.Context, operatorchannel.InboundText, ResolvedNativeEntry, string) (string, error)
 }
