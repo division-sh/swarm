@@ -524,7 +524,7 @@ func TestRouteTopologyLifecycleStagePreservesCompleteObserverContext(t *testing.
 				t.Fatalf("observer stage lost older producer context: got=%#v want=%#v", got, want)
 			}
 			lister.rows = append(lister.rows, descriptor(newOwner))
-			if err := eb.RemoveFlowInstanceRouteContext(context.Background(), oldA); err != nil {
+			if err := eb.RemoveFlowInstanceRouteContextFixture(context.Background(), oldA); err != nil {
 				t.Fatalf("remove one producer: %v", err)
 			}
 			if lister.calls != 0 || lister.scopedCalls != 2 || !slices.Equal(lister.templateScope[1], []string{"observer", "other", "producer"}) {

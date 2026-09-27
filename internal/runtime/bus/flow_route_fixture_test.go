@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
@@ -82,12 +81,10 @@ func (eb *EventBus) RemoveFlowInstanceRouteContextFixture(ctx context.Context, i
 	if descriptorLister == nil {
 		return errors.New("flow-instance route removal requires active flow-instance descriptors")
 	}
-	staged, identities, err := eb.deriveFlowInstanceRouteTopology(ctx, table, descriptorLister, owner.RunID, nil, owner)
+	staged, identities, err := eb.deriveFlowInstanceRouteRecordTopology(ctx, table, descriptorLister, owner.RunID, nil, owner)
 	if err != nil {
 		return err
 	}
-	identities = append(identities, owner)
-	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
 	committed, commitErr := persister.ReplaceFlowInstanceRouteTopology(ctx, flowInstanceRouteTopologyRecordSets(staged, identities))
 	if !committed.Acknowledged {
 		return errors.Join(commitErr, errors.New("flow-instance route topology commit was not acknowledged"))
