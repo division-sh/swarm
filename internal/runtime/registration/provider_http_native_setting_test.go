@@ -118,7 +118,7 @@ func TestChannelNativeSettingEffectOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Run("lost acknowledgment is never redispatched", func(t *testing.T) {
+	t.Run("lost acknowledgment remains uncertain even with matching readback", func(t *testing.T) {
 		h := &nativeSettingHarness{Harness: effecttest.New()}
 		client := &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("transport lost bot-secret")
