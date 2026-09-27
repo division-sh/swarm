@@ -234,7 +234,7 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 				Heuristics:       status.Heuristics,
 				FailedDeliveries: failedDeliveries,
 				FanOut:           normalizeRunFanOut(report.FanOut),
-				TestQuiescence:   normalizeRunTestQuiescence(report.TestQuiescence),
+				TestQuiescence:   report.TestQuiescence,
 			}, nil
 		},
 	}
@@ -244,14 +244,6 @@ func normalizeRunFanOut(value fanoutobligation.RunSummary) fanoutobligation.RunS
 	if value.BlockedIntents == nil {
 		value.BlockedIntents = []fanoutobligation.BlockedIntentDiagnosis{}
 	}
-	return value
-}
-
-func normalizeRunTestQuiescence(value operatorread.RunTestQuiescence) operatorread.RunTestQuiescence {
-	value.Ready = value.ActiveDeliveries == 0 &&
-		value.UnsettledPipelineEvents == 0 &&
-		value.DueTimers == 0 &&
-		value.ActiveSessionLeases == 0
 	return value
 }
 

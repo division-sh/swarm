@@ -650,6 +650,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 				EventCount:     1,
 				EntityCount:    2,
 				Deliveries:     []operatorread.RunDebugDeliveryCount{{SubscriberID: "worker", Status: "pending", Count: 1}},
+				TestQuiescence: operatorread.RunTestQuiescence{Ready: true},
 				FanOut: fanoutobligation.RunSummary{
 					RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, SemanticRejected: 1,
 					SemanticRejectionSample: &fanoutobligation.FanOutSemanticRejectionSample{
@@ -775,8 +776,23 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 		t.Fatalf("run.diagnose semantic rejection sample = %#v", sample)
 	}
 	quiescence := asMap(t, asMap(t, diagnose.Result)["test_quiescence"])
-	if quiescence["ready"] != true || quiescence["active_deliveries"] != float64(0) {
+	if quiescence["ready"] != true || quiescence["active_deliveries"] != float64(0) || quiescence["fan_out_unsettled"] != float64(0) {
 		t.Fatalf("run.diagnose test_quiescence = %#v, want ready zero-count projection", quiescence)
+	}
+	report := fakeRuns.reports[runID]
+	report.TestQuiescence = operatorread.RunTestQuiescence{FanOutUnsettled: 1}
+	report.FanOut = fanoutobligation.RunSummary{
+		RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, Committed: 1, Unsettled: 1,
+		MinNextChunk: fanoutobligation.InitialChunkSize, MaxNextChunk: fanoutobligation.InitialChunkSize,
+	}
+	fakeRuns.reports[runID] = report
+	diagnose = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"unsettled","method":"run.diagnose","params":{"run_id":"run-1"}}`)
+	if diagnose.Error != nil {
+		t.Fatalf("run.diagnose unsettled error = %#v", diagnose.Error)
+	}
+	quiescence = asMap(t, asMap(t, diagnose.Result)["test_quiescence"])
+	if quiescence["ready"] != false || quiescence["fan_out_unsettled"] != float64(1) {
+		t.Fatalf("run.diagnose must preserve store-owned unsettled readiness: %#v", quiescence)
 	}
 }
 

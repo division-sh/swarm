@@ -67,7 +67,7 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 						reporter = &plan.Units[i]
 					}
 				}
-				if reporter == nil || !slices.Equal(reporter.Packages, []string{"github.com/division-sh/swarm/internal/serveapp"}) || reporter.Run != "^TestIssue2394ServedFanOutSupportedSurfacesBothStores$" || reporter.Skip != "" || reporter.CountMode != "count-1" || !slices.Equal(reporter.RequiredChildren["TestIssue2394ServedFanOutSupportedSurfacesBothStores"], []string{"sqlite", "postgres"}) {
+				if reporter == nil || !slices.Equal(reporter.Packages, []string{"github.com/division-sh/swarm/internal/serveapp"}) || reporter.Run != "^TestIssue2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores)$" || reporter.Skip != "" || reporter.CountMode != "count-1" || !slices.Equal(reporter.RequiredChildren["TestIssue2394ServedFanOutSupportedSurfacesBothStores"], []string{"sqlite", "postgres"}) || !slices.Equal(reporter.RequiredChildren["TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores"], []string{"sqlite/run.start", "sqlite/event.publish", "postgres/run.start", "postgres/event.publish"}) {
 					t.Fatalf("local reporter must remain exact two-store served canary: %+v", reporter)
 				}
 				return

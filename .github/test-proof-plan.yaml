@@ -317,9 +317,10 @@ units:
     budget_class: full
   local-routing-reporter:
     packages: [github.com/division-sh/swarm/internal/serveapp]
-    run: '^TestIssue2394ServedFanOutSupportedSurfacesBothStores$'
+    run: '^TestIssue2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores)$'
     required_children:
       TestIssue2394ServedFanOutSupportedSurfacesBothStores: [sqlite, postgres]
+      TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores: [sqlite/run.start, sqlite/event.publish, postgres/run.start, postgres/event.publish]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -729,7 +730,7 @@ units:
   serveapp-other-late:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
+    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(One.*|F.*|S.*)|Stop.*|Selected.*)|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full
