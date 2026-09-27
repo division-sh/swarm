@@ -116,6 +116,106 @@ func TestChannelConfirmationEffectOutcomes(t *testing.T) {
 	})
 }
 
+type channelDeliveryHarness struct{ *effecttest.Harness }
+
+func (h *channelDeliveryHarness) IsExternalEffectAuthorityCurrent(_ context.Context, authority runtimeeffects.Authority) (bool, error) {
+	return authority.Kind == runtimeeffects.AuthorityChannelDelivery && authority.Valid(), nil
+}
+
+func channelDeliveryTestContext(h *channelDeliveryHarness) context.Context {
+	plan, err := plangeneration.FromCanonicalValue(map[string]string{"test": "channel-delivery"})
+	if err != nil {
+		panic(err)
+	}
+	deliveryID, renderID := uuid.NewString(), uuid.NewString()
+	operationID, err := runtimeeffects.ChannelDeliveryOperationID(deliveryID, renderID)
+	if err != nil {
+		panic(err)
+	}
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityChannelDelivery, ID: operationID,
+		ExecutionOwner: "channel-delivery:test", LeaseExpiresAt: time.Now().Add(time.Minute), FenceGeneration: 7,
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		ChannelDelivery: runtimeeffects.ChannelDeliveryAuthority{
+			EffectOperationID: operationID, DeliveryID: deliveryID, RenderID: renderID, RenderHash: "sha256:render",
+			PrincipalID: uuid.NewString(), InterfaceKey: "telegram:v2", DeliveryEpoch: 1, BindingRevision: 2,
+			ExternalAccountRef: "account", ConversationRef: "chat", ActivationID: uuid.NewString(), ActivationRevision: 3,
+			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "bundle:test@sha256:delivery",
+			PackInventoryGeneration: "sha256:delivery-inventory", RuntimeInstanceID: uuid.NewString(),
+			ContextPublicationGeneration: 7, PlanGeneration: plan, TargetGeneration: 1,
+		},
+	}
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
+	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(h).WithExecutionPosture(executionposture.Live))
+	return runtimeeffects.WithAuthority(ctx, authority)
+}
+
+func TestChannelDeliveryEffectOutcomes(t *testing.T) {
+	tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
+	input := map[string]any{"chat_id": "42", "text": "Notice", "reply_markup": map[string]any{"inline_keyboard": []any{}}}
+	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+	project := func(raw any) (map[string]any, error) {
+		result, ok := raw.(map[string]any)
+		if !ok {
+			return nil, errors.New("connector result is not an object")
+		}
+		return map[string]any{"delivery_reference": map[string]any{"id": result["message_id"]}}, nil
+	}
+	t.Run("known receipt retained", func(t *testing.T) {
+		h := &channelDeliveryHarness{Harness: effecttest.New()}
+		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			if err := h.RequireState("channel_delivery", runtimeeffects.StateLaunched); err != nil {
+				t.Fatal(err)
+			}
+			return registrationResponse(http.StatusOK, `{"ok":true,"result":{"message_id":91}}`), nil
+		})}}
+		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil, project)
+		if err != nil || result.OperationID == "" || result.Output == nil {
+			t.Fatalf("delivery = %#v, %v", result, err)
+		}
+		if err := h.RequireState("channel_delivery", runtimeeffects.StateSettled); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, settlement := range h.Settlements {
+			if settlement.OperationID == result.OperationID && settlement.Evidence["projected_output"] != nil {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("settled delivery lost projected provider receipt")
+		}
+	})
+	t.Run("lost response is uncertain", func(t *testing.T) {
+		h := &channelDeliveryHarness{Harness: effecttest.New()}
+		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("transport lost bot-secret")
+		})}}
+		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil, project)
+		if err == nil || result.OperationID == "" || strings.Contains(err.Error(), "bot-secret") {
+			t.Fatalf("lost delivery response = %#v, %v", result, err)
+		}
+		if err := h.RequireState("channel_delivery", runtimeeffects.StateOutcomeUncertain); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("prelaunch marker failure does not dispatch", func(t *testing.T) {
+		h := &channelDeliveryHarness{Harness: effecttest.New()}
+		h.MarkErr = errors.New("marker failed")
+		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("prelaunch failure reached provider")
+			return nil, nil
+		})}}
+		result, err := executor.DeliverChannelMessage(channelDeliveryTestContext(h), "telegram.send_interactive", tool, input, credentials, nil, project)
+		if err == nil || result.OperationID == "" {
+			t.Fatalf("prelaunch delivery = %#v, %v", result, err)
+		}
+		if err := h.RequireState("channel_delivery", runtimeeffects.StateTerminalFailure); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func serveRegistrationTestContext(harness *effecttest.Harness, identity string) context.Context {
 	intentID := uuid.NewString()
 	startupID := uuid.NewString()
