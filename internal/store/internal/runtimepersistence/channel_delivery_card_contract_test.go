@@ -22,6 +22,8 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			var settle func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
 			var plan func(string) (bool, error)
 			var count func(string) (int, error)
+			var list func() ([]channeldelivery.Plan, error)
+			var freeze func(string) (channeldelivery.StoredRender, error)
 			switch store := cards.(type) {
 			case *SQLiteRuntimeStore:
 				settle = func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
@@ -46,6 +48,12 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					var n int
 					err := store.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind = 'card' AND source_id = ?`, id).Scan(&n)
 					return n, err
+				}
+				list = func() ([]channeldelivery.Plan, error) {
+					return store.ListCurrentChannelDeliveryPlans(ctx, "", 100)
+				}
+				freeze = func(id string) (channeldelivery.StoredRender, error) {
+					return store.FreezeAndPersistChannelRender(ctx, id)
 				}
 			case *PostgresStore:
 				settle = func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
@@ -77,6 +85,12 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					err := store.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind = 'card' AND source_id = $1::uuid`, id).Scan(&n)
 					return n, err
 				}
+				list = func() ([]channeldelivery.Plan, error) {
+					return store.ListCurrentChannelDeliveryPlans(ctx, "", 100)
+				}
+				freeze = func(id string) (channeldelivery.StoredRender, error) {
+					return store.FreezeAndPersistChannelRender(ctx, id)
+				}
 			default:
 				t.Fatalf("unsupported card store %T", cards)
 			}
@@ -101,7 +115,7 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 				}
 				return card, entityID, activationID
 			}
-			backlog, _, _ := newCard()
+			backlog, backlogEntityID, backlogActivationID := newCard()
 			if created, err := plan(backlog.CardID); err != nil || created {
 				t.Fatalf("before default plan = %t, %v", created, err)
 			}
@@ -139,6 +153,27 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			if created, err := plan(backlog.CardID); err != nil || !created {
 				t.Fatalf("first backlog plan = %t, %v", created, err)
 			}
+			firstPlans, err := list()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var firstDeliveryID string
+			for _, item := range firstPlans {
+				if item.SourceKind == channeldelivery.PlanCard && item.SourceID == backlog.CardID {
+					firstDeliveryID = item.DeliveryID
+				}
+			}
+			if firstDeliveryID == "" {
+				t.Fatalf("current card plan missing from scan: %#v", firstPlans)
+			}
+			firstRender, err := freeze(firstDeliveryID)
+			if err != nil || firstRender.Frozen.SourceKind != channeldelivery.PlanCard {
+				t.Fatalf("freeze pending card = %#v, %v", firstRender, err)
+			}
+			repeated, err := freeze(firstDeliveryID)
+			if err != nil || repeated.RenderID != firstRender.RenderID {
+				t.Fatalf("repeated render = %#v, %v", repeated, err)
+			}
 			if created, err := plan(backlog.CardID); err != nil || created {
 				t.Fatalf("repeated backlog plan = %t, %v", created, err)
 			}
@@ -152,6 +187,33 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			}
 			if got, err := count(backlog.CardID); err != nil || got != 2 {
 				t.Fatalf("backlog plans = %d, %v", got, err)
+			}
+			currentPlans, err := list()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reboundDeliveryID string
+			for _, item := range currentPlans {
+				if item.SourceKind == channeldelivery.PlanCard && item.SourceID == backlog.CardID {
+					reboundDeliveryID = item.DeliveryID
+				}
+				if item.DeliveryID == firstDeliveryID {
+					t.Fatal("historical delivery epoch was scanned as current")
+				}
+			}
+			if reboundDeliveryID == "" {
+				t.Fatalf("rebound card plan missing from scan: %#v", currentPlans)
+			}
+			if err := cards.SupersedeDecisionCardsForStage(ctx, runID, backlogEntityID, backlogActivationID, "flow moved on", now.Add(4*time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			terminalRender, err := freeze(reboundDeliveryID)
+			if err != nil || terminalRender.Frozen.Revision <= firstRender.Frozen.Revision ||
+				terminalRender.Frozen.Hash == firstRender.Frozen.Hash {
+				t.Fatalf("terminal card render = %#v, %v", terminalRender, err)
+			}
+			if _, err := freeze(firstDeliveryID); err == nil {
+				t.Fatal("historical card destination accepted a new render")
 			}
 			terminal, entityID, activationID := newCard()
 			if err := cards.SupersedeDecisionCardsForStage(ctx, runID, entityID, activationID, "flow moved on", now.Add(5*time.Second)); err != nil {
