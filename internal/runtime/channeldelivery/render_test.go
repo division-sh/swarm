@@ -104,3 +104,19 @@ func TestChannelRenderNoticeIsRunlessAndHasNoDecisionActions(t *testing.T) {
 		t.Fatalf("phone backlog summary = %#v, %v", summary, err)
 	}
 }
+
+func TestChannelRenderExcerptPreservesFullHashAndTail(t *testing.T) {
+	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 1,
+		ExternalAccountRef: "account", ConversationRef: "direct", ConversationScope: operatorchannel.ConversationScopeDirect}
+	frozen, err := FreezeNotice(Notice{ID: uuid.NewString(), Type: "notify_human", Summary: "Long notice",
+		Priority: "normal", Context: []byte(`{"detail":"` + strings.Repeat("a", 4000) + `TAIL"}`)}, audience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	excerpt, truncated, err := PresentationText(frozen)
+	if err != nil || !truncated || len([]rune(excerpt)) > ChannelExcerptRunes ||
+		!strings.Contains(excerpt, "TAIL") || strings.Contains(excerpt, strings.Repeat("a", 4000)) ||
+		frozen.Hash != canonicaljson.HashBytes(frozen.Input) {
+		t.Fatalf("excerpt = %q, truncated=%t err=%v", excerpt, truncated, err)
+	}
+}
