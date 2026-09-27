@@ -19,8 +19,8 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 		}
 		tools[installed.ToolID] = installed.Tool
 	}
-	if got := len(tools); got != 10 {
-		t.Fatalf("shipped connector tool count = %d, want 10", got)
+	if got := len(tools); got != 12 {
+		t.Fatalf("shipped connector tool count = %d, want 12", got)
 	}
 
 	flowLocal := withOutputSchema(t, telegramConnectorTool("https://example.test"), runtimecontracts.MustToolInputSchema(
@@ -57,8 +57,8 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 	if err != nil {
 		t.Fatalf("CompileMockResponsePlan second: %v", err)
 	}
-	if len(first.responses) != 11 || len(second.responses) != 11 {
-		t.Fatalf("compiled response counts = %d, %d, want 11", len(first.responses), len(second.responses))
+	if len(first.responses) != 13 || len(second.responses) != 13 {
+		t.Fatalf("compiled response counts = %d, %d, want 13", len(first.responses), len(second.responses))
 	}
 	for toolID, firstValue := range first.responses {
 		firstRaw, err := canonicaljson.Encode(firstValue)
