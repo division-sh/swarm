@@ -14087,6 +14087,12 @@ platform_tables:
         - operator_channel_operations
         - operator_channel_bindings
         - operator_channel_claim_receipts
+        - operator_channel_action_intents
+        - channel_delivery_defaults
+        - channel_delivery_plans
+        - channel_delivery_renders
+        - channel_delivery_receipts
+        - channel_delivery_actions
         - channel_onboarding_teardowns
         - run_fork_selected_contract_runtime_executions
         - budget_admission_scopes
@@ -15097,6 +15103,27 @@ platform_tables:
             reason TEXT NOT NULL,
             recorded_at TIMESTAMPTZ NOT NULL,
             UNIQUE (provider, provider_event_id, interface_key)
+        );
+    operator_channel_action_intents:
+      description: >-
+        Verified channel callback facts commit with their inbound publication and publish zero business
+        events. This row is an intent, not verdict or principal authority: processing must recheck the
+        current binding, exact provider receipt, render, card and selected-source authority before
+        replay or mutation. A committed pending row survives callback acknowledgement loss and restart.
+      ddl: |
+        CREATE TABLE operator_channel_action_intents (
+            publication_id UUID PRIMARY KEY,
+            provider TEXT NOT NULL,
+            provider_event_id TEXT NOT NULL,
+            interface_key TEXT NOT NULL,
+            fact JSONB NOT NULL,
+            provider_authorization TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('pending','settled')),
+            disposition TEXT CHECK (disposition IN ('applied','input_started','stale','rejected','unsupported')),
+            recorded_at TIMESTAMPTZ NOT NULL,
+            settled_at TIMESTAMPTZ,
+            CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
+            INDEX idx_operator_channel_action_pending (state, recorded_at)
         );
     runtime_reset_operations:
       description: >-

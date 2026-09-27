@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -37,9 +38,28 @@ type DecisionCardMutation struct {
 	beginInput          decisioncard.BeginInputRequest
 	cancelInput         decisioncard.CancelInputRequest
 	observedContentHash string
+	channelAction       *operatorchannel.InboundAction
 }
 
 func (m DecisionCardMutation) Kind() DecisionCardMutationKind { return m.kind }
+
+func (m DecisionCardMutation) WithChannelAction(fact operatorchannel.InboundAction) (DecisionCardMutation, error) {
+	if m.kind != DecisionCardMutationDecide && m.kind != DecisionCardMutationBeginInput {
+		return DecisionCardMutation{}, fmt.Errorf("channel action cannot authorize this card mutation")
+	}
+	if err := fact.Validate(); err != nil {
+		return DecisionCardMutation{}, err
+	}
+	m.channelAction = &fact
+	return m, nil
+}
+
+func (m DecisionCardMutation) ChannelAction() (operatorchannel.InboundAction, bool) {
+	if m.channelAction == nil {
+		return operatorchannel.InboundAction{}, false
+	}
+	return *m.channelAction, true
+}
 
 func NewDecisionCardDecision(req decisioncard.DecideRequest) DecisionCardMutation {
 	return DecisionCardMutation{kind: DecisionCardMutationDecide, decide: req}
@@ -100,6 +120,12 @@ func (m DecisionCardMutation) ValidateRequest(req apiidempotency.Request) error 
 // semantic field, actor and occurrence stays bound to the acquired operation.
 func (m DecisionCardMutation) SameRequest(other DecisionCardMutation) bool {
 	if m.kind != other.kind || m.observedContentHash != other.observedContentHash {
+		return false
+	}
+	if (m.channelAction == nil) != (other.channelAction == nil) {
+		return false
+	}
+	if m.channelAction != nil && *m.channelAction != *other.channelAction {
 		return false
 	}
 	m.beginInput.TTL, other.beginInput.TTL = 0, 0
