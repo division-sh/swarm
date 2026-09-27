@@ -374,11 +374,10 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		const eventName = "scan.unroutable_requested"
 		bundle := runStartTestBundle(eventName)
-		bundle.FlowTree.Root.Children[0].Events["scan.other_requested"] = runtimecontracts.EventCatalogEntry{}
+		bundle.FlowTree.Root.Children[0].Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
 		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
 			SubscribesTo: []string{"scan.other_requested"},
 		}
-		bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
 		if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 			t.Fatalf("compile declared but unroutable input fixture: %v", err)
 		}
@@ -886,9 +885,6 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
 		Path:  "discovery",
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
-		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
@@ -896,39 +892,41 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": {
-				SubscribesTo: []string{eventName},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					eventName: {},
-				},
+				ExecutionType: "system_node",
+				SubscribesTo:  []string{eventName},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {}},
 			},
 		},
 	}
 	root := runtimecontracts.FlowContractView{
-		Events:   map[string]runtimecontracts.EventCatalogEntry{eventName: {}},
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Path:  ".",
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: eventName}}},
+			},
+			Connect: []runtimecontracts.FlowConnect{{Event: eventName, From: ".", To: "discovery"}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{eventName: {Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}},
+		}}},
 		Children: []runtimecontracts.FlowContractView{flow},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: authorActivityTestSourceArtifact,
 		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": flow.Nodes["scan-orchestrator"],
-		},
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"discovery": flow.Schema,
+		Events:         root.Events,
+		Nodes:          root.Nodes,
+		RootSchema:     &root.Schema,
+		FlowSchemas:    map[string]runtimecontracts.FlowSchemaDocument{"discovery": flow.Schema},
+		FlowSources: map[string]runtimecontracts.FlowSource{
+			".":         {FlowPath: ".", Schema: "schema.yaml", Events: "events.yaml"},
+			"discovery": {FlowPath: "discovery", Schema: "discovery/schema.yaml", Nodes: "discovery/nodes.yaml"},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"discovery": &root.Children[0],
-			},
+			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "discovery": &root.Children[0]},
 		},
 	}
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {

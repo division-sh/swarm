@@ -25,7 +25,11 @@ name: derived-novel-flow
 pins:
   inputs:
     events:
-      - {event: fulfillment.requested, source: external}
+      - fulfillment.requested
+  outputs:
+    events: [fulfillment.requested]
+connect:
+  - {event: fulfillment.requested, from: ., to: fulfillment}
 `
 		rootEvents = `
 fulfillment.requested:
@@ -41,7 +45,7 @@ mode: static
 pins:
   inputs:
     events:
-      - {event: fulfillment.requested, source: external}
+      - fulfillment.requested
 `,
 		"fulfillment/events.yaml": `
 fulfillment.requested:
@@ -57,6 +61,7 @@ complete-request:
 	}
 	if rootEvents != "" {
 		files["events.yaml"] = rootEvents
+		delete(files, "fulfillment/events.yaml")
 	}
 	for relative, body := range files {
 		writeClosedVariantFile(t, root, relative, body)

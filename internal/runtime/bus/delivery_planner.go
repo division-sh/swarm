@@ -52,34 +52,39 @@ func (e *exactDirectRecipientsUnavailableError) Unwrap() error {
 }
 
 type deliveryRouteResolver struct {
-	resolveRoutedSubscribers            func(events.Event) []Subscriber
+	resolveRoutedSubscribers            func(events.Event, []string) []Subscriber
 	resolveSubscribedRecipients         func(string) []deliveryRecipientCandidate
 	resolveRoutedNodeInternalRecipients func(events.Event, []Subscriber) []deliveryRecipientCandidate
 	describeSubscribersForEvent         func(string, []Subscriber) []PublishDiagnosticRecipient
 }
 
 func (r deliveryRouteResolver) Resolve(evt events.Event) deliveryRoutingResult {
-	return r.resolve(evt, nil)
+	return r.resolve(evt, ordinaryPublicationSource{}, nil)
 }
 
-func (r deliveryRouteResolver) ResolveIndependentPubsub(evt events.Event) deliveryRoutingResult {
-	return r.resolve(evt, independentPubsubSubscriber)
+func (r deliveryRouteResolver) ResolveIndependentPubsub(evt events.Event, source ordinaryPublicationSource) deliveryRoutingResult {
+	return r.resolve(evt, source, independentPubsubSubscriber)
 }
 
-func (r deliveryRouteResolver) resolve(evt events.Event, include func(Subscriber) bool) deliveryRoutingResult {
-	routedRecipients := r.resolveRoutedSubscribers(evt)
-	if include != nil {
+func (r deliveryRouteResolver) resolve(evt events.Event, source ordinaryPublicationSource, include func(Subscriber) bool) deliveryRoutingResult {
+	eventKeys := source.eventKeys(evt)
+	routedRecipients := r.resolveRoutedSubscribers(evt, eventKeys)
+	if include != nil || !source.route.Empty() {
 		filtered := make([]Subscriber, 0, len(routedRecipients))
 		for _, subscriber := range routedRecipients {
-			if include(subscriber) {
+			if source.includesSubscriber(subscriber) && (include == nil || include(subscriber)) {
 				filtered = append(filtered, subscriber)
 			}
 		}
 		routedRecipients = filtered
 	}
 	subscribedRecipients := make([]deliveryRecipientCandidate, 0, 8)
-	for _, eventKey := range routedEventKeysForPlan(evt) {
-		subscribedRecipients = append(subscribedRecipients, r.resolveSubscribedRecipients(eventKey)...)
+	for _, eventKey := range eventKeys {
+		for _, candidate := range r.resolveSubscribedRecipients(eventKey) {
+			if source.includesCandidate(candidate) {
+				subscribedRecipients = append(subscribedRecipients, candidate)
+			}
+		}
 	}
 	subscribedRecipients = normalizeDeliveryRecipientCandidates(subscribedRecipients)
 	routedCandidates := routedSubscriberCandidates(evt.RunID(), routedRecipients)
@@ -123,6 +128,10 @@ type deliveryRecipientPolicy struct {
 }
 
 func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate) (deliveryRecipientManifest, error) {
+	return p.evaluate(ctx, evt, recipients, ordinaryPublicationSource{})
+}
+
+func (p deliveryRecipientPolicy) evaluate(ctx context.Context, evt events.Event, recipients []deliveryRecipientCandidate, localSource ordinaryPublicationSource) (deliveryRecipientManifest, error) {
 	projection, projected := selectedRunTargetOwnerProjectionFromContext(ctx)
 	if !projected {
 		var err error
@@ -154,11 +163,11 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 		}
 		return manifest, nil
 	}
-	manifest, err := filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors, projection)
+	manifest, err := filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors, projection, localSource)
 	if err != nil {
 		return deliveryRecipientManifest{}, err
 	}
-	return admitPendingStaticAgentRecipients(evt, recipients, descriptors, projection, manifest)
+	return admitPendingStaticAgentRecipients(evt, recipients, descriptors, projection, manifest, localSource)
 }
 
 func agentLifecycleAdmissionsForCandidates(recipients []deliveryRecipientCandidate) map[agentidentity.Identity]agentLifecycleAdmission {
@@ -181,6 +190,7 @@ func admitPendingStaticAgentRecipients(
 	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
 	projection selectedRunTargetOwnerProjection,
 	manifest deliveryRecipientManifest,
+	localSource ordinaryPublicationSource,
 ) (deliveryRecipientManifest, error) {
 	admitted := false
 	root := rootExecutionCoordinate(projection.source, evt.RunID())
@@ -196,6 +206,9 @@ func admitPendingStaticAgentRecipients(
 			return deliveryRecipientManifest{}, fmt.Errorf("admit static declaration delivery identity: event and agent run ownership disagree")
 		}
 		target, matched := staticAgentLifecycleTarget(evt, identity, root)
+		if len(eventDeliveryTargetRoutes(evt)) == 0 && !localSource.route.Empty() {
+			target, matched = localSource.route, localSource.ownsAgent(identity.FlowInstance())
+		}
 		if !matched {
 			continue
 		}
@@ -278,7 +291,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan,
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(ctx, p.recipientPolicy.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
+	if err := validateRoutedNodeDeliveryAuthority(p.recipientPolicy.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
 		return RoutePlan{}, err
 	}
 	return plan, nil
@@ -376,22 +389,28 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 	if err != nil {
 		return RoutePlan{}, err
 	}
+	projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx)
+	if !ok {
+		return RoutePlan{}, fmt.Errorf("ordinary publication requires selected-run ownership projection")
+	}
+	source, err := projection.ordinarySource(localEvent)
+	if err != nil {
+		return RoutePlan{}, err
+	}
 	include := independentPubsubSubscriber
 	if input, ok := selectedInputValidationFromContext(ctx, evt); ok {
 		include = func(subscriber Subscriber) bool {
 			return independentPubsubSubscriber(subscriber) && input.AllowsSubscriber(subscriber)
 		}
 	}
-	routing := p.routeResolver.resolve(localEvent, include)
-	manifest, err := p.recipientPolicy.Evaluate(ctx, localEvent, routing.Recipients)
+	routing := p.routeResolver.resolve(localEvent, source, include)
+	manifest, err := p.recipientPolicy.evaluate(ctx, localEvent, routing.Recipients, source)
 	if err != nil {
 		return RoutePlan{}, err
 	}
 	routePlan := routePlanFromManifest(localEvent, manifest, routeIntentProducerAgentPolicy)
-	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(p.recipientPolicy.semanticSource, localEvent, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedAPIEventPublicationNodeDeliveryIntents(ctx, p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(p.recipientPolicy.semanticSource, localEvent, routing.RoutedRecipients)...)
+	routePlan.ordinarySource = source
+	routePlan.AddDeliveryIntents(source.localNodeIntents(p.recipientPolicy.semanticSource, localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
 	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients) {
@@ -404,7 +423,7 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 }
 
 func independentPubsubEvent(evt events.Event, clearConnectProjection bool) (events.Event, error) {
-	if !clearConnectProjection || len(eventDeliveryTargetRoutes(evt)) == 0 {
+	if !clearConnectProjection || len(eventDeliveryTargetRoutes(evt)) == 0 || !explicitRootPublicationTarget(evt).Empty() {
 		return evt, nil
 	}
 	localEvent, err := events.ResolveEnvelope(evt, events.EnvelopeForBroadcast(evt.NormalizedEnvelope()))
@@ -414,12 +433,25 @@ func independentPubsubEvent(evt events.Event, clearConnectProjection bool) (even
 	return localEvent, nil
 }
 
+func explicitRootPublicationTarget(evt events.Event) events.RouteIdentity {
+	if evt.RoutingSource().Kind() != events.RoutingSourceRoot {
+		return events.RouteIdentity{}
+	}
+	switch evt.AdmissionClass() {
+	case events.EventAdmissionRootIngress, events.EventAdmissionOperatorInjected, events.EventAdmissionSelectedForkReplay:
+		return evt.TargetRoute().Normalized()
+	default:
+		return events.RouteIdentity{}
+	}
+}
+
 func composeIndependentPubsubBranch(connectPlan, localPlan RoutePlan) RoutePlan {
 	connectPlan = connectPlan.Normalized()
 	localPlan = localPlan.Normalized()
 	if connectPlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || connectPlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
 		return connectPlan
 	}
+	connectPlan.ordinarySource = localPlan.ordinarySource
 	connectPlan.AddLiveRecipients(localPlan.LiveRecipients...)
 	connectPlan.AddDeliveryIntents(localPlan.DeliveryIntents...)
 	connectPlan.RoutedRecipients = dedupeSubscribers(append(connectPlan.RoutedRecipients, localPlan.RoutedRecipients...))
@@ -739,13 +771,62 @@ func agentDeliveryRecipientCandidates(in []string) []deliveryRecipientCandidate 
 }
 
 func routedEventKeysForPlan(evt events.Event) []string {
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
+	out := SourceEventRouteKeys(evt.Type(), evt.RoutingSource())
+	out = append(out, targetedConcreteEventKeysForPlan(evt)...)
+	return uniqueStrings(out)
+}
+
+// SourceEventRouteKeys projects the admitted source occurrence, never a receiver
+// address. Live publication and selected history use the same lookup identity.
+func SourceEventRouteKeys(name events.EventType, source events.RoutingSource) []string {
+	eventType := strings.Trim(strings.TrimSpace(string(name)), "/")
 	if eventType == "" {
 		return nil
 	}
 	out := []string{eventType}
-	out = append(out, targetedConcreteEventKeysForPlan(evt)...)
+	if source.Kind() == events.RoutingSourceRoot {
+		out = append(out, "./"+eventType)
+	}
+	if concrete := sourceFlowInstanceEventKey(name, source); concrete != "" {
+		out = append(out, concrete)
+	}
 	return uniqueStrings(out)
+}
+
+func sourceFlowInstanceEventKey(name events.EventType, source events.RoutingSource) string {
+	eventType := strings.Trim(strings.TrimSpace(string(name)), "/")
+	flowInstance := exactSourceFlowInstance(source)
+	if eventType == "" || flowInstance == "" {
+		return ""
+	}
+	staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
+	if staticScope == "" {
+		return ""
+	}
+	localEvent := eventContextLocalEventForFlowInstance(eventType, staticScope)
+	if localEvent == "" {
+		return ""
+	}
+	return flowInstance + "/" + localEvent
+}
+
+func eventContextLocalEventForFlowInstance(eventType, staticScope string) string {
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	staticScope = strings.Trim(strings.TrimSpace(staticScope), "/")
+	if eventType == "" || staticScope == "" {
+		return ""
+	}
+	if strings.HasPrefix(eventType, staticScope+"/") {
+		localEvent := strings.TrimPrefix(eventType, staticScope+"/")
+		if localEvent == "" || strings.Contains(localEvent, "/") {
+			return ""
+		}
+		return localEvent
+	}
+	if strings.Contains(eventType, "/") {
+		return ""
+	}
+	return eventType
 }
 
 func targetedConcreteEventKeysForPlan(evt events.Event) []string {
@@ -779,7 +860,10 @@ func targetedConcreteEventKeysForPlan(evt events.Event) []string {
 }
 
 func exactEventFlowInstance(evt events.Event) string {
-	source := evt.RoutingSource()
+	return exactSourceFlowInstance(evt.RoutingSource())
+}
+
+func exactSourceFlowInstance(source events.RoutingSource) string {
 	switch source.Kind() {
 	case events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance, events.RoutingSourceFlowOwnedControl:
 		return strings.Trim(strings.TrimSpace(source.Route().FlowInstance), "/")
@@ -821,6 +905,7 @@ func filterDeliveryRecipientCandidates(
 	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
 	targetDescriptors []ActiveTargetDescriptor,
 	projection selectedRunTargetOwnerProjection,
+	localSource ordinaryPublicationSource,
 ) (deliveryRecipientManifest, error) {
 	recipients = normalizeDeliveryRecipientCandidates(recipients)
 	targetFailureDescriptors := append([]ActiveTargetDescriptor(nil), targetDescriptors...)
@@ -833,6 +918,11 @@ func filterDeliveryRecipientCandidates(
 		}, nil
 	}
 	singularTarget := evt.TargetRoute()
+	if len(targets) == 0 && !localSource.route.Empty() {
+		targets = []events.RouteIdentity{localSource.route}
+		singularTarget = localSource.route
+		eventEntityID = localSource.route.EntityID
+	}
 	allowed := make([]string, 0, len(recipients))
 	allowedCandidates := make([]deliveryRecipientCandidate, 0, len(recipients))
 	persisted := make([]string, 0, len(recipients))
@@ -1010,13 +1100,31 @@ func routedExactSameInstanceNoTargetNodeDeliveryIntents(source semanticview.Sour
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerConcreteNodeRoute)
 }
 
-func validateRoutedNodeDeliveryAuthority(ctx context.Context, source semanticview.Source, evt events.Event, routed []Subscriber, plan RoutePlan) error {
+func validateRoutedNodeDeliveryAuthority(source semanticview.Source, evt events.Event, routed []Subscriber, plan RoutePlan) error {
+	// Ingress authenticates the declaring scope, not an arbitrary delivery address.
+	if evt.AdmissionClass() == events.EventAdmissionRootIngress || evt.AdmissionClass() == events.EventAdmissionOperatorInjected {
+		sourceFlow := evt.RoutingSource().Route().FlowID
+		if evt.RoutingSource().Kind() == events.RoutingSourceRoot {
+			sourceFlow = semanticview.RootExecutionFlowID(source)
+		}
+		for _, intent := range plan.DeliveryIntents {
+			if intent.Producer == routeIntentProducerConnectRoutePlan && !intent.ConnectClaim.Empty() {
+				continue
+			}
+			target := intent.TargetOwnership.Route().Normalized()
+			if target.Empty() {
+				target = intent.TargetBlueprint.Normalized()
+			}
+			if target.FlowID != "" && target.FlowID != sourceFlow {
+				return fmt.Errorf("ingress source %q cannot authorize private delivery to %q without a compiled connection", sourceFlow, target.FlowID)
+			}
+		}
+	}
 	if len(routed) == 0 {
 		return nil
 	}
 	hasExplicitTargets := len(eventDeliveryTargetRoutes(evt)) > 0
 	authorized := make(map[routedSubscriberAuthorityKey]struct{}, len(plan.DeliveryIntents))
-	apiAuthorized := make(map[routedSubscriberAuthorityKey]struct{}, len(plan.DeliveryIntents))
 	for _, subscriber := range routed {
 		if !subscriber.Recipient.IsNode() {
 			continue
@@ -1027,9 +1135,6 @@ func validateRoutedNodeDeliveryAuthority(ctx context.Context, source semanticvie
 				continue
 			}
 			authorized[key] = struct{}{}
-			if intent.Producer == routeIntentProducerAPIEventPublication {
-				apiAuthorized[key] = struct{}{}
-			}
 		}
 	}
 	for _, subscriber := range routed {
@@ -1037,26 +1142,6 @@ func validateRoutedNodeDeliveryAuthority(ctx context.Context, source semanticvie
 			continue
 		}
 		key := newRoutedSubscriberAuthorityKey(source, evt, subscriber)
-		selectedByExplicitTarget := !hasExplicitTargets || eventTargetsRoutedSubscriber(source, evt, subscriber)
-		if subscriber.routeSource == subscriberRouteSourceRootInputFlow && evt.AdmissionClass() != events.EventAdmissionRootIngress {
-			if !selectedByExplicitTarget {
-				continue
-			}
-			if input, ok := selectedInputValidationFromContext(ctx, evt); ok && input.AllowsSubscriber(subscriber) {
-				if _, exists := authorized[key]; exists {
-					continue
-				}
-			}
-			if routedAPIEventPublicationAuthorizesSubscriber(ctx, source, evt, subscriber) {
-				if _, ok := apiAuthorized[key]; ok {
-					continue
-				}
-			}
-			return fmt.Errorf(
-				"routed root-input node %q at %q matched event %q without root_ingress or typed API admission",
-				subscriber.Recipient.ID(), strings.TrimSpace(subscriber.Path), evt.Type(),
-			)
-		}
 		if hasExplicitTargets {
 			continue
 		}
@@ -1131,6 +1216,12 @@ func resolvedSelectedRunRootIntentMatchesSubscriber(
 		key.handler.Node().Equal(subscriber.handlerNode) && target.FlowID == handlerFlowID
 }
 
+func routedNodeTargetRoute(targetFlowInstance string) events.RouteIdentity {
+	return events.RouteIdentity{
+		FlowInstance: targetFlowInstance,
+	}.Normalized()
+}
+
 func eventTargetsRoutedSubscriber(source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
 	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, target := range eventDeliveryTargetRoutes(evt) {
@@ -1139,12 +1230,6 @@ func eventTargetsRoutedSubscriber(source semanticview.Source, evt events.Event, 
 		}
 	}
 	return false
-}
-
-func routedNodeTargetRoute(targetFlowInstance string) events.RouteIdentity {
-	return events.RouteIdentity{
-		FlowInstance: targetFlowInstance,
-	}.Normalized()
 }
 
 func routedRootNodeDeliveryIntentsForNoTargetEvent(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
@@ -1169,103 +1254,6 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(source semanticview.Source, e
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerRootNodeRoute)
-}
-
-func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
-	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
-		return nil
-	}
-	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
-	for _, subscriber := range routed {
-		if !routedRootInputFlowNodeMatchesNoTargetEvent(evt, subscriber) {
-			continue
-		}
-		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		out = append(out, RoutePlanDeliveryIntent{
-			Recipient:       subscriber.Recipient,
-			TargetBlueprint: events.RouteIdentity{FlowID: runtimeflowidentity.SemanticScopeFromFlowInstanceRef(path), FlowInstance: path},
-			Handler:         routedSubscriberTargetHandler(subscriber, evt.Type()),
-			Producer:        routeIntentProducerRootInputFlowNode, Persist: true,
-		})
-	}
-	return normalizeRoutePlanDeliveryIntents(out)
-}
-
-func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
-	if len(routed) == 0 {
-		return nil
-	}
-	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
-	for _, subscriber := range routed {
-		if !routedAPIEventPublicationAuthorizesSubscriber(ctx, source, evt, subscriber) {
-			continue
-		}
-		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-		flowID := subscriber.handlerNode.FlowPath()
-		out = append(out, RoutePlanDeliveryIntent{
-			Recipient: subscriber.Recipient,
-			TargetBlueprint: events.RouteIdentity{
-				FlowID: flowID, FlowInstance: path,
-			},
-			Handler:  routedSubscriberTargetHandler(subscriber, evt.Type()),
-			Producer: routeIntentProducerAPIEventPublication,
-			Persist:  true,
-		})
-	}
-	return normalizeRoutePlanDeliveryIntents(out)
-}
-
-func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
-	admission, ok := apiEventPublicationAdmissionFromContext(ctx)
-	return ok && admission.authorizesSubscriber(source, evt, subscriber)
-}
-
-func (admission apiEventPublicationAdmission) authorizesSubscriber(source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
-	if !subscriber.Recipient.IsNode() || admission.eventType != evt.Type() {
-		return false
-	}
-	if len(eventDeliveryTargetRoutes(evt)) > 0 && !eventTargetsRoutedSubscriber(source, evt, subscriber) {
-		return false
-	}
-	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	flowID := subscriber.handlerNode.FlowPath()
-	switch subscriber.routeSource {
-	case subscriberRouteSourceSubscription:
-		return admission.kind == apiEventPublicationEndpointOrdinaryFlow && flowID == admission.flowID && path == admission.flowPath
-	case subscriberRouteSourceRootInputFlow:
-		if evt.AdmissionClass() != events.EventAdmissionOperatorInjected {
-			return false
-		}
-		switch admission.kind {
-		case apiEventPublicationEndpointOrdinaryFlow:
-			return flowID == admission.flowID && path == admission.flowPath
-		case apiEventPublicationEndpointRootInput:
-			return flowID != "" && path != ""
-		default:
-			return false
-		}
-	default:
-		return false
-	}
-}
-
-func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
-	if evt.AdmissionClass() != events.EventAdmissionRootIngress {
-		return false
-	}
-	if !subscriber.Recipient.IsNode() {
-		return false
-	}
-	if subscriber.routeSource != subscriberRouteSourceRootInputFlow {
-		return false
-	}
-	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	if path == "" || path == "." {
-		return false
-	}
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	matchPattern := strings.Trim(strings.TrimSpace(subscriber.MatchPattern), "/")
-	return eventType != "" && eventType == matchPattern
 }
 
 func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber, rootFlowID string) bool {

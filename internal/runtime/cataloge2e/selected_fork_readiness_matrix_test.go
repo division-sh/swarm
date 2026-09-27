@@ -27,7 +27,6 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runcontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -66,14 +65,13 @@ func TestTerminalCommittedUnwindBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				h := newRuntimeHarnessForBackend(t, selectedForkReadinessCatalogFixture(t, 0, "node"), backend, true)
 				path := "worker-flow/worker-001"
-				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
+				materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
 				ctx, cancel := context.WithCancel(catalogRunContext(h, catalogRuntimeRunID))
 				defer cancel()
 				probe := &terminalUnwindProbe{mode: mode, cancel: cancel}
 				h.rt.Pipeline.SetTestLifecycleProbe(probe)
-				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/worker.inspect"), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entity), path),
-					eventtest.ConcreteTemplateRoutingSource("worker-flow", path, entity), time.Now().UTC())
+				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("worker.inspect"), "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
+					events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
 				publishErr := h.rt.Bus.PublishAndWait(ctx, event)
 				if probe.calls.Load() != 1 {
 					t.Fatalf("terminal injection was not reached once: calls=%d err=%v", probe.calls.Load(), publishErr)
@@ -181,7 +179,7 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 				h.rt.Pipeline.SetTestLifecycleProbe(probe)
 				ctx, cancel := context.WithTimeout(catalogRunContext(h, catalogRuntimeRunID), 10*time.Second)
 				defer cancel()
-				event := catalogRunScopedWorkerReadyEvent(t, catalogRuntimeRunID, path, entity, uuid.NewString())
+				event := catalogRunScopedWorkerReadyEvent(t, catalogRuntimeRunID, uuid.NewString())
 				if err := h.rt.Bus.PublishAndWait(ctx, event); err != nil {
 					t.Fatalf("ordinary two-agent terminal execution: %v", err)
 				}
@@ -206,7 +204,7 @@ func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
 					if item.EventName == path+"/worker.observed" {
 						outputs++
 					}
-					if item.EventName != path+"/worker.ready" {
+					if item.EventName != "worker-flow/worker.ready" {
 						continue
 					}
 					for _, delivery := range item.Deliveries {
@@ -409,7 +407,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						continue
 					}
 					t.Run(fmt.Sprintf("%s/declared_%d/%s/%s", backend, declarations, frontier, stage), func(t *testing.T) {
-						root := selectedForkReadinessCatalogFixture(t, declarations, frontier)
+						root := localReadinessFixture(t, declarations, frontier)
 						var activityCalls atomic.Int32
 						if activityFrontier {
 							server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -435,21 +433,12 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						h := newRuntimeHarnessForBackend(t, root, backend, true)
 						selected := runScopedCatalogStore(t, h)
 						path := "worker-flow/worker-001"
-						entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path)
 						ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
-						if _, err := selected.PauseRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: catalogRuntimeRunID, Reason: "readiness matrix", ControlledBy: "cataloge2e"}); err != nil {
-							t.Fatal(err)
-						}
 						eventName := "worker.inspect"
 						if frontier != "node" && !activityFrontier {
 							eventName = "worker.ready"
 						}
-						event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/"+eventName), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
-							events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entity), path),
-							eventtest.ConcreteTemplateRoutingSource("worker-flow", path, entity), time.Now().UTC())
-						if err := h.rt.Bus.PublishAndWait(ctx, event); err != nil {
-							t.Fatal(err)
-						}
+						frontierID := activateLocalReadinessFrontier(t, ctx, h, eventName)
 						owner, err := flowidentity.NewRunScopedFlowInstance(catalogRuntimeRunID, flowidentity.RouteForInstancePath(path))
 						if err != nil {
 							t.Fatal(err)
@@ -499,10 +488,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						}
 						var result forkexecution.SelectedContractExecutionResult
 						if stage == "staged" {
-							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, event.ID())
+							result.Materialization = stageCatalogSelectedContractFork(t, ctx, forkStore, executionOwner, loader, selection, options, catalogRuntimeRunID, frontierID)
 						} else {
 							result, err = forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
-								SourceRunID: catalogRuntimeRunID, At: event.ID(), AllowSourceFreeze: true,
+								SourceRunID: catalogRuntimeRunID, At: frontierID, AllowSourceFreeze: true,
 								Owner: executionOwner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 							})
 						}
@@ -573,6 +562,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						forkState, found, err := h.workflow.Load(ctx, forkOwner)
 						fenced := (frontier == "mixed" || frontier == "activity_rejected") && stage == "initial"
 						if err != nil || (fenced && found) || (!fenced && (!found || forkState.Config["worker_id"] != "worker-001")) {
+							logSelectedForkRecoveryFailure(t, ctx, h, forkRun, err)
 							t.Fatalf("fork flow: %#v found=%t err=%v", forkState, found, err)
 						}
 						readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, forkRun, owner.Route)

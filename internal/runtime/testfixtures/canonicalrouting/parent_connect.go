@@ -42,7 +42,7 @@ func CopyParentConnectEventMetadataAuthority(t testing.TB) string {
 		"      - work.ready\n      - deploy.done\n")
 	applyClosedReplacement(t, consumerSchema,
 		"      - work.ready\n",
-		"      - work.ready\n      - event: deploy.completed\n        source: external\n")
+		"      - work.ready\n      - deploy.completed\n")
 	return root
 }
 

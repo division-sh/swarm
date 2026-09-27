@@ -3,6 +3,7 @@ package semanticview
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -201,11 +202,12 @@ func (p ConnectorPackProvenance) Valid() bool {
 }
 
 type providerTriggerCapabilities struct {
-	base       Source
-	generation triggergeneration.Generation
-	targetFree []runtimeprovideroutput.Authorization
-	provenance []ProviderTriggerEventProvenance
-	schemas    map[string]runtimecontracts.CompiledEventSchema
+	base          Source
+	generation    triggergeneration.Generation
+	outputs       map[string][]runtimeprovideroutput.Authorization
+	ingressEvents map[string][]string
+	provenance    []ProviderTriggerEventProvenance
+	schemas       map[string]runtimecontracts.CompiledEventSchema
 }
 
 // WithProviderTriggerSchemaReadback retains the admitted provider catalog for
@@ -293,24 +295,30 @@ type Capabilities struct {
 	connectorPacks  *connectorPackCapabilities
 }
 
-func (c Capabilities) WithProviderTriggerEvents(base Source, generation triggergeneration.Generation, targetFree []runtimeprovideroutput.Authorization) Capabilities {
+func (c Capabilities) WithProviderTriggerEvents(base Source, generation triggergeneration.Generation, outputs map[string][]runtimeprovideroutput.Authorization) Capabilities {
 	out := c
 	if base == nil || !generation.Valid() {
 		out.providerTrigger = nil
 		return out
 	}
-	authorizations := make([]runtimeprovideroutput.Authorization, len(targetFree))
-	for index, authorization := range targetFree {
-		if !authorization.Valid() {
+	bindings := make(map[string][]runtimeprovideroutput.Authorization, len(outputs))
+	for flowID, authorizations := range outputs {
+		if flowID == "" || flowID != strings.TrimSpace(flowID) {
 			out.providerTrigger = nil
 			return out
 		}
-		authorizations[index] = authorization
+		for _, authorization := range authorizations {
+			if !authorization.Valid() || !authorization.Generation().Equal(generation) {
+				out.providerTrigger = nil
+				return out
+			}
+		}
+		bindings[flowID] = append([]runtimeprovideroutput.Authorization(nil), authorizations...)
 	}
 	out.providerTrigger = &providerTriggerCapabilities{
 		base:       base,
 		generation: generation,
-		targetFree: authorizations,
+		outputs:    bindings,
 	}
 	return out
 }
@@ -335,13 +343,67 @@ func (c Capabilities) WithProviderTriggerRebuildBase(base Source) Capabilities {
 	return out
 }
 
-func (c Capabilities) ProviderTriggerTargetFreeAuthorizations() []runtimeprovideroutput.Authorization {
+// WithProviderIngressEvents records successfully compiled ingress declarations.
+func (c Capabilities) WithProviderIngressEvents(events map[string][]string) Capabilities {
+	out := c
+	if out.providerTrigger == nil {
+		return out
+	}
+	provider := *out.providerTrigger
+	provider.ingressEvents = make(map[string][]string, len(events))
+	for flowID, names := range events {
+		provider.ingressEvents[flowID] = append([]string(nil), names...)
+		sort.Strings(provider.ingressEvents[flowID])
+	}
+	out.providerTrigger = &provider
+	return out
+}
+
+func (c Capabilities) ProviderIngressEvents() map[string][]string {
 	if c.providerTrigger == nil {
 		return nil
 	}
-	out := make([]runtimeprovideroutput.Authorization, len(c.providerTrigger.targetFree))
-	copy(out, c.providerTrigger.targetFree)
+	out := make(map[string][]string, len(c.providerTrigger.ingressEvents))
+	for flowID, names := range c.providerTrigger.ingressEvents {
+		out[flowID] = append([]string(nil), names...)
+	}
 	return out
+}
+
+func (c Capabilities) HasProviderIngressEvent(flowID, event string) bool {
+	if c.providerTrigger == nil {
+		return false
+	}
+	for _, name := range c.providerTrigger.ingressEvents[flowID] {
+		if name == event {
+			return true
+		}
+	}
+	return false
+}
+
+// ProviderTriggerOutputBindings records outputs of actual ingress declarations.
+// Schema import scopes are separate and never create a binding or a receiver.
+func (c Capabilities) ProviderTriggerOutputBindings() map[string][]runtimeprovideroutput.Authorization {
+	if c.providerTrigger == nil {
+		return nil
+	}
+	out := make(map[string][]runtimeprovideroutput.Authorization, len(c.providerTrigger.outputs))
+	for flowID, authorizations := range c.providerTrigger.outputs {
+		out[flowID] = append([]runtimeprovideroutput.Authorization(nil), authorizations...)
+	}
+	return out
+}
+
+func (c Capabilities) ProviderTriggerOutputAuthorization(flowID, event string) (runtimeprovideroutput.Authorization, bool) {
+	if c.providerTrigger != nil {
+		for _, authorization := range c.providerTrigger.outputs[flowID] {
+			if authorization.Event() == event {
+				return authorization, true
+			}
+		}
+	}
+	return runtimeprovideroutput.Authorization{}, false
 }
 
 func (c Capabilities) WithProviderTriggerEventProvenance(provenance []ProviderTriggerEventProvenance) Capabilities {

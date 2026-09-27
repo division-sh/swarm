@@ -1,4 +1,2 @@
 review.requested:
-  swarm:
-    source: external
   title: text?

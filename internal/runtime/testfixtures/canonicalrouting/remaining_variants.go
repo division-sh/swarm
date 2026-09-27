@@ -50,7 +50,6 @@ pins:
     events: [opco.spend_requested]
 `)
 	writeClosedVariantFile(t, root, "treasury/events.yaml", `opco.spend_requested:
-  swarm: {source: external}
   vertical_id: string
   amount_usd: number
 opco.spend_recorded:
@@ -117,8 +116,6 @@ pins:
 		t.Fatalf("unsupported root static entity ID variant %d", entityID)
 	}
 	writeClosedVariantFile(t, root, "events.yaml", `subject.created:
-  swarm:
-    source: external
 `+entityIDField+`  display_name: string?
 subject.observed:
 `+entityIDField+`  display_name: string?
@@ -175,9 +172,10 @@ stages:
 pins:
   inputs:
     events:
-      - {event: order.started, source: external}
-      - {event: order.dispatched, source: external}
-      - {event: item.completed, source: external}
+      - order.started
+      - order.dispatched
+      - item.completed
+      - fork.probe
 `,
 		"entities.yaml": `order:
   expected:
@@ -191,18 +189,14 @@ pins:
     ok: boolean
 `,
 		"events.yaml": `order.started:
-  swarm: {source: external}
   expected: "[text]"
   dispatch_id: text
-order.dispatched:
-  swarm: {source: external}
+order.dispatched: {}
 item.completed:
-  swarm: {source: external}
   dispatch_id: text
   member_id: text
   result: JoinResult
 fork.probe:
-  swarm: {source: external}
   marker: text
 `,
 		"nodes.yaml": `starter:
@@ -263,7 +257,7 @@ initial_state: new
 terminal_states: [done]
 states: [new, done]
 `,
-		"events.yaml": "scan.requested:\n  swarm: {source: external}\n  topic: text\n",
+		"events.yaml": "scan.requested:\n  topic: text\n",
 		"nodes.yaml":  "scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
 		"operating/schema.yaml": `name: operating
 mode: static
@@ -280,7 +274,7 @@ states: [initializing, waiting, ready]
   review_scores: map[text]integer
 `,
 		"operating/types.yaml":  "types:\n  Brief:\n    summary: text\n  Feature:\n    name: text\n",
-		"operating/events.yaml": "opco.product_review_requested:\n  swarm: {source: external}\n  note: text\n",
+		"operating/events.yaml": "opco.product_review_requested:\n  note: text\n",
 		"operating/nodes.yaml": `reviewer:
   execution_type: system_node
   subscribes_to: [opco.product_review_requested]
@@ -345,8 +339,6 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 		"schema.yaml": "name: empire-outbox\npins:\n  outputs:\n    events: [opco.create_requested]\nconnect:\n  - {event: opco.create_requested, from: ., to: operating}\n",
 
 		"events.yaml": `approval.completed:
-  swarm:
-    source: external
   entity_id: string?
   instance_id: string
   product_id: string
@@ -439,7 +431,17 @@ func CopyProviderRollback(t testing.TB, withHandler bool) string {
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `,
-		"schema.yaml": "name: provider-rollback-proof\n",
+		"schema.yaml": `name: provider-rollback-proof
+pins:
+  inputs:
+    events: [inbound.telegram]
+  outputs:
+    events: [inbound.telegram.text_message]
+connect:
+  - event: inbound.telegram.text_message
+    from: .
+    to: consumer
+`,
 		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
 		"consumer/schema.yaml": `name: consumer
 mode: template
@@ -448,7 +450,6 @@ pins:
   inputs:
     events:
       - event: inbound.telegram.text_message
-        source: external
         resolution: {mode: select-or-create}
 `,
 		"consumer/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n",

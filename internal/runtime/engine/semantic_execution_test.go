@@ -62,10 +62,10 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 		if req.Event.ProducerType() == "" {
 			return ExecutionResult{}, fmt.Errorf("complete engine root fixture: producer type is required")
 		}
-		req.Event = eventtest.RunCreatingRootIngressWithMode(
+		req.Event = eventtest.RunCreatingRootIngressWithRoutingSourceAndMode(
 			req.Event.ID(), req.Event.Type(), req.Event.Producer().ID(), req.Event.TaskID(),
 			req.Event.Payload(), req.Event.ChainDepth(), semanticExecutionFixtureRunID, "",
-			req.Event.NormalizedEnvelope(), req.Event.CreatedAt(), req.Event.ExecutionMode(),
+			req.Event.NormalizedEnvelope(), req.Event.RoutingSource(), req.Event.CreatedAt(), req.Event.ExecutionMode(),
 		)
 	}
 	if req.ProducerSource.Empty() {

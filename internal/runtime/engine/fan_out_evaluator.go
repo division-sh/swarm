@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -111,13 +110,8 @@ func (e *Executor) PrepareFanOutEvaluation(ctx context.Context, intent fanoutobl
 	base.Metadata = values.Wrap(cloneStringAnyMap(capsule.StateFields))
 	base.Gates = values.Wrap(boolMapToAnyMap(capsule.StateGates))
 
-	var target events.DeliveryTargetOwnership
-	if capsule.Receiver != nil {
-		target = capsule.Receiver.Target
-	}
 	frame := &executionFrame{
-		ctx:            ctx,
-		deliveryTarget: runtimepinrouting.ClassifyExecutionReceiverTarget(target, capsule.Receiver != nil),
+		ctx: ctx,
 		req: ExecutionRequest{
 			ExecutionID: intent.Request.Key.String(), EntityID: identity.NormalizeEntityID(capsule.EntityID), Node: node,
 			ExecutionFlowID: identity.NormalizeFlowID(capsule.ExecutionFlowID), Route: capsule.Route,

@@ -66,7 +66,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	const (
 		runID             = "41000000-0000-0000-0000-000000000001"
 		entityID          = "41000000-0000-0000-0000-000000000002"
-		flowInstance      = "github-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "github"
 		webhookSecret     = "github-secret"
@@ -169,7 +169,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	const (
 		runID             = "42000000-0000-0000-0000-000000000001"
 		entityID          = "42000000-0000-0000-0000-000000000002"
-		flowInstance      = "slack-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "slack"
 		webhookSecret     = "slack-secret"
@@ -272,7 +272,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	const (
 		runID             = "43000000-0000-0000-0000-000000000001"
 		entityID          = "43000000-0000-0000-0000-000000000002"
-		flowInstance      = "stripe-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "stripe"
 		webhookSecret     = "stripe-secret"
@@ -374,7 +374,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	const (
 		runID             = "44000000-0000-0000-0000-000000000001"
 		entityID          = "44000000-0000-0000-0000-000000000002"
-		flowInstance      = "stripe-sqlite-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "stripe"
 		webhookSecret     = "stripe-secret"
@@ -436,7 +436,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	const (
 		runID             = "45000000-0000-0000-0000-000000000001"
 		entityID          = "45000000-0000-0000-0000-000000000002"
-		flowInstance      = "twilio-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "twilio"
 		webhookSecret     = "twilio-secret"
@@ -499,7 +499,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	const (
 		runID             = "46000000-0000-0000-0000-000000000001"
 		entityID          = "46000000-0000-0000-0000-000000000002"
-		flowInstance      = "twilio-sqlite-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "twilio"
 		webhookSecret     = "twilio-secret"
@@ -565,7 +565,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	const (
 		runID             = "47000000-0000-0000-0000-000000000001"
 		entityID          = "47000000-0000-0000-0000-000000000002"
-		flowInstance      = "shopify-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "shopify"
 		webhookSecret     = "shopify-secret"
@@ -624,7 +624,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	const (
 		runID             = "48000000-0000-0000-0000-000000000001"
 		entityID          = "48000000-0000-0000-0000-000000000002"
-		flowInstance      = "shopify-sqlite-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "shopify"
 		webhookSecret     = "shopify-secret"
@@ -686,7 +686,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	const (
 		runID             = "4d000000-0000-0000-0000-000000000001"
 		entityID          = "4d000000-0000-0000-0000-000000000002"
-		flowInstance      = "telegram-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "telegram"
 		webhookSecret     = "telegram-secret"
@@ -730,7 +730,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
-	requireInboundGatewayAuthorProjection(t, ctx, pg, runID, entityID, "hello", "chat", "42")
+	requireInboundGatewayAuthorProjection(t, ctx, pg, runID, entityID, "chat", "42")
 	record, found, err := pg.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
@@ -755,7 +755,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	const (
 		runID             = "4e000000-0000-0000-0000-000000000001"
 		entityID          = "4e000000-0000-0000-0000-000000000002"
-		flowInstance      = "telegram-sqlite-provider-trigger-instance"
+		flowInstance      = boundedProviderFlowID
 		entitySlug        = "customer-a"
 		provider          = "telegram"
 		webhookSecret     = "telegram-secret"
@@ -799,7 +799,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
 		t.Fatalf("agent delivery rows = %d, want 1", got)
 	}
-	requireInboundGatewayAuthorProjection(t, ctx, sqliteStore, runID, entityID, "hello sqlite", "chat", "42")
+	requireInboundGatewayAuthorProjection(t, ctx, sqliteStore, runID, entityID, "chat", "42")
 	record, found, err := sqliteStore.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
 	if err != nil || !found {
 		t.Fatalf("LoadInboundPublicationByIdentity = found:%v err:%v", found, err)
@@ -861,7 +861,6 @@ func requireInboundGatewayAuthorProjection(
 	reader inboundAuthorActivityReader,
 	runID string,
 	entityID string,
-	wantSummary string,
 	wantSubjectType string,
 	wantSubjectID string,
 ) {
@@ -883,9 +882,6 @@ func requireInboundGatewayAuthorProjection(
 	if occurrence.EntityID != entityID {
 		t.Fatalf("inbound author entity_id = %q, want %q", occurrence.EntityID, entityID)
 	}
-	if occurrence.AuthorSafeSummary != wantSummary {
-		t.Fatalf("inbound author summary = %q, want declared %q", occurrence.AuthorSafeSummary, wantSummary)
-	}
 	if occurrence.Projection.AuthorSubjectType != wantSubjectType || occurrence.Projection.AuthorSubjectID != wantSubjectID {
 		t.Fatalf(
 			"inbound author subject = %q/%q, want declared %q/%q",
@@ -899,7 +895,7 @@ func requireInboundGatewayAuthorProjection(
 	if err != nil {
 		t.Fatalf("marshal inbound author occurrence: %v", err)
 	}
-	for _, forbidden := range []string{"root-must-not-enter-author-story", "private-must-not-enter-author-story", "undeclared_root", "undeclared_private"} {
+	for _, forbidden := range []string{"author_safe_summary", "hello", "root-must-not-enter-author-story", "private-must-not-enter-author-story", "undeclared_root", "undeclared_private"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("inbound author occurrence leaked undeclared payload marker %q: %s", forbidden, encoded)
 		}
@@ -925,7 +921,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			name:              "typeform",
 			runID:             "49000000-0000-0000-0000-000000000001",
 			entityID:          "49000000-0000-0000-0000-000000000002",
-			flowInstance:      "typeform-provider-trigger-instance",
+			flowInstance:      boundedProviderFlowID,
 			provider:          "typeform",
 			webhookSecret:     "typeform-secret",
 			providerEventID:   "tf-evt-pg-123",
@@ -939,7 +935,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			name:              "intercom",
 			runID:             "4a000000-0000-0000-0000-000000000001",
 			entityID:          "4a000000-0000-0000-0000-000000000002",
-			flowInstance:      "intercom-provider-trigger-instance",
+			flowInstance:      boundedProviderFlowID,
 			provider:          "intercom",
 			webhookSecret:     "intercom-secret",
 			providerEventID:   "notif_pg_123",
@@ -1020,7 +1016,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			name:              "typeform",
 			runID:             "4b000000-0000-0000-0000-000000000001",
 			entityID:          "4b000000-0000-0000-0000-000000000002",
-			flowInstance:      "typeform-sqlite-provider-trigger-instance",
+			flowInstance:      boundedProviderFlowID,
 			provider:          "typeform",
 			webhookSecret:     "typeform-secret",
 			providerEventID:   "tf-evt-sqlite-123",
@@ -1034,7 +1030,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			name:              "intercom",
 			runID:             "4c000000-0000-0000-0000-000000000001",
 			entityID:          "4c000000-0000-0000-0000-000000000002",
-			flowInstance:      "intercom-sqlite-provider-trigger-instance",
+			flowInstance:      boundedProviderFlowID,
 			provider:          "intercom",
 			webhookSecret:     "intercom-secret",
 			providerEventID:   "notif_sqlite_123",

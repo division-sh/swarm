@@ -96,10 +96,11 @@ func CopyTemplateSelectAgentOnlyWithUnrelatedNode(t testing.TB) string {
 
 func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState string) {
 	t.Helper()
-	producerEvents := filepath.Join(root, "producer", "events.yaml")
 	for _, event := range []string{"account.requested", "account.ready"} {
+		producerEvents := filepath.Join(root, "events.yaml")
 		key, fieldType := "", "text"
 		if event == "account.ready" {
+			producerEvents = filepath.Join(root, "producer", "events.yaml")
 			key = "  key: account_id\n"
 			fieldType = "text"
 		}
@@ -184,6 +185,10 @@ func CopyNestedProducerTemplateSelectResolution(t testing.TB, opts TemplateSelec
 	if err := os.Rename(filepath.Join(root, "producer"), nestedProducer); err != nil {
 		t.Fatalf("move producer into nested flow: %v", err)
 	}
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    to: producer\n", "    to: left/child/producer\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
+		"  - event: account.work.requested\n    from: .\n    to: producer\n",
+		"  - event: account.work.requested\n    from: .\n    to: left/child/producer\n")
 	for _, event := range []string{"account.setup", "account.ready"} {
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 			"  - event: "+event+"\n    from: producer\n    to: account\n",

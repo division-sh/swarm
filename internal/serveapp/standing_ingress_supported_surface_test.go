@@ -40,6 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type telegramPhraseBotLLMRuntime struct {
@@ -1272,6 +1273,38 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 	if err != nil {
 		t.Fatalf("read standing manifest: %v", err)
 	}
+	rootSchemaPath := filepath.Join(sourceRoot, "schema.yaml")
+	baseRootSchema, err := os.ReadFile(rootSchemaPath)
+	if err != nil {
+		t.Fatalf("read root connection schema: %v", err)
+	}
+	removeConnectedReceiver := func(t *testing.T) {
+		t.Helper()
+		// The removed chat flow owns the tool used by the root smoke scenario.
+		// Retire its executable test declaration too, rather than leave a dangling double.
+		for _, name := range []string{"telegram-chat", "tests"} {
+			original := filepath.Join(sourceRoot, name)
+			removed := filepath.Join(t.TempDir(), name)
+			if err := os.Rename(original, removed); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.Rename(removed, original); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		var schema map[string]any
+		if err := yaml.Unmarshal(baseRootSchema, &schema); err != nil {
+			t.Fatal(err)
+		}
+		delete(schema, "connect")
+		raw, err := yaml.Marshal(schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeStandingCandidateFile(t, rootSchemaPath, string(raw))
+	}
 	flowDir := filepath.Join(sourceRoot, "telegram-ingress")
 	flowSchemaPath := filepath.Join(flowDir, "schema.yaml")
 	baseFlowSchema, err := os.ReadFile(flowSchemaPath)
@@ -1297,6 +1330,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			writeStandingCandidateFile(t, manifestPath, strings.Replace(string(baseManifest), "name: telegram-agent", "name: renamed-telegram-agent", 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
 		{name: "standing declaration removed", apply: func(t *testing.T) {
+			removeConnectedReceiver(t)
 			removedDir := filepath.Join(t.TempDir(), filepath.Base(flowDir))
 			if err := os.Rename(flowDir, removedDir); err != nil {
 				t.Fatalf("remove standing flow directory from the admitted tree: %v", err)
@@ -1306,14 +1340,22 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			})
 		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "standing changed to non-standing", apply: func(t *testing.T) {
-			nonStandingSchema := canonicalrouting.WithoutStandingIngressPins(t, string(baseFlowSchema))
-			nonStandingSchema = strings.Replace(nonStandingSchema, "activation: standing\n", "", 1)
-			if ingress := strings.Index(nonStandingSchema, "\ningress:\n"); ingress >= 0 {
-				nonStandingSchema = nonStandingSchema[:ingress+1]
+			removeConnectedReceiver(t)
+			var schema map[string]any
+			if err := yaml.Unmarshal(baseFlowSchema, &schema); err != nil {
+				t.Fatal(err)
 			}
-			writeStandingCandidateFile(t, flowSchemaPath, nonStandingSchema)
+			delete(schema, "pins")
+			delete(schema, "activation")
+			delete(schema, "ingress")
+			raw, err := yaml.Marshal(schema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeStandingCandidateFile(t, flowSchemaPath, string(raw))
 		}, wantOutput: []string{" orphaned declaration_removed=true"}},
 		{name: "flow identity renamed", apply: func(t *testing.T) {
+			writeStandingCandidateFile(t, rootSchemaPath, strings.Replace(string(baseRootSchema), "from: telegram-ingress", "from: telegram-ingress-v2", 1))
 			renamedDir := filepath.Join(sourceRoot, "telegram-ingress-v2")
 			if err := os.Rename(flowDir, renamedDir); err != nil {
 				t.Fatalf("rename flow directory: %v", err)
@@ -1328,6 +1370,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 	for _, mutation := range mutations {
 		mutation := mutation
 		t.Run(mutation.name, func(t *testing.T) {
+			writeStandingCandidateFile(t, rootSchemaPath, string(baseRootSchema))
 			writeStandingCandidateFile(t, manifestPath, string(baseManifest))
 			writeStandingCandidateFile(t, flowSchemaPath, string(baseFlowSchema))
 			if _, err := os.Stat(flowDir); err != nil {
@@ -1340,6 +1383,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			requireChangedStandingColdStartReconciled(t, opts, mutation.wantOutput...)
 		})
 	}
+	writeStandingCandidateFile(t, rootSchemaPath, string(baseRootSchema))
 	writeStandingCandidateFile(t, manifestPath, string(baseManifest))
 	writeStandingCandidateFile(t, flowSchemaPath, string(baseFlowSchema))
 }

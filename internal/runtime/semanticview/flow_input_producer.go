@@ -73,15 +73,12 @@ func resolveNonConnectFlowInputProducer(source Source, flowID, eventType string,
 	var pins []runtimecontracts.CompiledFlowInputPin
 	if isInputEvent {
 		pins = flowInputPinsForEvent(source, census, flowID, eventType)
-	}
-	if isInputEvent && !opts.AllowNonInputEvent {
-		appendBoundaryIngressEvidence(pins, flowID, eventType, opts, appendEvidence)
-	} else {
-		appendExternalMetadataEvidence(source, flowID, eventType, appendEvidence)
+		appendBoundaryIngressEvidence(source, flowID, eventType, appendEvidence)
 	}
 	if isInputEvent {
 		appendHarnessInputEvidence(pins, flowID, eventType, appendEvidence)
 	}
+	appendProviderIngressEvidence(source, flowID, eventType, appendEvidence)
 	appendPlatformSourceEvidence(source, flowID, eventType, appendEvidence)
 	appendInternalTopologyEvidence(census, flowID, eventType, appendEvidence)
 
@@ -93,25 +90,17 @@ func resolveNonConnectFlowInputProducer(source Source, flowID, eventType string,
 	return out
 }
 
-func appendBoundaryIngressEvidence(pins []runtimecontracts.CompiledFlowInputPin, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	if flowID == "." && !opts.AllowNonInputEvent {
+func appendBoundaryIngressEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
+	if flowID == "." {
+		if _, public := SelectedRootInputPin(source, eventType); !public {
+			return
+		}
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryExternalIngress,
 			EventType: eventType,
 			Detail:    "root input pin is externally ingressible",
 		})
 		return
-	}
-	for _, pin := range pins {
-		if pin.Source() != runtimecontracts.FlowInputPinSourceExternal {
-			continue
-		}
-		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-			Kind:      runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress,
-			EventType: eventType,
-			Pin:       pin.EventType(),
-			Detail:    "input pin declares source: external",
-		})
 	}
 }
 
@@ -145,31 +134,24 @@ func appendPlatformSourceEvidence(source Source, flowID, eventType string, appen
 			return
 		}
 	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	if ok && eventMetadataPlatformSource(entry.SwarmSource()) {
-		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-			Kind:      runtimecontracts.FlowInputProducerPlatformSource,
-			EventType: eventType,
-			Detail:    "event metadata swarm.source: platform",
-		})
-	}
 }
 
-func appendExternalMetadataEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	if !ok || !eventMetadataExternalSource(entry.SwarmSource()) {
-		return
+func appendProviderIngressEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
+	for _, candidate := range uniqueFlowInputProducerEvents(eventType, source.ResolveFlowEventReference(flowID, eventType)) {
+		if source.SemanticCapabilities().HasProviderIngressEvent(flowID, candidate) {
+			appendEvidence(runtimecontracts.FlowInputProducerEvidence{
+				Kind:   runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress,
+				FlowID: flowID, EventType: candidate,
+				Detail: "compiled provider ingress declaration",
+			})
+			return
+		}
 	}
-	appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-		Kind:      runtimecontracts.FlowInputProducerBoundaryExternalIngress,
-		EventType: eventType,
-		Detail:    "event metadata swarm.source: external",
-	})
 }
 
 func appendInternalTopologyEvidence(census AuthoredEventEndpointCensus, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	for _, endpoint := range census.MatchingProducers(flowID, eventType) {
-		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform {
+		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform || endpoint.Kind == EventEndpointRequiredAgentRole {
 			continue
 		}
 		detail := endpoint.ProducerDescription()
@@ -245,14 +227,6 @@ func uniqueFlowInputProducerEvents(values ...string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func eventMetadataPlatformSource(source string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "platform")
-}
-
-func eventMetadataExternalSource(source string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "external")
 }
 
 func flowInputProducerEvidenceSortKey(evidence runtimecontracts.FlowInputProducerEvidence) string {

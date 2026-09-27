@@ -22,9 +22,6 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 		"appendUniqueSubscriber": {
 			"resolvedSubscriberRoleKey": false,
 		},
-		"appendUniqueRootInputSubscriber": {
-			"appendUniqueSubscriber": false,
-		},
 		"dedupeSubscribers": {
 			"resolvedSubscriberRoleKey": false,
 		},

@@ -16,7 +16,7 @@ import (
 
 func TestCompileRequiresExactInputWhenAmbiguousAndBindsEmptyProfile(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	root := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
+	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func TestCompileRequiresExactInputWhenAmbiguousAndBindsEmptyProfile(t *testing.T
 	fact, _ := runtimecorrelation.NewSourceArtifactFact(hash)
 	identity, _ := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("a", 64))
 	source := semanticview.Wrap(bundle)
-	inputs := semanticview.BuildAuthoredEventEndpointCensus(source).InputPins()
+	inputs := semanticview.SelectedRootInputEndpoints(source)
 	if len(inputs) == 0 {
 		t.Fatal("fixture has no public inputs")
 	}
@@ -48,16 +48,16 @@ func TestCompileRequiresExactInputWhenAmbiguousAndBindsEmptyProfile(t *testing.T
 
 func TestCompileInputSelectionFailsClosedAndAllInputsIsDeterministic(t *testing.T) {
 	source, identity := derivationHostileTestSource(t)
-	if _, err := Compile(source, identity, Request{FlowID: "work"}); err == nil || !strings.Contains(err.Error(), "multiple public inputs") || !strings.Contains(err.Error(), "--input") {
+	if _, err := Compile(source, identity, Request{FlowID: "."}); err == nil || !strings.Contains(err.Error(), "multiple public inputs") || !strings.Contains(err.Error(), "--input") {
 		t.Fatalf("ambiguous input error = %v", err)
 	}
-	if _, err := Compile(source, identity, Request{FlowID: "missing"}); err == nil || !strings.Contains(err.Error(), "no public input") {
+	if _, err := Compile(source, identity, Request{FlowID: "missing"}); err == nil || !strings.Contains(err.Error(), "select the child directory") {
 		t.Fatalf("missing flow error = %v", err)
 	}
-	if _, err := Compile(source, identity, Request{FlowID: "work", Input: "missing"}); err == nil || !strings.Contains(err.Error(), "no public input") {
+	if _, err := Compile(source, identity, Request{FlowID: ".", Input: "missing"}); err == nil || !strings.Contains(err.Error(), "no public input") {
 		t.Fatalf("missing input error = %v", err)
 	}
-	plans, err := Compile(source, identity, Request{FlowID: "work", AllInputs: true})
+	plans, err := Compile(source, identity, Request{FlowID: ".", AllInputs: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestCompileGeneratedBaseOverlayUsesCanonicalValidation(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/scenarioderivation/testdata/hostile"))
 	source, identity := derivationHostileTestSource(t)
 	plans, err := Compile(source, identity, Request{
-		FlowID: "work", Input: "work.requested",
+		FlowID: ".", Input: "work.requested",
 		Set: map[string]any{
 			"mode": "fast", "details": map[string]any{"count": 7}, "tags": []any{"alpha", "beta"},
 		},
@@ -98,7 +98,7 @@ func TestCompileGeneratedBaseOverlayUsesCanonicalValidation(t *testing.T) {
 		{name: "array item mismatch", set: map[string]any{"tags": []any{1}}, want: "tags"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Compile(source, identity, Request{FlowID: "work", Input: "work.requested", Set: tc.set})
+			_, err := Compile(source, identity, Request{FlowID: ".", Input: "work.requested", Set: tc.set})
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.want)) {
 				t.Fatalf("overlay error = %v, want %q", err, tc.want)
 			}
@@ -109,8 +109,8 @@ func TestCompileGeneratedBaseOverlayUsesCanonicalValidation(t *testing.T) {
 func TestCompileCatalogRejectsDuplicateExactFlowInputCoordinates(t *testing.T) {
 	source, identity := derivationHostileTestSource(t)
 	declarations := []Declaration{
-		{Name: "first", FlowID: "work", Input: "work.requested"},
-		{Name: "second", FlowID: "work", Input: "work.requested"},
+		{Name: "first", FlowID: ".", Input: "work.requested"},
+		{Name: "second", FlowID: ".", Input: "work.requested"},
 	}
 	if _, err := CompileCatalog(source, identity, declarations...); err == nil || !strings.Contains(err.Error(), "same exact flow/input coordinate") {
 		t.Fatalf("duplicate catalog coordinate error = %v", err)
@@ -120,7 +120,7 @@ func TestCompileCatalogRejectsDuplicateExactFlowInputCoordinates(t *testing.T) {
 func derivationHostileTestSource(t *testing.T) (semanticview.Source, scenarioexecution.EffectiveSourceIdentity) {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	root := filepath.Join(repoRoot, "internal", "runtime", "scenarioderivation", "testdata", "hostile")
+	root := filepath.Join(repoRoot, "internal", "runtime", "scenarioderivation", "testdata", "hostile", "work")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatal(err)

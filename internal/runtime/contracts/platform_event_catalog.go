@@ -45,8 +45,6 @@ func PlatformEventCatalogNames(platform PlatformSpecDocument) []string {
 
 func platformEventEntryFromYAMLNode(node yaml.Node) EventCatalogEntry {
 	entry := EventCatalogEntry{
-		Source: "platform_spec",
-		Swarm:  EventSwarmMetadata{Source: "platform"},
 		Payload: EventPayloadSpec{
 			Properties: map[string]EventFieldSpec{},
 		},
@@ -57,29 +55,11 @@ func platformEventEntryFromYAMLNode(node yaml.Node) EventCatalogEntry {
 	if node.Kind != yaml.MappingNode {
 		return entry
 	}
-	if source := platformEventScalarValue(node, "produced_by_type"); source != "" {
-		entry.EmitterType = source
-	}
-	if source := platformEventScalarValue(node, "source"); source != "" {
-		entry.Source = source
-	}
-	if status := platformEventScalarValue(node, "status"); status != "" {
-		entry.Status = status
-	}
-	if handling := platformEventScalarValue(node, "runtime_handling"); handling != "" {
-		entry.RuntimeHandling = handling
-	}
 	if platformEventMappingValue(node, "required") != nil {
 		panic("platform event required lists are retired; fields are required by default and optional fields use one trailing ? on their type")
 	}
 	if payload := platformEventMappingValue(node, "payload"); payload != nil {
 		entry.Payload.Properties, entry.Payload.Required = platformEventPayloadSchema(*payload, "platform event payload")
-	}
-	if consumer := platformEventStringList(node, "consumer"); len(consumer) > 0 {
-		entry.Consumer = consumer
-	}
-	if producer := platformEventStringList(node, "producer"); len(producer) > 0 {
-		entry.Producer = producer
 	}
 	return entry
 }

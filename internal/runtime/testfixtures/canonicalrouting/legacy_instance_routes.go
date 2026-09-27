@@ -148,14 +148,11 @@ mode: static
 pins:
   inputs:
     events:
-      - event: deploy.requested
-        source: external
+      - deploy.requested
   outputs:
     events: [deploy.done]
 `)
 	writeClosedVariantFile(t, root, "flows/producer/events.yaml", `deploy.requested:
-  swarm:
-    source: external
   vertical_id: string
 deploy.done:
   key: vertical_id

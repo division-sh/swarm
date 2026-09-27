@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -319,8 +320,26 @@ func requireForkReceiverEffect(t *testing.T, rt servedControlProofRuntime, runID
 		t.Fatalf("final effect count=%d err=%v", count, err)
 	}
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": effectID}, &public)
-	if public.RunID != runID || len(public.Deliveries) != 0 || public.NoDelivery == nil || len(public.DeadLetters) != 0 {
-		t.Fatalf("external final effect public disposition: %+v", public)
+	if public.RunID != runID || len(public.Deliveries) != 1 || public.NoDelivery != nil || len(public.DeadLetters) != 0 {
+		t.Fatalf("connected final effect public disposition: %+v", public)
+	}
+	parent := strings.TrimSuffix(path, label)
+	parent = strings.TrimSuffix(parent, "/")
+	parentInstance := parent
+	if parentInstance == "" {
+		parentInstance = runID
+	}
+	var parentEntity string
+	if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, parentInstance).Scan(&parentEntity); err != nil {
+		t.Fatal(err)
+	}
+	delivery := public.Deliveries[0]
+	wantTarget := operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: parent, FlowInstance: parentInstance, EntityID: parentEntity}
+	if parent == "" {
+		wantTarget.FlowID = "."
+	}
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != identitytest.FlowNode(t, wantTarget.FlowID, label+"-receipt-observer").Key() || delivery.Status != "delivered" || delivery.Target != wantTarget {
+		t.Fatalf("final effect lost its exact parent consumer: %+v want target %+v", delivery, wantTarget)
 	}
 	return route
 }
@@ -651,7 +670,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 		t.Run(string(backend)+"/template_resolution_create", func(t *testing.T) {
 			root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID})
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "producer/validation.triggered", "bundle_hash": rt.BundleHash,
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
 			waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt, seed.RunID)

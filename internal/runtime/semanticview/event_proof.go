@@ -197,7 +197,7 @@ func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	if !ok {
 		return canonical
 	}
-	localNames := flowScopeEventNamesForProof(scope)
+	localNames := flowScopeEventNamesForProof(source, scope)
 	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical); local != "" {
 		return local
 	}
@@ -209,14 +209,14 @@ func localizeExecutableNodeEventForProof(source Source, scope FlowScope, canonic
 	if canonical == "" {
 		return ""
 	}
-	localNames := flowScopeEventNamesForProof(scope)
+	localNames := flowScopeEventNamesForProof(source, scope)
 	if local := concreteTemplateInstanceLocalEventForProof(source, scope, canonical); local != "" {
 		return local
 	}
 	return runtimeeventidentity.LocalizeForFlow(scope.Path, localNames, canonical)
 }
 
-func flowScopeEventNamesForProof(scope FlowScope) []string {
+func flowScopeEventNamesForProof(source Source, scope FlowScope) []string {
 	localNames := make([]string, 0, len(scope.Events))
 	for name := range scope.Events {
 		name = runtimeeventidentity.Normalize(name)
@@ -225,6 +225,16 @@ func flowScopeEventNamesForProof(scope FlowScope) []string {
 		}
 		localNames = append(localNames, name)
 	}
+	// Receiver renames are compiled definitions, not authored declarations.
+	// Only schema-backed pins in this exact flow may localize an occurrence.
+	for _, pin := range source.FlowInputEventPins(scope.ID) {
+		_, receiver := pin.ReceiverEventSchema()
+		_, producer := pin.ProducerEventSchema()
+		if receiver || producer {
+			localNames = append(localNames, pin.EventType())
+		}
+	}
+	localNames = uniqueNormalizedProofCandidates(localNames...)
 	sort.SliceStable(localNames, func(i, j int) bool {
 		if len(localNames[i]) != len(localNames[j]) {
 			return len(localNames[i]) > len(localNames[j])
@@ -235,15 +245,46 @@ func flowScopeEventNamesForProof(scope FlowScope) []string {
 }
 
 func concreteTemplateInstanceLocalEventForProof(source Source, scope FlowScope, canonical string) string {
-	bundle, ok := Bundle(source)
-	if !ok || scope.Mode != "template" {
+	if scope.Mode != "template" {
 		return ""
 	}
-	compiled, ok, err := bundle.ResolveCompiledFlowEventSchema(scope.ID, canonical)
-	if err != nil || !ok || compiled.FlowPath() != scope.ID {
+	scopePath := runtimeeventidentity.Normalize(scope.Path)
+	canonical = runtimeeventidentity.Normalize(canonical)
+	if scopePath == "" || !strings.HasPrefix(canonical, scopePath+"/") {
 		return ""
 	}
-	return runtimeeventidentity.LeafName(compiled.EventName())
+	remainder := strings.TrimPrefix(canonical, scopePath+"/")
+	if !strings.Contains(remainder, "/") || eventProofRemainderTargetsDescendantScope(source, scopePath, remainder) {
+		return ""
+	}
+	compiled, ok, err := source.ResolveEffectiveCompiledFlowEventSchema(scope.ID, canonical)
+	if err != nil || !ok {
+		return ""
+	}
+	local := runtimeeventidentity.LeafName(canonical)
+	if pin, matched := source.FlowInputEventPin(scope.ID, local); matched {
+		if receiver, owned := pin.ReceiverEventSchema(); owned && receiver.AcceptanceSchemaDigest() == compiled.AcceptanceSchemaDigest() {
+			return pin.EventType()
+		}
+	}
+	if compiled.FlowPath() == scope.ID && runtimeeventidentity.LeafName(compiled.EventName()) == local {
+		return local
+	}
+	return ""
+}
+
+func eventProofRemainderTargetsDescendantScope(source Source, scopePath, remainder string) bool {
+	for _, descendant := range source.FlowScopes() {
+		descendantPath := runtimeeventidentity.Normalize(descendant.Path)
+		if descendantPath == scopePath || !strings.HasPrefix(descendantPath, scopePath+"/") {
+			continue
+		}
+		relativePath := strings.TrimPrefix(descendantPath, scopePath+"/")
+		if remainder == relativePath || strings.HasPrefix(remainder, relativePath+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func uniqueNormalizedProofCandidates(values ...string) []string {

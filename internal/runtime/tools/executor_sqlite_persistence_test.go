@@ -493,7 +493,11 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	if err := persistence.CreateReplyContext(unmanagedToolTestContext(), record); err != nil {
 		t.Fatalf("seed reply tool context: %v", err)
 	}
-	inbound := eventtest.RunCreatingRootIngress(
+	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound := eventtest.RunCreatingRootIngressWithRoutingSource(
 		requestEventID,
 		events.EventType("provider.requested"),
 		"",
@@ -503,7 +507,7 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 		runID,
 		"",
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: record.Origin.EntityID}),
-		now,
+		source, now,
 	)
 	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), inbound)
 	ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}})

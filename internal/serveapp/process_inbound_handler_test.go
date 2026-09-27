@@ -55,20 +55,16 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
-	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
-	for _, flow := range bundle.FlowTree.ByID {
-		if flow != nil {
-			flow.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
-		}
-	}
-	source := semanticview.Wrap(bundle)
 	catalog := testProviderTriggerCatalog(t)
+	source := processIngressTransportSource(t, bundle, catalog)
 	makeContext := func(hash, alias, runID, entityID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore, processIngressCredentialStore) {
 		persistence := &processIngressProofStore{}
 		eventsStore := &processIngressEventStore{}
 		persistence.store = eventsStore
 		workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
+			ContractBundle:         source,
+			Durable:                runtimebus.DurableDependencies{TargetOwners: processIngressTargetOwners{{RunID: runID, FlowInstance: "telegram-ingress", EntityID: entityID}}},
 			SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(hash),
 			ProviderOutputVerifier: catalog,
 			WorkOwner:              workOwner,
@@ -98,8 +94,8 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
 			PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			StandingTargets: []runtimepkg.StandingTarget{{
-				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-chat", Alias: alias, Provider: "telegram",
-				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"), InstanceID: alias, EntityID: entityID,
+				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-ingress", Alias: alias, Provider: "telegram",
+				RunID: runID, FlowInstance: "telegram-ingress", InstanceID: alias, EntityID: entityID,
 				Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
 		}
@@ -152,4 +148,38 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	if currentRecorder.Code != http.StatusAccepted || len(eventsB.events) != 4 {
 		t.Fatalf("current signing secret status/events = %d/%d, want 202/4", currentRecorder.Code, len(eventsB.events))
 	}
+}
+
+type processIngressTargetOwners []runtimepkg.StandingTarget
+
+func (owners processIngressTargetOwners) ListSelectedRunTargetOwners(_ context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	var out []runtimebus.ActiveTargetDescriptor
+	for _, owner := range owners {
+		if owner.RunID == runID {
+			out = append(out, runtimebus.ActiveTargetDescriptor{FlowInstance: owner.FlowInstance, EntityID: owner.EntityID})
+		}
+	}
+	return out, nil
+}
+
+// These transport/controller fixtures use real provider declarations without
+// conversation work. Full source-loaded delivery is covered by the HTTP matrix.
+func processIngressTransportSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, catalog *providertriggers.CatalogSnapshot) semanticview.Source {
+	t.Helper()
+	bundle.Agents = nil
+	for _, flow := range bundle.FlowTree.ByID {
+		if flow != nil {
+			flow.Agents = nil
+			flow.Nodes = nil
+			flow.Schema.Connect = nil
+		}
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatal(err)
+	}
+	source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }

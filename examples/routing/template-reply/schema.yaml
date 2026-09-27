@@ -1,5 +1,16 @@
 name: template-reply
+pins:
+  inputs:
+    events: [requester.setup.requested, request.submitted]
+  outputs:
+    events: [requester.setup.requested, request.submitted]
 connect:
+  - event: requester.setup.requested
+    from: .
+    to: initiator
+  - event: request.submitted
+    from: .
+    to: initiator
   - event: requester.setup
     from: initiator
     to: requester

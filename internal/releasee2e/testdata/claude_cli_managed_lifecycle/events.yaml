@@ -1,7 +1,4 @@
 task.assigned:
   request: "[text]"
 agent.completed:
-  swarm:
-    source: external
-    consumer: external
   result: text?

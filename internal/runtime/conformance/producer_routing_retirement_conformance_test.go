@@ -201,6 +201,14 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 					FlowID: tc.flowID, FlowInstance: tc.flowInstance, EntityID: "fixture-entity",
 				})
 			}
+			routingSource := eventtest.RootRoutingSource("00000000-0000-0000-0000-000000000001")
+			if tc.flowID != "" {
+				if scope, ok := source.FlowScopeByID(tc.flowID); ok && scope.Mode == "template" {
+					routingSource = eventtest.ConcreteTemplateRoutingSource(tc.flowID, tc.flowInstance, "fixture-entity")
+				} else {
+					routingSource = eventtest.StaticFlowRoutingSource(tc.flowID, tc.flowInstance, "fixture-entity")
+				}
+			}
 			previewCtx := context.Background()
 			node := conformanceNode(t, tc.flowID, tc.nodeID)
 			if tc.flowPath != "" {
@@ -216,9 +224,9 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			}
 			preview, err := runtimepipeline.PreviewContractHandlerExecution(
 				previewCtx, bundle, node,
-				eventtest.RunCreatingRootIngress(
+				eventtest.RunCreatingRootIngressWithRoutingSource(
 					"event-"+strings.ToLower(tc.id), events.EventType(tc.trigger), "fixture-proof", "", payload, 0,
-					"00000000-0000-0000-0000-000000000001", "", envelope, time.Now().UTC(),
+					"00000000-0000-0000-0000-000000000001", "", envelope, routingSource, time.Now().UTC(),
 				),
 				runtimeengine.StateSnapshot{CurrentState: source.FlowInitialStage(tc.flowID)}, nil,
 			)
@@ -250,9 +258,11 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 					}
 				}
 			case "external":
-				entry, _, ok := source.ResolveFlowEventCatalogEntry(tc.flowID, tc.emitted)
-				if !ok || entry.AcceptedConsumerBoundary() != runtimecontracts.EventConsumerBoundaryExternal {
-					t.Fatalf("%s lacks typed accepted external boundary", tc.emitted)
+				// The historical external disposition is now a public root export,
+				// not an authored promise of an external consumer.
+				classification := runtimepinrouting.ClassifyOutputConsumer(source, tc.flowID, tc.emitted)
+				if !classification.Has(runtimepinrouting.OutputConsumerRootExport) {
+					t.Fatalf("%s lacks a compiled public root output: %#v", tc.emitted, classification)
 				}
 			default:
 				t.Fatalf("unsupported disposition %q", tc.disposition)

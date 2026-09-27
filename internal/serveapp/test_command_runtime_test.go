@@ -128,7 +128,7 @@ expect:
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 				for _, args := range [][]string{
 					{"test", sourceRoot, "--timeout", "5s", "--poll-interval", "10ms"},
-					{"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
+					{"test", sourceRoot, "--derive", ".", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 				} {
 					var stdout, stderr bytes.Buffer
 					commandArgs := append(append([]string(nil), args...), "--config", configPath)
@@ -230,7 +230,7 @@ expect:
 
 	for _, args := range [][]string{
 		{"test", sourceRoot, "--timeout", "5s", "--poll-interval", "10ms"},
-		{"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
+		{"test", sourceRoot, "--derive", ".", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 	} {
 		var stdout, stderr bytes.Buffer
 		commandArgs := append(append([]string(nil), args...), "--config", configPath)
@@ -303,7 +303,7 @@ func TestServeRuntimeConfiguredChannelBindingProjectsOnce(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
-	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "channel-projection.sqlite"))
 	rawConfig, err := os.ReadFile(configPath)
 	if err != nil {
@@ -356,14 +356,14 @@ func TestServedParityHarnessPublicMockApprovalLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioPublicMockApprovalLifecycle), runServedPublicMockApprovalBackendProof)
 }
 
-func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *testing.T) {
+func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
 			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
 			claim := testsql.EventCorruptionClaim{
 				Invariant: "public_input.selected_store_atomicity",
-				Reason:    "prove public template lifecycle and publication facts roll back on late delivery failure",
+				Reason:    "prove root-connected private template lifecycle and publication facts roll back on late delivery failure",
 			}
 			if backend == servedparity.BackendExplicitPostgres {
 				testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
@@ -372,7 +372,7 @@ func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *t
 			}
 
 			idempotencyKey := "public-input-rollback-" + string(backend)
-			rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
+			response := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
 				"bundle_hash": bundleHash,
 				"event_name":  "inbound.telegram.text_message",
 				"payload": map[string]any{
@@ -381,6 +381,17 @@ func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *t
 				},
 				"idempotency_key": idempotencyKey,
 			})
+			if response.Error == nil {
+				var result struct {
+					EventID string `json:"event_id"`
+				}
+				if err := json.Unmarshal(response.Result, &result); err != nil {
+					t.Fatal(err)
+				}
+				readback := requestServedJSONRPC(t, endpoint, "event.get", map[string]any{"event_id": result.EventID})
+				t.Fatalf("expected rollback, publication=%s readback=%s error=%#v", response.Result, readback.Result, readback.Error)
+			}
+			rpcErr := response.Error
 			if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 				t.Fatalf("%s event.publish error = %#v, want %s", backend, rpcErr, apiv1.EventPublishFailedCode)
 			}
@@ -390,7 +401,7 @@ func TestPublicTemplateInputPublicationRollbackIsAtomicAcrossSelectedStores(t *t
 	}
 }
 
-func TestPublicTemplateInputPublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores(t *testing.T) {
+func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores(t *testing.T) {
 	stages := []struct {
 		name    string
 		install func(testing.TB, context.Context, *sql.DB, testsql.EventCorruptionClaim, string, servedparity.Backend)
@@ -584,7 +595,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	scenario := filepath.ToSlash(filepath.Join("telegram-chat", "tests", "public-mock-approval.yaml"))
+	scenario := filepath.ToSlash(filepath.Join("tests", "public-mock-approval.yaml"))
 	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 		"test", sourceRoot,
 		"--config", configPath,
@@ -640,7 +651,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+	sourceRoot := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 
 	var db *sql.DB
 	var configPath string
@@ -683,7 +694,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 		t.Fatalf("%s derived scenario runtime is incomplete", backend)
 	}
 
-	plans, err := scenarioderivation.Compile(rt.Options.WorkflowModule.SemanticSource(), rt.EffectiveSourceIdentity, scenarioderivation.Request{FlowID: "fulfillment", Input: "fulfillment.requested"})
+	plans, err := scenarioderivation.Compile(rt.Options.WorkflowModule.SemanticSource(), rt.EffectiveSourceIdentity, scenarioderivation.Request{FlowID: ".", Input: "fulfillment.requested"})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("%s compile negative selector plan: plans=%d err=%v", backend, len(plans), err)
 	}
@@ -736,7 +747,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
 	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
-		"test", sourceRoot, "--derive", "fulfillment", "--input", "fulfillment.requested",
+		"test", sourceRoot, "--derive", ".", "--input", "fulfillment.requested",
 		"--config", configPath,
 		"--timeout", "20s", "--poll-interval", "25ms",
 	}, endpoint, &stdout, &stderr)
@@ -746,7 +757,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	if elapsed := time.Since(started); elapsed >= 60*time.Second {
 		t.Fatalf("%s derived scenario took %s, want under 60s", backend, elapsed)
 	}
-	if !strings.Contains(stdout.String(), "scenario ok: derived:fulfillment/fulfillment.requested") || strings.TrimSpace(stderr.String()) != "" {
+	if !strings.Contains(stdout.String(), "scenario ok: derived:./fulfillment.requested") || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("%s derived output stdout=%q stderr=%q", backend, stdout.String(), stderr.String())
 	}
 	requireExactScenarioExecutionProfile(t, db, backend, rt.EffectiveSourceIdentity)
@@ -1082,7 +1093,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	}
 
 	var stdout, stderr bytes.Buffer
-	scenario := filepath.ToSlash(filepath.Join("telegram-chat", "tests", "generated-input.yaml"))
+	scenario := filepath.ToSlash(filepath.Join("tests", "generated-input.yaml"))
 	code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), []string{
 		"test", sourceRoot,
 		"--config", configPath,
@@ -1135,7 +1146,7 @@ telegram-input-observer:
   event_handlers:
     inbound.telegram.text_message: {}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "tests", "generated-input.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests", "generated-input.yaml"), `
 name: generated Telegram normalized input
 steps:
   - publish: inbound.telegram.text_message

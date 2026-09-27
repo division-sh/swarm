@@ -736,16 +736,15 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				// SQLite stores delivery timestamps at millisecond precision. Keep
 				// the cursor-order proof from collapsing both inserts into one key.
 				time.Sleep(2 * time.Millisecond)
-				newEvent := eventtest.PersistedChildForProducer(
+				newEvent := eventtest.ChildForProducerWithRoutingSource(
 					eventtest.UUID("handoff-after-cursor-"+backend.name),
 					events.EventType("delivery.conformance"),
 					eventtest.Producer(events.EventProducerNode, "cursor-proof"),
 					"",
 					json.RawMessage(`{"ok":true}`),
 					0,
-					oldEvent.RunID(),
-					oldEvent.ID(),
-					oldEvent.Envelope(),
+					events.LineageFromEvent(oldEvent),
+					oldEvent.Envelope(), oldEvent.RoutingSource(),
 					oldEvent.CreatedAt().Add(time.Second),
 				)
 				newRoute := deliveryLifecycleConformanceRoute(t, newEvent.RunID(), "agent", "new-route")

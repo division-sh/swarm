@@ -150,7 +150,6 @@ func ActivityResultEventsForSite(site ActivitySite) ActivityResultEvents {
 }
 
 func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCatalogEntry {
-	note := "Generated durable activity approval rejection event"
 	required := []string{"card_id", "activity_id", "tool", "effect_class", "effect_content_hash", "decided_by", "decided_at"}
 	properties := map[string]EventFieldSpec{
 		"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
@@ -163,7 +162,6 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 		"reason":              {Type: "text", Description: "Optional operator rejection reason."},
 	}
 	if revision {
-		note = "Generated durable activity revision-request event"
 		required = append(required, "feedback")
 		properties = map[string]EventFieldSpec{
 			"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
@@ -177,11 +175,7 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 		}
 	}
 	return EventCatalogEntry{
-		Swarm: EventSwarmMetadata{Note: note, Source: "contract_derived_activity_approval", Producer: []string{site.Node.Key()}, Status: "generated"},
-		Note:  note, Emitter: EventEmitterRef{NodeID: site.Node.Key()}, EmitterType: "system_node",
-		Producer: []string{site.Node.Key()}, Source: "contract_derived_activity_approval", Status: "generated",
-		OwningNode: site.Node.Key(), Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required},
-		Consumer: []string{},
+		Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required},
 	}
 }
 
@@ -226,7 +220,6 @@ func activitySlug(raw string) string {
 }
 
 func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, status string) EventCatalogEntry {
-	description := "Generated durable activity success event"
 	required := []string{"activity_id", "tool", "effect_class", "attempt", "result"}
 	properties := map[string]EventFieldSpec{
 		"activity_id":  {Type: "string", Description: "Generated durable activity id."},
@@ -236,7 +229,6 @@ func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, st
 		"result":       {Type: "object", Description: "Tool output shaped by the authored tool output schema."},
 	}
 	if status == ActivityResultStatusFailed {
-		description = "Generated durable activity failure event"
 		required = []string{"activity_id", "tool", "effect_class", "attempt", "failure"}
 		properties = map[string]EventFieldSpec{
 			"activity_id":  {Type: "string", Description: "Generated durable activity id."},
@@ -251,25 +243,11 @@ func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, st
 		required = append(required, revisionField)
 	}
 	return EventCatalogEntry{
-		Swarm: EventSwarmMetadata{
-			Note:     description,
-			Source:   "contract_derived_activity",
-			Producer: []string{site.Node.Key()},
-			Status:   "generated",
-		},
-		Note:        description,
-		Emitter:     EventEmitterRef{NodeID: site.Node.Key()},
-		EmitterType: "system_node",
-		Producer:    []string{site.Node.Key()},
-		Source:      "contract_derived_activity",
-		Status:      "generated",
-		OwningNode:  site.Node.Key(),
 		Payload: EventPayloadSpec{
 			Type:       "object",
 			Properties: properties,
 			Required:   required,
 		},
-		Consumer: []string{},
 	}
 }
 

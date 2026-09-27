@@ -197,8 +197,8 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 					}()
 				}
 				ctx := catalogRunContext(h, catalogRuntimeRunID)
-				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/worker.ready"), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entity), path), eventtest.ConcreteTemplateRoutingSource("worker-flow", path, entity), time.Now().UTC())
+				event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("worker.ready"), "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
+					events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
 				published := make(chan error, 1)
 				const directiveKey = "terminal-provider-directive"
 				if directive {
@@ -249,8 +249,8 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 						t.Fatal("replacement did not cancel the exact predecessor")
 					}
 				} else if activity {
-					request := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(path+"/worker.inspect"), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
-						events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entity), path), eventtest.ConcreteTemplateRoutingSource("worker-flow", path, entity), time.Now().UTC())
+					request := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("worker.inspect"), "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
+						events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
 					if err := h.rt.Bus.PublishAndWait(ctx, request); err != nil {
 						t.Fatal(err)
 					}
@@ -361,10 +361,10 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 					if item.EventName == path+"/worker.observed" {
 						t.Fatal("retired provider projected an agent output")
 					}
-					if item.EventName != path+"/worker.ready" {
-						continue
-					}
 					for _, delivery := range item.Deliveries {
+						if delivery.DeliveryID != attempt.Origin.Delivery.DeliveryID() {
+							continue
+						}
 						if delivery.Route.AgentIdentity.IsZero() {
 							continue
 						}

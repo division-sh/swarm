@@ -795,11 +795,11 @@ contract_formats:
   event_schema:
     description: |
       Events in `events.yaml` use the Wave 1 flat payload form.
-      Event-level Swarm metadata lives under the reserved `swarm:`
-      namespace. Aside from reserved platform metadata fields such as
-      `emitter`, `runtime_handling`, `owning_node`, and
-      `delivery_channel`, other non-underscored top-level keys are
-      producer-owned payload fields.
+      Event payload fields and the optional business key are the authored event contract.
+      Authored swarm metadata, emitter descriptors, runtime_handling, owning_node, delivery_channel,
+      consumer/interception flags, legacy metadata aliases, and author_summary_field are retired on presence.
+      Null, empty, aliased, or merge-expanded values do not bypass retirement. No old-store migration or
+      compatibility reader is supported. Payload source, status, and note remain ordinary business fields.
       The platform validates emit calls against the declared payload
       contract and populates envelope fields separately.
       Runtime emit-payload admission MUST consume the
@@ -807,13 +807,18 @@ contract_formats:
       Wave 1 type catalog. Runtime admission MUST NOT pass unresolved
       contract type names such as named types, scalar aliases, or enums
       to the primitive JSON schema validator as literal schema types.
-      Authored `swarm.source`, `swarm.producer`, and `swarm.consumer`
-      are external/platform/non-derivable proof only. Internal producer,
-      consumer, and source facts MUST be derived from topology owners such
-      as handlers, agents, timers, fan_out, auto_emit_on_create, pins,
-      connect routes, runtime owners, and effective system-node helpers.
-      Authored metadata that deterministically restates those internal
-      roles is a hard invalidity, not an alternate semantic owner.
+      Producer and consumer facts derive from executable handlers, agents, timers, fan_out, auto_emit_on_create,
+      selected-root pins, actual compiled connect edges, admitted provider ingress, and exact platform catalog facts.
+      A schema import is not a subscription. A child input is private even when its event schema is visible elsewhere.
+      Concrete template-instance event proof consumes the owning flow's authored declarations and schema-backed
+      compiled receiver input definitions, including connection renames. Local, flow-qualified and concrete-instance
+      receiver names resolve the same receiver acceptance schema without changing the occurrence identity or making
+      it an authored declaration. Producer schemas do not replace receiver-generated fields. Descendant/sibling paths,
+      missing connection evidence and ambiguous producer ownership do not grant local schema or delivery authority.
+      Creation, rebuilt pending creation, ordinary node/agent publication, payload validation and author-activity
+      classification consume this same proof; no permissive journal descriptor or copied child declaration is allowed.
+      Root exports are public persisted observations and need no internal consumer or fabricated delivery.
+      All other outputs need a real consuming relation; a complete destination address alone is insufficient.
       Payload fields are required by default. Exactly one trailing field-level
       `?` on the complete authored type marks a field optional and is removed
       before scalar, named, list, or map type semantics are admitted. Mapping
@@ -823,9 +828,6 @@ contract_formats:
       presence, including through a YAML merge. Optional `key:` names one
       required declared payload field whose admitted semantics are boolean,
       number, or string; it is the sole event business-key authoring surface.
-      `swarm:` is a closed metadata mapping containing only note, source,
-      producer, consumer, and status. Unknown direct, alias, or merge-expanded
-      keys fail closed with the supported key set.
       Validation ownership is layered, not competing: supported emit
       surfaces validate producer-authored payloads before publish, while
       canonical event-store admission validates every event payload that
@@ -837,12 +839,6 @@ contract_formats:
     format:
       event_name: |
         key: entity_id (optional; must name a required scalar payload field)
-        swarm:
-          source: external (optional; non-derivable external/platform producer proof)
-          producer: mailbox_human (optional; exceptional non-derivable producer proof)
-          consumer: external (optional; registered non-derivable external sink proof)
-          status: planned (optional; lifecycle suppression)
-          note: Human-readable metadata (optional)
         required_field: type
         optional_field: type?
         nested_field:
@@ -901,8 +897,7 @@ contract_formats:
           entity_id at emit time. Source lineage is never overwritten by
           receiver selection, replay, or target resolution.
         - event.target: the singular recipient route identity. It is set by a
-          lowered parent `connect` route plan, by structural child-to-parent
-          binding, by an eligible static-child delivery route, or by
+          lowered `connect` route plan or by
           receiver-side late binding when resolution yields exactly one
           recipient. Producers never author this identity.
         - event.target_set: a concrete list of recipient route identities for
@@ -938,9 +933,10 @@ contract_formats:
           fields:
           - flow_instance
           - entity_id
-          rule: Pin-declared production output emits MUST resolve a canonical consumer through typed same-flow pub/sub,
-            lowered parent connect topology, a structural ParentRoute, an eligible static child delivery-entity route,
-            an accepted external boundary, or receiver-owned resolution. A validation-only output pin may instead declare
+          rule: Pin-declared private output emits MUST have an actual typed same-flow consumer or explicit compiled
+            connection before receiver-owned target materialization. A complete ParentRoute or current delivery address
+            never establishes consumption. Selected-root output pins are public observations and require no invented
+            recipient or delivery. A validation-only output pin may instead declare
             sink:harness, but production admission rejects it and it creates no target or delivery authority.
           absent_means: event.target is absent when event.target_set is present or when uncontrolled external ingress has not yet been receiver-bound.
           mutual_exclusion: event.target and event.target_set MUST NOT both be populated on the persisted event.
@@ -1490,7 +1486,7 @@ contract_formats:
         rule: |
           Flow input producer proof is resolved once through a typed source taxonomy and consumed by boot verification,
           RouteTable derivation, and workflow-node subscription projection. The accepted proof classes are boundary external
-          ingress, intrinsic input-pin ingress (`source: external` on the input pin), parent connect, validation-only harness
+          ingress at the selected root, flow-local admitted provider ingress, parent connect, validation-only harness
           intent (`source: harness` on the input pin), platform source, and internal topology producer. Harness intent is
           static producer proof only: it MUST be exclusive of every other accepted producer source and MUST NOT create a
           route, topology edge, producer pattern, alias, standing target, provider ingress, subscriber, or runtime delivery
@@ -1500,10 +1496,31 @@ contract_formats:
           qualification, or filesystem ancestry. Internal proof MUST NOT generate producer-scoped auto-wire route patterns.
           Direct parent connect proof proves the input is satisfied, but concrete delivery authority remains the connect
           RoutePlan, not a raw subscription fallback.
-          A RouteTable root_input_flow node route is executable only for an admitted root_ingress event or an
-          operator_injected event carrying the exact opaque, source-validated root_input API publication endpoint for that
-          event. An unadmitted child, operator-injected, replay, runtime, or platform event with the same event name cannot
-          acquire external-input receiver authority and MUST fail before event-delivery or receiver mutation.
+          Source-distinct compiled connections may enter the same input. Every edge independently satisfies its exact
+          event, schema, projection, key and receiver-resolution contract; the admitted source selects the edge.
+          Counting producer evidence is not an ambiguity check. The compiled graph still rejects duplicate edges,
+          unresolvable endpoints, incompatible schemas and receiver-pin collisions; harness intent remains exclusive.
+          Root admission and exact root-input API endpoints authenticate entry only; they MUST NOT subscribe a private
+          child by event name. Declaring-flow provider entry uses ordinary exact same-instance consumers. Cross-flow
+          delivery requires an explicit compiled connection; schema imports, root pins and complete destination
+          addresses cannot manufacture a consuming relation. Independent local and connected obligations both survive.
+          Provider raw and normalized events retain their admitted ExternalIngress declaring flow and entity; this source
+          intentionally has no FlowInstance. Ordinary publication resolves that coordinate from the compiled flow and
+          exact selected-run existing ownership before selecting node or agent candidates. Unqualified names MUST NOT
+          acquire unrelated root consumers. Normalized target-free events MUST retain their genuine provider-local
+          consumers alongside compiled connected recipients. A destination, guessed instance path, schema import or
+          replacement subscription registry is not source ownership. Authentication and the final delivery-authority
+          guard remain mandatory; a compiled provider-to-root edge is valid cross-flow authority.
+          The same selected source coordinate supplies local agent filtering and pending-agent lifecycle admission,
+          not only subscription lookup or node intents. Both raw and normalized publications start without recipient
+          targets. Their immutable admitted source retains the declaring flow and entity; the complete planned
+          recipients alone determine persisted target/target_set facts. Active agent descriptors must agree
+          with that exact local entity owner. Neither a missing target envelope nor a connected branch may suppress
+          independently admitted local agents. A lost acknowledgment after the atomic provider batch commit is
+          reconciled by the original request identity and recorded recipients, never by recommitting the batch.
+          Declared and runtime-created agents use the same exact source ownership predicate for their independently
+          admitted subscriptions; a runtime-created name does not borrow declaration authority. Root source lookup
+          includes the canonical dot-scoped node key without subscribing private children by unqualified name.
           A separately admitted selected fork may process only starting inputs selected by its fixed frontier/history
           admission. Its existing non-executable preparation owner consumes strictly decoded, fixed-revision publication
           identity, payload/schema identity and target facts and resolves the supported inputs against the exact selected
@@ -1512,11 +1529,12 @@ contract_formats:
           payload, schema bundle/flow/event/digest/class, envelope targets, typed routing source and optional operator
           reference provenance. Payload evidence uses canonical stored bytes, not diagnostic JSON; live source loading
           must agree with the fixed revision and prepared coordinates before publication. Only recorded root/operator
-          publications with absent or provider-admitted ingress routing
+          publications with explicit selected-root or provider-admitted ingress routing
           source enter this input validator; explicit producer/control routes and platform schemas retain their existing
           selected route/activity owners and acquire no public-input authority from their event class. A recorded `.`
-          schema flow selects the root-input endpoint; the ordinary root API's absent flow selects only the exact declared
-          root event schema, never a root-input fan-out. A concrete ordinary flow selects only that exact endpoint.
+          schema flow selects the exact selected-root input endpoint. Schema visibility without that public pin does not
+          admit a public input. Private receivers require an explicit compiled connection; a fixed historical address
+          does not create a new consuming relation.
           The selected owner consumes the canonical endpoint census, route table and publication matcher, not a second
           router. Validation must precede fork materialization, source freezing and business execution; missing,
           ambiguous or incompatible input evidence fails closed. Root publication may admit multiple declared inputs,
@@ -1536,15 +1554,14 @@ contract_formats:
           authorized by this rule.
         retired_paths: |
           Unique same-name sibling output-pin inference and unconnected root/sibling emit inference are retired as both producer
-          proof and producer-pattern authority. `swarm.source: external`
-          on events.yaml is not input-pin producer proof; it remains external metadata for non-input event roles such as
-          dead-event and accumulator producer-source checks.
+          proof and producer-pattern authority. All authored event metadata and input-pin `source: external` are retired
+          on presence. No external or planned annotations survive as non-input verifier exemptions.
       delivery_rules:
-        owning_node: If a system node subscribes_to the event → that node owns it
+        node_handling: Exact executable node subscriptions and compiled handlers establish handling, not authored owning_node or runtime_handling annotations.
         dual_delivery: If a node AND agents subscribe → route to both
         mixed_branch_delivery: If one publication independently satisfies same-flow typed pub/sub and compiled connect topology, preserve and compose both exact branches. A matched connect decision prohibits fallback reconstruction for that connect branch but MUST NOT suppress or retarget the independently admitted same-flow branch.
-        consuming: If only a node subscribes → route to node only
-        passthrough: If no node subscribes → pure agent delivery
+        consuming: An exact node delivery consumes only that node obligation; event-wide node handling never suppresses independently admitted agent delivery.
+        agent_delivery: If no node subscribes, only independently admitted agent recipients receive the event.
         workflow_node_route_authority: Workflow-node delivery route authority is derived from semantic route topology at publish time and persisted as typed event_deliveries rows before workflow-node execution. Live internal carriers, interceptors, handler lookup, receipts, settlement, replay markers, and API/CLI readback are consumers or evidence only; they MUST NOT be required or used as the authority that creates a workflow-node delivery route.
       route_plan_authority:
         status: merge_bearing_source_authority
@@ -1582,7 +1599,11 @@ contract_formats:
             The graph evaluator returns one opaque typed receiver/recipient result. EventBus live planning, template lifecycle
             routability, pending selected-contract frontier, and pending selected-route history consume that exact result;
             RouteTable contributes only typed registered recipients and direct pub/sub remains a separately named non-connect
-            branch. None of those consumers may rebuild receiver event names, rematch subscriber paths or targets, perform a
+            branch. For ordinary concrete flow producers, live publication and selected frontier/history recipient lookup
+            share one projection of event type and admitted RoutingSource into source-occurrence lookup keys. A flow-level name
+            must retain its exact instance's local consumers; historical delivery targets or envelope addresses cannot supply
+            the source occurrence. Run-scoped registration and compiled connection authority remain separate requirements.
+            None of those consumers may rebuild receiver event names, rematch subscriber paths or targets, perform a
             shadow HasConsumer/Resolve decision, or flatten the result into free recipient-kind strings before behavior.
             For each concrete materialized target, the compiled graph selects only registrations with the admitted receiver
             pin and exact target scope before constructing candidate evidence. Other instances, pins, and flows are not
@@ -1775,8 +1796,8 @@ contract_formats:
             Independent optional and materializing recipients retain separate decisions even within one publication.
             The evaluation ledger consumes exact compiled plan identity, not shared flow-instance text or another plan's owner.
             Entityless child emissions use the child's execution scope and supported explicit-connect, typed-local or
-            external mechanisms; inbound parent context cannot repair absent onward routing authority. Exact receiver-owned
-            current-delivery output context and complete persisted ParentRoute remain separate supported mechanisms.
+            selected-root export mechanisms; inbound parent context cannot repair absent onward routing authority.
+            Current-delivery context and persisted ParentRoute are addresses, not independent output consumers.
             After a claim is acquired, stamped validation, target loading/decoding, declared-key disagreement and unavailable
             state use the same failure settlement, heartbeat and continuation handoff as handler execution. A pipeline
             receipt alone is not a delivery outcome. Deterministic rejection settles canonically; typed infrastructure,
@@ -1906,8 +1927,6 @@ contract_formats:
           - concrete_node_route / route_table_node
           - scoped_node_route / route_table_node
           - root_node_route / route_table_node
-          - root_input_flow_node_route / route_table_node
-          - api_event_publication_route / route_table_node
           - recipient_plan_materializer / materialized_route
           - connect_route_plan / lowered_connect_route_plan
           rule: |
@@ -2371,12 +2390,12 @@ contract_formats:
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
-      _source: 'Retired legacy migration input for event swarm.source. Contracts MUST fail closed instead of accepting this as event metadata.'
-      _consumer: 'Retired legacy migration input for event swarm.consumer. Contracts MUST fail closed instead of accepting this as event metadata.'
-      _status: 'Retired legacy migration input for event swarm.status. Contracts MUST fail closed instead of accepting this as event metadata.'
-      _producer: 'Retired legacy migration input for event swarm.producer. Contracts MUST fail closed instead of accepting this as event metadata.'
-    documentation_fields: Any other _-prefixed field (_note, _routing_note, _internal_events_note, etc.) is a human comment.
-      The platform ignores them. The verifier ignores them. They are not part of the contract.
+      _source: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
+      _consumer: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
+      _status: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
+      _producer: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
+    documentation_fields: Event metadata aliases, including _note, are rejected on presence. Use YAML comments for
+      event documentation; a leading underscore does not grant a metadata or routing exemption.
 rule:
   statement: |
     Entity contracts are the authoritative source of truth for what
@@ -3773,14 +3792,14 @@ handler_specification:
       pin_routing_activation:
         rule: Pin routing activates if and only if the emitted event is declared in the emitter flow's schema.yaml pins.outputs.events.
         ad_hoc_emits: Emits not declared in pins.outputs.events are ordinary event-loop emits and never authorize recipients.
-        target_requirement: A pin-declared output emit in parent-composed topology MUST resolve through lowered parent connect
-          facts, use structural child-to-parent ParentRoute binding, or use the static no-instance child-flow delivery-entity
-          route where eligible. Typed same-flow consumers and accepted external boundaries also satisfy their own delivery
-          classes. A structured output pin with sink:harness is validation-only, mutually exclusive with real consumers,
+        target_requirement: A private pin-declared output MUST have a typed same-flow consumer or an explicit compiled
+          connection to a consuming receiver. ParentRoute and current delivery addresses do not prove consumption.
+          Selected-root output pins are persisted public exports and need no internal consumer or synthetic delivery.
+          A structured output pin with sink:harness is validation-only, mutually exclusive with real consumers,
           and rejected by production admission. No silent event-type broadcast fallback is allowed.
       target_failures:
-        target_required_missing: Pin-declared production output has no canonical typed consumer, lowered parent connect,
-          structural ParentRoute, eligible static child delivery-entity route, or accepted external boundary.
+        target_required_missing: A private pin-declared production output has no canonical typed same-flow consumer or
+          explicit compiled connection. Complete parent or delivery addresses cannot satisfy this requirement.
         retired_emit_routing: emit.target or emit.broadcast is present in any shape; strict loading fails before verification or runtime.
       single_emit_handler_rule: >-
         A handler top-level emit is valid only when the handler has exactly one possible emit site, except for the explicit
@@ -4946,8 +4965,9 @@ engine:
         Example: scoring/vertical.shortlisted → vertical.shortlisted when delivered to a validation
         node that declares vertical.shortlisted in any of those surfaces.'
       root_events_are_global: 'Events emitted at root level have no flow prefix. They route directly only to root-local
-        consumers. Delivery into a child flow requires root and child pins plus an exact nearest-LCA connect row under
-        engine.cross_flow_routing.'
+        consumers. A same-named child handler or private input pin is not a root subscription and MUST NOT create an
+        implicit root_input_flow route. Delivery into a child flow requires root and child pins plus an exact nearest-LCA
+        connect row under engine.cross_flow_routing; missing connection evidence is a verification error.'
     business_publication:
       owner: runtime/core/eventidentity/publication.go
       source_adapter: runtime/core/pinrouting/publication_identity.go
@@ -4975,29 +4995,24 @@ engine:
     canonical_owner: platform-spec.yaml#flow_model.composition_routing
     implementation_status: typed_composition_authority_complete_for_supported_surface
     activation:
-      rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.events and the
-        event is admitted through a valid typed same-flow consumer, lowered parent connect route, structural ParentRoute
-        fallback when no lowered connect route applies, eligible static child delivery-entity route, accepted real external
-        boundary, or validation-only output sink:harness. Production admission rejects sink:harness.
+      rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.events.
+        Private outputs require a typed same-flow consuming relation or explicit compiled connection. Selected-root
+        outputs are persisted public exports without a fake recipient. ParentRoute and delivery addresses never prove
+        consumption. Production admission rejects validation-only sink:harness.
       no_separate_flag: The output pin declaration is the activation switch.
       ad_hoc_emits: Events not declared in the emitter flow's output pins remain ordinary event-loop emits.
       aggressive_day_one: Pin routing is the default for pin-declared outputs; implicit event-type broadcast is not a compatibility mode.
     auto_wiring:
-      status: safe_inference_only
-      description: 'At boot, the platform validates parent connect topology and may infer same-name wiring only when the
-        inference is unambiguous and lowers to the same concrete route-plan facts as an explicit connect:
-        1. For each flow, collect pins.outputs.events.
-        2. For each flow, collect pins.inputs.events.
-        3. Match local event names across output and input pins only as an inference candidate, not as topology authority.
-        4. Preserve local handler lookup by local event name in the target flow.
-        5. Persist or expose the lowered parent-connect route facts; do not treat a topology match as permission to broadcast
-           to every instance.'
-      ambiguity: 'If an input pin event name matches output pins from multiple flows, boot MUST fail
-        unless an explicit event-centric parent connect disambiguates the producer and receiver flows.'
-      static_pairs: Static-to-static pairs may resolve to a single instance pair at boot.
+      status: retired
+      description: Same-name pins and imported schemas never create cross-flow subscriptions or connections.
+        Only explicit parent connect topology lowers to cross-flow route-plan facts. Local handler lookup remains
+        flow-scoped and does not authorize broadcast or private-child public admission.
+      ambiguity: An explicit event-centric parent connect identifies each producer and receiver; a unique same-name
+        match is not a substitute for that connection.
+      static_pairs: An explicit static-to-static connection may resolve to a single instance pair at boot.
       template_pairs: Template or dynamic-instance pairs require lowered parent connect route facts from the receiver's
-        scalar instance field, same-named required producer payload source or exact resolution.from override, and explicit resolution mode. Structural ParentRoute binding
-        is only a child-to-parent fallback when no lowered connect target applies.
+        scalar instance field, same-named required producer payload source or exact resolution.from override, and explicit
+        resolution mode. ParentRoute does not replace a consuming relation.
     reply_resolution:
       status: runnable_v1
       description: Receiver-declared request/reply routing returns one terminal provider result to the exact route that
@@ -5078,11 +5093,11 @@ engine:
       precedence:
       - lowered parent connect route plan
       - typed same-flow consumer topology
-      - structural ParentRoute for child-to-parent pin outputs
-      - exact input/composition receiver resolution for external and mixed-provenance ingress
+      - selected-root persisted public export without an internal delivery obligation
       ownership: Source identity is context only. No handler or ingress fallback may replace the composition-selected receiver.
-      fail_closed: A pin-declared production output that has no canonical typed consumer, lowered parent connect,
-        structural ParentRoute, eligible static child delivery-entity route, or accepted external boundary is invalid.
+      fail_closed: A private pin-declared production output without a typed same-flow consumer or explicit compiled
+        connection is invalid. Receiver acquisition and parent/current delivery addresses materialize an authorized
+        relation; they cannot create one or rescue a missing consumer.
       no_silent_broadcast_fallback: Missing, malformed, ambiguous, or unreachable routes fail with a typed reason; producer broadcast is retired.
     retired_producer_forms:
       target: emit.target is rejected on presence. Sender/reply uses typed receiver reply topology; exact instance selection
@@ -5090,24 +5105,17 @@ engine:
       broadcast: emit.broadcast is rejected on presence. Static fan-out uses repeated connect edges; no-target production
         output is not an escape hatch.
     structural_binding:
-      precedence_guard: Structural binding is lower precedence than lowered parent connect. It may write event.target only
-        for a child-to-parent pin output when no lowered parent connect target applies.
-      child_to_parent: A child flow instance has exactly one parent in v1. A child pin-declared output routes to the recorded
-        ParentRoute of the instance that created the child only when the emit has no lowered parent connect route.
-      static_child_no_instance: Nested static child flows that are not template/dynamic instances have no persisted ParentRoute
-        row. When such a child emits a pin-declared output without a lowered parent connect route, the runtime may target
-        only the exact typed target on the admitted current DeliveryRoute. Eligibility requires the resolved flow scope path
-        to be nested and the current delivery target to be complete and entity-owning. This exception must not read inbound
-        event identity, RoutingSource, actor identity, a partial route, or an entity-only value as structural parent authority
-        and does not satisfy ParentRoute metadata for template/dynamic instances.
+      precedence_guard: Structural output-consumer inference is retired. A complete parent or current delivery coordinate
+        is not a consumer, even when no compiled connection applies.
+      child_to_parent: Child-to-parent delivery requires an explicit compiled connection identifying a real receiver.
+      static_child_no_instance: Nesting, static mode and a complete current delivery target do not authorize onward output.
       lowered_connect_precedence: An emit with any lowered connect plan preserves producer origin, causal lineage, and
         RoutingSource but remains receiver-targetless until EventBus evaluates that compiled plan. Engine and tool callers
         MUST NOT stamp ParentRoute, current-delivery, source, inbound, or actor identity as the connect receiver target.
       parent_to_child: Parent-to-child routing is never inferred structurally in v1. The parent must use canonical parent
         connect topology with receiver-owned scalar instance/source/resolution.
-      grandchildren: A grandchild's structural pin output routes to its immediate parent only. Multi-level retargeting is v2.
-      multiple_parents: Per-child multi-parent structural routing is v2. Parent-authored multi-consumer fan-out uses connect
-        topology and lowers to target_set route-plan facts.
+      grandchildren: A grandchild output requires its own actual consuming relation; ancestry does not create one.
+      multiple_parents: Parent-authored multi-consumer fan-out uses explicit connect topology and compiled recipient facts.
     parent_route:
       description: Full parent route identity recorded at receiver creation.
       fields:
@@ -5115,9 +5123,7 @@ engine:
         parent_entity_id: parent entity id
         parent_flow_id: parent flow id, defensive and derivable from path
       exposed_type: 'ParentRoute { FlowInstance, EntityID, FlowID }'
-      read_rule: Child pin-output emit reads ParentRoute from local instance metadata and writes event.target only when no
-        lowered parent connect route applies.
-      stale_instance_policy: Pre-existing children with only parent_entity_id and no complete ParentRoute fail closed with parent_route_incomplete.
+      read_rule: ParentRoute records creation context only. Output resolution does not read it as consumer or target authority.
     delivery_filter:
       rule: Filter once at publish-time recipient construction, persist the narrowed recipient list, and make all downstream
         delivery paths inherit that persisted list.
@@ -5141,7 +5147,7 @@ engine:
         zero_target_set: >
           Dead-letter target_unreachable_no_subscriber or target_not_subscribed depending on whether the target instance
           exists. The sole exception is an accepted typed raw provider output whose private inbound admission proves the
-          matching provider-admission external ingress, exact live standing target, matching external raw input pin, and zero
+          matching provider-admission external ingress, exact live standing target, matching provider-bound raw input pin, and zero
           executable routes; that exact event settles no_subscriber_by_design. A real route wins, and missing, malformed,
           foreign, terminated, or ordinary non-subscribing targets remain fail-closed.
         one_target_set: Normal delivery.
@@ -5153,8 +5159,7 @@ engine:
         retired_emit_routing: emit.target or emit.broadcast is present in any shape and strict loading fails.
       publish_time_dead_letter:
         target_unreachable_no_subscriber: Target resolution finds no recipient for the requested target.
-        target_unreachable_terminated: Target or ParentRoute referred to an instance that no longer exists.
-        parent_route_incomplete: Structural child-to-parent routing needs ParentRoute but instance metadata only has incomplete legacy parent data.
+        target_unreachable_terminated: The authorized target referred to an instance that no longer exists.
         target_not_subscribed: Target instance exists but does not subscribe to the emitted event type.
         platform.reply_already_terminal: A distinct reply event attempted to consume a context already terminally claimed by
           another reply. Diagnostics name reply_context_id, request event, accepted reply event, and rejected reply event.
@@ -5298,9 +5303,8 @@ engine:
           parent_flow_instance: Parent flow instance path from the calling handler context.
           parent_entity_id: Parent entity id from the calling handler context.
           parent_flow_id: Parent flow id, defensively recorded even when derivable from parent_flow_instance.
-        required_for: Child-to-parent pin-declared output emits when the emit site has no lowered parent connect route.
-        incomplete_policy: A child instance with incomplete ParentRoute metadata MUST fail closed with parent_route_incomplete
-          before emitting a structurally routed pin output.
+        required_for: Creation context where required by the creating operation, not output consumption.
+        incomplete_policy: Creation validates its required context. Complete metadata does not authorize a child output.
         single_parent_v1: Each child has exactly one ParentRoute in v1. Multiple parents are v2.
       route_materialization:
         canonical_template_source: Dynamic flow-instance routes MUST materialize only from the exact template registered by
@@ -5507,7 +5511,7 @@ engine:
         action: Resolve all agent and node subscriptions through the typed subscription owners. Node exact values resolve from local names within the same flow. Flow-owned agent admission may retain an already-normalized same-scope identity. Slash-qualified or full-URI exact values that cross a flow boundary fail closed. Wildcards are slash-free and expand only inside the exact same flow identity.
       - step: 7
         name: validate_pins
-        action: 'For each flow: required input event pins must be satisfied by the canonical input-source resolver: parent connect topology, input pin source:external, validation-only input pin source:harness, platform source, or internal topology producer. Harness source is accepted only by the verify policy, is labeled non-production-valid in human and machine readback, and MUST be rejected by serve and every shared production boot path before route/runtime materialization. Pin-declared production outputs require a typed same-flow consumer, lowered parent connect, structural ParentRoute, eligible static-child delivery route, or accepted external consumer. A structured output pin may instead declare sink:harness only for explicit validation/catalog observation; readback marks production_valid:false, production admission rejects it, and it creates no route or delivery authority. emit.target and emit.broadcast are rejected on presence. No two flows may write the same entity field (write conflict = boot error).'
+        action: 'For each flow: required input event pins must be satisfied by the canonical input-source resolver: selected-root public input, explicit parent connect, declaration-owned provider ingress, validation-only input pin source:harness, platform source, or internal topology producer. source:external is retired on presence. Schema imports and complete parent/delivery addresses do not prove a producer or consumer. Harness source is accepted only by the verify policy, is labeled non-production-valid in human and machine readback, and MUST be rejected by serve and every shared production boot path before route/runtime materialization. Pin-declared production outputs require a typed same-flow consumer, explicit compiled connection, or selected-root persisted public export. A structured output pin may instead declare sink:harness only for explicit validation/catalog observation; readback marks production_valid:false, production admission rejects it, and it creates no route or delivery authority. emit.target and emit.broadcast are rejected on presence. No two flows may write the same entity field (write conflict = boot error).'
       - step: 8
         name: validate_required_agents
         action: Build effective required-agent facts for every scope. If schema.required_agents is omitted, infer facts from same-scope agents.yaml map keys, subscriptions, and emit_events. If schema.required_agents is present, including an empty list, validate that explicit boundary strictly against same-scope agents.yaml by exact map key and required subscription/emit coverage.
@@ -7439,8 +7443,8 @@ engine:
         RoutePlan delivery intents; if that canonical decision failed closed, the tool MUST fail closed before
         publish with zero executable route rows. Raw event-name subscribers, RouteTable fallback, live subscriptions,
         materializer repair, or retired producer target/broadcast syntax MUST NOT rescue a matched canonical
-        failure. When no canonical lowered route applies, typed same-flow consumers, structural ParentRoute,
-        static child-flow delivery-entity routing, and accepted external boundaries remain governed by
+        failure. When no canonical lowered route applies, typed same-flow consumers and selected-root public exports
+        remain governed by
         handler_specification.handler_fields.emit and engine.cross_flow_routing.
       universal_tools: 'notify_human is auto-granted to all agents without explicit tools listing. Generated emit tools
         are derived from emit_events. Entity tools are governed by
@@ -8033,9 +8037,9 @@ engine:
         context exists for that global schedule.
       state_reference: state:<name> must reference a declared flow state. Unknown state is a boot error.
       event_reference: event:<name> must reference an event in the flow or platform catalog and must have an authored producer
-        path, platform producer, or explicit external source. Unknown or inert event triggers are boot errors.
-      fire_event_consumer: The timer fire event must have an executable handler/agent consumer, a declared output boundary, or
-        explicit external consumer metadata. Catalog membership alone is not sufficient proof that a timer can do useful work.
+        path, platform producer, selected-root public input, or admitted provider ingress. Unknown or inert event triggers are boot errors.
+      fire_event_consumer: The timer fire event must have an executable handler/agent consumer, an explicit compiled connection,
+        or a selected-root public output. Catalog membership alone is not sufficient proof that a timer can do useful work.
       cancel_state_reachability: >
         For timers started by state:<name> or event:<name>, cancel_on state:<name> must be reachable after every possible
         timer activation context in the authored transition graph. start_on state:<name> uses that state as the activation
@@ -8780,16 +8784,19 @@ engine:
     - id: event_runtime_wiring_validation
       severity: error
       scope: per-flow
-      trigger: An event that requires system node handling (has node-owned state transitions) has no owning node registered. Or
-        the owning node exists but has no handler for the event.
+      trigger: An executable node subscription or compiled transition requires a node that is absent or has no matching
+        executable handler. Another node or flow handling the same event never satisfies this obligation.
+        Authored exact and wildcard subscriptions are checked through the same admitted declaration-handler proof used
+        by the executable endpoint census. A wildcard declaration is not a concrete event occurrence; removing its exact
+        node's handler must fail verification even when another node handles matching events.
       when: boot-only
     - id: timer_validation
       severity: error
       scope: per-node
       trigger: A timer declaration is missing its owner (owner_node or owner_agent). Or the timer's owner is not a registered
         participant in the flow. Or the timer's fire_event is not in events.yaml. Timer fire/start/cancel references are
-        derived internal event producer/consumer roles; authors MUST NOT restate them through swarm.source, swarm.producer,
-        or swarm.consumer. External/non-derivable metadata remains only explicit proof for external producers or consumers.
+        derived internal event producer/consumer roles; all authored event role metadata is retired. Root exports are
+        observable without internal consumers; private timer output needs an actual consuming relation.
       when: boot-only
     - id: write_pin_ownership_validation
       severity: error
@@ -8812,7 +8819,7 @@ engine:
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
         source on the static verify surface. The warning consumes internal/runtime/core/pinrouting.ResolveFlowInputProducer
-        evidence: boundary external ingress, intrinsic input-pin source:external, parent connect, validation-only input-pin
+        evidence: boundary external ingress, flow-local admitted provider ingress, parent connect, validation-only input-pin
         source:harness,
         platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
         producer-pattern authority, events.yaml swarm.source:external as input-pin proof, produces, or swarm.status: planned.'
@@ -8822,7 +8829,7 @@ engine:
       scope: per-handler
       trigger: A handler declares an accumulator over an input event but the authored bundle has no accepted static producer
         or source path for that event. This check consumes the same canonical producer-source resolver as input_pin_wiring
-        with non-input producer checking enabled. Accepted proof classes are external event metadata for non-input events,
+        with non-input producer checking enabled. Accepted proof classes are admitted provider ingress,
         parent connect, validation-only input-pin source:harness, platform source, and internal topology producer (including handler emits,
         agent emit_events, flow output pins, and timers). produces declarations and swarm.status planned do not satisfy this
         proof.
@@ -8831,8 +8838,8 @@ engine:
       severity: error
       scope: per-emit-site
       trigger: A pin-declared production output emit or agent emit_events declaration lacks a typed same-flow consumer,
-        lowered parent connect route, structural ParentRoute eligibility, eligible static child delivery-entity route, or
-        accepted real external boundary. A structured output pin with sink:harness is validation-only and is rejected by
+        lowered parent connect route, or selected-root export. A complete ParentRoute or static child delivery address
+        is not a consuming relation. A structured output pin with sink:harness is validation-only and is rejected by
         production admission before this check can authorize runtime construction. Authored emit.target and emit.broadcast
         fail strict loading on presence and never reach this verifier.
       when: boot-only
@@ -10016,7 +10023,7 @@ tool_model:
       outbound_binding: internal/packs.OutboundBindingPlan
       compiled_plan_generation: internal/runtime/plangeneration.Generation
       provider_trigger_catalog_generation: internal/runtime/triggergeneration.Generation
-      provider_output_target_free_authorization: internal/runtime/core/provideroutput.Authorization
+      provider_output_authentication: internal/runtime/core/provideroutput.Authorization
       connector_generation_and_import_capabilities: internal/runtime/semanticview admitted ConnectorGenerationSurface and ConnectorImportSource values
       runtime_execution_view: internal/runtime/tools.ExecutionTool
       runtime_adapter: internal/runtime/tools channel handler consuming internal/packs.OutboundBindingPlan
@@ -10035,7 +10042,7 @@ tool_model:
       platform.channel_activity.<binding>.<operation>.g<compiled-plan-digest> target into the durable activity journal.
       Private targets carry one opaque admitted connector tool contract plus one typed compiled-plan generation inside the
       coordinator and never enter an agent-visible or authored generic tool registry. Semantic-source wrappers expose one
-      finite compile-visible capability aggregate carrying the opaque provider-trigger catalog generation, target-free authority, connector import
+      finite compile-visible capability aggregate carrying the opaque provider-trigger catalog generation, declaring-flow output bindings, connector import
       generation, and connector provenance. Generic optional-capability assertions and wrapper-unwrapping walks are not
       authority. ToolInputSchema is one opaque immutable recursive semantic schema vocabulary. Authored YAML presence,
       aliases, and null state end at lexical admission; typed constructors and YAML decoding publish the same admitted
@@ -10957,15 +10964,14 @@ tool_model:
         and requires the relevant signed-payload recipe to fail closed on malformed form input.
       normalized_events:
         shape: >
-          Optional list entries use `{event, fields, when, author_summary_field, author_subject}`. `event` must be an exact
+          Optional list entries use `{event, fields, when, author_subject}`. `event` must be an exact
           `inbound.<provider>.*` literal.
           Each field declares `from`, one required post-conversion JSON `schema`, optional `optional`, and an optional closed
           conversion. The schema is the sole admitted-value owner: runtime normalization, imported event refinements,
           accepted trigger descriptors, channel assignability, carry eligibility, and capability type projection derive
           mechanically from this one block. The retired `type` spelling is rejected; there is no compatibility alias.
-          Optional `author_summary_field` must name one declared string field and is the only normalized provider content
-          eligible for the author story after the connector projection/redaction boundary. Readers never inspect another
-          payload field to recover a preview. Optional `author_subject` must declare its registered subject type and name one
+          The retired `author_summary_field` fails on presence, including nulls, aliases, and merges; no content preview
+          is admitted or persisted. Optional `author_subject` must declare its registered subject type and name one
           declared string field; both members are required together.
         paths: >
           `from`, `when.exists/absent`, and `when.one_of` keys use strict dotted paths relative to the decoded raw provider object. Empty
@@ -10988,16 +10994,24 @@ tool_model:
           presence is not conversion or backend selection. There is no implicit coercion, missing-key fallback, or unknown
           conversion behavior.
         output_route: >
-          Raw and normalized outputs are explicit compiled kinds. Raw is exact-standing-target. Normalized is target-free
-          but inherits the standing run. The provider-delivery batch carries the normalized kind plus the exact verified
+          Raw and normalized outputs are explicit compiled kinds and retain the admitted declaring-flow source provenance
+          and standing run, without preassigned recipient targets. Either output reaches another flow only through an explicit
+          compiled connection from its declaring flow's output pin. Schema imports supply types, never subscriptions;
+          fanout is exactly the authored connection set. Immutable imported schema binding covers input and output pins
+          without granting producer authority to schema-only imports. External-ingress matching checks the exact declaring
+          flow as well as the event; another same-provider alias cannot acquire that flow's edges.
+          The provider-delivery batch carries the normalized kind plus the exact verified
           pack id/version/manifest_hash/catalog-generation authorization into route planning, which must match the composed
           plan authorization byte-for-byte. Missing, partial, stale, or mismatched authorization fails before mutation.
-          Only composed pack-owned normalized events may enter the target-free external input-plan lowering path; ordinary
-          events cannot gain this authority by event name, catalog presence, source-agent label, or payload shape. The batch
-          also privately carries raw kind into settlement. When the exact provider-admission source and standing target match
-          a composed external raw input pin, generic planning proves that target live, and no executable route exists, the raw
+          Output authentication is not a receiver subscription. Ordinary events cannot gain provider authority by event name,
+          catalog presence, source-agent label, or payload shape. The batch
+          also privately carries raw kind into settlement. When the exact provider-admission source matches a composed
+          raw ingress input, ordinary planning proves its exact selected-run live source owner, no compiled receiver
+          relation matched, and no executable route or route failure exists, the raw
           event settles no_subscriber_by_design. This authority is unavailable outside inbound publication and cannot weaken
-          malformed, foreign, terminated, or ordinary target failure.
+          malformed, foreign, terminated, or ordinary target failure. Consumerless settlement has no recipient target;
+          its source owner is not relabeled as a recipient. Duplicate and acknowledgment-loss reconciliation reuse the
+          exact committed settlement and complete recipients without replanning or redispatching.
         source_composition: Before boot verification, schema.yaml imports.provider_trigger_events imports normalized schemas from the effective pack inventory.
         capability_surface: >
           Installed and effective trigger subjects carry structured event descriptors with event, raw|normalized kind,
@@ -12352,22 +12366,21 @@ flow_model:
     description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
     input_event_pins:
       description: |
-        Events the flow subscribes to through its public receiver interface. Required pins must be wired by parent
-        connect, input pin source:external, validation-only input pin source:harness, platform source, or internal topology
-        producer proof. The normalized authored source enum is empty, external, or harness. Harness is exclusive static
+        Events accepted by the flow receiver interface. Only selected-root inputs are public. Private required pins
+        need explicit compiled connections, declaration-owned provider ingress, platform facts, or internal producer
+        proof. Schema imports are not subscriptions. source:external is retired on presence; the only authored source
+        choice is validation-only harness. Harness is exclusive static
         producer proof only: verify reports its count and production_valid:false, while serve and shared production boot
         validation reject it before runtime construction. It never creates delivery authority.
       required: true
     output_event_pins:
       description: |
         Events the flow emits across its public interface. Optional, but when an emit site emits one of these
-        events, pin routing is active and production routing must be supplied by typed same-flow consumers, parent connect
-        lowering, structural ParentRoute fallback when no lowered connect route applies, an eligible static child
-        delivery-entity route, or an accepted real external boundary. Structured output pins may declare validation-only
+        events, pin routing is active. Private outputs require typed same-flow consumers or explicit compiled connections.
+        Selected-root outputs are public persisted exports. A parent or current delivery address is not a consumer.
+        Structured output pins may declare validation-only
         `sink: harness`, which production admission rejects and which creates no route or delivery authority. Output pins may
-        also declare `key` and `carries`; for connected
-        instance-key composition these fields are the canonical producer-side evidence that the output event carries the
-        payload key material consumed by parent `connect`.
+        not declare retired `key` or `carries`; event-level schema and business-key declarations own producer payload guarantees.
       required: false
     input_data_pins:
       description: Entity fields the flow reads. Required pins must be written by a prior flow or initial data.
@@ -12640,7 +12653,7 @@ flow_model:
         scalar_form: |
           Scalar output event identity is the default authoring form. Receiver identity is never inferred from retired output-pin key/carries. Scalar pins cannot declare sink.
         harness_sink: |
-          sink:harness is mutually exclusive with same-flow subscribers, parent connect, accepted external consumers, and every other real consumer. It creates no semantic external endpoint, subscriber, route, connect edge, recipient manifest, delivery row, persistence authority, retry/replay route, or production no-consumer bypass.
+          sink:harness is mutually exclusive with same-flow subscribers, parent connect, and every other real consumer. It creates no semantic external endpoint, subscriber, route, connect edge, recipient manifest, delivery row, persistence authority, retry/replay route, or production no-consumer bypass.
         example: |
           pins:
             outputs:
@@ -13162,54 +13175,51 @@ flow_model:
           - singular target, target_set fanout, and reply metadata are covered
           - arbitrary business-field descriptor targets remain hard-invalid under #2087
           - '#1473 does not close #1474, #1475, selected-contract runfork readiness, or #1466 parent closure'
-      implementation_slice_2207:
+      implementation_slice_2304:
         status: merge_bearing_runtime_behavior
-        canonical_code_owner: internal/apiv1.resolveEventPublicationTemplateInputEndpoint plus internal/runtime/bus.publicInputAdmission over internal/runtime/core/pinrouting.ConnectRoutePlan plus runtimebus.APIEventPublicationCommitOwner
+        canonical_code_owner: internal/runtime/semanticview.SelectedRootInputPin plus internal/runtime/bus.NewRootInputAPIEventPublicationEndpoint and runtimebus.APIEventPublicationCommitOwner
         rule: |
-          Create-new `/v1/rpc event.publish` may admit one exact authored template-flow input pin as a public input.
-          Endpoint resolution is census-backed and preserves authored root event-catalog authority: an unscoped event
-          authored by the root remains ordinary root publication even when a template input resolves to the same canonical
-          identity. Effective schemas imported from verified provider-trigger packs are visibility facts, not authored root
-          ownership, and therefore may validate and resolve an exact template input without granting provider admission.
+          Public event.publish admission requires an exact compiled selected-root input pin for both new and existing
+          runs. Catalog membership, imported schemas, a private child input, template resolution mode, and a complete
+          caller-supplied target confer no public input authority. Root input membership wins a colliding private name.
+          Root catalog ownership without a root input does not. Private inputs are not injected through the public API.
+          Each public publication records typed root routing provenance with the admitted run's root entity identity.
+          A caller's delivery target or referenced historical event never becomes its source identity. Root-to-private
+          connections must match this source in both new-run and existing-run execution, not fall through to export-only settlement.
 
-          The selected endpoint compiles to one `ConnectRoutePlan` and executes under a typed EventBus public-input
-          authority that is distinct from provider-output authorization. The canonical plan owns template create, select,
-          or select-or-create lifecycle resolution and the selected delivery routes. Endpoint resolution returns one typed
-          ordinary-root/static, exact-template-input, or invalid-template decision. Once template ownership is selected,
-          a missing, ambiguous, or invalid exact input is terminal and cannot fall through to ordinary publication.
-          Ambiguous or missing endpoints,
-          design-locked or invalid resolution, target failure, noncanonical route ownership, and zero durable deliveries
-          fail closed before acknowledgment. Run, flow-instance, entity, route, event, delivery, replay-scope, and API
-          idempotency completion mutation is one typed selected-store API-event publication transaction; any lifecycle,
-          materialization, delivery, replay-scope, completion, or commit failure leaves no partial public-input publication
-          facts. The operation preserves #1214 short keyed lookup/serialization and does not alter generic callback ownership.
+          Real root-to-private connections remain executable. Shared private template receiver registration survives
+          public endpoint cleanup; the compiled connection and receiver pin own create, select, and select-or-create.
+          This does not add selected-root template lifecycle support or repair selected-root static+standing and
+          explicit-singleton startup exclusion; those pre-existing lifecycle defects are tracked by #2438.
+          The boot-only split does not waive ordinary root-origin delivery, provider-to-existing-root connections,
+          child-provider execution, selected-input authority, or unrelated fork readiness and receiver proofs.
+
+          The existing selected-store publication transaction owns run, event, delivery, replay-scope and deterministic
+          API completion writes atomically. Failures before commit leave no partial publication facts. A commit error
+          alone does not establish rollback; same-key reconciliation returns any durable completion without redispatch.
           A durable keyed replay is resolved before current bundle, endpoint, route, or runtime admission is re-evaluated.
-          Once publication plus completion commits, that completion remains the API result; process-local activation finalization
-          or dispatch-admission failures are reported and recovered through durable readiness/delivery owners rather than
-          contradicting the committed response. The completion includes the deterministic initial selected-delivery snapshot
-          from the prepared canonical routes and is returned directly for both the first response and replay; post-commit
-          operator readback cannot reinterpret it.
+          Once publication plus completion commits, that completion remains the API result; process-local activation or
+          dispatch failures use durable recovery rather than contradicting it. First response and replay return the same
+          recorded initial delivery snapshot without mutable post-commit operator readback.
         consumes:
-          - authored root event catalog and authored endpoint census
-          - effective provider-trigger schema imports without provider-output authority
-          - exact template input pins and their typed instance-resolution declarations
-          - canonical ConnectRoutePlan and selected-store publication transaction
+          - exact compiled selected-root input pins, separate from the full internal endpoint census
+          - provider ingress declaration and output authorization, never schema-import subscriptions
+          - compiled private connections and receiver-owned instance-resolution declarations
+          - selected-store atomic publication and idempotency completion
         produces:
-          - one exact concrete template target for an admitted public input
-          - durable event and delivery rows committed with the selected template lifecycle facts
+          - public root admission without private child injection or catalog-only authority
+          - connected private lifecycle execution and durable deliveries
+          - selected-root exports as public persisted observations without fabricated deliveries
         proof_obligations:
-          - authored root without a root input pin retains precedence over a colliding template input
-          - imported normalized provider schema plus an exact template input remains eligible for typed public admission
-          - scoped and unscoped template-owned events without an exact input reject before lower-precedence publication
-          - create, select, and select-or-create modes consume the same canonical lifecycle owner
-          - the complete public rejection matrix fails before acknowledgment
-          - SQLite and PostgreSQL faults at delivery insertion, replay-scope insertion after delivery, and API completion insertion after complete publication leave zero exact run, instance, entity, route, event, delivery, replay-scope, or idempotency residue
-          - same-key replay returns the stored response after the selected runtime context is unloaded and does not re-enter semantic admission
-          - process-local activation finalization failure after the atomic commit cannot replace the committed API completion with an error
-          - first response and replay return the same stored initial delivery snapshot without post-commit operator readback
+          - root pin versus catalog-only, private leaf and qualified name, imported schema, caller target, and both run modes
+          - root to connection to private create, select, and select-or-create execution with exact instance readback
+          - provider declaring-flow binding, disjoint aliases, explicit fanout, unwired importers and binding removal
+          - complete parent and static delivery addresses without consuming relations fail closed
+          - SQLite and PostgreSQL rollback, acknowledgment loss, same-key replay and restart retain atomic outcomes
+          - supported HTTP publication, WebSocket observation and CLI readback consume the same recorded facts
         does_not_close:
-          - provider ingress activation, signing, and provider-output authority
-          - automatic scenario derivation tracked by the S6 workstream
+          - selected-root template lifecycle and static+standing/explicit-singleton startup subcases explicitly deferred to issue 2438; the latter retain executable dual-store acceptance under TestIssue2438SelectedRootProviderBootBothStores with the issue2438 test tag
+          - general routing architecture tracked by issue 2413
       implementation_slice_1474:
         status: merge_bearing_runtime_behavior
         canonical_code_owner: internal/runtime/bus.RoutePlan via CheckPublishRecipientPlan and Publish, consumed by internal/runtime/tools.Executor.handleEmitTool
@@ -13222,8 +13232,7 @@ flow_model:
           canonical matched plans are admitted to Publish; canonical
           fail-closed plans fail before publish with zero executable routes;
           lower-precedence or no-canonical plans continue only through typed
-          same-flow consumers, structural ParentRoute, static child delivery-entity,
-          or accepted external-boundary handling. Node/system emits remain consumers of
+          same-flow consumers or selected-root public exports. Node/system emits remain consumers of
           the same RoutePlan authority through engine outbox/dispatcher paths.
         consumes:
           - implementation_slice_1473 EventBus RoutePlan publish authority
@@ -13762,7 +13771,7 @@ platform_tables:
       serve_filter: The serve story reads exact bundle rows for its runtime instance and loaded bundle set plus runtime-scoped rows for that runtime instance; store-global and unrelated rows are excluded.
       forbidden: [run joins, selected-store-wide inference, empty-string scope inference, current-bundle fallback, timestamp correlation]
     privacy_contract:
-      allowed: Exact registry-owned metadata fields, one producer-owned validated author_safe_summary, and a validated platform.failure/v1 envelope.
+      allowed: Exact registry-owned metadata fields and a validated platform.failure/v1 envelope. Event content remains available through normal event payload APIs; author activity does not extract or copy previews.
       forbidden: Raw payloads, prompts, transcripts, provider responses, credentials, arbitrary tool results, stacks, hidden reasoning, and generic evidence maps.
       rule: Allowlisting and redaction happen before persistence. Rendering may truncate only after that boundary.
     registry:
@@ -13793,9 +13802,13 @@ platform_tables:
         failure envelope and is not author-visible; it MUST NOT be rendered or reclassified as handler failure.
       event_descriptor_projection: >-
         The selected store holds one process-local immutable projection keyed by exact (runtime_instance_id, bundle_hash).
-        Every descriptor carries event_type, authored|different disposition, and optional author_summary_field from the
-        resolved semantic source. Identical same-key registration is reference-safe; conflicts fail closed. Names-only,
+        Every descriptor carries event_type and authored|different disposition from the resolved semantic source.
+        These generated classification facts are not authored emitter descriptors and carry no content selectors. Identical same-key registration is reference-safe; conflicts fail closed. Names-only,
         process-global, last-writer-wins, fallback, and current-bundle classifiers are forbidden.
+        Generated activity outcome schemas and their classification MUST consume the same effective executable source,
+        including admitted connector imports. The underlying uncomposed bundle is not sufficient evidence for imported
+        activities. Removing the owning activity or effective tool invalidates generated classification even if a stale
+        catalog projection survives; suffix matching or a sibling activity MUST NOT replace the missing owner.
         Compiled arrival and fanout-delivery joins contribute platform.join_complete; a declared join timeout additionally
         contributes platform.join_timeout. These internal occurrence descriptors have different disposition and no authored
         summary, deduplicate exactly across declarations, and reject conflicting authored classification. No join descriptor
@@ -13819,14 +13832,14 @@ platform_tables:
       plain: Append-only text with no ANSI, emoji, footer, or cursor rewrite.
       ndjson: One complete typed AuthorActivity occurrence per line; machine output MUST NOT scrape human prose.
       vocabulary: [received, in flight, emitted, sent, completed, failed, outcome uncertain]
-      missing_facts: Omit unavailable phases, summaries, and content. Never render placeholders or infer them from elapsed time or logs.
-      safe_summary: >-
-        Authored events may select only an explicit event-catalog author_summary_field. Provider ingress may select only its
-        exact connector-declared normalized projection after connector redaction. authoractivity validates scalar text,
-        valid UTF-8, normalizes controls/whitespace to one line, and caps at 24 Unicode code points before persistence.
+      missing_facts: Omit unavailable phases and content. Never render placeholders or infer them from elapsed time or logs.
+      content_boundary: >-
+        Event and provider author_summary_field selectors are retired on presence. No producer, transaction, persistence
+        column, replay path, fork clone, renderer, or stream grouping may extract, retain, or reconstruct event previews.
+        Full event payload remains available only through its canonical payload/readback APIs; author activity is metadata-only.
       repetition: >-
         Human output groups only contiguous identical failures by exact registry kind/transition, author subject, rendered
-        action, failure class/code, diagnostic route, and safe summary. It renders the first, marks the second as (2nd time),
+        action, failure class/code, and diagnostic route. It renders the first, marks the second as (2nd time),
         and emits aggregate (×N in D) rows at each fifth repeat, a three-minute close, a different occurrence, or shutdown.
         Typed NDJSON is never compressed.
     serve_follower:
@@ -14194,12 +14207,10 @@ platform_tables:
             scope_kind      TEXT NOT NULL CHECK (scope_kind IN ('bundle', 'runtime', 'global')),
             runtime_instance_id UUID,
             bundle_hash     TEXT,
-            author_safe_summary TEXT,
             projection      JSONB NOT NULL DEFAULT '{}',
             failure         JSONB,
             occurred_at     TIMESTAMPTZ NOT NULL,
             CHECK ((scope_kind = 'bundle' AND runtime_instance_id IS NOT NULL AND bundle_hash IS NOT NULL) OR (scope_kind = 'runtime' AND runtime_instance_id IS NOT NULL AND bundle_hash IS NULL) OR (scope_kind = 'global' AND runtime_instance_id IS NULL AND bundle_hash IS NULL)),
-            CHECK (author_safe_summary IS NULL OR length(author_safe_summary) <= 24),
             INDEX idx_author_activity_run (run_id, sequence) WHERE run_id IS NOT NULL,
             INDEX idx_author_activity_entity (entity_id, sequence) WHERE entity_id IS NOT NULL,
             INDEX idx_author_activity_agent (agent_id, sequence) WHERE agent_id IS NOT NULL,
@@ -17674,6 +17685,16 @@ run_model:
         without source or child mutation. Future admission of this inert history is tracked under #642, separately
         from selected pending timer, join, and fan-out execution. This scope does not narrow already-supported
         ordinary fan-out child/fork-of-fork completion or permit deriving authority from status or root-shaped path text.
+      completed_dynamic_connection_history_scope: >-
+        A genuine pending flow-local event does not by itself prove the selected topology of its completed dynamic
+        connection ancestor. When selected route-history evaluation cannot prove that ancestor's dynamic receiver,
+        the topology summary must retain its dynamic-topology blocker even when every frontier instance has local
+        recipient evidence; that evidence cannot promote historical topology to supported.
+        Materialization preserves flow_route_history_unproven and refuses without source or child mutation, including
+        repeated requests. Future admission of this completed history is tracked under #642; source delivery targets
+        are not copied as authority and completed events are not dropped merely to obtain admission. This limitation
+        does not declare every dynamic fork unsupported, waive independently admitted local receiver-readiness proof,
+        or expand the selected pending scheduler and general routing workstreams.
       distinct_current_evidence: >-
         activity_attempts are post-frontier selected-execution evidence, not a historical family. Source
         preparation reads the immutable selected request event and current terminal attempt in one source/fork
@@ -18837,7 +18858,6 @@ platform_events:
         locations:
         - internal/runtime/pipeline/activity_engine.go
       routing_class: platform_internal_event_loop
-      runtime_handling: consumed_by_workflow_runtime
       scope: entity
       payload:
         activity_id: string
@@ -18990,8 +19010,6 @@ platform_events:
         source: string — who initiated the reset (admin_cli)
         timestamp: string (ISO 8601)
       produced_by_type: platform
-      swarm:
-        source: external (platform admin CLI)
     platform.auth_required:
       description: Agent or tool call blocked pending authorization.
       schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.auth_required"].payload'
@@ -20867,25 +20885,25 @@ static_analyzer:
       - swarm.status-based lifecycle suppression
     accepted_producer_sources:
       boundary_external_ingress:
-        rule: A root input pin is externally ingressible by boundary contract.
-      intrinsic_input_pin_ingress:
-        rule: 'A child/template/static flow input pin explicitly declares source: external.'
+        rule: Only the selected-root input pin is externally ingressible by public boundary contract. Public eligibility may coexist with admitted providers and exact compiled connections. Source-distinct explicit producers are not ambiguous inference; compiled-edge validity and harness exclusivity remain checked. Private child inputs require actual local or connected producer evidence.
+      admitted_provider_ingress:
+        rule: An exact input pin belongs to its flow-local admitted ingress.providers plan. Pack-backed and explicit raw plans are distinct admitted provider entry; schema imports are not subscriptions.
       parent_connect:
-        rule: An LCA-owned schema.yaml connect row binds the producer output pin to this receiver input pin and lowers to a concrete RoutePlan.
+        rule: An LCA-owned schema.yaml connect row binds the producer output pin to this receiver input pin and lowers to a concrete RoutePlan. Multiple source-distinct rows are lawful when each independently validates; the exact admitted source chooses its relation, never schema visibility or producer-count inference.
       harness_injection:
         rule: 'The input pin declares source: harness. This is exclusive validation-only static producer proof: verify may
           accept it only with explicit non-production readback, while all production admission rejects it. It creates no
           producer pattern, alias, route, topology edge, standing target, provider ingress, subscriber, or runtime delivery.'
       platform_source:
-        rule: The input pin event exactly matches a platform_events.catalog key or accepted platform source proof.
+        rule: The input pin event exactly matches an authoritative platform_events.catalog key. Name prefixes and authored annotations confer no authority.
       internal_topology_producer:
-        rule: Authored handlers, agents, flow output pins, or timers produce the event inside the topology; this proof does not
+        rule: Same-flow authored handlers, agents, timers, fan_out, or auto_emit_on_create produce the event; a sibling output alone is not producer proof. This proof does not
           generate producer-scoped route patterns.
     retired_producer_paths:
       sibling_flow_output_auto_wire:
         rule: Unique same-name sibling output pin inference is not producer-pattern authority and MUST NOT create auto-wire aliases.
       event_swarm_source_external:
-        rule: 'events.yaml swarm.source: external is not input-pin proof. Use input pin source: external for intrinsic ingress.'
+        rule: 'Both events.yaml swarm metadata and input pin source: external are retired on presence; no compatibility interpretation.'
     rule: Emit warning when none of the accepted producer-source forms are found. The finding message must say no accepted producer
       source was found in the authored bundle and list the checked source classes.
   slice_3a_pin_target_resolution:
@@ -20904,8 +20922,8 @@ static_analyzer:
     scope:
       description: For every system-node emit site or agent emit_events declaration whose emitted event is declared in the
         emitter flow's pins.outputs.events, verify that the authored contract supplies a typed same-flow consumer,
-        lowered parent connect topology, structural binding, eligible static child delivery-entity routing, an accepted
-        external consumer, or validation-only sink:harness. Harness is mutually exclusive with real consumers and makes
+        explicit compiled connection, selected-root export, or validation-only sink:harness.
+        Harness is mutually exclusive with real consumers and makes
         the bundle production-invalid. Producers never author recipient identity or cardinality.
       applies_to:
       - handler top-level single-emit
@@ -20921,10 +20939,10 @@ static_analyzer:
     accepted_target_mechanisms:
       typed_same_flow_consumer:
         rule: A scoped authored subscriber consumes the local event through typed pub/sub.
-      accepted_external_consumer:
+      selected_root_export:
         rule: >-
-          Exact `swarm.consumer: external` lowers to the closed external-boundary type. Other free-form consumer
-          metadata does not authorize routing or suppress no-consumer failure.
+          A compiled output pin of the selected root is a public persisted observation. It requires no internal
+          consumer and creates no fabricated target or delivery. A matching failed connection still fails closed.
       lowered_parent_connect:
         rule: Parent connect plus receiver-owned scalar instance/source/resolution lowering provides concrete route-plan facts before runtime dispatch.
       structural_parent_route:
@@ -20940,15 +20958,14 @@ static_analyzer:
         rule: A structured output pin may declare sink:harness only for explicit validation/catalog observation. Production
           admission rejects it, and it creates no runtime recipient or route fact.
     static_failure_reasons:
-      target_required_missing: No typed same-flow consumer, lowered parent connect route, structural ParentRoute eligibility,
-        eligible static child delivery-entity route, or accepted external consumer exists.
+      target_required_missing: No actual typed same-flow consumer, compiled connection, or selected-root export exists.
+        Complete or incomplete parent/current-delivery addresses and template mode or static path depth are not consumers.
       retired_emit_routing: emit.target or emit.broadcast is present in any shape.
-      harness_consumer_conflict: sink:harness is combined with a real same-flow, connect, or external consumer.
+      harness_consumer_conflict: sink:harness is combined with a real same-flow or compiled-connect consumer.
     runtime_failure_reasons:
       publish_time_dead_letter:
       - target_unreachable_no_subscriber
       - target_unreachable_terminated
-      - parent_route_incomplete
       - target_ambiguous
       - target_not_subscribed
     rule: Emit hard invalidity for every statically detectable missing or malformed accepted pin route source. Runtime failure
@@ -20959,9 +20976,8 @@ static_analyzer:
       rule: |
         Agent emit_events declarations that name a pin-declared output event are
         static emit sites for pin_target_resolution. They consume the same
-        composition-first route authority as node/system emits: lowered parent
-        connect, typed same-flow consumers, structural ParentRoute/static child
-        delivery-entity eligibility, or an accepted external consumer. A lowered parent
+        composition-first route authority as node/system emits: explicit compiled
+        connect, typed same-flow consumers, or a selected-root export. A lowered parent
         connect is sufficient and MUST NOT require producer routing fields,
         relay nodes, raw same-name fallback, or live-subscription compatibility
         fallback. If no accepted route proof exists, verification fails closed
@@ -20981,7 +20997,7 @@ static_analyzer:
       - unconnected or unsupported agent output-pin verification failure with pin_target_resolution
       proof_obligations:
       - flow-scoped agent emit_events with a parent connect output route verifies successfully
-      - flow-scoped agent emit_events without a typed consumer, parent connect, structural route, static child delivery-entity route, or accepted external consumer fails with target_required_missing
+      - private flow-scoped agent emit_events without an actual consumer or compiled connection fails with target_required_missing even when complete parent or current-delivery addresses exist
       - node/system pin_target_resolution behavior remains unchanged
       - fixture contracts that intentionally test intent/tool/agent delivery behavior do not declare stale output pins unless they also provide route authority
       does_not_close:
@@ -21131,8 +21147,10 @@ static_analyzer:
         rule: A typed compiled connect edge from the declaring output to the consuming input keeps the declaration alive.
           Raw qualified exact or slash-qualified wildcard subscription text is not a liveness proof. Cross-flow liveness
           counts only through the immutable compiled connect edge.
-      external_annotations:
-        rule: "Accepted `swarm.source` beginning with external or platform, or accepted external `swarm.consumer` metadata on the declared event entry, counts as an active external role. Internal topology roles must be derived from topology owners and fail closed if restated through `swarm.*`."
+      selected_root_interface:
+        rule: Declared selected-root inputs and exports have a public role without inventing internal consumers or deliveries.
+      admitted_provider_ingress:
+        rule: An admitted ingress declaration owns provider production in its exact flow. Schema imports alone establish neither producers nor consumers.
       same_flow_timer_references:
         rule: "Timers in the same scope keep the declaration alive through `event`, `start_on: event:...`, or `cancel_on: event:...`."
       same_flow_fan_out_emit:
@@ -21568,8 +21586,8 @@ test_specification:
           borrowed-project, custom-store dev behavior, and production identity salting are outside this profile.
       public_checkpoint: >
         Forced-death journeys first pause the exact run through public RPC, send one signed webhook, join its accepted
-        standing entity and exact ordered raw/normalized child receipt to event.list, prove the raw child has the standing
-        entity and no_subscriber_by_design settlement, then observe the normalized input event and one exact pending
+        standing entity and exact ordered raw/normalized child receipt to event.list, prove the consumerless raw child has
+        no recipient entity or delivery and has no_subscriber_by_design settlement, then observe the normalized input event and one exact pending
         non-terminal agent delivery to the expected existing downstream entity and route. The normalized transport lookup
         independently resolves exactly that receipt child. run.diagnose must report paused status with exactly one active
         delivery. A deadline is failure, not success.
@@ -21578,7 +21596,7 @@ test_specification:
         M2: Public verify and internal retained mock construction use the same production-shaped YAML-only relative invocation root; public live serve is separate L evidence.
         M3: Exact authored connector mock response admission succeeds; missing response is structurally valid but fails public test admission before acquisition. Malformed supplied responses still fail structural verification.
         M4: Cold internal retained mock construction reaches committed readiness on both selected stores with recovery omitted.
-        M5: Signed ingress proves the exact ordered receipt from its raw standing-entity event and no-subscriber settlement through its normalized downstream-entity event and exact delivery target, with no dead letter.
+        M5: Signed ingress proves the exact ordered receipt from its target-free consumerless raw event and no-subscriber settlement through its normalized downstream-entity event and exact delivery target in the same standing run, with no dead letter. The receipt retains the standing source entity, not a fabricated raw recipient.
         M6: The filesystem-flow-owned mock agent executes without external provider or container discovery and exposes mock provenance.
         M7: One workflow timer advances once with exact platform.stage_timer event cardinality.
         M8: One decision card is listed, read, approved, and read back as decided through public RPC.
@@ -27016,6 +27034,9 @@ cli_specification:
         and optional idempotency_key to /v1/rpc event.replay through the shared v1 API client. The server remains the replay
         owner: it derives replay targets from original event_deliveries, creates fresh replay/audit evidence, and returns
         EventReplayResult.
+        The replay event's target set is projected from the selected historical delivery routes, not copied from the
+        original event's possibly larger local-plus-connected target set. Producer source, payload and causal lineage
+        remain unchanged. Current topology cannot add replay recipients or convert a connected route into a local one.
       flags:
       - name: --subscriber <agent-id>
         repeatable: true
@@ -27062,14 +27083,18 @@ cli_specification:
         it validates declared event/payload/run/bundle/idempotency semantics, publishes through the runtime EventBus/store
         owner, derives delivery rows, and returns EventPublishResult. The server requires --bundle-hash for create-new-work
         when --run-id is omitted, checks optional --bundle-hash against existing run context when --run-id is supplied, and
-        rejects valid but non-routable hashes with BUNDLE_UNAVAILABLE under the single-active-runtime boundary. Flow-scoped event
-        names are server-owned contract references: the CLI sends the caller string unchanged, and /v1/rpc event.publish
-        resolves valid flow_id/local_event or flow-path/local-event references through the loaded contract catalog before
-        declaration validation, payload validation, EventBus publish, and idempotency completion persistence. Unknown
-        flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED. When --run-id selects
+        rejects valid but non-routable hashes with BUNDLE_UNAVAILABLE under the single-active-runtime boundary. The CLI sends
+        the caller event name unchanged. /v1/rpc event.publish requires an exact selected-root input pin; schema visibility,
+        private leaf names and qualified private references do not grant publication authority. Rejection is
+        EVENT_NOT_DECLARED before mutation or idempotency completion. When --run-id selects
         an existing run, the server preflights the selected runtime EventBus recipient plan and rejects declared-but-unroutable
         follow-up events before event/idempotency persistence; the CLI must render that server EVENT_NOT_DECLARED rejection
-        rather than reporting a successful publish with zero deliveries. When both --target-flow-instance and --target-entity-id
+        rather than reporting a successful publish with zero deliveries. An explicit receiver target narrows both the
+        selected-root local branch and every compiled connection before receiver activation: only the exact selected
+        flow instance and entity may receive a delivery. An entityless static connect blueprint binds that admitted
+        entity at materialization; it does not broaden to sibling connections or resurrect implicit child subscriptions.
+        An unselected receiver must not activate. A target without a consuming relation fails before event and
+        idempotency persistence, and replay/readback retain the exact selected delivery route. When both --target-flow-instance and --target-entity-id
         are supplied with --run-id, the CLI serializes them as `target: {flow_instance, entity_id}` and the server validates
         the selected-run entity, entity_state.flow_instance equality, event routability for that concrete receiver route,
         and source-event same-run lineage before persistence. Caller-supplied payload.entity_id is not target or
@@ -27129,7 +27154,7 @@ cli_specification:
         - IDEMPOTENCY_CONFLICT
       proof_expectations:
       - exact /v1/rpc event.publish call with event_name, required payload, optional run_id, optional source_event_id, optional target object from --target-flow-instance plus --target-entity-id, optional canonical bundle_hash, optional emitter, and optional idempotency_key params only; missing create-new-work bundle scope maps to server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map to BUNDLE_UNAVAILABLE
-      - flow-scoped event names are passed through exactly by the CLI and resolved only by the server-owned /v1/rpc event.publish contract-catalog resolver; unknown scoped references and ambiguous unscoped leaf names produce EVENT_NOT_DECLARED without mutation or idempotency completion
+      - event names are passed through exactly by the CLI; the server admits only exact selected-root input pins and rejects private leaf/qualified references with EVENT_NOT_DECLARED without mutation or idempotency completion
       - existing-run follow-up publish with no selected persisted delivery recipient or delivery route produces server EVENT_NOT_DECLARED before event/idempotency persistence; the CLI exits through publish_rejected and never reports deliveries=0 as success for that path
       - explicit target route publish persists event.target and one delivery_target_route through the server-owned event.publish/EventBus path; nonexistent entity, mismatched entity/flow ownership, not-routable target flow, missing/terminal run, source lineage mismatch, blank/malformed target params, and payload-only entity_id/flow_instance non-authority fail closed before event/idempotency persistence
       - payload.entity_id on a create_entity event produces server PAYLOAD_VALIDATION_FAILED before event/idempotency persistence; the CLI exits through publish_rejected and does not treat payload.entity_id as target/entity routing authority
@@ -34135,52 +34160,40 @@ api_specification:
       errors: [DATA_INVOCATION_CONFLICT, DATA_INTEGRITY_ERROR]
     event.publish:
       tier: should_have
-      description: "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into\
-        \ the runtime bus. If run_id is omitted,\nthe server allocates a new run_id, persists the event as that run's\ntrigger,\
-        \ and returns new_run_created=true. If run_id is provided,\nit must identify an existing nonterminal run; missing\
-        \ or terminal\nruns fail closed with RUN_NOT_FOUND or RUN_ALREADY_TERMINAL. For create-new publication, an exact authored\
-        \ template-flow input pin may be admitted through typed public-input authority. Authored root event-catalog ownership\
-        \ takes precedence even when the root has no input pin; effective provider-trigger schema imports are visibility facts,\
-        \ not authored-root or provider-output authority. The exact template endpoint must lower through the canonical ConnectRoutePlan\
-        \ and template create/select/select-or-create lifecycle owner. Endpoint resolution returns one typed ordinary-root/static,\
-        \ exact-template-input, or invalid-template decision. Once template ownership is selected, a missing, ambiguous, or invalid\
-        \ exact input fails closed and cannot fall through to ordinary publication. Invalid or design-locked resolution, target\
-        \ failure, noncanonical route ownership, and zero durable deliveries also fail closed. Run, template instance, entity, route,\
-        \ event, delivery, replay-scope, and deterministic API idempotency completion writes commit through one typed selected-store\
-        \ API-event publication transaction or leave no residue. The operation preserves the generic #1214 short keyed lookup/lock\
-        \ contract and does not execute an arbitrary idempotency callback inside the publication transaction. A same-key replay with\
-        \ the same request body returns its durable completion before current bundle, endpoint, route, or runtime admission is re-evaluated.\
-        \ Once the transaction commits, process-local activation finalization or dispatch-admission failure is reported for durable\
-        \ recovery and cannot replace the committed API result with an error. The stored completion includes the deterministic\
-        \ initial selected-delivery snapshot from the canonical prepared routes; the first response and every replay return it\
-        \ directly without mutable post-commit operator readback. Existing-run publication must preflight\
-        \ the selected runtime EventBus recipient plan before event/idempotency persistence. A declared event with no selected\
-        \ persisted delivery recipient or delivery route for that run fails closed with EVENT_NOT_DECLARED and must not return\
-        \ success with deliveries=0. Target resolution failures in the selected plan also fail closed with EVENT_NOT_DECLARED.\
-        \ Existing-run publication may provide `target` as the singular receiver route identity (`flow_instance` plus `entity_id`).\
-        \ When present, `target` is route authority and the server validates that the entity exists in the selected run,\
-        \ belongs to the selected target flow instance, and has a selected delivery route for the requested event before\
-        \ event/idempotency persistence. The API must not infer an entity target from run_id or payload.entity_id.\n\nOperator-reference provenance policy:\
-        \ source_event_id is an input selector for an optional operator reference. It MUST be supplied with run_id, the referenced event\
-        \ must exist in the same run, and the server persists it as events.operator_reference_event_id. It never populates\
-        \ events.source_event_id / ParentEventID and does not prove causal checkpoint or approval lineage. Omitted source_event_id\
-        \ means no operator reference provenance is recorded. source_event_id without run_id, malformed source_event_id, or a referenced\
-        \ event from another run fails\nclosed before event or idempotency completion persistence. A missing\nsource event\
-        \ fails closed with EVENT_NOT_FOUND.\n\nThe method consumes the same canonical EventBus/store event-publication\n\
-        owner used by runtime dispatch. Delivery results are read back from the\npersisted event_deliveries owner; the API\
-        \ layer must not re-plan\nsubscribers. A successful event.publish response is a durable acceptance acknowledgment\
-        \ for the event record, selected delivery manifest, and committed replay scope; it MUST NOT wait for system-node\
-        \ handler completion, dynamic auto_emit_on_create side effects, agent processing, downstream event delivery, or downstream\
-        \ receipts. Delivery statuses in the response are a persisted snapshot and may remain pending. Post-commit runtime\
-        \ dispatch/recovery owns downstream completion. `run.start` separately owns explicit event-only, feed-only,\n or combined run initiation; eventless deployment feeds do not pass through event.publish.\n\n`event_name` is a contract event reference. Callers may pass a root/unambiguous leaf event\
-        \ name or a flow-scoped reference such as `flow_id/local_event` or `flow-path/local-event`. The server resolves\
-        \ flow-scoped references through the loaded contract catalog before declaration validation, payload validation,\
-        \ EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped\
-        \ leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity\
-        \ is the only authority that materializes the canonical receiving-flow entity identity. Caller-supplied payload.entity_id on an event whose selected\
-        \ handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence.\
-        \ Composition owns the receiver key and resolution; payload.entity_id is not target\
-        \ or stateful-context authority.\n"
+      description: |
+        Canonical low-level public event publication primitive. Both new-run and existing-run requests require an exact
+        compiled selected-root input pin. Root catalog membership without that pin, imported schemas, private child inputs,
+        template resolution modes, and caller targets confer no public authority. Private template create/select/select-or-create
+        remains available through explicit compiled connections from admitted root or provider events, with shared private
+        receiver registration. No selected-root template lifecycle accommodation is introduced.
+
+        If run_id is omitted, the server creates a run and persists this event as its trigger, returning new_run_created=true.
+        Otherwise run_id must name an existing nonterminal run; missing or terminal runs fail closed. Event and payload
+        admission, target validation, selected delivery planning, and idempotency completion precede acknowledgment.
+        The selected-store transaction commits run, lifecycle, event, delivery, replay-scope and deterministic API completion
+        facts atomically. Pre-commit failure leaves no residue. Commit acknowledgment loss does not prove rollback:
+        same-key reconciliation returns any durable completion without repeating committed work.
+        The operation retains the short keyed lookup/lock contract, without arbitrary callbacks inside the transaction.
+        A same-key replay with the same request returns the recorded completion before current bundle or endpoint admission
+        is re-evaluated. First response and replay return its recorded initial delivery snapshot, never a mutable post-commit
+        operator readback. Post-commit activation or dispatch failure uses durable recovery and cannot replace that result.
+
+        Existing-run publication preflights selected recipients before event/idempotency persistence. Missing recipients,
+        noncanonical route ownership, or target failure returns EVENT_NOT_DECLARED, not success with zero deliveries.
+        Optional target is a singular flow_instance/entity_id address validated against the selected run and actual consuming
+        relation; it cannot make a private input public. run_id and payload.entity_id do not imply a receiver.
+        Handler create_entity owns materialization; caller payload.entity_id for such a handler fails PAYLOAD_VALIDATION_FAILED.
+        Composition owns receiver keys and resolution; retired handler-side acquisition grants no authority.
+
+        Optional source_event_id requires run_id and an existing event in that same run. It is persisted exclusively as
+        operator_reference_event_id, never causal source_event_id/ParentEventID or approval lineage. Malformed or cross-run
+        references fail before mutation; a missing referenced event returns EVENT_NOT_FOUND.
+
+        This HTTP method uses the canonical EventBus/store owner. Acknowledgment proves durable acceptance, not handler,
+        agent, auto-creation, downstream delivery or receipt completion. Delivery statuses may remain pending. Runtime
+        dispatch/recovery owns completion. run.start delegates to this same public admission boundary.
+        event_name must identify an exact selected-root input. Private leaf and qualified references fail EVENT_NOT_DECLARED
+        before mutation; schema visibility cannot make them public.
       scope:
         required:
         - write:runs
@@ -34193,7 +34206,7 @@ api_specification:
             $ref: '#/components/schemas/BundleHash'
         - name: event_name
           required: true
-          description: Contract event reference to publish. Root and unambiguous leaf names remain accepted; valid flow_id/local_event or flow-path/local-event references are resolved server-side through the loaded contract catalog to the canonical runtime event identity before validation and persistence. Unknown flow/event combinations and ambiguous unscoped leaf names fail closed with EVENT_NOT_DECLARED.
+          description: Exact selected-root input pin event to publish. Catalog-only, private child, and qualified private references fail closed with EVENT_NOT_DECLARED before mutation. A target does not confer public input authority.
           schema:
             type: string
         - name: payload
@@ -34214,7 +34227,7 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
         - name: target
           required: false
-          description: Optional singular receiver route identity for existing-run publication. Requires run_id and carries the concrete target flow_instance plus entity_id that the server persists as event.target before EventBus recipient planning. This field is route authority; payload.entity_id and run_id are not target authority. Fan-out target_set and selector-style target forms are not part of the v1 event.publish public surface in this slice.
+          description: Optional singular receiver coordinate for existing-run publication. Requires run_id and a selected-run flow_instance plus entity_id. The coordinate never authorizes a private input or a consuming relation; EventBus must prove selected-root-local or explicit compiled-connection delivery authority. payload.entity_id and run_id are not target authority. Fan-out target_set and selector-style target forms are not part of the v1 event.publish public surface.
           schema:
             $ref: '#/components/schemas/EventPublishTargetRoute'
         - name: emitter

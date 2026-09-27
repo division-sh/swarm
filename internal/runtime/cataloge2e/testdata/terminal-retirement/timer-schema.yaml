@@ -11,7 +11,9 @@ stages:
 pins:
   inputs:
     events:
-      - event: worker.ready
-        source: external
+      - event: worker.inspect.requested
+        resolution: {mode: select}
+      - event: worker.ready.requested
+        resolution: {mode: select}
   outputs:
     events: [worker.observed]

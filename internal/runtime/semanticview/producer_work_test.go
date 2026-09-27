@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
 type producerCensusCounter struct {
@@ -11,15 +12,22 @@ type producerCensusCounter struct {
 	builds int
 }
 
-func (s *producerCensusCounter) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
+func (s *producerCensusCounter) WorkflowTimers() []runtimecontracts.WorkflowTimerContract {
 	s.builds++
-	return s.Source.AuthoredEventEntries()
+	return s.Source.WorkflowTimers()
 }
 
 func TestInputProducerSharesOnlyOperationLocalCensus(t *testing.T) {
-	for _, kind := range []runtimecontracts.FlowInputPinSource{runtimecontracts.FlowInputPinSourceExternal, runtimecontracts.FlowInputPinSourceHarness} {
-		t.Run(string(kind), func(t *testing.T) {
+	for _, kind := range []runtimecontracts.FlowInputPinSource{runtimecontracts.FlowInputPinSourceNone, runtimecontracts.FlowInputPinSourceHarness} {
+		name := "provider"
+		if kind == runtimecontracts.FlowInputPinSourceHarness {
+			name = "harness"
+		}
+		t.Run(name, func(t *testing.T) {
 			source := &producerCensusCounter{Source: flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{Event: "work.requested", Source: kind}, nil)}
+			if kind == runtimecontracts.FlowInputPinSourceNone {
+				source.Source = markedToolOverlaySource{Source: source.Source, capabilities: source.SemanticCapabilities().WithProviderTriggerEvents(source.Source, triggergeneration.FromCanonicalBytes([]byte("producer-work")), nil).WithProviderIngressEvents(map[string][]string{"worker": {"work.requested"}})}
+			}
 			for calls := 1; calls <= 2; calls++ {
 				got := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 				want := runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress

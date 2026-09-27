@@ -54,6 +54,7 @@ states: [new, waiting, done]
           condition: "has(payload.item_id) && payload.item_id == 'review'"
           advances_to: done
 `)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.received\n", "      - item.received\n      - item.processed\n")
 	return root
 }
 
@@ -89,11 +90,9 @@ func CopyRootIngressServedExternalEvent(t testing.TB) string {
   item_id: text?
 `, `item.processed:
   item_id: text?
-external.observed:
-  swarm:
-    source: external
-    consumer: external
+external.observed: {}
 `)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - external.observed\n  outputs:\n    events: [external.observed]\n")
 	return root
 }
 
@@ -104,16 +103,21 @@ func CopyRootIngressServedConversationFork(t testing.TB) string {
 	root := CopyRootIngressServedExternalEvent(t)
 
 	writeClosedVariantFile(t, root, "fork-source/schema.yaml", `name: fork-source
-mode: static
+stages:
+  waiting: {initial: true}
+  active: {}
+  done: {terminal: true}
 pins:
   inputs:
     events:
-      - event: fork.source_message
-        source: external
+      - fork.source_message
+      - item.processed
 `)
-	writeClosedVariantFile(t, root, "fork-source/events.yaml", `fork.source_message:
-  note: text
-`)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - external.observed\n", "      - external.observed\n      - fork.source_message\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [external.observed]\n", "events: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
+	writeClosedVariantFile(t, root, "fork-source/entities.yaml", "conversation: {}\n")
+	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    fork.source_message:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed: {}\n", "external.observed: {}\nfork.source_message:\n  note: text\n")
 	writeClosedVariantFile(t, root, "fork-source/agents.yaml", `fork-source-agent:
   id: fork-source-agent
   role: researcher
@@ -143,16 +147,20 @@ func CopyRootIngressServedSessionCleanup(t testing.TB) string {
 	root := CopyRootIngressServedFollowUp(t)
 
 	writeClosedVariantFile(t, root, "hold/schema.yaml", `name: hold
-mode: static
+stages:
+  waiting: {initial: true}
+  active: {}
+  done: {terminal: true}
 pins:
   inputs:
     events:
-      - event: item.agent_hold
-        source: external
+      - item.agent_hold
+      - item.processed
 `)
-	writeClosedVariantFile(t, root, "hold/events.yaml", `item.agent_hold:
-  note: text
-`)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - item.processed\n", "      - item.processed\n      - item.agent_hold\n  outputs:\n    events: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
+	writeClosedVariantFile(t, root, "hold/entities.yaml", "session: {}\n")
+	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    item.agent_hold:\n      create_entity: true\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")
 	writeClosedVariantFile(t, root, "hold/agents.yaml", `load-agent:
   id: load-agent
   role: load_agent
@@ -213,7 +221,7 @@ pins:
           product_id: payload.product_id
       - opco.product_initialization_requested
       - event: opco.product_review_requested
-        source: external
+        resolution: {mode: select}
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
@@ -225,14 +233,8 @@ product:
 `)
 	writeClosedVariantFile(t, root, "operating/events.yaml", `
 opco.product_initialization_requested:
-  swarm:
-    source: external
   instance_id: string
   product_id: string
-opco.product_review_requested:
-  swarm:
-    source: external
-  note: string
 `)
 	writeClosedVariantFile(t, root, "operating/nodes.yaml", `
 lifecycle-orchestrator:
@@ -254,6 +256,25 @@ lifecycle-orchestrator:
           - source_field: note
             target_field: note
       advances_to: ready
+`)
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `      - opco.spinup_requested
+  outputs:
+    events: [opco.create_requested]
+connect:
+  - {event: opco.create_requested, from: ., to: operating}
+`, `      - opco.spinup_requested
+      - opco.product_review_requested
+  outputs:
+    events: [opco.create_requested, opco.product_review_requested]
+connect:
+  - {event: opco.create_requested, from: ., to: operating}
+  - {event: opco.product_review_requested, from: ., to: operating}
+`)
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "opco.spinup_requested:\n", `opco.product_review_requested:
+  instance_id: text
+  product_id: text
+  note: text
+opco.spinup_requested:
 `)
 	return root
 }
@@ -334,8 +355,7 @@ states: [pending, processed, done]
 pins:
   inputs:
     events:
-      - event: item.received
-        source: external
+      - item.received
 `, `name: routing-root-ingress
 initial_state: new
 terminal_states: [done]
@@ -343,12 +363,9 @@ states: [new, waiting, done]
 pins:
   inputs:
     events:
-      - event: item.received
-        source: external
-      - event: opco.bootstrap_requested
-        source: external
-      - event: opco.spinup_requested
-        source: external
+      - item.received
+      - opco.bootstrap_requested
+      - opco.spinup_requested
   outputs:
     events: [opco.create_requested]
 connect:

@@ -31,13 +31,9 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	}
 }
 
-func TestAPIEventPublicationRouteIntentProducerIsClosedTypedRole(t *testing.T) {
-	producer := routeIntentProducerAPIEventPublication
-	if producer.Normalized() != producer {
-		t.Fatalf("API publication producer normalized to %q", routeIntentProducerCode(producer.Normalized()))
-	}
-	if got, want := routeIntentProducerCode(producer), "api_event_publication_route/route_table_node"; got != want {
-		t.Fatalf("API publication producer = %q, want %q", got, want)
+func TestRetiredRootSubscriptionSourceIsNotAdmitted(t *testing.T) {
+	if _, ok := subscriberRouteSourceFromCode("root_input_flow"); ok {
+		t.Fatal("retired cross-flow subscription source admitted")
 	}
 }
 

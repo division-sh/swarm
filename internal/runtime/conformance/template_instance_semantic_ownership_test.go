@@ -73,7 +73,6 @@ func TestCompiledRoutingTypesDoNotImplementStringer(t *testing.T) {
 		runtimecontracts.TemplateInstanceField{},
 		runtimecontracts.FlowInputResolutionMode(0),
 		runtimecontracts.FlowOutputSink(0),
-		runtimecontracts.EventConsumerBoundary(0),
 		semanticview.ConnectorImportSource{},
 		runtimebus.TemplateInstanceLifecycleAction(0),
 		events.DeliveryRouteIdentity{},

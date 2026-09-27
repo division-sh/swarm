@@ -47,7 +47,7 @@ func TestNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStores(
 				0,
 				runID,
 				"",
-				testWorkflowSourceEnvelope(".", runID, entityID),
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 				occurredAt,
 			)
 			dialect := authoractivityfixture.DialectPostgres

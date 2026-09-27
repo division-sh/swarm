@@ -294,6 +294,16 @@ func performEventReplay(
 	if err != nil {
 		return eventReplayPerformed{}, err
 	}
+	// Replay selects recorded deliveries, not every target of the original event.
+	// Keep the producer/source evidence while projecting only that selection.
+	targets := make([]events.RouteIdentity, 0, len(selectedRoutes))
+	for _, route := range selectedRoutes {
+		targets = append(targets, route.Target.Route())
+	}
+	replayEvent, err = events.ResolveEnvelope(replayEvent, events.EnvelopeForTargetSet(replayEvent.Envelope(), targets))
+	if err != nil {
+		return eventReplayPerformed{}, err
+	}
 	status, err := publisher.CheckDirectRoutes(ctx, replayEvent, selectedRoutes)
 	if err != nil {
 		return eventReplayPerformed{}, eventReplayPublishError(original.EventName, err)

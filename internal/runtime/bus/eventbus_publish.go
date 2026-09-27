@@ -288,16 +288,17 @@ func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return apiidempotency.Completion{}, false, err
 	}
-	if endpoint != nil {
-		admission, publicInput, err := endpoint.admit(eb.semanticSource, evt)
-		if err != nil {
-			return apiidempotency.Completion{}, false, err
-		}
-		if publicInput != nil {
-			ctx = withPublicInputAdmission(ctx, *publicInput)
-		} else {
-			ctx = withAPIEventPublicationAdmission(ctx, admission)
-		}
+	if endpoint == nil {
+		return apiidempotency.Completion{}, false, errors.New("API event publication requires an admitted endpoint")
+	}
+	admission, publicInput, err := endpoint.admit(eb.semanticSource, evt)
+	if err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	if publicInput != nil {
+		ctx = withPublicInputAdmission(ctx, *publicInput)
+	} else {
+		ctx = withAPIEventPublicationAdmission(ctx, admission)
 	}
 	owner, ok := eb.store.(APIEventPublicationCommitOwner)
 	if !ok || owner == nil {
@@ -623,6 +624,9 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	routePlan, err := planRoutes(ctx, evt)
 	if err != nil {
 		return releaseFailure(err)
+	}
+	if eb.semanticSource != nil && !explicitRootPublicationTarget(evt).Empty() && len(routePlan.DeliveryRoutes()) == 0 {
+		return releaseFailure(fmt.Errorf("explicit root target %s has no selected root-local or compiled-connection delivery", evt.TargetRoute().FlowInstance))
 	}
 	targetFailureInput := evt
 	if err := requirePublicInputRoutePlan(ctx, routePlan); err != nil {
@@ -1872,9 +1876,8 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 		disposition = runtimeauthoractivity.StoryAuthored
 	}
 	return runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, runtimeauthoractivity.EventDescriptor{
-		EventType:          name,
-		Disposition:        disposition,
-		AuthorSummaryField: strings.TrimSpace(proof.Entry.AuthorSummaryField),
+		EventType:   name,
+		Disposition: disposition,
 	})
 }
 
@@ -2026,7 +2029,7 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(ctx, eb.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
+	if err := validateRoutedNodeDeliveryAuthority(eb.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
 		return RoutePlan{}, err
 	}
 	routePlan := plan.Normalized()
@@ -2519,7 +2522,9 @@ func (eb *EventBus) admitEventPayload(ctx context.Context, event events.Event) (
 	} else if admission, ok := apiEventPublicationAdmissionFromContext(ctx); ok {
 		flowID = strings.TrimSpace(admission.flowID)
 	}
-	if flowID == "" {
+	if flowID == "" && event.RoutingSource().Kind() == events.RoutingSourceRoot {
+		flowID = "."
+	} else if flowID == "" {
 		flowID = strings.TrimSpace(event.RoutingSource().Route().FlowID)
 	}
 	admission, err := eb.payloadAdmitter(ctx, event, flowID)

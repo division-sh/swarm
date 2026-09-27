@@ -52,10 +52,15 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 	}
 
 	connects := bundle.CompositionConnects()
-	if len(connects) != 2 {
-		t.Fatalf("CompositionConnects = %#v, want two", connects)
+	if len(connects) != 4 {
+		t.Fatalf("CompositionConnects = %#v, want two root ingress edges and two private edges", connects)
 	}
-	connect := connects[1]
+	for i, event := range []string{"account.setup.requested", "account.work.requested"} {
+		if connects[i].Event != event || connects[i].From != "." || connects[i].To != "producer" {
+			t.Fatalf("root ingress edge %d = %#v", i, connects[i])
+		}
+	}
+	connect := connects[3]
 	if got, want := connect.Event, "account.ready"; got != want {
 		t.Fatalf("connect event = %q, want %q", got, want)
 	}

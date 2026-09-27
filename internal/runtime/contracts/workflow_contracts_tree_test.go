@@ -846,38 +846,16 @@ gate_state:
 	}
 }
 
-func TestEventCatalogEntry_SwarmMetadataOwnsTopologyAndLifecycle(t *testing.T) {
+func TestEventCatalogEntry_RejectsRetiredSwarmMetadata(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.CanonicalExternalEventMetadata)
-	entry, err := admitEventCatalogParserSnippet(t, snippet)
-	if err != nil {
-		t.Fatalf("load event catalog entry: %v", err)
-	}
-	if got := entry.SwarmSource(); got != "external (human board interface)" {
-		t.Fatalf("expected source annotation preserved, got %q", got)
-	}
-	if got := entry.SwarmConsumer(); len(got) != 1 || strings.TrimSpace(got[0]) == "" {
-		t.Fatalf("expected swarm.consumer to populate canonical consumer, got %#v", got)
-	}
-	if got := entry.ConsumerType; len(got) != 1 || strings.TrimSpace(got[0]) != "external_ui" {
-		t.Fatalf("expected sibling consumer_type to remain runtime delivery metadata, got %#v", got)
-	}
-	if got := entry.SwarmProducer(); len(got) != 1 || strings.TrimSpace(got[0]) != "mailbox_human" {
-		t.Fatalf("expected swarm.producer to populate canonical producer, got %#v", got)
-	}
-	if got := entry.SwarmStatus(); got != "planned" {
-		t.Fatalf("expected swarm.status preserved, got %q", got)
-	}
-	if got := entry.SwarmNote(); got != "Human board handoff" {
-		t.Fatalf("expected swarm.note preserved, got %q", got)
-	}
-	if _, ok := entry.Payload.Properties["source"]; ok {
-		t.Fatalf("did not expect metadata source to become a payload field")
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "swarm") {
+		t.Fatalf("retired swarm metadata admission = %v", err)
 	}
 }
 
 func TestEventCatalogEntry_LegacyMetadataFieldsFailClosed(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.RetiredExternalEventMetadata)
-	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "metadata field") || !strings.Contains(err.Error(), "swarm.") {
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "metadata field") {
 		t.Fatalf("load event catalog entry error = %v, want retired metadata failure", err)
 	}
 }
@@ -907,7 +885,7 @@ entity_id: string
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := admitEventCatalogEntryForTest(t, tc.yaml)
-			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), tc.wantField) || !strings.Contains(err.Error(), "swarm.") {
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), tc.wantField) || !strings.Contains(err.Error(), "metadata field") {
 				t.Fatalf("load event catalog entry error = %v, want retired %s failure", err, tc.wantField)
 			}
 		})
@@ -917,8 +895,8 @@ entity_id: string
 func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.ConflictingEventMetadata)
 	_, err := admitEventCatalogParserSnippet(t, snippet)
-	if err == nil || !strings.Contains(err.Error(), "swarm.source") || !strings.Contains(err.Error(), "_source") {
-		t.Fatalf("load event catalog entry error = %v, want swarm/_source conflict", err)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "metadata field swarm") {
+		t.Fatalf("load event catalog entry error = %v, want retirement before legacy conflict interpretation", err)
 	}
 }
 

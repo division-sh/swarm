@@ -17,7 +17,6 @@ const (
 	FailureTargetRequiredMissing TargetFailure = iota + 1
 	FailureTargetNotSubscribed
 	FailureTargetUnreachableTerminated
-	FailureParentRouteIncomplete
 	FailureReplyAlreadyTerminal
 	FailureStaleArrival
 )
@@ -41,8 +40,6 @@ func (f TargetFailure) Code() string {
 		return "target_not_subscribed"
 	case FailureTargetUnreachableTerminated:
 		return "target_unreachable_terminated"
-	case FailureParentRouteIncomplete:
-		return "parent_route_incomplete"
 	case FailureReplyAlreadyTerminal:
 		return "platform.reply_already_terminal"
 	case FailureStaleArrival:
@@ -65,8 +62,6 @@ func ParseTargetFailure(code string) (TargetFailure, error) {
 		return FailureTargetNotSubscribed, nil
 	case "target_unreachable_terminated":
 		return FailureTargetUnreachableTerminated, nil
-	case "parent_route_incomplete":
-		return FailureParentRouteIncomplete, nil
 	case "platform.reply_already_terminal":
 		return FailureReplyAlreadyTerminal, nil
 	case "platform.stale_arrival":
@@ -88,73 +83,11 @@ type Descriptor struct {
 	AddressFields map[string]string
 }
 
-type targetEvidenceState uint8
-
-const (
-	targetEvidenceAbsent targetEvidenceState = iota
-	targetEvidenceExact
-	targetEvidenceInvalid
-)
-
-// PersistedStructuralParent is the classified parent route stored when a
-// child/template instance is created. Its zero value is explicit absence.
-type PersistedStructuralParent struct {
-	state targetEvidenceState
-	route events.RouteIdentity
-}
-
-func ClassifyPersistedStructuralParent(route events.RouteIdentity) PersistedStructuralParent {
-	route = route.Normalized()
-	if route.Empty() {
-		return PersistedStructuralParent{}
-	}
-	if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
-		return PersistedStructuralParent{state: targetEvidenceInvalid}
-	}
-	return PersistedStructuralParent{state: targetEvidenceExact, route: route}
-}
-
-// CurrentDeliveryTarget is exact target evidence obtained from an admitted
-// DeliveryRoute. It cannot be constructed from an event or source identity.
-type CurrentDeliveryTarget struct {
-	state targetEvidenceState
-	route events.RouteIdentity
-}
-
-func ClassifyCurrentDeliveryTarget(route events.DeliveryRoute, present bool) CurrentDeliveryTarget {
-	if !present {
-		return CurrentDeliveryTarget{}
-	}
-	route = route.Normalized()
-	if _, err := route.Identity(); err != nil {
-		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
-	}
-	return ClassifyExecutionReceiverTarget(route.Target, true)
-}
-
-// ClassifyExecutionReceiverTarget consumes only receiver ownership, including
-// the frozen projection of an already admitted durable fan-out handler.
-func ClassifyExecutionReceiverTarget(owner events.DeliveryTargetOwnership, present bool) CurrentDeliveryTarget {
-	if !present {
-		return CurrentDeliveryTarget{}
-	}
-	if owner.Validate() != nil || owner.EntitylessReceiver() {
-		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
-	}
-	target := owner.Route().Normalized()
-	if target.FlowID == "" || target.FlowInstance == "" || target.EntityID == "" {
-		return CurrentDeliveryTarget{state: targetEvidenceInvalid}
-	}
-	return CurrentDeliveryTarget{state: targetEvidenceExact, route: target}
-}
-
 type ResolutionInput struct {
-	Source               semanticview.Source
-	FlowID               string
-	EventType            string
-	RoutingSource        events.RoutingSource
-	StructuralParent     PersistedStructuralParent
-	CurrentDeliveryOwner CurrentDeliveryTarget
+	Source        semanticview.Source
+	FlowID        string
+	EventType     string
+	RoutingSource events.RoutingSource
 }
 
 type Resolution struct {
@@ -171,8 +104,7 @@ const (
 	OutputConsumerHarness
 	OutputConsumerSameFlow
 	OutputConsumerConnect
-	OutputConsumerStructuralParent
-	OutputConsumerExternal
+	OutputConsumerRootExport
 )
 
 type OutputConsumerClassification struct {
@@ -191,12 +123,11 @@ func (c OutputConsumerClassification) InvalidSink() bool {
 }
 
 func (c OutputConsumerClassification) HasRuntimeConsumer() bool {
-	return c.Has(OutputConsumerSameFlow) || c.Has(OutputConsumerConnect) || c.Has(OutputConsumerStructuralParent) || c.Has(OutputConsumerExternal)
+	return c.Has(OutputConsumerSameFlow) || c.Has(OutputConsumerConnect)
 }
 
 func (c OutputConsumerClassification) DeliberateNoSubscriber() bool {
-	return (c.Has(OutputConsumerHarness) || c.Has(OutputConsumerExternal)) &&
-		!c.Has(OutputConsumerSameFlow) && !c.Has(OutputConsumerConnect) && !c.Has(OutputConsumerStructuralParent)
+	return (c.Has(OutputConsumerHarness) || c.Has(OutputConsumerRootExport)) && !c.HasRuntimeConsumer()
 }
 
 func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string) OutputConsumerClassification {
@@ -242,6 +173,11 @@ func (r *OutputConsumerResolver) classify(flowID, eventType string, routingSourc
 	outputPins := outputPinsForEvent(source, flowID, eventType)
 	r.once.Do(func() { r.graph, r.census = compileConnectGraphWithCensus(source) })
 	graph, census := r.graph, r.census
+	if routingSource.Kind() == events.RoutingSourceConcreteTemplateInstance {
+		if _, err := PublicationDeclarationForSourceEvent(events.EventType(eventType), routingSource); err != nil {
+			return classification
+		}
+	}
 	for _, pin := range outputPins {
 		if !pin.Sink().Valid() {
 			classification.invalidSink = true
@@ -259,34 +195,25 @@ func (r *OutputConsumerResolver) classify(flowID, eventType string, routingSourc
 			classification.connects = append(classification.connects, graph.MatchingSourceEvent(sourceEvent)...)
 		}
 	}
-	for _, endpoint := range census.MatchingConsumers(flowID, eventType) {
-		if endpoint.Kind != semanticview.EventEndpointExternal {
+	consumerEvent := eventType
+	if routingSource.Kind() == events.RoutingSourceConcreteTemplateInstance {
+		consumerEvent = semanticview.ResolveFlowEventProof(source, flowID, eventType).Local
+	}
+	for _, endpoint := range census.MatchingConsumers(flowID, consumerEvent) {
+		switch endpoint.Kind {
+		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointAgent, semanticview.EventEndpointTimer:
 			classification.classes[OutputConsumerSameFlow] = struct{}{}
-			break
 		}
 	}
 	if len(classification.connects) > 0 {
 		classification.classes[OutputConsumerConnect] = struct{}{}
 	}
-	if structuralParentRouteEligible(source, flowID) {
-		classification.classes[OutputConsumerStructuralParent] = struct{}{}
-	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	if ok && entry.AcceptedConsumerBoundary() == runtimecontracts.EventConsumerBoundaryExternal {
-		classification.classes[OutputConsumerExternal] = struct{}{}
+	if flowID == "" || flowID == "." {
+		if _, exported := semanticview.SelectedRootOutputPin(source, eventType); exported {
+			classification.classes[OutputConsumerRootExport] = struct{}{}
+		}
 	}
 	return classification
-}
-
-func structuralParentRouteEligible(source semanticview.Source, flowID string) bool {
-	if source == nil {
-		return false
-	}
-	if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
-		return true
-	}
-	path := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
-	return strings.Contains(path, "/")
 }
 
 func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) bool {
@@ -356,46 +283,17 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 	if consumer.InvalidSink() || (consumer.Has(OutputConsumerHarness) && consumer.HasRuntimeConsumer()) {
 		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
 	}
-	if consumer.Has(OutputConsumerHarness) || consumer.Has(OutputConsumerSameFlow) || consumer.Has(OutputConsumerExternal) {
+	if consumer.Has(OutputConsumerHarness) || consumer.Has(OutputConsumerSameFlow) || consumer.Has(OutputConsumerRootExport) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
 	if len(consumer.connects) > 0 {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
-	if input.StructuralParent.state == targetEvidenceInvalid {
-		return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
-	}
-	if input.StructuralParent.state == targetEvidenceExact {
-		parentRoute := input.StructuralParent.route
-		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute), Target: parentRoute}
-	}
-	if nestedStaticCurrentDeliveryTargetEligible(input.Source, input.FlowID) {
-		if input.CurrentDeliveryOwner.state != targetEvidenceExact {
-			return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
-		}
-		target := input.CurrentDeliveryOwner.route
-		return Resolution{Envelope: events.EnvelopeForTargetRoute(envelope, target), Target: target}
-	}
-	if OutputHasExternalConsumer(input.Source, input.FlowID, input.EventType) {
-		return Resolution{Envelope: envelope.Normalized()}
-	}
 	return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
-}
-
-func nestedStaticCurrentDeliveryTargetEligible(source semanticview.Source, flowID string) bool {
-	scope, ok := semanticview.FlowScopeByID(source, strings.TrimSpace(flowID))
-	if !ok || !strings.EqualFold(strings.TrimSpace(scope.Mode), string(runtimecontracts.FlowModeStatic)) {
-		return false
-	}
-	return strings.Contains(strings.Trim(strings.TrimSpace(scope.Path), "/"), "/")
 }
 
 func OutputHarnessSink(source semanticview.Source, flowID, eventType string) bool {
 	return ClassifyOutputConsumer(source, flowID, eventType).Has(OutputConsumerHarness)
-}
-
-func OutputHasExternalConsumer(source semanticview.Source, flowID, eventType string) bool {
-	return ClassifyOutputConsumer(source, flowID, eventType).Has(OutputConsumerExternal)
 }
 
 func descriptorRoute(flowID string, descriptor Descriptor) events.RouteIdentity {

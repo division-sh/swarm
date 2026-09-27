@@ -106,12 +106,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			}
 			// Never Run/Resume/Ensure: only this first publication may finalize
 			// readiness. An eventual recovery cannot conceal the callback error.
-			association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("telegram-chat", "inbound.telegram.text_message")
-			endpoint, ok := association.Endpoint()
-			if !ok {
-				t.Fatal(association.Err())
-			}
-			apiEndpoint, err := bus.NewTemplateAPIEventPublicationEndpoint(source, endpoint)
+			apiEndpoint, err := bus.NewRootInputAPIEventPublicationEndpoint(source, "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}

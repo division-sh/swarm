@@ -14,7 +14,11 @@ func TestConnectorPackGeneratedResultsRetainExactCompiledSchema(t *testing.T) {
 	for _, local := range []string{"telegram_send_message.succeeded", "telegram_send_message.failed"} {
 		t.Run(local, func(t *testing.T) {
 			entry, _, exists := source.ResolveFlowEventCatalogEntry(boundedProviderFlowID, local)
-			if !exists || entry.Source == "" {
+			outcomeField := "result"
+			if local == "telegram_send_message.failed" {
+				outcomeField = "failure"
+			}
+			if _, present := entry.Payload.Properties[outcomeField]; !exists || !present {
 				t.Fatalf("connector generated catalog missing %s", local)
 			}
 			compiled, found, err := source.ResolveEffectiveCompiledFlowEventSchema(boundedProviderFlowID, local)

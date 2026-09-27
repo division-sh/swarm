@@ -540,7 +540,7 @@ func TestNormalizedEventOneOfDoesNotProveBranchExclusivity(t *testing.T) {
 func TestNormalizedEventCatalogDerivesSchemaAndCapabilities(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	entry := manifest.EventCatalogEntries()["inbound.telegram.text_message"]
-	if entry.Source != "provider_trigger_pack_normalized" || entry.Payload.Properties["chat_id"].Type != "text" {
+	if entry.Payload.Properties["chat_id"].Type != "text" {
 		t.Fatalf("catalog entry = %#v", entry)
 	}
 	if got := strings.Join(entry.Payload.Required, ","); got != "chat_id,message_id,text" {

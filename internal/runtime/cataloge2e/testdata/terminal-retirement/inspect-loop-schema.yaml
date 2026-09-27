@@ -14,6 +14,6 @@ pins:
   inputs:
     events:
       - event: worker.ready
-        source: external
+        resolution: {mode: select}
   outputs:
     events: [worker.observed]

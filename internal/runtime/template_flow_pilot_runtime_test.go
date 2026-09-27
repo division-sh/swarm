@@ -77,7 +77,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	}))
 	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
 
-	evt := eventtest.ExistingRunRootIngress(
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"99999999-9999-4999-8999-999999999952",
 		events.EventType("producer/account.ready"),
 		"producer",
@@ -88,6 +88,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 			FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
 		}),
+		eventtest.StaticFlowRoutingSource("producer", "producer", "88888888-8888-4888-8888-888888888888"),
 		time.Now().UTC(),
 	)
 	preflight, err := bus.CheckPublishRecipientPlan(ctx, evt)
@@ -191,7 +192,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			evt := eventtest.ExistingRunRootIngress(
+			evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 				"99999999-9999-4999-8999-999999999953",
 				events.EventType("producer/account.ready"),
 				"producer",
@@ -202,6 +203,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
 					FlowID: "producer", FlowInstance: "producer", EntityID: "88888888-8888-4888-8888-888888888888",
 				}),
+				eventtest.StaticFlowRoutingSource("producer", "producer", "88888888-8888-4888-8888-888888888888"),
 				time.Now().UTC(),
 			)
 			plan, err := bus.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)

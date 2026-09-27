@@ -17,7 +17,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
+      - work.requested
   outputs:
     events:
       - work.ready

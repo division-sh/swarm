@@ -13,8 +13,10 @@ stages:
 pins:
   inputs:
     events:
-      - {event: seed, source: external}
-      - {event: select, source: external}
+      - seed
+      - select
+  outputs:
+    events: [ack]
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  marker: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", `seed: {}
@@ -23,7 +25,6 @@ selected:
   marker: text
 ack:
   marker: text
-  swarm: {consumer: external}
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `seed:
   execution_type: system_node

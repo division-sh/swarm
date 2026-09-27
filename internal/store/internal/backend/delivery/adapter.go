@@ -2607,18 +2607,8 @@ func (a *Adapter) recordTransition(ctx context.Context, attempt *mutationprotoco
 	} else if currentScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(currentScope.BundleHash) == "" {
 		return fmt.Errorf("delivery lifecycle transition requires persisted run bundle_hash or exact bundle scope")
 	}
-	var summary string
-	var found bool
-	var err error
 	if attempt == nil {
 		return fmt.Errorf("delivery transition requires private attempt ownership")
-	}
-	summary, found, err = attempt.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
-	if err != nil {
-		return fmt.Errorf("load delivery source author-safe summary: %w", err)
-	}
-	if !found {
-		summary = ""
 	}
 	retryCount := record.RetryCount
 	projection := runtimeauthoractivity.Projection{
@@ -2632,10 +2622,10 @@ func (a *Adapter) recordTransition(ctx context.Context, attempt *mutationprotoco
 		DedupKey:   fmt.Sprintf("delivery:%s:v%d:%s", record.DeliveryID, record.ClaimVersion, transition),
 		OccurredAt: occurredAt, RunID: record.RunID, EntityID: record.entityID,
 		AgentID: agentIdentity(record), FlowID: record.flowID, Projection: projection,
-		Scope:             transitionScope,
-		AuthorSafeSummary: summary, Failure: runtimefailures.CloneEnvelope(failure),
+		Scope:   transitionScope,
+		Failure: runtimefailures.CloneEnvelope(failure),
 	}
-	err = attempt.Record(ctx, draft)
+	err := attempt.Record(ctx, draft)
 	if err != nil {
 		return fmt.Errorf("record delivery lifecycle activity: %w", err)
 	}

@@ -21,8 +21,6 @@ const (
 	routePlanSourceConcreteNodeRoute
 	routePlanSourceScopedNodeRoute
 	routePlanSourceRootNodeRoute
-	routePlanSourceRootInputFlowNode
-	routePlanSourceAPIEventPublication
 	routePlanSourceRecipientMaterializer
 	routePlanSourceConnectRoutePlan
 )
@@ -50,10 +48,6 @@ func (s routePlanSource) code() string {
 		return "scoped_node_route"
 	case routePlanSourceRootNodeRoute:
 		return "root_node_route"
-	case routePlanSourceRootInputFlowNode:
-		return "root_input_flow_node_route"
-	case routePlanSourceAPIEventPublication:
-		return "api_event_publication_route"
 	case routePlanSourceRecipientMaterializer:
 		return "recipient_plan_materializer"
 	case routePlanSourceConnectRoutePlan:
@@ -93,8 +87,6 @@ const (
 	routeIntentProducerConcreteNodeRoute
 	routeIntentProducerScopedNodeRoute
 	routeIntentProducerRootNodeRoute
-	routeIntentProducerRootInputFlowNode
-	routeIntentProducerAPIEventPublication
 	routeIntentProducerRecipientMaterializer
 	routeIntentProducerConnectRoutePlan
 )
@@ -108,8 +100,6 @@ func (p routeIntentProducer) Normalized() routeIntentProducer {
 		routeIntentProducerConcreteNodeRoute,
 		routeIntentProducerScopedNodeRoute,
 		routeIntentProducerRootNodeRoute,
-		routeIntentProducerRootInputFlowNode,
-		routeIntentProducerAPIEventPublication,
 		routeIntentProducerRecipientMaterializer,
 		routeIntentProducerConnectRoutePlan:
 		return p
@@ -132,10 +122,6 @@ func (p routeIntentProducer) Source() routePlanSource {
 		return routePlanSourceScopedNodeRoute
 	case routeIntentProducerRootNodeRoute:
 		return routePlanSourceRootNodeRoute
-	case routeIntentProducerRootInputFlowNode:
-		return routePlanSourceRootInputFlowNode
-	case routeIntentProducerAPIEventPublication:
-		return routePlanSourceAPIEventPublication
 	case routeIntentProducerRecipientMaterializer:
 		return routePlanSourceRecipientMaterializer
 	case routeIntentProducerConnectRoutePlan:
@@ -156,9 +142,7 @@ func (p routeIntentProducer) Reason() routePlanReason {
 	case routeIntentProducerInternalTargetRoute,
 		routeIntentProducerConcreteNodeRoute,
 		routeIntentProducerScopedNodeRoute,
-		routeIntentProducerRootNodeRoute,
-		routeIntentProducerRootInputFlowNode,
-		routeIntentProducerAPIEventPublication:
+		routeIntentProducerRootNodeRoute:
 		return routePlanReasonRouteTableNode
 	case routeIntentProducerRecipientMaterializer:
 		return routePlanReasonMaterializedRoute
@@ -199,6 +183,7 @@ const (
 // typed delivery intents that should be persisted and the live dispatch
 // recipients that remain only projections/consumers of that authority.
 type RoutePlan struct {
+	ordinarySource       ordinaryPublicationSource
 	Event                events.Event
 	ConnectEvaluation    events.ConnectEvaluationLedger
 	AuthorityState       RoutePlanAuthorityState
@@ -789,7 +774,7 @@ func normalizeRoutePlanSource(source routePlanSource) routePlanSource {
 	switch source {
 	case routePlanSourceAgentPolicy, routePlanSourceDirectPolicy, routePlanSourceInternalTarget,
 		routePlanSourceConcreteNodeRoute, routePlanSourceScopedNodeRoute, routePlanSourceRootNodeRoute,
-		routePlanSourceRootInputFlowNode, routePlanSourceRecipientMaterializer, routePlanSourceConnectRoutePlan:
+		routePlanSourceRecipientMaterializer, routePlanSourceConnectRoutePlan:
 		return source
 	default:
 		return 0

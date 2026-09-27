@@ -5,4 +5,4 @@ states: [pending, working, done]
 pins:
   inputs:
     events:
-      - {event: entry.nested, source: external}
+      - entry.nested

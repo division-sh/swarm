@@ -53,6 +53,7 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
+	plans = requireRootInputConnections(t, plans, "producer", "account.requested")
 	if len(plans) != 1 {
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one template instance-key route plan", plans)
 	}

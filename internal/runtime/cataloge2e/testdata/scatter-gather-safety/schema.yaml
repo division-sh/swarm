@@ -8,11 +8,13 @@ stages:
 pins:
   inputs:
     events:
-      - {event: batch.submitted, source: external}
-      - {event: batch.finished, source: external}
+      - batch.submitted
+      - batch.finished
+      - batch.opened
   outputs:
-    events: [item.registered, item.finished]
+    events: [item.registered, item.finished, batch.opened]
 connect:
+  - {event: batch.opened, from: ., to: collector}
   - {event: item.registered, from: ., to: workers}
   - {event: item.finished, from: ., to: workers}
   - {event: item.reported, from: workers, to: collector}

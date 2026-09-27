@@ -184,7 +184,7 @@ types:
 `)
 	writeFixtureFile(t, root+"/events.yaml", `
 root.ready:
-  _note: root event
+  # root event
   entity_id: uuid
 `)
 	writeFixtureFile(t, root+"/scoring/schema.yaml", `
@@ -215,7 +215,7 @@ vertical:
 `)
 	writeFixtureFile(t, root+"/scoring/events.yaml", `
 vertical.shortlisted:
-  _note: shortlist event
+  # shortlist event
   vertical_name: text
   composite_score: numeric
 `)
@@ -712,9 +712,7 @@ vertical:
 
 func TestEventCatalogEntryDecode_AcceptsFlatWave1PayloadGrammar(t *testing.T) {
 	entry, err := admitEventCatalogEntryForTest(t, `
-swarm:
-  note: root handoff
-  source: scoring
+# root handoff
 vertical_name: text
 composite_score:
   type: numeric
@@ -722,9 +720,6 @@ composite_score:
 `)
 	if err != nil {
 		t.Fatalf("admit event catalog entry: %v", err)
-	}
-	if got := entry.Note; got != "root handoff" {
-		t.Fatalf("Note = %q", got)
 	}
 	if got := entry.Payload.Properties["vertical_name"].Type; got != "text" {
 		t.Fatalf("vertical_name type = %q", got)
@@ -734,23 +729,14 @@ composite_score:
 	}
 }
 
-func TestEventCatalogEntryDecode_AuthorSummaryFieldIsMetadataNotPayload(t *testing.T) {
-	entry, err := admitEventCatalogEntryForTest(t, `
-chat_id: text
-text: text
-author_summary_field: text
-`)
-	if err != nil {
-		t.Fatalf("admit event catalog entry: %v", err)
-	}
-	if entry.AuthorSummaryField != "text" {
-		t.Fatalf("AuthorSummaryField = %q, want text", entry.AuthorSummaryField)
-	}
-	if _, exists := entry.Payload.Properties["author_summary_field"]; exists {
-		t.Fatalf("author_summary_field leaked into payload schema: %#v", entry.Payload.Properties)
-	}
-	if _, exists := entry.Payload.Properties["text"]; !exists {
-		t.Fatalf("text payload field missing: %#v", entry.Payload.Properties)
+func TestEventCatalogEntryDecode_RejectsRetiredAuthorSummaryField(t *testing.T) {
+	for _, value := range []string{"text", "null", "false", "{}"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := admitEventCatalogEntryForTest(t, "text: text\nauthor_summary_field: "+value+"\n")
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "author_summary_field") {
+				t.Fatalf("retired selector admission = %v", err)
+			}
+		})
 	}
 }
 

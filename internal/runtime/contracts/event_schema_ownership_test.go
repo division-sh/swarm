@@ -297,8 +297,7 @@ func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRo
 	if err := os.WriteFile(producerEvents, []byte(`validation.triggered:
   candidate: text?
 validation.requested:
-  swarm:
-    note: Producer-owned request schema
+  # Producer-owned request schema
   candidate:
     type: ProducerCandidate?
     description: Candidate under validation
@@ -336,7 +335,7 @@ validation.requested:
 		t.Fatalf("receiver schema did not consume producer type catalog: schema=%#v ok=%t", schema.Schema, ok)
 	}
 	projectionPrefix := effectiveEventProjectionProvenancePrefix(".", "validator", "validation.requested")
-	for _, suffix := range []string{"metadata.swarm.note", "fields.candidate.description", "fields.candidate.refinements.pattern"} {
+	for _, suffix := range []string{"fields.candidate.description", "fields.candidate.refinements.pattern"} {
 		provenance, found := bundle.EffectiveProvenance().Lookup(projectionPrefix + "." + suffix)
 		if !found || provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != eventConsumerProjectionRule || len(provenance.InputPaths) != 1 || !strings.Contains(provenance.InputPaths[0], suffix) {
 			t.Fatalf("complete projection provenance %s = %#v, found=%t", suffix, provenance, found)

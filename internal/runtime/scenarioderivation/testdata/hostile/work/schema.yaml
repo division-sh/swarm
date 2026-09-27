@@ -5,5 +5,5 @@ states: [ready]
 pins:
   inputs:
     events:
-      - {event: work.requested, source: external}
-      - {event: work.alternate, source: external}
+      - work.requested
+      - work.alternate

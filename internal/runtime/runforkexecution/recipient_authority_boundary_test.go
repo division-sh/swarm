@@ -31,7 +31,6 @@ type recipientBoundaryAllowance struct {
 // compiler-resolved functions plus operation counts, never files or receiver names.
 func recipientBoundaryAllowances() map[string]recipientBoundaryAllowance {
 	return map[string]recipientBoundaryAllowance{
-		"runtime/bus::validateRoutedNodeDeliveryAuthority/reduced_recipient_map_key":                                     {2, "existing route-intent target/recipient corroboration; selected evidence is independently checked using canonical Equal"},
 		"runtime/runforkadmission::AdmitContractFrontier/evidence_field:Recipient":                                       {1, "node diagnostics projected only from the narrowed admitted input frontier"},
 		"runtime/runforkadmission::completedInputRecipient/evidence_field:Recipient":                                     {2, "historical completed-slot exclusion, never creation of selected authority"},
 		"runtime/runforkadmission::completedInputRecipient/evidence_field:Path":                                          {1, "exact historical flow-instance completion correspondence"},

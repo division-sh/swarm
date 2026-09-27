@@ -70,7 +70,7 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 		}
 		incompleteRoutes[frontier[i].SourceEventID] = incompleteRoutes[frontier[i].SourceEventID] || evaluation.requiresRuntimeResolution
 		frontier[i].RuntimeEventOwners = sortedUnique(runtimeOwners)
-		localSubscribers := routeTable.ResolveIndependentPubsubForRun(req.Plan.SourceRunID, eventName)
+		localSubscribers := routeTable.ResolveIndependentPubsubFromSource(req.Plan.SourceRunID, events.EventType(eventName), source)
 		if publication, ok := req.Plan.HistoricalInputPublication(frontier[i].SourceEventID); ok {
 			original, _ := publication.Event()
 			input, err := runtimebus.RevalidateSelectedInput(req.Source, original)

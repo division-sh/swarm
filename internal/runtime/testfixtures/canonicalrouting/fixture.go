@@ -123,6 +123,19 @@ func CopyTelegramChatWithoutIngress(t testing.TB) string {
 			t.Fatalf("remove Telegram %s branch: %v", branch, err)
 		}
 	}
+	writeClosedVariantFile(t, root, "schema.yaml", `name: telegram-agent
+imports:
+  provider_trigger_events:
+    - provider: telegram
+      event: inbound.telegram.text_message
+pins:
+  inputs:
+    events: [inbound.telegram.text_message]
+  outputs:
+    events: [inbound.telegram.text_message]
+connect:
+  - {event: inbound.telegram.text_message, from: ., to: telegram-chat}
+`)
 	return root
 }
 
@@ -267,7 +280,7 @@ func applyClosedReplacement(t testing.TB, path, old, replacement string) {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	if !strings.Contains(string(contents), old) {
-		t.Fatalf("canonical mutation target missing in %s", path)
+		t.Fatalf("canonical mutation target %q missing in %s", old, path)
 	}
 	updated := strings.Replace(string(contents), old, replacement, 1)
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {

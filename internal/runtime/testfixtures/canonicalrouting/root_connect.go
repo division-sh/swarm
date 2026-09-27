@@ -15,7 +15,7 @@ const (
 )
 
 // WritePublicTemplateInputRoute owns the API publication fixture with one root
-// input and one public template input. Callers load the returned contract tree.
+// input and one private template input. Callers load the returned contract tree.
 func WritePublicTemplateInputRoute(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
@@ -28,8 +28,7 @@ platform_version: ">=0.7.0 <0.8.0"
 pins:
   inputs:
     events:
-      - event: bootstrap.requested
-        source: external
+      - bootstrap.requested
 `,
 		"events.yaml": `bootstrap.requested:
   topic: text?
@@ -47,7 +46,6 @@ pins:
   inputs:
     events:
       - event: opco.product_initialization_requested
-        source: external
         resolution:
           mode: create
           from: event.id

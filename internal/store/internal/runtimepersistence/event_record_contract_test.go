@@ -436,7 +436,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 					}
 				})
 			}
-			conflict := eventtest.RunCreatingRootIngress(baseEvent.ID(), baseEvent.Type(), baseEvent.SourceAgent(), baseEvent.TaskID(), []byte(`{"value":2}`), baseEvent.ChainDepth(), baseEvent.RunID(), "", baseEvent.NormalizedEnvelope(), baseEvent.CreatedAt())
+			conflict := eventtest.RunCreatingRootIngressWithRoutingSource(baseEvent.ID(), baseEvent.Type(), baseEvent.SourceAgent(), baseEvent.TaskID(), []byte(`{"value":2}`), baseEvent.ChainDepth(), baseEvent.RunID(), "", baseEvent.NormalizedEnvelope(), baseEvent.RoutingSource(), baseEvent.CreatedAt())
 			if _, err := commitSemanticEventFixtureOutcome(ctx, store, conflict, nil, "direct"); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("conflicting duplicate error = %v", err)
 			}

@@ -556,7 +556,7 @@ func TestRun_AcceptsParentCompositionConnectToRootInput(t *testing.T) {
 	}
 }
 
-func TestRun_AllowsParentCompositionConnectAsCrossFlowAmbiguityProof(t *testing.T) {
+func TestRun_RejectsUnconnectedInputDespiteUnambiguousSiblingSchemas(t *testing.T) {
 	root := writeCompositionConnectAmbiguityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -565,8 +565,8 @@ func TestRun_AllowsParentCompositionConnectAsCrossFlowAmbiguityProof(t *testing.
 	if reportContains(report.Errors(), "composition_connect_validation", "") {
 		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "ticket.ready") {
-		t.Fatalf("parent connect should disambiguate cross-flow input pin, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
+		t.Fatalf("sibling schemas without a compiled edge supplied input authority: %#v", report.Errors())
 	}
 }
 

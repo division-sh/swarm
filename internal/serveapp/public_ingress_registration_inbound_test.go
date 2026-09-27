@@ -88,20 +88,16 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
-	bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
-	for _, flow := range bundle.FlowTree.ByID {
-		if flow != nil {
-			flow.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
-		}
-	}
-	source := semanticview.Wrap(bundle)
 	catalog := testProviderTriggerCatalog(t)
+	source := processIngressTransportSource(t, bundle, catalog)
 	persistence := &processIngressProofStore{}
 	eventsStore := &processIngressEventStore{}
 	persistence.store = eventsStore
 	bundleHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
+		ContractBundle:         source,
+		Durable:                runtimebus.DurableDependencies{TargetOwners: processIngressTargetOwners{{RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress", EntityID: "41000000-0000-0000-0000-000000000002"}}},
 		SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 		ProviderOutputVerifier: catalog,
 		WorkOwner:              workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -136,8 +132,8 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		t.Fatalf("CompileAdmission: %v", err)
 	}
 	target := runtimepkg.StandingTarget{
-		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-chat",
-		Alias: "chat", Provider: "telegram", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-chat/chat",
+		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001", FlowPath: "telegram-ingress",
+		Alias: "chat", Provider: "telegram", RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress",
 		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002", Generation: 1, PublicationSequence: 1,
 		SigningSecret: "webhook_signing.telegram", AdmissionPlan: admission,
 	}
@@ -160,7 +156,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	learnedBinding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"learned-telegram", channelPlan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "channel.generated.signing"},
-		"ingress:telegram-chat:telegram",
+		"ingress:telegram-ingress:telegram",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +252,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
-			Selector: "ingress:telegram-chat:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
+			Selector: "ingress:telegram-ingress:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
 			FlowPath: target.FlowPath, Alias: target.Alias, Provider: target.Provider,
 			Generation: target.Generation, PublicationSequence: target.PublicationSequence,
 			AdmissionPlanGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
@@ -343,8 +339,8 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	t.Cleanup(func() { _ = bus.ResetInMemoryState() })
 	target := runtimepkg.StandingTarget{
 		BundleHash: bundleHash, ServiceID: "43000000-0000-0000-0000-000000000001",
-		FlowPath: "telegram-chat", Alias: "chat", Provider: "telegram",
-		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-chat/chat",
+		FlowPath: "telegram-ingress", Alias: "chat", Provider: "telegram",
+		RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress",
 		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002",
 		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
 	}
@@ -374,7 +370,7 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot"},
-		"ingress:telegram-chat:telegram",
+		"ingress:telegram-ingress:telegram",
 	)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlanWithRegistration: %v", err)
@@ -427,7 +423,7 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 	binding, err := packs.NewOutboundBindingPlanWithRegistration(
 		"telegram", plan, "42", nil,
 		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "signing"},
-		"ingress:telegram-chat:telegram",
+		"ingress:telegram-ingress:telegram",
 	)
 	if err != nil {
 		t.Fatal(err)

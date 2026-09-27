@@ -1096,9 +1096,9 @@ func fullLifecycleReceiptEvents(events []fullLifecycleEvent, receipt fullLifecyc
 	if !rawOK || !normalizedOK {
 		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("event.list omitted receipt children raw=%t normalized=%t", rawOK, normalizedOK)
 	}
-	if raw.EventName != receipt.EventNames[0] || raw.EntityID != receipt.EntityID || len(raw.Deliveries) != 0 ||
+	if raw.EventName != receipt.EventNames[0] || receipt.EntityID == "" || raw.EntityID != "" || raw.RunID == "" || raw.RunID != normalized.RunID || len(raw.Deliveries) != 0 ||
 		raw.NoDelivery == nil || raw.NoDelivery.Reason != "no_subscriber_by_design" || len(raw.DeadLetters) != 0 {
-		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("raw standing event does not match exact receipt settlement: receipt=%#v event=%#v", receipt, raw)
+		return fullLifecycleEvent{}, fullLifecycleEvent{}, fmt.Errorf("consumerless raw event does not match exact receipt settlement: receipt=%#v event=%#v", receipt, raw)
 	}
 	if normalized.EventName != receipt.EventNames[1] || normalized.EntityID == "" || len(normalized.Deliveries) != 1 ||
 		normalized.NoDelivery != nil || len(normalized.DeadLetters) != 0 {

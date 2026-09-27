@@ -602,36 +602,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func mergeCanonicalLegacyString(canonical, legacy, canonicalKey, legacyKey string) (string, error) {
-	canonical = strings.TrimSpace(canonical)
-	legacy = strings.TrimSpace(legacy)
-	switch {
-	case canonical == "":
-		return legacy, nil
-	case legacy == "":
-		return canonical, nil
-	case canonical == legacy:
-		return canonical, nil
-	default:
-		return "", fmt.Errorf("event metadata fields %s and %s conflict: %q != %q", canonicalKey, legacyKey, canonical, legacy)
-	}
-}
-
-func mergeCanonicalLegacyStringLists(canonical, legacy []string, canonicalKey, legacyKey string) ([]string, error) {
-	canonical = normalizeStrings(canonical)
-	legacy = normalizeStrings(legacy)
-	switch {
-	case len(canonical) == 0:
-		return legacy, nil
-	case len(legacy) == 0:
-		return canonical, nil
-	case sameStringSet(canonical, legacy):
-		return canonical, nil
-	default:
-		return nil, fmt.Errorf("event metadata fields %s and %s conflict: %v != %v", canonicalKey, legacyKey, canonical, legacy)
-	}
-}
-
 func sameStringSet(a, b []string) bool {
 	a = normalizeStrings(a)
 	b = normalizeStrings(b)

@@ -14,9 +14,9 @@ type outputCensusReadSource struct {
 	reads int
 }
 
-func (s *outputCensusReadSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
+func (s *outputCensusReadSource) FlowScopes() []semanticview.FlowScope {
 	s.reads++
-	return s.Source.AuthoredEventEntries()
+	return s.Source.FlowScopes()
 }
 
 func TestOutputConsumerSharesOnlyOperationLocalCensus(t *testing.T) {
@@ -70,11 +70,16 @@ func TestOutputConsumerCensusReusePreservesRoutingSources(t *testing.T) {
 	}
 }
 
-// Frozen pre-change classification, including its second independent census.
+// Reference classification with an independent census for each query.
 func classifyOutputConsumerBeforeCensusReuse(source semanticview.Source, flowID, eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
 	classification := OutputConsumerClassification{classes: map[OutputConsumerClass]struct{}{}}
 	if source == nil {
 		return classification
+	}
+	if routingSource.Kind() == events.RoutingSourceConcreteTemplateInstance {
+		if _, err := PublicationDeclarationForSourceEvent(events.EventType(eventType), routingSource); err != nil {
+			return classification
+		}
 	}
 	outputPins := outputPinsForEvent(source, flowID, eventType)
 	graph := CompileConnectGraph(source)
@@ -95,21 +100,23 @@ func classifyOutputConsumerBeforeCensusReuse(source semanticview.Source, flowID,
 			classification.connects = append(classification.connects, graph.MatchingSourceEvent(sourceEvent)...)
 		}
 	}
-	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, eventType) {
-		if endpoint.Kind != semanticview.EventEndpointExternal {
+	consumerEvent := eventType
+	if routingSource.Kind() == events.RoutingSourceConcreteTemplateInstance {
+		consumerEvent = semanticview.ResolveFlowEventProof(source, flowID, eventType).Local
+	}
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, consumerEvent) {
+		switch endpoint.Kind {
+		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointAgent, semanticview.EventEndpointTimer:
 			classification.classes[OutputConsumerSameFlow] = struct{}{}
-			break
 		}
 	}
 	if len(classification.connects) > 0 {
 		classification.classes[OutputConsumerConnect] = struct{}{}
 	}
-	if structuralParentRouteEligible(source, flowID) {
-		classification.classes[OutputConsumerStructuralParent] = struct{}{}
-	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	if ok && entry.AcceptedConsumerBoundary() == runtimecontracts.EventConsumerBoundaryExternal {
-		classification.classes[OutputConsumerExternal] = struct{}{}
+	if flowID == "" || flowID == "." {
+		if _, exported := semanticview.SelectedRootOutputPin(source, eventType); exported {
+			classification.classes[OutputConsumerRootExport] = struct{}{}
+		}
 	}
 	return classification
 }

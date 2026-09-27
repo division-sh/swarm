@@ -9,6 +9,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -130,7 +131,7 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"external.received":  {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
+			"external.received":  {},
 			"flow.started":       {},
 			"flow.completed":     {},
 			"flow.created":       {},
@@ -164,15 +165,19 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 	// Timer census is a direct compiled-carrier fixture, not timer authoring.
 	bundle.Semantics.Timers = timers
 	base := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "flow.started"}}}, map[string][]runtimecontracts.FlowOutputEventPin{".": {{Event: "flow.completed"}}})
-	census := BuildAuthoredEventEndpointCensus(base)
+	source := markedToolOverlaySource{Source: base, capabilities: base.SemanticCapabilities().WithProviderTriggerEvents(base, triggergeneration.FromCanonicalBytes([]byte("endpoint-census")), nil).WithProviderIngressEvents(map[string][]string{".": {"external.received"}})}
+	census := BuildAuthoredEventEndpointCensus(source)
 	producerKinds := endpointKindSet(census.Producers())
 	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointAutoEmit, EventEndpointExternal} {
 		if !producerKinds[kind] {
 			t.Fatalf("producer kinds = %#v, missing %s", producerKinds, kind)
 		}
 	}
+	if endpointCount(census.Consumers(), EventEndpointExternal, ".", "external.received") != 0 {
+		t.Fatal("ingress declaration invented a consumer")
+	}
 	consumerKinds := endpointKindSet(census.Consumers())
-	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointExternal} {
+	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer} {
 		if !consumerKinds[kind] {
 			t.Fatalf("consumer kinds = %#v, missing %s", consumerKinds, kind)
 		}

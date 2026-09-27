@@ -108,11 +108,9 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				}
 				eventType := "item.completed"
 				subscriptionType := source.WorkflowName() + "/item.completed"
-				var additionalDescriptors []string
 				if flowID != "" {
 					eventType = path + "/item.completed"
 					subscriptionType = eventType
-					additionalDescriptors = append(additionalDescriptors, eventType)
 				}
 				if owners := source.RuntimeEventOwners("item.completed"); len(owners) != 1 || !owners[0].Equal(joinNode) {
 					t.Fatalf("join event owners = %#v", owners)
@@ -122,15 +120,12 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					nodes: []runtimepipeline.WorkflowNode{{
 						Node: joinNode, Subscriptions: []events.EventType{events.EventType(subscriptionType)},
 						ExecutionType: runtimecontracts.SystemNodeExecutionType,
-						Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-							subscriptionType: {Consume: true},
-						},
 					}},
 				}
 				probe := runtimelifecycleprobe.New()
 				eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 					ContractBundle: source, TestLifecycleProbe: probe,
-				}, additionalDescriptors...)
+				})
 				if err != nil {
 					t.Fatalf("new join EventBus: %v", err)
 				}
@@ -159,6 +154,7 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 
 				eventsByMember := make([]events.Event, 0, 2)
 				for _, member := range []string{"a", "b"} {
+					producer := eventtest.RootRoutingSource(runID)
 					wantTargetFlow := flowID
 					envelope := events.EnvelopeForFlowInstance(
 						events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), workflowName,
@@ -166,15 +162,16 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					if flowID == "" {
 						wantTargetFlow = source.WorkflowName()
 					} else {
+						producer = eventtest.ConcreteTemplateRoutingSource(flowID, path, entityID)
 						envelope = events.EnvelopeForTargetRoute(
 							events.EnvelopeForFlowInstance(envelope, path),
 							events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: entityID},
 						)
 					}
-					event := eventtest.ExistingRunRootIngress(
+					event := eventtest.ExistingRunRootIngressWithRoutingSource(
 						uuid.NewString(), events.EventType(eventType), "operator", "",
 						[]byte(`{"member_id":"`+member+`","result":{"value":"`+member+`"}}`),
-						0, runID, envelope, time.Now().UTC(),
+						0, runID, envelope, producer, time.Now().UTC(),
 					)
 					plan, err := eventBus.CheckPublishRecipientPlan(ctx, event)
 					if err != nil {
@@ -300,9 +297,6 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 						nodes: []runtimepipeline.WorkflowNode{{
 							Node: joinNode, ExecutionType: runtimecontracts.SystemNodeExecutionType,
 							Subscriptions: []events.EventType{"item.completed"},
-							Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-								"item.completed": {Consume: true},
-							},
 						}},
 					}
 					probe := runtimelifecycleprobe.New()

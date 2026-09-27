@@ -64,11 +64,11 @@ search_dimensions:
       - platform-spec.yaml
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
+      - internal/runtime/core/pinrouting/consumer_relation_test.go
       - internal/runtime/core/pinrouting/pinrouting.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/runforkadmission/recipient_authority_test.go
-      - internal/runtime/bus/public_input_admission.go
       - internal/runtime/bus/route_plan.go
       - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/conformance/canonical_forms_registry_test.go
@@ -111,7 +111,7 @@ search_dimensions:
     canonical_layer: invalid_old_authority
     classified_paths_required: true
   - id: route_table_resolve
-    pattern: '\bRouteTable\.Resolve(?:ForRun|IndependentPubsubForRun)?\b|\brouteTable\.Resolve(?:ForRun|IndependentPubsubForRun)?\b'
+    pattern: '\bRouteTable\.Resolve(?:ForRun|IndependentPubsubForRun|IndependentPubsubFromSource)?\b|\brouteTable\.Resolve(?:ForRun|IndependentPubsubForRun|IndependentPubsubFromSource)?\b'
     minimum_matching_files: 4
     required_paths:
       - internal/runtime/runforkadmission/contract_frontier.go
@@ -226,7 +226,7 @@ search_dimensions:
       - internal/cliapp/event_publish.go
     canonical_layer: event_context
   - id: route_event_key_derivation
-    pattern: 'routedEventKeysForPlan|concreteFlowInstanceEventKey|eventContextLocalEventForFlowInstance|route key|event key|eventKeys|routeKey'
+    pattern: 'SourceEventRouteKeys|sourceFlowInstanceEventKey|routedEventKeysForPlan|concreteFlowInstanceEventKey|eventContextLocalEventForFlowInstance|route key|event key|eventKeys|routeKey'
     minimum_matching_files: 10
     required_paths:
       - platform-spec.yaml
@@ -393,6 +393,8 @@ seam_families:
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/outbox.go
       - internal/runtime/bus/target_owner_projection.go
+      - internal/runtime/bus/ordinary_source.go
+      - internal/runtime/bus/ordinary_source_test.go
       - internal/runtime/bus/target_owner_projection_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
     search_dimensions: [route_plan, route_event_key_derivation, event_name_type, delivery_route_model, publish_plan_consumers, connect_route_plan, route_plan_source_reason]
@@ -409,6 +411,7 @@ seam_families:
       - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
+      - internal/runtime/core/pinrouting/consumer_relation_test.go
       - internal/runtime/core/pinrouting/pinrouting.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/public_input_admission.go
@@ -762,7 +765,10 @@ seam_families:
     notes: >
       RouteTable.Resolve is limited to runless authored direct typed pub/sub
       consumers in runstart. Selected-fork admission uses
-      ResolveIndependentPubsubForRun with the exact source run; connect
+      ResolveIndependentPubsubFromSource with the exact source run and admitted
+      RoutingSource; its SourceEventRouteKeys projection is shared with live
+      publication and does not borrow historical receiver targets. The underlying
+      ResolveIndependentPubsubForRun remains a raw run-scoped lookup only. Connect
       recipients come from admitted EventBus recipient actuals, not a second
       local connect evaluation. EventBus lowered-connect planning and template
       lifecycle do not use either API as connect authority; they consume the

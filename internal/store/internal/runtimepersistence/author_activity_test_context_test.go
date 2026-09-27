@@ -300,7 +300,6 @@ func registerTestAuthorActivityCatalogForContext(t *testing.T, target testAuthor
 		descriptor := runtimeauthoractivity.EventDescriptor{EventType: eventType, Disposition: runtimeauthoractivity.StoryDifferent}
 		if eventType == "test.delivery_receipt" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
-			descriptor.AuthorSummaryField = "text"
 		} else if eventType == "test.node_emitted" || eventType == "atomic.selected" {
 			descriptor.Disposition = runtimeauthoractivity.StoryAuthored
 		}

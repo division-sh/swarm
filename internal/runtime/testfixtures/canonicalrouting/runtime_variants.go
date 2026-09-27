@@ -10,14 +10,14 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	if nested {
 		removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 
-		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-generated-activity-topology\nstages: []\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-generated-activity-topology\nstages: []\npins:\n  inputs:\n    events: [request]\n  outputs:\n    events: [request]\nconnect:\n  - {event: request, from: ., to: child}\n")
 		flowRoot = "child/"
-		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nmode: static\nstages: []\n")
+		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nmode: static\nstages: []\npins:\n  inputs:\n    events: [request]\n")
 	} else {
 
-		writeClosedVariantFile(t, root, "schema.yaml", "name: generated-activity-topology\nstages: []\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "name: generated-activity-topology\nstages: []\npins:\n  inputs:\n    events: [request]\n")
 	}
-	writeClosedVariantFile(t, root, flowRoot+"events.yaml", "request:\n  message: text\n  swarm:\n    source: external\n")
+	writeClosedVariantFile(t, root, "events.yaml", "request:\n  message: text\n")
 	writeClosedVariantFile(t, root, flowRoot+"tools.yaml", `send:
   description: send one message
   handler_type: http
@@ -57,9 +57,9 @@ func CopyPayloadNamedField(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: payload-normalizer\ninitial_state: active\nstates: [active, done]\nterminal_states: [done]\npins:\n  inputs:\n    events: [inbound.telegram]\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "chat:\n  chat_id: text\n")
-	writeClosedVariantFile(t, root, "events.yaml", "inbound.telegram:\n  entity_id: text\n  payload: json\n  swarm:\n    source: external\n")
+	writeClosedVariantFile(t, root, "events.yaml", "inbound.telegram:\n  entity_id: text\n  payload: json\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "normalizer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram]\n  event_handlers:\n    inbound.telegram:\n      data_accumulation:\n        writes:\n          - target_field: chat_id\n            value: \"${payload.payload.message.chat.id}\"\n      advances_to: done\n")
 	return root
 }
@@ -71,7 +71,8 @@ func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
 		"validator/events.yaml", "validator/entities.yaml", "validator/nodes.yaml", "validator/schema.yaml", "validator")
 
-	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\npins:\n  inputs:\n    events: [thing.created]\n  outputs:\n    events: [thing.created]\nconnect:\n  - {event: thing.created, from: ., to: validation}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "thing.created:\n  amount: integer\n  who: text\n")
 	inputs := "thing.created"
 	produces := "thing.emitted"
 	timer := ""
@@ -82,6 +83,6 @@ func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 		timerEvent = "timer.check: {}\n"
 		timer = "  timers:\n    - id: check_timer\n      event: timer.check\n      delay: 1h\n      start_on: event:thing.created\n"
 	}
-	writeLegacyInstanceFlow(t, root, "validation", "name: validation\nmode: static\ninitial_state: new\nterminal_states: [done]\nstates: [new, done]\npins:\n  inputs:\n    events: ["+inputs+"]\n  outputs:\n    events:\n      - event: thing.emitted\n        sink: harness\n", "thing.created:\n  swarm:\n    source: external\n  amount: integer\n  who: text\nthing.emitted:\n  amount: integer\n  who: text\n"+timerEvent, "widget:\n  amount:\n    type: integer\n    initial: 0\n  who:\n    type: text\n    initial: \"\"\n  counter:\n    type: integer\n    initial: 0\n", "w-node:\n  execution_type: system_node\n  subscribes_to: ["+inputs+"]\n  produces: ["+produces+"]\n"+timer+"  event_handlers:\n    thing.created:\n      create_entity: true\n      data_accumulation:\n        source_event: thing.created\n        writes:\n          - source_field: amount\n            target_field: amount\n          - source_field: who\n            target_field: who\n          - target_field: counter\n            value: \"${entity.counter + 1}\"\n      sets_gate: ready\n      advances_to: done\n      emit:\n        event: thing.emitted\n        fields:\n          amount: \"${entity.amount}\"\n          who: \"${entity.who}\"\n")
+	writeLegacyInstanceFlow(t, root, "validation", "name: validation\nmode: static\ninitial_state: new\nterminal_states: [done]\nstates: [new, done]\npins:\n  inputs:\n    events: ["+inputs+"]\n  outputs:\n    events:\n      - event: thing.emitted\n        sink: harness\n", "thing.emitted:\n  amount: integer\n  who: text\n"+timerEvent, "widget:\n  amount:\n    type: integer\n    initial: 0\n  who:\n    type: text\n    initial: \"\"\n  counter:\n    type: integer\n    initial: 0\n", "w-node:\n  execution_type: system_node\n  subscribes_to: ["+inputs+"]\n  produces: ["+produces+"]\n"+timer+"  event_handlers:\n    thing.created:\n      create_entity: true\n      data_accumulation:\n        source_event: thing.created\n        writes:\n          - source_field: amount\n            target_field: amount\n          - source_field: who\n            target_field: who\n          - target_field: counter\n            value: \"${entity.counter + 1}\"\n      sets_gate: ready\n      advances_to: done\n      emit:\n        event: thing.emitted\n        fields:\n          amount: \"${entity.amount}\"\n          who: \"${entity.who}\"\n")
 	return root
 }

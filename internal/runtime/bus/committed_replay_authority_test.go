@@ -113,7 +113,7 @@ func TestExactDuplicateReuseRejectsCorruptPreparedAggregateBeforeRoutePlanDeriva
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: base.RunID()}
 	evt, err := events.ResolveEnvelope(
 		base,
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+		events.EnvelopeForTargetRoute(base.NormalizedEnvelope(), target),
 	)
 	if err != nil {
 		t.Fatalf("resolve exact duplicate fixture target: %v", err)

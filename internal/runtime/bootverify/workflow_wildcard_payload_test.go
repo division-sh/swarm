@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -53,4 +54,28 @@ func wildcardPayloadProofSource(t *testing.T, variant canonicalrouting.LocalWild
 		t.Fatalf("load wildcard proof: %v", err)
 	}
 	return semanticview.Wrap(bundle)
+}
+
+func TestRuntimeWiringPatternRequiresExactAdmittedHandler(t *testing.T) {
+	source := wildcardPayloadProofSource(t, canonicalrouting.LocalWildcardPayloadValid)
+	if findings := (&checkerContext{source: source}).eventRuntimeWiring(); len(findings) != 0 {
+		t.Fatalf("admitted wildcard declaration lost its handler: %#v", findings)
+	}
+	without := sourceWithoutPatternHandler{Source: source, owner: identitytest.FlowNode(t, "worker", "observer")}
+	findings := (&checkerContext{source: without}).eventRuntimeWiring()
+	if !reportContains(findings, "event_runtime_wiring_validation", "event task.* on node flow worker node observer has no matching executable handler") {
+		t.Fatalf("missing wildcard owner borrowed another node's handlers: %#v", findings)
+	}
+}
+
+type sourceWithoutPatternHandler struct {
+	semanticview.Source
+	owner runtimeidentity.ExecutableNode
+}
+
+func (s sourceWithoutPatternHandler) ExecutableNodeEventHandlers(node runtimeidentity.ExecutableNode) map[string]runtimecontracts.SystemNodeEventHandler {
+	if node.Equal(s.owner) {
+		return nil
+	}
+	return s.Source.ExecutableNodeEventHandlers(node)
 }

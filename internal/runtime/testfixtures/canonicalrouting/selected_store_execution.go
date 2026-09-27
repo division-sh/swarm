@@ -22,10 +22,19 @@ func CopySelectedStoreExecution(t testing.TB) string {
 pins:
   inputs:
     events:
-      - {event: item.received, source: external}
-      - {event: review.ready, source: external}
+      - item.received
+      - review.ready
+      - state.seeded
+      - state.closed
+  outputs:
+    events: [state.seeded, state.closed]
+connect:
+  - {from: ., event: state.seeded, to: flow-a/1}
+  - {from: ., event: state.closed, to: flow-a/1}
+  - {from: ., event: state.seeded, to: selected-state-flow/at-t}
+  - {from: ., event: state.closed, to: selected-state-flow/at-t}
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "item.received: {}\nreview.ready: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "item.received: {}\nreview.ready: {}\nstate.seeded:\n  name: text\nstate.closed: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `test-node:
   execution_type: system_node
   subscribes_to: [item.received, review.ready]
@@ -43,11 +52,10 @@ stages:
 pins:
   inputs:
     events:
-      - {event: state.seeded, source: external}
-      - {event: state.closed, source: external}
+      - state.seeded
+      - state.closed
 `)
 		writeClosedVariantFile(t, root, owner.path+"/entities.yaml", owner.entity+":\n  name: text\n")
-		writeClosedVariantFile(t, root, owner.path+"/events.yaml", "state.seeded:\n  name: text\nstate.closed: {}\n")
 		writeClosedVariantFile(t, root, owner.path+"/nodes.yaml", `state-owner:
   execution_type: system_node
   subscribes_to: [state.seeded, state.closed]

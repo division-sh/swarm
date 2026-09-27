@@ -1259,7 +1259,7 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	intent := runtimeengine.EmitIntent{
-		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-outbox-materialized-route"),
+		Event: eventtest.RuntimeControl(eventtest.UUID("evt-outbox-materialized-route"),
 			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, runtimebustest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
@@ -1347,7 +1347,7 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 	}
 	_ = requireBusEvent(t, controlCh, "direct intent delivery to control-plane")
 	evt := requireBusEvent(t, matchCh, "direct intent delivery to matching entity-scoped agent")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless matched event entity_id = %q, want empty route-local target", got)
 	}
 	requireNoBusEvent(t, otherCh, "direct intent delivery to filtered recipient")
@@ -1465,11 +1465,11 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
 	evt := requireBusEvent(t, internalCh, "outbox event delivery to internal subscriber")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless internal event entity_id = %q, want empty route-local target", got)
 	}
 	evt = requireBusEvent(t, agentCh, "outbox event delivery to agent subscriber")
-	if got := evt.EntityID(); got != "" {
+	if got := evt.TargetRoute().EntityID; got != "" {
 		t.Fatalf("targetless agent event entity_id = %q, want empty route-local target", got)
 	}
 

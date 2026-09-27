@@ -24,11 +24,10 @@ const (
 )
 
 type NormalizedEventManifest struct {
-	Event              string                                    `yaml:"event"`
-	Fields             map[string]NormalizedEventFieldProjection `yaml:"fields"`
-	When               NormalizedEventWhen                       `yaml:"when,omitempty"`
-	AuthorSummaryField string                                    `yaml:"author_summary_field,omitempty"`
-	AuthorSubject      AuthorSubjectManifest                     `yaml:"author_subject,omitempty"`
+	Event         string                                    `yaml:"event"`
+	Fields        map[string]NormalizedEventFieldProjection `yaml:"fields"`
+	When          NormalizedEventWhen                       `yaml:"when,omitempty"`
+	AuthorSubject AuthorSubjectManifest                     `yaml:"author_subject,omitempty"`
 }
 
 // NormalizedEventFieldProjection owns the exact value admitted after its
@@ -64,13 +63,12 @@ type NormalizedEventWhen struct {
 const normalizedFieldConvertTextEnumMap = "text_enum_map"
 
 type OutputManifest struct {
-	Kind               OutputKind
-	EventName          EventNameManifest
-	Event              string
-	Fields             map[string]NormalizedEventFieldProjection
-	When               NormalizedEventWhen
-	AuthorSummaryField string
-	AuthorSubject      AuthorSubjectManifest
+	Kind          OutputKind
+	EventName     EventNameManifest
+	Event         string
+	Fields        map[string]NormalizedEventFieldProjection
+	When          NormalizedEventWhen
+	AuthorSubject AuthorSubjectManifest
 }
 
 type NormalizationError struct {
@@ -94,7 +92,7 @@ func (m Manifest) OutputManifest() []OutputManifest {
 		}
 		out = append(out, OutputManifest{
 			Kind: OutputKindNormalized, Event: strings.TrimSpace(item.Event),
-			Fields: fields, When: item.When.normalized(fields), AuthorSummaryField: strings.TrimSpace(item.AuthorSummaryField), AuthorSubject: item.AuthorSubject.normalized(),
+			Fields: fields, When: item.When.normalized(fields), AuthorSubject: item.AuthorSubject.normalized(),
 		})
 	}
 	return out
@@ -124,17 +122,6 @@ func (m Manifest) validateNormalizedEvents() error {
 		seen[eventName] = struct{}{}
 		if len(item.Fields) == 0 {
 			return fmt.Errorf("%s normalized event %q requires fields", provider, eventName)
-		}
-		summaryField := strings.TrimSpace(item.AuthorSummaryField)
-		if summaryField != "" {
-			field, ok := item.Fields[summaryField]
-			if !ok {
-				return fmt.Errorf("%s normalized event %q author_summary_field %q is not a declared field", provider, eventName, summaryField)
-			}
-			field = field.normalized()
-			if field.Schema.Kind() != runtimecontracts.ToolSchemaString {
-				return fmt.Errorf("%s normalized event %q author_summary_field %q must project text", provider, eventName, summaryField)
-			}
 		}
 		authorSubject := item.AuthorSubject.normalized()
 		if (authorSubject.Type == "") != (authorSubject.Field == "") {
@@ -391,11 +378,6 @@ func (m Manifest) normalizedDeliveryEvents(payload any) ([]DeliveryEvent, error)
 		normalized[name] = converted
 	}
 	result := DeliveryEvent{Name: events.EventType(output.Event), Kind: OutputKindNormalized, Payload: normalized}
-	if output.AuthorSummaryField != "" {
-		if value, ok := normalized[output.AuthorSummaryField].(string); ok {
-			result.AuthorSummary = value
-		}
-	}
 	if output.AuthorSubject.Type != "" {
 		if value, ok := normalized[output.AuthorSubject.Field].(string); ok {
 			result.AuthorSubjectType = output.AuthorSubject.Type
@@ -546,9 +528,7 @@ func (m Manifest) eventCatalogEntries() map[string]runtimecontracts.EventCatalog
 	}
 	for _, normalized := range m.NormalizedEvents {
 		entry := runtimecontracts.EventCatalogEntry{
-			Source: "provider_trigger_pack_normalized", Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
-			Payload:            runtimecontracts.EventPayloadSpec{Type: "object", Properties: map[string]runtimecontracts.EventFieldSpec{}},
-			AuthorSummaryField: strings.TrimSpace(normalized.AuthorSummaryField),
+			Payload: runtimecontracts.EventPayloadSpec{Type: "object", Properties: map[string]runtimecontracts.EventFieldSpec{}},
 		}
 		for name, projection := range normalized.Fields {
 			projection = projection.normalized()
@@ -615,7 +595,6 @@ func RawEventCatalogEntry() runtimecontracts.EventCatalogEntry {
 	}
 	sort.Strings(required)
 	return runtimecontracts.EventCatalogEntry{
-		Source: "provider_trigger_pack_raw", Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
 		Payload: runtimecontracts.EventPayloadSpec{Type: "object", Properties: properties, Required: append([]string{}, required...)},
 	}
 }

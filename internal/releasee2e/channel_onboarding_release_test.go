@@ -407,11 +407,13 @@ func writeReleaseChannelFixture(t *testing.T, root string) string {
 	contracts := filepath.Join(root, "contracts")
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "integrations", "telegram-agent"), contracts)
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "channel_onboarding_release"), contracts)
+	// This overlay replaces the example's tool consumers; its smoke scenario is
+	// not an execution profile for the release onboarding workload.
 	for _, relative := range []string{
+		filepath.Join("tests", "smoke.yaml"),
 		filepath.Join("telegram-chat", "agents.yaml"),
 		filepath.Join("telegram-chat", "nodes.yaml"),
 		filepath.Join("telegram-chat", "events.yaml"),
-		filepath.Join("tests", "smoke.yaml"),
 	} {
 		if err := os.Remove(filepath.Join(contracts, relative)); err != nil {
 			t.Fatalf("remove release channel consumer %s: %v", relative, err)

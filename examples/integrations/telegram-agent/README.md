@@ -13,6 +13,8 @@ swarm test . tests/smoke.yaml
 
 `verify` checks structural validity, not deployment readiness. `test` creates a fresh private mock runtime and removes it after the scenario finishes. It needs no separate server, LLM credentials, Telegram credentials, Claude executable or Docker. Its private session has no webhook ingress and cannot connect to an existing server. Repeating the command starts a new store, not a retained conversation.
 
+The smoke test enters the declared public root input. An explicit connection delivers it to the private `telegram-chat` flow; live webhooks enter through the separate signed ingress connection.
+
 The source's mock reply begins:
 
 ```text

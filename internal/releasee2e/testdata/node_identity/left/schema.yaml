@@ -5,5 +5,5 @@ states: [pending, working, done]
 pins:
   inputs:
     events:
-      - {event: entry.left, source: external}
+      - entry.left
       - work.routed

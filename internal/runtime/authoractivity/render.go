@@ -85,9 +85,6 @@ func humanLine(occurrence Occurrence, opts RenderOptions) (string, string, error
 	if failed && !strings.Contains(action, "✗") {
 		action = "✗ " + action
 	}
-	if occurrence.AuthorSafeSummary != "" {
-		action += " " + fmt.Sprintf("%q", occurrence.AuthorSafeSummary)
-	}
 	if occurrence.Projection.DurationMS != nil && *occurrence.Projection.DurationMS >= 0 {
 		action += " (" + formatDurationMS(*occurrence.Projection.DurationMS) + ")"
 	}
@@ -141,7 +138,7 @@ func validateOccurrenceForRender(occurrence Occurrence) error {
 		Transition: occurrence.Transition, SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity,
 		DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, RunID: occurrence.RunID,
 		EntityID: occurrence.EntityID, AgentID: occurrence.AgentID, FlowID: occurrence.FlowID,
-		Scope: occurrence.Scope, AuthorSafeSummary: occurrence.AuthorSafeSummary, Projection: occurrence.Projection, Failure: occurrence.Failure,
+		Scope: occurrence.Scope, Projection: occurrence.Projection, Failure: occurrence.Failure,
 	}); err != nil {
 		return fmt.Errorf("render author activity occurrence: %w", err)
 	}

@@ -55,12 +55,21 @@ func (rt *RouteTable) ResolveIndependentPubsubForRun(runID, eventType string) []
 	return out
 }
 
+func (rt *RouteTable) ResolveIndependentPubsubFromSource(runID string, eventType events.EventType, source events.RoutingSource) []Subscriber {
+	var out []Subscriber
+	for _, key := range SourceEventRouteKeys(eventType, source) {
+		for _, subscriber := range rt.ResolveIndependentPubsubForRun(runID, key) {
+			out = appendUniqueSubscriber(out, subscriber)
+		}
+	}
+	return out
+}
+
 type subscriberRouteSource uint8
 
 const (
 	subscriberRouteSourceSubscription subscriberRouteSource = iota + 1
 	subscriberRouteSourcePinAutoWire
-	subscriberRouteSourceRootInputFlow
 	subscriberRouteSourceConnectRoutePlan
 )
 
@@ -70,8 +79,6 @@ func subscriberRouteSourceFromCode(code string) (subscriberRouteSource, bool) {
 		return subscriberRouteSourceSubscription, true
 	case "pin_auto_wire":
 		return subscriberRouteSourcePinAutoWire, true
-	case "root_input_flow":
-		return subscriberRouteSourceRootInputFlow, true
 	case "connect_route_plan":
 		return subscriberRouteSourceConnectRoutePlan, true
 	default:
@@ -85,8 +92,6 @@ func (s subscriberRouteSource) code() string {
 		return "subscription"
 	case subscriberRouteSourcePinAutoWire:
 		return "pin_auto_wire"
-	case subscriberRouteSourceRootInputFlow:
-		return "root_input_flow"
 	case subscriberRouteSourceConnectRoutePlan:
 		return "connect_route_plan"
 	default:
@@ -100,7 +105,6 @@ type RouteTable struct {
 	generation                  uint64
 	source                      semanticview.Source
 	routes                      map[routeResolutionKey][]Subscriber
-	rootInputRoutes             map[string][]Subscriber
 	patterns                    []routePattern
 	exactPatternIndexes         map[string][]int
 	wildcardPatternIndexes      []int
@@ -303,9 +307,6 @@ func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtim
 		}
 	}
 
-	if err := rt.addRootInputFlowNodeRoutesLocked(source, inputProducers); err != nil {
-		return nil, err
-	}
 	rt.rebuildLocked()
 	return rt, nil
 }
@@ -355,9 +356,6 @@ func (rt *RouteTable) ResolveForRun(runID, eventType string) []Subscriber {
 		for _, subscriber := range rt.routes[routeResolutionKey{eventType: eventType}] {
 			out = appendUniqueSubscriber(out, subscriber)
 		}
-	}
-	for _, subscriber := range rt.rootInputRoutes[eventType] {
-		out = appendUniqueRootInputSubscriber(out, subscriber)
 	}
 	if _, active := rt.eventPath[eventType]; !active {
 		return projectSubscriberEvents(out, eventType)
@@ -860,7 +858,6 @@ func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.
 		resolutionIndexDirty:        true,
 		source:                      source,
 		routes:                      make(map[routeResolutionKey][]Subscriber),
-		rootInputRoutes:             make(map[string][]Subscriber),
 		eventPath:                   make(map[string]struct{}),
 		authoredEventPath:           make(map[string]struct{}),
 		authoredScopes:              make(map[string]struct{}),
@@ -928,121 +925,6 @@ func (rt *RouteTable) removeFlowInstanceRouteForContext(ctx context.Context, ide
 		}
 	}
 	return rt.RemoveFlowInstanceRoute(identity)
-}
-
-func rootInputFlowOwnsNodeRoute(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) bool {
-	for _, scope := range source.FlowScopes() {
-		if strings.EqualFold(scope.Mode, "template") || !normalizedStringListContains(scope.InputEvents, eventType) {
-			continue
-		}
-		if strings.TrimSpace(routeFlowPath(source, scope.ID)) == node.FlowPath() {
-			if _, declared := scope.Nodes[node.NodeID()]; declared {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Source, inputProducers runtimepinrouting.FlowInputProducerResolver) error {
-	if rt == nil || source == nil {
-		return nil
-	}
-	rootInputs := routeRootInputEventSet(source)
-	for _, scope := range source.FlowScopes() {
-		if strings.EqualFold(scope.Mode, "template") {
-			continue
-		}
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "." {
-			continue
-		}
-		flowPath := strings.Trim(strings.TrimSpace(routeFlowPath(source, flowID)), "/")
-		if flowID == "" || flowPath == "" {
-			continue
-		}
-		admittedInputs := routeAdmittedFlowIngressEventSet(source, scope, rootInputs, inputProducers)
-		if len(admittedInputs) == 0 {
-			continue
-		}
-		identityScope := routeEventIdentityScope(flowPath, routeFlowLocalEventSetWithInputProducers(scope, inputProducers), scope.InputEvents)
-		for _, eventType := range sortedStringKeys(admittedInputs) {
-			localEvent := eventidentity.Normalize(identityScope.LocalizeInput(eventType))
-			if localEvent == "" || !normalizedStringListContains(scope.InputEvents, localEvent) {
-				continue
-			}
-			nodes, err := routeExecutableNodeDeclarations(source, flowPath, scope.Nodes)
-			if err != nil {
-				return err
-			}
-			for _, declaration := range nodes {
-				handlerNode := declaration.Node
-				semanticNodeID := handlerNode.NodeID()
-				if !routeNodeSubscribesToLocalExact(source, handlerNode, localEvent) {
-					continue
-				}
-				subscriber := Subscriber{
-					Recipient:      events.MustNodeDeliveryRecipient(handlerNode),
-					Path:           flowPath,
-					MatchPattern:   eventType,
-					routeSource:    subscriberRouteSourceRootInputFlow,
-					LocalizedEvent: localEvent,
-					handlerNode:    handlerNode,
-				}
-				subscriber.targetHandler, err = runtimepipeline.AdmitDeliveryTargetHandler(
-					source, handlerNode,
-				)
-				if err != nil {
-					return fmt.Errorf("admit root-input flow target handler %s for %s: %w", semanticNodeID, eventType, err)
-				}
-				rt.rootInputRoutes[eventType] = appendUniqueSubscriber(rt.rootInputRoutes[eventType], subscriber)
-			}
-		}
-	}
-	return nil
-}
-
-func routeAdmittedFlowIngressEventSet(source semanticview.Source, scope semanticview.FlowScope, rootInputs map[string]struct{}, inputProducers runtimepinrouting.FlowInputProducerResolver) map[string]struct{} {
-	out := cloneStringSet(rootInputs)
-	flowID := strings.TrimSpace(scope.ID)
-	for _, localEvent := range scope.InputEvents {
-		// Connect evidence does not add or suppress intrinsic ingress. Keep
-		// this exact admission predicate while sharing the operation's census.
-		resolution := inputProducers.Resolve(flowID, localEvent)
-		if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
-			continue
-		}
-		eventType := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, localEvent))
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	return out
-}
-
-func routeRootInputEventSet(source semanticview.Source) map[string]struct{} {
-	if source == nil {
-		return nil
-	}
-	out := make(map[string]struct{})
-	for _, eventType := range normalizeStringList(source.FlowInputEvents(".")) {
-		out[eventType] = struct{}{}
-	}
-	return out
-}
-
-func routeNodeSubscribesToLocalExact(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) bool {
-	eventType = eventidentity.Normalize(eventType)
-	if source == nil || eventType == "" {
-		return false
-	}
-	for _, authored := range source.ExecutableNodeRuntimeSubscriptions(node) {
-		admission := semanticview.ClassifyExecutableNodeSubscription(source, node, authored)
-		if admission.Admitted() && !admission.Pattern() && admission.LocalEvent() == eventType {
-			return true
-		}
-	}
-	return false
 }
 
 func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) ([]string, []string) {
@@ -1808,19 +1690,6 @@ func routeEventIdentityScope(basePath string, localEvents map[string]struct{}, i
 	}
 }
 
-func normalizedStringListContains(values []string, needle string) bool {
-	needle = eventidentity.Normalize(needle)
-	if needle == "" {
-		return false
-	}
-	for _, value := range values {
-		if eventidentity.Normalize(value) == needle {
-			return true
-		}
-	}
-	return false
-}
-
 type resolvedSubscriberRoleIdentity struct {
 	recipient      events.DeliveryRecipient
 	path           string
@@ -1857,10 +1726,6 @@ func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber
 		return in
 	}
 	return append(in, subscriber)
-}
-
-func appendUniqueRootInputSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
-	return appendUniqueSubscriber(in, subscriber)
 }
 
 func strongestSubscriberMatchEvidence(left, right string) string {

@@ -35,12 +35,40 @@ func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProject
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, source)
-			evt := eventtest.RunCreatingRootIngress("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource("", "producer/inst-1/deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, eventtest.ConcreteTemplateRoutingSource(source.FlowID, source.FlowInstance, source.EntityID), time.Unix(1, 0).UTC())
 			evt = eventtest.TargetRouted(evt, tc.target)
 			if !connectSourceEndpointMatchesTestEvent(endpoint, evt) {
 				t.Fatalf("source endpoint did not match immutable producer route; envelope = %#v", evt.NormalizedEnvelope())
 			}
 		})
+	}
+}
+
+func TestConnectReceiverTargetSelectionBeforeActivation(t *testing.T) {
+	static := ConnectRoutePlan{receiver: newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, "child", "child", runtimecontracts.FlowModeStatic, "work.first", "work.first", "child/work.first")}
+	template := ConnectRoutePlan{receiver: newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, "worker", "worker", runtimecontracts.FlowModeTemplate, "work.first", "work.first", "worker/work.first")}
+	child := events.RouteIdentity{FlowID: "child", FlowInstance: "child", EntityID: "entity-child"}
+	sibling := events.RouteIdentity{FlowID: "sibling", FlowInstance: "sibling", EntityID: "entity-sibling"}
+	if !static.AcceptsReceiverTarget(child, "run") || static.AcceptsReceiverTarget(sibling, "run") || template.AcceptsReceiverTarget(child, "run") {
+		t.Fatal("compiled receiver scope did not exclude an unselected connection")
+	}
+	worker := events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/instance-1", EntityID: "entity-worker"}
+	if !template.AcceptsReceiverTarget(worker, "run") {
+		t.Fatal("concrete template instance did not match its compiled receiver scope")
+	}
+	materialized := ConnectRoutePlanMaterialization{Target: events.RouteIdentity{FlowID: "child", FlowInstance: "child"}}
+	selected, ok := materialized.SelectReceiverTarget(child)
+	if !ok || selected.Target != child {
+		t.Fatalf("entityless static route failed to bind exact admitted entity: %+v, %v", selected, ok)
+	}
+	for _, route := range []events.RouteIdentity{sibling, {FlowID: "child", FlowInstance: "child/other", EntityID: child.EntityID}} {
+		if _, ok := materialized.SelectReceiverTarget(route); ok {
+			t.Fatalf("materialized route accepted unselected receiver %+v", route)
+		}
+	}
+	bound := ConnectRoutePlanMaterialization{Target: events.RouteIdentity{FlowID: "worker", FlowInstance: worker.FlowInstance, EntityID: "other-entity"}}
+	if _, ok := bound.SelectReceiverTarget(worker); ok {
+		t.Fatal("materialized template route accepted a different entity")
 	}
 }
 
@@ -160,7 +188,7 @@ func TestConnectSourceEndpointMatchesEventRejectsTargetIdentityAsSource(t *testi
 	endpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "consumer", "consumer", runtimecontracts.FlowModeStatic, "", "deploy.done", "consumer/deploy.done")
 	target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: "consumer-entity"}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "producer-entity"})
-	evt := eventtest.RunCreatingRootIngress("", "deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, time.Unix(1, 0).UTC())
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource("", "deploy.done", "", "", []byte(`{}`), 0, "", "", envelope, eventtest.ConcreteTemplateRoutingSource("producer", "producer/inst-1", "producer-entity"), time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, target)
 	if connectSourceEndpointMatchesTestEvent(endpoint, evt) {
 		t.Fatalf("consumer target matched as producer source; envelope = %#v", evt.NormalizedEnvelope())
@@ -255,7 +283,6 @@ func TestCompiledConnectEndpointPreservesReceiverModeMatrix(t *testing.T) {
 		assertion func(ConnectRoutePlanEndpoint) bool
 	}{
 		{name: "root", root: true, mode: "root", wantKind: connectEndpointRoot, assertion: ConnectRoutePlanEndpoint.IsRoot},
-		{name: "external", mode: "external", wantKind: connectEndpointExternalIngress, assertion: ConnectRoutePlanEndpoint.IsExternalIngress},
 		{name: "static", mode: runtimecontracts.FlowModeStatic, wantKind: connectEndpointStaticFlow, assertion: ConnectRoutePlanEndpoint.IsStatic},
 		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, wantKind: connectEndpointSingletonFlow, assertion: ConnectRoutePlanEndpoint.IsSingleton},
 		{name: "template", mode: runtimecontracts.FlowModeTemplate, wantKind: connectEndpointTemplateFlow, assertion: ConnectRoutePlanEndpoint.IsTemplate},
@@ -609,12 +636,12 @@ func TestDeploymentFeedAdmissionUsesExactImportableDeclaration(t *testing.T) {
 
 func connectSourceEndpointMatchesTestEvent(endpoint ConnectRoutePlanEndpoint, evt events.Event) bool {
 	sourceEvent, err := SourceEventFromEvent(evt)
-	return err == nil && connectSourceEndpointMatches(endpoint, sourceEvent)
+	return err == nil && connectSourceEndpointMatches(endpoint, sourceEvent, nil)
 }
 
 func connectSourceEndpointMatchesTestSource(endpoint ConnectRoutePlanEndpoint, eventType events.EventType, source events.RoutingSource) bool {
 	sourceEvent, err := AdmitSourceEvent(eventType, source)
-	return err == nil && connectSourceEndpointMatches(endpoint, sourceEvent)
+	return err == nil && connectSourceEndpointMatches(endpoint, sourceEvent, nil)
 }
 
 func mustRootRoutingSource(t *testing.T) events.RoutingSource {
@@ -644,7 +671,7 @@ func mustConcreteRoutingSource(t *testing.T, flowID, flowInstance string) events
 	return source
 }
 
-func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
+func TestProviderBindingDoesNotSubscribeHarnessInput(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -659,13 +686,13 @@ func TestLowerTargetFreeInputRoutePlans_RejectsHarnessSource(t *testing.T) {
 		"sha256:"+strings.Repeat("a", 64),
 		triggergeneration.FromCanonicalBytes([]byte("generation-test")),
 	)
-	plans, issues := lowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
+	plans, issues := compileConnectPlans(providerBoundGraphSource{semanticview.Wrap(bundle), authorization})
 	if len(plans) != 0 || len(issues) != 0 {
 		t.Fatalf("plans = %#v issues = %#v, want harness excluded without lowering issues", plans, issues)
 	}
 }
 
-func TestLowerTargetFreeInputRoutePlansUsesCanonicalRenamedIdentitySource(t *testing.T) {
+func TestProviderConnectUsesCanonicalRenamedIdentitySource(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyProviderRollbackRenamedSource(t, true)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
@@ -680,11 +707,7 @@ func TestLowerTargetFreeInputRoutePlansUsesCanonicalRenamedIdentitySource(t *tes
 		triggergeneration.FromCanonicalBytes([]byte("target-free-renamed-source")),
 	)
 
-	source, err := bindTargetFreeProviderFixture(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
+	plans, issues := compileConnectPlans(providerBoundGraphSource{semanticview.Wrap(bundle), authorization})
 	if len(issues) != 0 || len(plans) != 1 || plans[0].instanceKey == nil {
 		t.Fatalf("plans/issues = %#v/%#v, want one target-free instance plan", plans, issues)
 	}
@@ -720,6 +743,7 @@ func TestCompileConnectPlansFromLoadedPackageFixture(t *testing.T) {
 	}
 
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+	plans = requireRootIngressPlans(t, plans, "work.requested")
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
@@ -790,8 +814,14 @@ func TestLowerCompositionConnectRoutePlanWithLocationRejectsOtherwiseValidConnec
 	}
 	source := semanticview.Wrap(bundle)
 	connects := bundle.CompositionConnects()
-	if len(connects) != 1 {
-		t.Fatalf("connects = %#v, want one", connects)
+	if len(connects) != 2 {
+		t.Fatalf("connects = %#v, want root admission and producer connection", connects)
+	}
+	if connects[0].Event != "work.ready" {
+		connects[0], connects[1] = connects[1], connects[0]
+	}
+	if connects[0].Event != "work.ready" {
+		t.Fatal("producer connection is missing")
 	}
 	connects[0].SourceFile = ""
 	connects[0].SourceLine = 0
@@ -937,6 +967,7 @@ func TestCompileConnectPlansRejectsAddresslessImplicitInstanceKey(t *testing.T) 
 	}
 
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+	plans = requireRootIngressPlans(t, plans, "account.setup.requested", "account.work.requested")
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none without receiver resolution", plans)
 	}
@@ -1044,11 +1075,14 @@ func TestInputPinResolutionMultiPinSatisfactionDerivesOneFlowIdentity(t *testing
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
-	if len(issues) != 0 || len(plans) != 2 {
-		t.Fatalf("plans/issues = %#v/%#v, want two valid input-pin plans", plans, issues)
+	if len(issues) != 0 || len(plans) != 4 {
+		t.Fatalf("plans/issues = %#v/%#v, want two root admission and two account input-pin plans", plans, issues)
 	}
 	modes := map[runtimecontracts.FlowInputResolutionMode]bool{}
 	for _, plan := range plans {
+		if plan.receiver.Readback().FlowID != "account" {
+			continue
+		}
 		if plan.instanceKey == nil || plan.instanceKey.Field().Path() != "account_id" {
 			t.Fatalf("plan instance identity = %#v, want scalar flow instance account_id", plan.instanceKey)
 		}
@@ -1074,8 +1108,8 @@ func TestLowerCompositionConnectRoutePlanWithLocationDerivesRenamedPayloadSource
 		t.Fatalf("renamed source fixture pins = %#v, want account_ready from payload.external_account_id", pins)
 	}
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
-	if len(issues) != 0 || len(plans) != 2 {
-		t.Fatalf("plans/issues = %#v/%#v, want both canonical fixture edges", plans, issues)
+	if len(issues) != 0 || len(plans) != 4 {
+		t.Fatalf("plans/issues = %#v/%#v, want root admission and both canonical fixture edges", plans, issues)
 	}
 	plan := requireReceiverPinRoutePlan(t, plans, "account.ready")
 	if plan.instanceKey == nil {
@@ -1203,7 +1237,7 @@ func TestCompileConnectPlansValidatesAuthoritativeInstanceSourceTypeMatrix(t *te
 	}
 }
 
-func TestLowerTargetFreeInputRoutePlansRejectsAuthoritativeSourceTypeMismatch(t *testing.T) {
+func TestProviderConnectRejectsAuthoritativeSourceTypeMismatch(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyProviderRollbackInvalidSourceType(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -1216,21 +1250,17 @@ func TestLowerTargetFreeInputRoutePlansRejectsAuthoritativeSourceTypeMismatch(t 
 		triggergeneration.FromCanonicalBytes([]byte("target-free-source-type")),
 	)
 
-	source, err := bindTargetFreeProviderFixture(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
+	plans, issues := compileConnectPlans(providerBoundGraphSource{semanticview.Wrap(bundle), authorization})
 	if len(plans) != 0 || len(issues) != 1 || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
 		t.Fatalf("plans/issues = %#v/%#v, want target-free source type blocker", plans, issues)
 	}
 }
 
-func TestLowerPublicInputRoutePlanAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
+func TestTemplateInputReceiverPlanAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			source, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
-			plan, issue := LowerPublicInputRoutePlan(source, endpoint)
+			plan, issue := lowerTemplateInputReceiverPlan(source, endpoint)
 			if !issue.Failure.Empty() {
 				t.Fatalf("public input issue = %#v, want accepted synthetic projection", issue)
 			}
@@ -1239,7 +1269,7 @@ func TestLowerPublicInputRoutePlanAcceptsSyntheticProjectionWithDistinctSchemaEv
 	}
 }
 
-func TestLowerTargetFreeInputRoutePlansAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
+func TestProviderConnectAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			source, _ := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
@@ -1248,7 +1278,7 @@ func TestLowerTargetFreeInputRoutePlansAcceptsSyntheticProjectionWithDistinctSch
 				"sha256:"+strings.Repeat("a", 64),
 				triggergeneration.FromCanonicalBytes([]byte("target-free-synthetic-positive")),
 			)
-			plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
+			plans, issues := compileConnectPlans(providerBoundGraphSource{source, authorization})
 			if len(issues) != 0 || len(plans) != 1 {
 				t.Fatalf("provider plans/issues = %#v/%#v, want one accepted synthetic projection", plans, issues)
 			}
@@ -1257,36 +1287,41 @@ func TestLowerTargetFreeInputRoutePlansAcceptsSyntheticProjectionWithDistinctSch
 	}
 }
 
-func TestPublicInputImportedBindingRejectsSyntheticProjectionCollision(t *testing.T) {
+func TestPublicInputImportedBindingRejectsExistingSchemaOwner(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := targetFreeSyntheticProjectionBundle(t, tc.mint, true)
-			if source, err := bindTargetFreeProviderFixture(bundle); source != nil || err == nil || !strings.Contains(err.Error(), "field chat_id conflicts") {
-				t.Fatalf("public input binding = %v, %v, want no source and synthetic projection collision", source, err)
+			if source, err := bindTargetFreeProviderFixture(bundle); source != nil || err == nil || !strings.Contains(err.Error(), "already owns event schema evidence") {
+				t.Fatalf("public input binding = %v, %v, want no source and existing-schema-owner rejection", source, err)
 			}
 		})
 	}
 }
 
-func TestLowerTargetFreeInputRoutePlansRejectsMissingImportedBinding(t *testing.T) {
+func TestProviderConnectRejectsSyntheticProjectionCollision(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := targetFreeSyntheticProjectionBundle(t, tc.mint, false)
+			source, _ := targetFreeSyntheticCollisionFixture(t, tc.mint)
 			authorization := runtimeprovideroutput.MustAuthorization(
 				"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
 				"sha256:"+strings.Repeat("a", 64),
 				triggergeneration.FromCanonicalBytes([]byte("target-free-synthetic-collision")),
 			)
-			plans, issues := lowerTargetFreeInputRoutePlans(semanticview.Wrap(bundle), []runtimeprovideroutput.Authorization{authorization})
-			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureProducerEventSchemaMissing {
-				t.Fatalf("provider plans/issues = %#v/%#v, want missing imported binding refusal", plans, issues)
-			}
-			collision := targetFreeSyntheticProjectionBundle(t, tc.mint, true)
-			if source, err := bindTargetFreeProviderFixture(collision); source != nil || err == nil || !strings.Contains(err.Error(), "field chat_id conflicts") {
-				t.Fatalf("provider input binding = %v, %v, want no source and synthetic projection collision", source, err)
+			plans, issues := compileConnectPlans(providerBoundGraphSource{source, authorization})
+			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureResolutionProjectionCollision || !strings.Contains(issues[0].Detail, "field chat_id conflicts") {
+				t.Fatalf("provider plans/issues = %#v/%#v, want synthetic projection collision", plans, issues)
 			}
 		})
 	}
+}
+
+type providerBoundGraphSource struct {
+	semanticview.Source
+	authorization runtimeprovideroutput.Authorization
+}
+
+func (s providerBoundGraphSource) SemanticCapabilities() semanticview.Capabilities {
+	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.authorization.Generation(), map[string][]runtimeprovideroutput.Authorization{".": {s.authorization}})
 }
 
 func targetFreeSyntheticProjectionCases() []struct {
@@ -1315,16 +1350,17 @@ func assertTargetFreeSchemaRoles(t testing.TB, plan ConnectRoutePlan) {
 func targetFreeSyntheticProjectionFixture(t testing.TB, mint canonicalrouting.CreateMint, collision bool) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
 	t.Helper()
 	bundle := targetFreeSyntheticProjectionBundle(t, mint, collision)
-	source, err := bindTargetFreeProviderFixture(bundle)
-	if err != nil {
-		t.Fatalf("bind target-free imported schema: %v", err)
-	}
+	source := semanticview.Wrap(bundle)
 	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "inbound.telegram.text_message")
 	endpoint, ok := association.Endpoint()
 	if !ok {
 		t.Fatalf("resolve target-free input endpoint: %v", association.Err())
 	}
 	return source, endpoint
+}
+
+func targetFreeSyntheticCollisionFixture(t testing.TB, mint canonicalrouting.CreateMint) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
+	return targetFreeSyntheticProjectionFixture(t, mint, true)
 }
 
 func targetFreeSyntheticProjectionBundle(t testing.TB, mint canonicalrouting.CreateMint, collision bool) *runtimecontracts.WorkflowContractBundle {
@@ -1419,6 +1455,7 @@ func TestCompileConnectPlansUsesSelectInputResolution(t *testing.T) {
 	}
 
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+	plans = requireRootIngressPlans(t, plans, "account.setup.requested", "account.work.requested")
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
@@ -1494,6 +1531,7 @@ func TestCompileConnectPlansUsesSelectOrCreateInputResolution(t *testing.T) {
 	}
 
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+	plans = requireRootIngressPlans(t, plans, "account.setup.requested", "account.work.requested")
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
@@ -1581,6 +1619,7 @@ func TestCompileConnectPlansRejectsSelectCarryTypeMismatch(t *testing.T) {
 	}
 
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+	plans = requireRootIngressPlans(t, plans, "account.setup.requested", "account.work.requested")
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none for invalid select resolution", plans)
 	}
@@ -1611,6 +1650,7 @@ func TestCompileConnectPlansRejectsSelectOrCreateCarryTypeMismatch(t *testing.T)
 	}
 
 	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+	plans = requireRootIngressPlans(t, plans, "account.setup.requested", "account.work.requested")
 	if len(plans) != 0 {
 		t.Fatalf("plans = %#v, want none for invalid select-or-create resolution", plans)
 	}

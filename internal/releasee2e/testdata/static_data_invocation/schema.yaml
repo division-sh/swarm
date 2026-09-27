@@ -7,7 +7,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: read.requested, source: external}
+      - read.requested
       - child.completed
   outputs:
     events: [child.requested]

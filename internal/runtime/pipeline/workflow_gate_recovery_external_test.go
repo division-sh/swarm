@@ -377,10 +377,6 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					Node: externalPipelineSourceNode(t, source, ".", "support"), Subscriptions: []events.EventType{"support.reply_drafted", "send_support_reply.revision_requested", "send_support_reply.rejected", "platform.activity_requested"},
 					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-						"support.reply_drafted":       {Consume: true},
-						"platform.activity_requested": {Consume: true},
-					},
 				}},
 			}
 			newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
@@ -807,7 +803,6 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 					Node: supportNode, Subscriptions: []events.EventType{"support.reply_drafted"},
 					Produces:      []events.EventType{"send_support_reply.succeeded", "send_support_reply.failed", "send_support_reply.revision_requested", "send_support_reply.rejected"},
 					ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"support.reply_drafted": {Consume: true}},
 				}},
 			}
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{

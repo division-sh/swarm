@@ -1,6 +1,6 @@
 name: select or create full authored path
 steps:
-  - publish: producer/account.requested
+  - publish: account.requested
     payload:
       account_id: account-1
 expect:

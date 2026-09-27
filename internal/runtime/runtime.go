@@ -947,35 +947,24 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 	resolved := source.ResolvedEventCatalog()
 	authored := source.AuthoredResolvedEventCatalog()
 	byName := make(map[string]runtimeauthoractivity.EventDescriptor, len(resolved)+len(authored))
-	add := func(name string, entry runtimecontracts.EventCatalogEntry, disposition runtimeauthoractivity.StoryDisposition) error {
+	add := func(name string, disposition runtimeauthoractivity.StoryDisposition) error {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			return nil
 		}
-		summaryField := strings.TrimSpace(entry.AuthorSummaryField)
-		if summaryField != "" {
-			field, ok := entry.Payload.Properties[summaryField]
-			if !ok {
-				return fmt.Errorf("authored event %q author_summary_field %q is not declared in payload", name, summaryField)
-			}
-			fieldType := strings.TrimSpace(field.Type)
-			if fieldType != "text" && fieldType != "string" {
-				return fmt.Errorf("authored event %q author_summary_field %q must be text", name, summaryField)
-			}
-		}
-		descriptor := runtimeauthoractivity.EventDescriptor{EventType: name, Disposition: disposition, AuthorSummaryField: summaryField}
+		descriptor := runtimeauthoractivity.EventDescriptor{EventType: name, Disposition: disposition}
 		if previous, ok := byName[name]; ok && previous != descriptor {
 			return fmt.Errorf("author activity event descriptor %q resolves to conflicting declarations", name)
 		}
 		byName[name] = descriptor
 		return nil
 	}
-	for name, entry := range resolved {
+	for name := range resolved {
 		disposition := runtimeauthoractivity.StoryDifferent
 		if _, ok := authored[name]; ok {
 			disposition = runtimeauthoractivity.StoryAuthored
 		}
-		if err := add(name, entry, disposition); err != nil {
+		if err := add(name, disposition); err != nil {
 			return nil, err
 		}
 	}
@@ -992,7 +981,7 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 		if proof.IsAuthored(source) {
 			disposition = runtimeauthoractivity.StoryAuthored
 		}
-		if err := add(proof.EventKey(), proof.Entry, disposition); err != nil {
+		if err := add(proof.EventKey(), disposition); err != nil {
 			return nil, err
 		}
 	}
@@ -1002,11 +991,11 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 		default:
 			return nil, fmt.Errorf("author activity join occurrence requires a compiled join mode")
 		}
-		if err := add("platform.join_complete", runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+		if err := add("platform.join_complete", runtimeauthoractivity.StoryDifferent); err != nil {
 			return nil, err
 		}
 		if join.Spec.TimeoutFound || strings.TrimSpace(join.Spec.Timeout.After) != "" {
-			if err := add("platform.join_timeout", runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+			if err := add("platform.join_timeout", runtimeauthoractivity.StoryDifferent); err != nil {
 				return nil, err
 			}
 		}
@@ -1015,7 +1004,7 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 		if !timer.StageOwned || strings.TrimSpace(timer.Event) != runtimecontracts.WorkflowStageTimerInternalEvent {
 			continue
 		}
-		if err := add(runtimecontracts.WorkflowStageTimerInternalEvent, runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+		if err := add(runtimecontracts.WorkflowStageTimerInternalEvent, runtimeauthoractivity.StoryDifferent); err != nil {
 			return nil, err
 		}
 		break
@@ -1029,7 +1018,7 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 			return nil, fmt.Errorf("channel operation tool requires an exact id")
 		}
 		for _, suffix := range []string{".succeeded", ".failed"} {
-			if err := add(toolID+suffix, runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+			if err := add(toolID+suffix, runtimeauthoractivity.StoryDifferent); err != nil {
 				return nil, err
 			}
 		}

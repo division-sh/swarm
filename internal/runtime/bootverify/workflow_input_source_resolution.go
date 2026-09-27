@@ -37,10 +37,7 @@ func inputProducerSourceIsExternalNoTarget(resolution runtimecontracts.FlowInput
 	return false
 }
 
-func nonInputEventMetadataProducerSource(entry runtimecontracts.EventCatalogEntry) bool {
-	if len(entry.SwarmProducer()) > 0 {
-		return true
-	}
-	source := strings.ToLower(strings.TrimSpace(entry.SwarmSource()))
-	return strings.HasPrefix(source, "external") || strings.HasPrefix(source, "platform")
+func nonInputEventExternalProducerSource(source semanticview.Source, flowID, eventType string) bool {
+	resolution := semanticview.ResolveNonConnectFlowInputProducerWithOptions(source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{AllowNonInputEvent: true})
+	return inputProducerSourceIsExternalNoTarget(resolution)
 }

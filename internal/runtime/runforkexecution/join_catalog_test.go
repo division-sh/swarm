@@ -41,7 +41,7 @@ func (s *observedActivationJoinCatalog) RegisterAuthorActivityEventCatalog(scope
 	}
 	s.scopes = append(s.scopes, scope)
 	for _, name := range []string{"platform.join_complete", "platform.join_timeout"} {
-		if got, found := s.registry.Resolve(scope, name); !found || got.Disposition != authoractivity.StoryDifferent || got.AuthorSummaryField != "" {
+		if got, found := s.registry.Resolve(scope, name); !found || got.Disposition != authoractivity.StoryDifferent {
 			s.t.Errorf("activation catalog lost %s: %+v %v", name, got, found)
 		}
 	}
@@ -85,7 +85,7 @@ func (o *observedSelectedJoinCatalog) RegisterAuthorActivityEventCatalog(scope a
 	o.scopes = append(o.scopes, scope)
 	for _, name := range o.want {
 		got, found := o.resolve(scope, name)
-		if !found || got.Disposition != authoractivity.StoryDifferent || got.AuthorSummaryField != "" {
+		if !found || got.Disposition != authoractivity.StoryDifferent {
 			o.t.Errorf("selected preparation omitted exact internal descriptor %s: %+v found=%v", name, got, found)
 		}
 		other := scope

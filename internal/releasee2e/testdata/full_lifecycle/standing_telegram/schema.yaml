@@ -1,0 +1,5 @@
+name: telegram-lifecycle
+connect:
+  - event: inbound.telegram.text_message
+    from: telegram-ingress
+    to: telegram-chat

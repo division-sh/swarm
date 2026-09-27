@@ -18,9 +18,9 @@ func TestRetainedNodeContractHandlerUsesRuntimeEnginePath(t *testing.T) {
 		Module: handlerEngineProjectNodeModule(t),
 	})
 
-	evt := eventtest.RunCreatingRootIngress(
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		"00000000-0000-0000-0000-000000000001", events.EventType("custom.trigger"), "", "", nil, 0, testPipelineRunID, "",
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}), time.Unix(1, 0).UTC(),
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: ".", FlowInstance: testPipelineRunID}), eventtest.StaticFlowRoutingSource(".", testPipelineRunID, ""), time.Unix(1, 0).UTC(),
 	)
 	outcome, err := executeNodeContractHandlerWithHandoff(t, pc, testAuthorActivityContext(t, context.Background()), pipelineNode(t, "", "node-a"), runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -241,7 +242,7 @@ func (c *checkerContext) validateTimerFireEventConsumer(timer runtimecontracts.W
 	c.timerFindings = append(c.timerFindings, Finding{
 		CheckID:  "timer_validation",
 		Severity: "error",
-		Message:  fmt.Sprintf("timer %s event %s has no executable consumer or explicit external/exported role", timer.ID, ref.DisplayName()),
+		Message:  fmt.Sprintf("timer %s event %s has no executable consumer, compiled connection, or selected-root export", timer.ID, ref.DisplayName()),
 		Location: strings.TrimSpace(timer.ID),
 	})
 }
@@ -434,10 +435,10 @@ func timerFireEventHasConsumer(source semanticview.Source, ref semanticview.Flow
 			return true
 		}
 	}
-	if eventHasExternalConsumerLocal(ref.Entry) {
+	if eventIsPublicRootOutput(source, ref) {
 		return true
 	}
-	return ref.CrossesDeclaredOutputBoundary(source)
+	return runtimepinrouting.ClassifyOutputConsumer(source, ref.FlowID, ref.Authored).HasRuntimeConsumer()
 }
 
 func (c *checkerContext) timerTriggerEventProduced(timer runtimecontracts.WorkflowTimerContract, ref semanticview.FlowEventProof) bool {
@@ -447,7 +448,7 @@ func (c *checkerContext) timerTriggerEventProduced(timer runtimecontracts.Workfl
 	if resolution, ok := c.resolveDeclaredInputProducerSource(timer.OwningFlowID(), ref.Authored); ok {
 		return resolution.HasEvidence()
 	}
-	if timerEventProducedByPlatform(c.source, ref) || nonInputEventMetadataProducerSource(ref.Entry) {
+	if timerEventProducedByPlatform(c.source, ref) || nonInputEventExternalProducerSource(c.source, ref.FlowID, ref.Authored) {
 		return true
 	}
 	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(c.source).MatchingProducers(ref.FlowID, ref.EventKey()) {

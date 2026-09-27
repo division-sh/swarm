@@ -599,11 +599,10 @@ func (eb *EventBus) runtimeActiveAgentDescriptors() map[agentidentity.Identity]A
 	return out
 }
 
-func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event) []Subscriber {
+func (eb *EventBus) resolveRoutedSubscribersForEvent(evt events.Event, eventKeys []string) []Subscriber {
 	if eb == nil {
 		return nil
 	}
-	eventKeys := routedEventKeysForPlan(evt)
 	if len(eventKeys) == 0 {
 		return nil
 	}

@@ -12,19 +12,19 @@ func CopyHandlerRuleSelectionProof(t testing.TB) string {
 pins:
   inputs:
     events:
-      - {event: rules.selected, source: external}
-      - {event: rules.no_match, source: external}
-      - {event: rules.evaluation_failed, source: external}
-      - {event: complete.selected, source: external}
-      - {event: complete.no_match, source: external}
-      - {event: direct, source: external}
+      - rules.selected
+      - rules.no_match
+      - rules.evaluation_failed
+      - complete.selected
+      - complete.no_match
+      - direct
 `)
-	writeClosedVariantFile(t, root, "events.yaml", `rules.selected: {swarm: {source: external}}
-rules.no_match: {swarm: {source: external}}
-rules.evaluation_failed: {swarm: {source: external}}
-complete.selected: {swarm: {source: external}}
-complete.no_match: {swarm: {source: external}}
-direct: {swarm: {source: external}}
+	writeClosedVariantFile(t, root, "events.yaml", `rules.selected: {}
+rules.no_match: {}
+rules.evaluation_failed: {}
+complete.selected: {}
+complete.no_match: {}
+direct: {}
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `selection-node:
   execution_type: system_node
@@ -77,8 +77,7 @@ stages:
 pins:
   inputs:
     events:
-      - event: item.completed
-        source: external
+      - item.completed
 `
 	joinEntities := `join_state:
   expected:
@@ -86,8 +85,6 @@ pins:
     initial: []
 `
 	joinEvents := `item.completed:
-  swarm:
-    source: external
   member_id: text
   result: JoinResult
 `
@@ -142,12 +139,9 @@ stages:
 pins:
   inputs:
     events:
-      - event: timer.cancel
-        source: external
+      - timer.cancel
 `)
-	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
-  swarm:
-    source: external
+	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel: {}
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "timer_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:

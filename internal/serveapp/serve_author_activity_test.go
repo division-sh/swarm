@@ -214,14 +214,14 @@ func TestServeAuthorActivityFollowerRefreshesExactScopeAfterRuntimeReload(t *tes
 	replacement.SourceIdentity = "delivery-replacement"
 	replacement.DedupKey = "delivery-replacement:delivered"
 	replacement.Scope = runtimeauthoractivity.BundleScope("runtime-a", "bundle-replacement")
-	replacement.AuthorSafeSummary = "replacement activity"
+	replacement.Projection.SubjectID = "replacement-agent"
 	unrelated := replacement
 	unrelated.OccurrenceID = uuid.NewString()
 	unrelated.Sequence = 33
 	unrelated.SourceIdentity = "delivery-unrelated"
 	unrelated.DedupKey = "delivery-unrelated:delivered"
 	unrelated.Scope = runtimeauthoractivity.BundleScope("runtime-a", "bundle-unrelated")
-	unrelated.AuthorSafeSummary = "must stay hidden"
+	unrelated.Projection.SubjectID = "unrelated-agent"
 
 	reader := &scopeFilteringServeStoryReader{occurrences: []runtimeauthoractivity.Occurrence{initial, replacement, unrelated}}
 	scope := &mutableServeAuthorActivityScope{hashes: []string{"bundle-a"}}
@@ -236,12 +236,12 @@ func TestServeAuthorActivityFollowerRefreshesExactScopeAfterRuntimeReload(t *tes
 	if err != nil {
 		t.Fatalf("newServeAuthorActivityFollower: %v", err)
 	}
-	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "how are you") })
+	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "telegram-sender") })
 	scope.replace("bundle-replacement")
-	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "replacement activity") })
+	waitForServeStory(t, func() bool { return strings.Contains(out.String(), "replacement-agent") })
 	follower.StopAndWait()
 
-	if strings.Contains(out.String(), "must stay hidden") {
+	if strings.Contains(out.String(), "unrelated-agent") {
 		t.Fatalf("unrelated bundle activity leaked into feed: %q", out.String())
 	}
 	calls := reader.snapshotCalls()
@@ -327,9 +327,8 @@ func serveStoryOccurrence(t *testing.T, sequence int64, transition string, at ti
 		OccurrenceID: uuid.NewString(), Sequence: sequence, Kind: runtimeauthoractivity.KindDeliveryLifecycle,
 		Version: runtimeauthoractivity.Version, Transition: transition, SourceOwner: "event_deliveries",
 		SourceIdentity: "delivery-" + uuid.NewString(), DedupKey: "delivery:" + uuid.NewString(), OccurredAt: at,
-		Scope:             runtimeauthoractivity.BundleScope("runtime-a", "bundle-a"),
-		Projection:        runtimeauthoractivity.Projection{SubjectType: "agent", SubjectID: "telegram-sender", EventType: "phrase.completed"},
-		AuthorSafeSummary: "how are you",
+		Scope:      runtimeauthoractivity.BundleScope("runtime-a", "bundle-a"),
+		Projection: runtimeauthoractivity.Projection{SubjectType: "agent", SubjectID: "telegram-sender", EventType: "phrase.completed"},
 	}
 	if transition == "failed" {
 		failure, ok := runtimefailures.EnvelopeFromError(runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_unavailable", "test", "serve_story", nil))

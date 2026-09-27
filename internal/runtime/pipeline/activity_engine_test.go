@@ -2189,7 +2189,11 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 	if err != nil {
 		t.Fatalf("marshal inbound delivery payload: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress(
+	source, err := events.NewExternalIngressRoutingSource("telegram", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:telegram-inbound:"+delivery.ProviderEventID)).String(),
 		delivery.Events[0].Name,
 		"telegram",
@@ -2200,11 +2204,8 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 		"",
 		events.EventEnvelope{
 			EntityID: entityID,
-			Source: events.RouteIdentity{
-				FlowID:   "telegram",
-				EntityID: entityID,
-			},
 		},
+		source,
 		time.Unix(1710000000, 0).UTC(),
 	)
 	return delivery, evt

@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -71,12 +72,13 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 				before[3].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[3].Transition != "delivered" {
 				t.Fatalf("first receipt occurrences = %#v, want run-started, emitted, in-progress, and delivered occurrences", before)
 			}
-			for _, occurrence := range before[1:] {
-				if occurrence.AuthorSafeSummary != "how are you" {
-					t.Fatalf("%s summary = %q, want persisted safe source summary", occurrence.Kind, occurrence.AuthorSafeSummary)
-				}
-				if strings.Contains(occurrence.AuthorSafeSummary, "must-not-render") {
-					t.Fatalf("%s summary leaked undeclared payload", occurrence.Kind)
+			var rendered bytes.Buffer
+			if err := runtimeauthoractivity.Render(&rendered, before, runtimeauthoractivity.RenderOptions{Mode: runtimeauthoractivity.RenderPlain}); err != nil {
+				t.Fatal(err)
+			}
+			for _, forbidden := range []string{"how are you", "must-not-render", "author_safe_summary"} {
+				if strings.Contains(rendered.String(), forbidden) {
+					t.Fatalf("author story copied payload preview %q: %s", forbidden, rendered.String())
 				}
 			}
 			beforeStamp := fixture.stamp(ctx, eventID, agentID)

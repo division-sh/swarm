@@ -68,17 +68,6 @@ func (m *Mutation) PersistedOccurredAt(ctx context.Context, dedupKey string) (ti
 	return occurrence.OccurredAt.UTC(), true, nil
 }
 
-func (m *Mutation) PersistedAuthorSafeSummary(ctx context.Context, dedupKey string) (string, bool, error) {
-	if m == nil || m.tx == nil || m.finalized {
-		return "", false, fmt.Errorf("author activity mutation is not active")
-	}
-	occurrence, found, err := m.loadByDedup(ctx, dedupKey)
-	if err != nil || !found {
-		return "", found, err
-	}
-	return occurrence.AuthorSafeSummary, true, nil
-}
-
 func (m *Mutation) Finalize(ctx context.Context) error {
 	if m == nil || m.tx == nil {
 		return fmt.Errorf("author activity mutation is required")
@@ -187,7 +176,7 @@ func (m *Mutation) updateLast(ctx context.Context, last int64) error {
 	return nil
 }
 
-const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), COALESCE(author_safe_summary, ''), projection, failure, occurred_at FROM author_activity_occurrences`
+const occurrenceSelect = `SELECT CAST(occurrence_id AS TEXT), sequence, kind, version, transition, source_owner, source_identity, dedup_key, COALESCE(CAST(run_id AS TEXT), ''), COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(agent_id, ''), COALESCE(flow_id, ''), scope_kind, COALESCE(CAST(runtime_instance_id AS TEXT), ''), COALESCE(bundle_hash, ''), projection, failure, occurred_at FROM author_activity_occurrences`
 
 func (m *Mutation) loadByDedup(ctx context.Context, key string) (runtimeauthoractivity.Occurrence, bool, error) {
 	key = strings.TrimSpace(key)
@@ -221,17 +210,16 @@ func (m *Mutation) insert(ctx context.Context, sequence int64, draft runtimeauth
 		}
 		failure = string(failureRaw)
 	}
-	args := []any{draft.OccurrenceID, sequence, string(draft.Kind), draft.Version, draft.Transition, draft.SourceOwner, draft.SourceIdentity, draft.DedupKey, nullable(draft.RunID), nullable(draft.EntityID), nullable(draft.AgentID), nullable(draft.FlowID), string(draft.Scope.Kind), nullable(draft.Scope.RuntimeInstanceID), nullable(draft.Scope.BundleHash), nullable(draft.AuthorSafeSummary), string(projection), failure, draft.OccurredAt.UTC()}
-	query := `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, scope_kind, runtime_instance_id, bundle_hash, author_safe_summary, projection, failure, occurred_at) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, ''), NULLIF($12, ''), $13, NULLIF($14, '')::uuid, NULLIF($15, ''), NULLIF($16, ''), $17::jsonb, NULLIF($18, '')::jsonb, $19)`
+	args := []any{draft.OccurrenceID, sequence, string(draft.Kind), draft.Version, draft.Transition, draft.SourceOwner, draft.SourceIdentity, draft.DedupKey, nullable(draft.RunID), nullable(draft.EntityID), nullable(draft.AgentID), nullable(draft.FlowID), string(draft.Scope.Kind), nullable(draft.Scope.RuntimeInstanceID), nullable(draft.Scope.BundleHash), string(projection), failure, draft.OccurredAt.UTC()}
+	query := `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, scope_kind, runtime_instance_id, bundle_hash, projection, failure, occurred_at) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, ''), NULLIF($12, ''), $13, NULLIF($14, '')::uuid, NULLIF($15, ''), $16::jsonb, NULLIF($17, '')::jsonb, $18)`
 	if m.dialect == DialectSQLite {
-		query = `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, scope_kind, runtime_instance_id, bundle_hash, author_safe_summary, projection, failure, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		query = `INSERT INTO author_activity_occurrences (occurrence_id, sequence, kind, version, transition, source_owner, source_identity, dedup_key, run_id, entity_id, agent_id, flow_id, scope_kind, runtime_instance_id, bundle_hash, projection, failure, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		args[8] = nullableSQLite(draft.RunID)
 		args[9] = nullableSQLite(draft.EntityID)
 		args[10] = nullableSQLite(draft.AgentID)
 		args[11] = nullableSQLite(draft.FlowID)
 		args[13] = nullableSQLite(draft.Scope.RuntimeInstanceID)
 		args[14] = nullableSQLite(draft.Scope.BundleHash)
-		args[15] = nullableSQLite(draft.AuthorSafeSummary)
 	}
 	if _, err := m.tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("insert author activity %s/%s: %w", draft.Kind, draft.Transition, err)

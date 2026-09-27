@@ -429,6 +429,12 @@ func resolveExecutableNodeSubscriptionHandler(source Source, node runtimeidentit
 	}
 	for _, candidate := range append(exact, patterns...) {
 		admission := candidate.admission
+		if admission.Pattern() && candidate.key == eventType {
+			return NodeSubscriptionHandlerResolution{
+				Handler: handlers[candidate.key], HandlerEventKey: strings.TrimSpace(candidate.key),
+				Admission: admission, Matched: true,
+			}
+		}
 		_, localMatch := admission.LocalEventAt("", eventType)
 		if !localMatch &&
 			!admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents) {

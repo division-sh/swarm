@@ -50,17 +50,15 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 			source := handlerRuleSelectionSupportedSource(t)
 			node := externalPipelineSourceNode(t, source, ".", "selection-node")
 			workflowName := source.WorkflowName()
-			policies := map[string]runtimepipeline.WorkflowEventPolicy{}
 			subscriptions := make([]events.EventType, 0, len(tests))
 			for _, tc := range tests {
 				eventType := tc.event
 				subscriptions = append(subscriptions, events.EventType(eventType))
-				policies[eventType] = runtimepipeline.WorkflowEventPolicy{Consume: true}
 			}
 			module := proposedEffectProofModule{
 				source: source,
 				nodes: []runtimepipeline.WorkflowNode{{
-					Node: node, Subscriptions: subscriptions, ExecutionType: runtimecontracts.SystemNodeExecutionType, Policies: policies,
+					Node: node, Subscriptions: subscriptions, ExecutionType: runtimecontracts.SystemNodeExecutionType,
 				}},
 			}
 			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})

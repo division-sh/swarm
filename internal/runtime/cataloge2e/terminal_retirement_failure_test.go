@@ -99,9 +99,8 @@ func TestTerminalMiddleMemberFailureRetainsSuffixBothStores(t *testing.T) {
 					t.Fatalf("fenced failed flow still exposes executable agent %s", cfg.ID)
 				}
 			}
-			event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(unrelatedPath+"/worker.inspect"), "cataloge2e", "", nil, 0, catalogRuntimeRunID,
-				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, unrelatedEntity), unrelatedPath),
-				eventtest.ConcreteTemplateRoutingSource("worker-flow", unrelatedPath, unrelatedEntity), time.Now().UTC())
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("worker.inspect"), "cataloge2e", "", []byte(`{"worker_id":"worker-002"}`), 0, catalogRuntimeRunID,
+				events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
 			if err := h.rt.Bus.PublishAndWait(ctx, event); err != nil {
 				t.Fatalf("unrelated flow execution: %v", err)
 			}
@@ -169,7 +168,7 @@ func proveDirectTerminalCommitUnwind(t *testing.T, mode string) {
 			if mode == "panic" {
 				expectTerminalShutdownFailure(t, h, injected)
 			}
-			evt := catalogRunScopedWorkerReadyEvent(t, catalogRuntimeRunID, path, entity, uuid.NewString())
+			evt := catalogRunScopedWorkerReadyEvent(t, catalogRuntimeRunID, uuid.NewString())
 			if h.pg != nil {
 				storetest.CommitSemanticEvent(t, ctx, h.pg, evt)
 			} else {

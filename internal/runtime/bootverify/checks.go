@@ -87,9 +87,6 @@ type checkerContext struct {
 	deadEventSchemaLoaded   bool
 	deadEventSchemaFindings []Finding
 
-	eventMetadataAuthorityLoaded   bool
-	eventMetadataAuthorityFindings []Finding
-
 	dialectLoaded   bool
 	dialectFindings []Finding
 
@@ -191,9 +188,6 @@ type checkerContext struct {
 	inputPinLoaded   bool
 	inputPinFindings []Finding
 
-	crossFlowPinAmbiguityLoaded   bool
-	crossFlowPinAmbiguityFindings []Finding
-
 	flowBoundaryCreateEntityLoaded   bool
 	flowBoundaryCreateEntityFindings []Finding
 
@@ -203,7 +197,6 @@ type checkerContext struct {
 
 var bootCheckRegistry = []Check{
 	{ID: "declared_agent_name_valid", Severity: SeverityHardInvalidity, Run: checkDeclaredAgentNameValid},
-	{ID: "event_metadata_authority", Severity: SeverityHardInvalidity, Run: checkEventMetadataAuthority},
 	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
@@ -270,7 +263,6 @@ var bootCheckRegistry = []Check{
 	{ID: "composition_connect_validation", Severity: "error", Run: checkCompositionConnectValidation},
 	{ID: "input_pin_wiring", Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Severity: "error", Run: checkPinTargetResolution},
-	{ID: "cross_flow_pin_ambiguity_validation", Severity: "error", Run: checkCrossFlowPinAmbiguityValidation},
 	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
 	{ID: "flow_data_access_validation", Severity: "error", Run: checkFlowDataAccessValidation},
 }

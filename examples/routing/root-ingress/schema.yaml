@@ -5,5 +5,4 @@ states: [pending, processed, done]
 pins:
   inputs:
     events:
-      - event: item.received
-        source: external
+      - item.received

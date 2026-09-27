@@ -6,14 +6,10 @@ pins:
   inputs:
     events:
       - portfolio.opened
-      - event: portfolio.account.register.requested
-        source: external
-      - event: portfolio.accounts.register.requested
-        source: external
-      - event: portfolio.membership.seeded
-        source: external
-      - event: portfolio.notify.requested
-        source: external
+      - portfolio.account.register.requested
+      - portfolio.accounts.register.requested
+      - portfolio.membership.seeded
+      - portfolio.notify.requested
   outputs:
     events:
       - account.registered

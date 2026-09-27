@@ -582,7 +582,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 				t.Fatal(err)
 			}
 			handler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "join-node"))["item.completed"]
-			member := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), now)
+			member := eventtest.RunCreatingRootIngressWithRoutingSource("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), testWorkflowRoutingSource("orders", path, entityID), now)
 			timeout := workflowJoinTimerEventForTest(t, "timeout-a", joinTimeoutEvent, handle, runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), now.Add(time.Hour))
 			triggerState := mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)
 			type raceResult struct {
@@ -672,7 +672,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			handler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "join-node"))["item.completed"]
-			arrival := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+			arrival := eventtest.RunCreatingRootIngressWithRoutingSource("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), testWorkflowRoutingSource("orders", path, entityID), time.Now().UTC())
 			triggerState := mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)
 			start := make(chan struct{})
 			armErr := make(chan error, 1)
@@ -759,7 +759,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			}
 			handler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "join-node"))["item.completed"]
 			deliver := func(coordinator *PipelineCoordinator, id, member, result string) error {
-				evt := eventtest.RunCreatingRootIngress(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": result}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+				evt := eventtest.RunCreatingRootIngressWithRoutingSource(id, events.EventType("item.completed"), "", "", mustJSON(map[string]any{"member_id": member, "result": map[string]any{"value": result}}), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), eventtest.ConcreteTemplateRoutingSource("orders", path, entityID), time.Now().UTC())
 				_, err := coordinator.executeNodeContractHandler(ctx, mustPipelineNode("orders", "join-node"), handler, workflowTriggerContext{Event: evt, State: mustCurrentWorkflowState(t, coordinator, ctx, testWorkflowInstanceRoute(path), entityID), HandlerEventKey: "item.completed"}, false)
 				return err
 			}
@@ -857,7 +857,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			dispatchHandler := pc.SemanticSource().ExecutableNodeEventHandlers(mustPipelineNode("orders", "dispatcher"))["order.accepted"]
-			dispatch := eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-empty"), events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+			dispatch := eventtest.RunCreatingRootIngressWithRoutingSource(eventtest.UUID("fan-out-empty"), events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), testWorkflowRoutingSource("orders", path, entityID), time.Now().UTC())
 			if dispatchHandler.FanOut == nil {
 				t.Fatal("dispatcher fixture lost fan_out")
 			}
@@ -1019,7 +1019,7 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 		EntityType: "test_entity"})); err != nil {
 		t.Fatal(err)
 	}
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), eventtest.ConcreteTemplateRoutingSource("orders", path, entityID), time.Now().UTC())
 	joinNode := pipelineNode(t, "orders", "join-node")
 	route := seedExactOnceEventDelivery(t, pc, ctx, evt, joinNode)
 	if resolved := workflowNodeEventHandlerResolutionForDelivery(pc.SemanticSource(), mustPipelineNode("orders", "join-node"), evt); !resolved.Matched {

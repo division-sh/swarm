@@ -15,7 +15,8 @@ import (
 
 func TestSelectedInputValidationExactEvidence(t *testing.T) {
 	source := selectedInputTestSource(t)
-	original := eventtest.OperatorInjected(uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC())
+	runID := uuid.NewString()
+	original := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
 	var err error
 	original, err = eventtest.AdmitPayload(original, ".", "thing.created")
 	if err != nil {
@@ -44,9 +45,6 @@ func TestSelectedInputValidationExactEvidence(t *testing.T) {
 	ctx, err := validation.bind(context.Background(), exact, validation.bundleHash)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, ok := apiEventPublicationAdmissionFromContext(ctx); ok {
-		t.Fatal("selected validation fabricated normal API admission")
 	}
 	if _, ok := selectedInputValidationFromContext(ctx, exact); !ok {
 		t.Fatal("exact selected event lost validation")
@@ -79,7 +77,8 @@ func TestSelectedInputValidationExactEvidence(t *testing.T) {
 
 func TestSelectedInputValidationCannotWidenRecipientDisposition(t *testing.T) {
 	source := selectedInputTestSource(t)
-	original := eventtest.OperatorInjected(uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC())
+	runID := uuid.NewString()
+	original := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), "thing.created", "operator", "", []byte(`{}`), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
 	original, err := eventtest.AdmitPayload(original, ".", "thing.created")
 	if err != nil {
 		t.Fatal(err)

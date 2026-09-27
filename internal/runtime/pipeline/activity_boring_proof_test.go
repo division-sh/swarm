@@ -481,9 +481,6 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 				Subscriptions: []events.EventType{"source.requested"},
 				Produces:      []events.EventType{"research.scanner_source_requested_source_scrape.succeeded", "research.scanner_source_requested_source_scrape.failed"},
 				ExecutionType: runtimecontracts.SystemNodeExecutionType,
-				Policies: map[string]WorkflowEventPolicy{
-					"source.requested": {Consume: true},
-				},
 			}},
 		},
 		Persistence:         workflowPersistenceForTest(store),

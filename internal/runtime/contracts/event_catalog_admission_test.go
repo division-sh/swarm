@@ -112,8 +112,8 @@ func TestEventCatalogAdmissionRejectsRetiredAndAmbiguousSyntax(t *testing.T) {
 		{name: "optional business key", source: "key: id\nid: uuid?", wantErr: "must be required"},
 		{name: "missing business key field", source: "key: id\nname: text", wantErr: "is not a declared payload field"},
 		{name: "null declaration", source: "null", wantErr: "want mapping"},
-		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `event swarm metadata field "producerr" is not supported`},
-		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `event swarm metadata field "producerr" is not supported`},
+		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `RETIRED: events.yaml metadata field swarm`},
+		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `RETIRED: events.yaml metadata field swarm`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,8 +232,6 @@ func TestEventCatalogAdmissionOwnsDeclarationIdentityBeforeMapInsertion(t *testi
 
 func TestEventCatalogAdmissionRecordsExactNestedValueProvenance(t *testing.T) {
 	entry, err := admitEventCatalogEntryForTest(t, `
-swarm:
-  note: delivery contract
 value:
   type: text?
   description: Human-readable value
@@ -257,7 +255,6 @@ value:
 		"fields.value.refinements.length.max",
 		"fields.value.citation.criteria",
 		"fields.value.citation.allowed_classes",
-		"metadata.swarm.note",
 	}
 	for _, path := range paths {
 		provenance, ok := entry.admissionProvenance[path]

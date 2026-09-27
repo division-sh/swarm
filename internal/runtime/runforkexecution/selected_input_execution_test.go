@@ -76,7 +76,11 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				run, eventID, entity := uuid.NewString(), uuid.NewString(), uuid.NewString()
-				input := eventtest.OperatorInjected(eventID, "item.received", "operator", "", []byte(`{}`), 0, run, nil, events.EventEnvelope{}, time.Unix(1700002200, 0).UTC())
+				input := eventtest.OperatorInjectedWithRoutingSource(eventID, "item.received", "operator", "", []byte(`{}`), 0, run, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(run), time.Unix(1700002200, 0).UTC())
+				input, err = eventtest.AdmitPayload(input, ".", "item.received")
+				if err != nil {
+					t.Fatal(err)
+				}
 				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, run, eventID, entity, input)
 				claimed := false
 				var claimedAuthority effects.Authority
@@ -104,7 +108,8 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 					case "missing_input":
 						rows[0].InputPublication = runfork.InputPublication{}
 					case "foreign_input":
-						other := eventtest.OperatorInjected(uuid.NewString(), "item.received", "operator", "", []byte(`{}`), 0, uuid.NewString(), nil, events.EventEnvelope{}, input.CreatedAt())
+						otherRun := uuid.NewString()
+						other := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), "item.received", "operator", "", []byte(`{}`), 0, otherRun, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(otherRun), input.CreatedAt())
 						other, err = eventtest.AdmitPayload(other, ".", "item.received")
 						if err != nil {
 							t.Fatal(err)

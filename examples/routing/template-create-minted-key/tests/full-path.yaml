@@ -1,6 +1,6 @@
 name: create minted key full authored path
 steps:
-  - publish: producer/validation.triggered
+  - publish: validation.triggered
     payload:
       candidate: candidate-1
 expect:

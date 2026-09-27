@@ -3,6 +3,8 @@ package bootverify
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -128,14 +130,38 @@ func TestEntityContractDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
 }
 
 func TestRetiredReceiverSelectorsRejectEveryIngressShape(t *testing.T) {
-	for _, selector := range []canonicalrouting.SelectEntityAcquisition{canonicalrouting.SelectEntityAcquire, canonicalrouting.SelectOrCreateEntityAcquire} {
+	for _, selector := range []string{"select_entity", "select_or_create_entity"} {
 		for _, template := range []bool{false, true} {
-			for _, external := range []bool{false, true} {
+			for _, selectedRoot := range []bool{false, true} {
 				for _, producer := range []bool{false, true} {
 					for _, renamed := range []bool{false, true} {
-						name := fmt.Sprintf("selector-%d/template-%t/external-%t/producer-%t/renamed-%t", selector, template, external, producer, renamed)
+						name := fmt.Sprintf("selector-%s/template-%t/selected-root-%t/producer-%t/renamed-%t", selector, template, selectedRoot, producer, renamed)
 						t.Run(name, func(t *testing.T) {
-							root := canonicalrouting.CopySelectEntityDemotion(t, canonicalrouting.SelectEntityDemotionOptions{TemplateReceiver: template, Acquisition: selector, External: external, WithProducer: producer, RenameReceiverPin: renamed})
+							root := canonicalrouting.CopyExample(t, canonicalrouting.TemplateSelectExisting)
+							if !producer {
+								writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selector-retirement\n")
+							}
+							for _, file := range []string{"schema.yaml", "account/schema.yaml", "account/nodes.yaml"} {
+								path := filepath.Join(root, file)
+								data, err := os.ReadFile(path)
+								if err != nil {
+									t.Fatal(err)
+								}
+								text := string(data)
+								if file == "account/nodes.yaml" {
+									text = strings.Replace(text, "    account.ready: {}", "    account.ready:\n      "+selector+":\n        by: {account_id: payload.account_id}", 1)
+								}
+								if !template && file == "account/schema.yaml" {
+									text = strings.Replace(text, "mode: template\ninstance: account_id\n", "mode: static\n", 1)
+								}
+								if renamed {
+									text = strings.ReplaceAll(text, "account.ready", "account.renamed")
+								}
+								writeBootverifyFixtureFile(t, path, text)
+							}
+							if selectedRoot {
+								root = filepath.Join(root, "account")
+							}
 							assertRetiredReceiverSelectorRejected(t, root)
 						})
 					}

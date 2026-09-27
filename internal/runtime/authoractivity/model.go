@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -20,7 +18,6 @@ import (
 type Mutation interface {
 	Record(context.Context, Draft) error
 	PersistedOccurredAt(context.Context, string) (time.Time, bool, error)
-	PersistedAuthorSafeSummary(context.Context, string) (string, bool, error)
 }
 
 const Version = 2
@@ -133,42 +130,40 @@ type Projection struct {
 }
 
 type Draft struct {
-	OccurrenceID      string
-	Kind              Kind
-	Version           int
-	Transition        string
-	SourceOwner       string
-	SourceIdentity    string
-	DedupKey          string
-	OccurredAt        time.Time
-	RunID             string
-	EntityID          string
-	AgentID           string
-	FlowID            string
-	Scope             Scope
-	AuthorSafeSummary string
-	Projection        Projection
-	Failure           *runtimefailures.Envelope
+	OccurrenceID   string
+	Kind           Kind
+	Version        int
+	Transition     string
+	SourceOwner    string
+	SourceIdentity string
+	DedupKey       string
+	OccurredAt     time.Time
+	RunID          string
+	EntityID       string
+	AgentID        string
+	FlowID         string
+	Scope          Scope
+	Projection     Projection
+	Failure        *runtimefailures.Envelope
 }
 
 type Occurrence struct {
-	OccurrenceID      string                    `json:"occurrence_id"`
-	Sequence          int64                     `json:"sequence"`
-	Kind              Kind                      `json:"kind"`
-	Version           int                       `json:"version"`
-	Transition        string                    `json:"transition"`
-	SourceOwner       string                    `json:"source_owner"`
-	SourceIdentity    string                    `json:"source_identity"`
-	DedupKey          string                    `json:"dedup_key"`
-	OccurredAt        time.Time                 `json:"occurred_at"`
-	RunID             string                    `json:"run_id,omitempty"`
-	EntityID          string                    `json:"entity_id,omitempty"`
-	AgentID           string                    `json:"agent_id,omitempty"`
-	FlowID            string                    `json:"flow_id,omitempty"`
-	Scope             Scope                     `json:"scope"`
-	AuthorSafeSummary string                    `json:"author_safe_summary,omitempty"`
-	Projection        Projection                `json:"projection"`
-	Failure           *runtimefailures.Envelope `json:"failure,omitempty"`
+	OccurrenceID   string                    `json:"occurrence_id"`
+	Sequence       int64                     `json:"sequence"`
+	Kind           Kind                      `json:"kind"`
+	Version        int                       `json:"version"`
+	Transition     string                    `json:"transition"`
+	SourceOwner    string                    `json:"source_owner"`
+	SourceIdentity string                    `json:"source_identity"`
+	DedupKey       string                    `json:"dedup_key"`
+	OccurredAt     time.Time                 `json:"occurred_at"`
+	RunID          string                    `json:"run_id,omitempty"`
+	EntityID       string                    `json:"entity_id,omitempty"`
+	AgentID        string                    `json:"agent_id,omitempty"`
+	FlowID         string                    `json:"flow_id,omitempty"`
+	Scope          Scope                     `json:"scope"`
+	Projection     Projection                `json:"projection"`
+	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
 }
 
 type ListOptions struct {
@@ -397,9 +392,6 @@ func ValidateDraft(d Draft) error {
 	if err := validateScope(d.Kind, transition, d.Scope); err != nil {
 		return err
 	}
-	if _, err := NormalizeAuthorSafeSummary(d.AuthorSafeSummary); err != nil {
-		return fmt.Errorf("author activity %s/%s author_safe_summary: %w", d.Kind, transition, err)
-	}
 	if err := validateProjection(d.Kind, contract, d.Projection); err != nil {
 		return err
 	}
@@ -446,33 +438,6 @@ func validateScope(kind Kind, transition string, scope Scope) error {
 		return fmt.Errorf("author activity %s/%s scope kind %q is not registered", kind, transition, scope.Kind)
 	}
 	return nil
-}
-
-func NormalizeAuthorSafeSummary(value string) (string, error) {
-	if value == "" {
-		return "", nil
-	}
-	if !utf8.ValidString(value) {
-		return "", fmt.Errorf("must be valid UTF-8")
-	}
-	var normalized strings.Builder
-	spacePending := false
-	for _, r := range value {
-		if unicode.IsControl(r) || unicode.IsSpace(r) {
-			spacePending = normalized.Len() > 0
-			continue
-		}
-		if spacePending {
-			normalized.WriteByte(' ')
-			spacePending = false
-		}
-		normalized.WriteRune(r)
-	}
-	runes := []rune(strings.TrimSpace(normalized.String()))
-	if len(runes) > 24 {
-		runes = runes[:24]
-	}
-	return string(runes), nil
 }
 
 func HumanVisible(kind Kind, transition string) bool {

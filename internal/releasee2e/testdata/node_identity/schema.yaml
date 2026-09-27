@@ -5,8 +5,14 @@ states: [pending, working, done]
 pins:
   inputs:
     events:
-      - {event: entry.root, source: external}
+      - entry.root
+      - entry.left
+      - entry.right
+      - entry.nested
   outputs:
-    events: [work.routed]
+    events: [work.routed, entry.left, entry.right, entry.nested]
 connect:
+  - {event: entry.left, from: ., to: left}
+  - {event: entry.right, from: ., to: right}
+  - {event: entry.nested, from: ., to: left/nested}
   - {event: work.routed, from: ., to: left}

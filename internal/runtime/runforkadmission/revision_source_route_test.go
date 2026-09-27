@@ -41,11 +41,12 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
-	pendingEvent := eventtest.ExistingRunRootIngress(pendingEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at)
+	routingSource := eventtest.ConcreteTemplateRoutingSource("producer", sourceRoute.FlowInstance, sourceEntityID)
+	pendingEvent := eventtest.ExistingRunRootIngressWithRoutingSource(pendingEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, routingSource, at)
 	pendingRoute := revisionSourceEntitylessNodeRoute(t, "pending-source-node")
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
 
-	completedEvent := eventtest.ExistingRunRootIngress(completedEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at.Add(time.Second))
+	completedEvent := eventtest.ExistingRunRootIngressWithRoutingSource(completedEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, routingSource, at.Add(time.Second))
 	completedRoute := revisionSourceEntitylessNodeRoute(t, "completed-source-node")
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, completedEvent, []events.DeliveryRoute{completedRoute}, runtimepipelineobligation.ScopeSubscribed)
 	completedClaim, err := storetest.ClaimDelivery(ctx, pg, completedEvent, completedRoute)
@@ -131,6 +132,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 	cases := []testCase{
 		{
 			name:             "explicit template fork point without delivery",
+			routingSource:    eventtest.ConcreteTemplateRoutingSource("producer", "producer/inst-1", "11111111-1111-4111-8111-111111111111"),
 			eventName:        "producer/inst-1/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
@@ -139,15 +141,17 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
 		{
-			name:        "latest template fork point without delivery",
-			eventName:   "producer/inst-1/scan.requested",
-			sourceRoute: events.RouteIdentity{FlowID: " producer ", FlowInstance: " /producer/inst-1/ ", EntityID: " 11111111-1111-4111-8111-111111111111 "},
-			source:      runforkadmission.ContractFrontierTemplateConnectSourceForTest,
-			wantHistory: []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
+			name:          "latest template fork point without delivery",
+			routingSource: eventtest.ConcreteTemplateRoutingSource(" producer ", " /producer/inst-1/ ", " 11111111-1111-4111-8111-111111111111 "),
+			eventName:     "producer/inst-1/scan.requested",
+			sourceRoute:   events.RouteIdentity{FlowID: " producer ", FlowInstance: " /producer/inst-1/ ", EntityID: " 11111111-1111-4111-8111-111111111111 "},
+			source:        runforkadmission.ContractFrontierTemplateConnectSourceForTest,
+			wantHistory:   []string{consumerNode}, wantHistoryEvents: 1, wantDynamic: []string{"producer/inst-1"},
 			wantHistoryCodes: []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
 		{
 			name:             "completed delivery deterministically agrees with fork point",
+			routingSource:    eventtest.ConcreteTemplateRoutingSource("producer", "producer/inst-1", "11111111-1111-4111-8111-111111111111"),
 			eventName:        "producer/inst-1/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "completed",
@@ -157,6 +161,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		},
 		{
 			name:             "pending delivery remains frontier work",
+			routingSource:    eventtest.ConcreteTemplateRoutingSource("producer", "producer/inst-1", "11111111-1111-4111-8111-111111111111"),
 			eventName:        "producer/inst-1/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true, deliveryStatus: "pending",
@@ -167,6 +172,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		},
 		{
 			name:             "static source preserves static connect",
+			routingSource:    eventtest.StaticFlowRoutingSource("producer", "producer", "11111111-1111-4111-8111-111111111111"),
 			eventName:        "producer/scan.requested",
 			sourceRoute:      events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "11111111-1111-4111-8111-111111111111"},
 			explicitSelector: true,
@@ -194,6 +200,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		},
 		{
 			name:              "conflicting template source route fails closed",
+			routingSource:     eventtest.ConcreteTemplateRoutingSource("foreign", "foreign/inst-9", "22222222-2222-4222-8222-222222222222"),
 			eventName:         "producer/inst-1/scan.requested",
 			sourceRoute:       events.RouteIdentity{FlowID: "foreign", FlowInstance: "foreign/inst-9", EntityID: "22222222-2222-4222-8222-222222222222"},
 			explicitSelector:  true,
@@ -214,16 +221,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 					eventtest.Producer(events.EventProducerExternal, "platform"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(-time.Second))
 				captureRunForkRevision(t, ctx, db, runID)
 			}
-			eventEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, tc.sourceRoute)
-			if !tc.routingSource.Empty() {
-				eventEnvelope = events.EventEnvelope{}
-			}
-			var event events.Event
-			if !tc.routingSource.Empty() {
-				event = eventtest.ExistingRunRootIngressWithRoutingSource(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, tc.routingSource, at)
-			} else {
-				event = eventtest.ExistingRunRootIngress(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, at)
-			}
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, tc.routingSource, at)
 			if tc.deliveryStatus != "" {
 				route := revisionSourceEntitylessNodeRoute(t, "source-node")
 				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)

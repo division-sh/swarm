@@ -54,19 +54,24 @@ func TestPublicationHistoryUsesExactSourceInstance(t *testing.T) {
 	}
 }
 
-func TestPublicationCandidateKeysNeverInventSourceAliases(t *testing.T) {
-	for _, eventType := range []string{
-		"result.done", "worker/result.done", "worker/instance-a/result.done",
-		"worker/instance-b/result.done", "mailbox.card_decided",
+func TestPublicationCandidateKeysProjectOnlyTheExactSourceInstance(t *testing.T) {
+	for _, tc := range []struct {
+		eventType string
+		want      []string
+	}{
+		{eventType: "result.done", want: []string{"result.done", "worker/instance-a/result.done"}},
+		{eventType: "worker/result.done", want: []string{"worker/result.done", "worker/instance-a/result.done"}},
+		{eventType: "worker/instance-a/result.done", want: []string{"worker/instance-a/result.done"}},
+		{eventType: "worker/instance-b/result.done", want: []string{"worker/instance-b/result.done"}},
 	} {
-		t.Run(eventType, func(t *testing.T) {
+		t.Run(tc.eventType, func(t *testing.T) {
 			source := eventtest.ConcreteTemplateRoutingSource("worker", "worker/instance-a", eventtest.UUID("source-owner"))
 			event := eventtest.RunCreatingRootIngressWithRoutingSource(
-				eventtest.UUID("event"), events.EventType(eventType), "", "", nil, 0, "", "",
+				eventtest.UUID("event"), events.EventType(tc.eventType), "", "", nil, 0, "", "",
 				events.EnvelopeForFlowInstance(events.EventEnvelope{}, "worker/instance-a"), source, time.Time{},
 			)
-			if got := routedEventKeysForPlan(event); !reflect.DeepEqual(got, []string{eventType}) {
-				t.Fatalf("candidate lookup invented publication authority: got=%v want=[%s]", got, eventType)
+			if got := routedEventKeysForPlan(event); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("candidate lookup crossed source-instance identity: got=%v want=%v", got, tc.want)
 			}
 		})
 	}

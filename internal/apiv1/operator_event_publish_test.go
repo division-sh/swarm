@@ -45,7 +45,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -408,7 +407,7 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 	}
 }
 
-func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
+func TestOperatorEventPublishRejectsPrivateFlowDespiteLiveRecipient(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
@@ -447,27 +446,23 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	body := eventPublishBody(runID, runStartTestBundleHash, "repo-scaffold/repo_scaffold.repo_commit_succeeded", `{"topic":"medicine"}`, "", "idem-flow-scoped")
 
 	published := rpcCall(t, handler, body)
-	if published.Error != nil {
-		t.Fatalf("event.publish flow-scoped error = %#v", published.Error)
+	if published.Error == nil {
+		t.Fatal("live private recipient authorized public publication")
 	}
-	result := asMap(t, published.Result)
-	eventID := stringValue(t, result["event_id"], "event_id")
-	if gotRunID := stringValue(t, result["run_id"], "run_id"); gotRunID != runID || result["new_run_created"] != false {
-		t.Fatalf("event.publish run = %s created=%#v, want existing %s", gotRunID, result["new_run_created"], runID)
+	data := asMap(t, published.Error.Data)
+	if data["code"] != EventNotDeclaredCode || asMap(t, data["details"])["reason"] != "selected_root_input_required" {
+		t.Fatalf("private recipient rejection = %#v", published.Error)
 	}
-	if got := countEventsByName(t, db, canonicalEventName); got != 1 {
-		t.Fatalf("%s event count = %d, want 1", canonicalEventName, got)
+	if got := countAllEventRows(t, db); got != 0 {
+		t.Fatalf("private publication wrote %d events", got)
 	}
-	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
-	deliveries := asSlice(t, result["deliveries"])
-	if len(deliveries) != 2 {
-		t.Fatalf("deliveries = %#v, want typed agent and node deliveries", deliveries)
+	if got := countAPIIdempotencyRows(t, db); got != 0 {
+		t.Fatalf("private publication wrote %d receipts", got)
 	}
-	assertEventPublishDeliveriesContain(t, deliveries, "agent", "repo-observer", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishRepoObserverNodeID(t), "pending", 1)
-	got := requireAPIV1RuntimeBusEvent(t, ch, "flow-scoped event.publish delivery")
-	if got.ID() != eventID || string(got.Type()) != canonicalEventName {
-		t.Fatalf("delivered event = %#v, want %s/%s", got, eventID, canonicalEventName)
+	select {
+	case evt := <-ch:
+		t.Fatalf("private publication dispatched %s", evt.ID())
+	default:
 	}
 }
 
@@ -486,7 +481,7 @@ func TestFlowScopedEventPublishDescriptorUsesCanonicalAuthoredIdentity(t *testin
 		if descriptor.EventType != eventName {
 			continue
 		}
-		if descriptor.Disposition != "authored" || descriptor.AuthorSummaryField != strings.TrimSpace(proof.Entry.AuthorSummaryField) {
+		if descriptor.Disposition != "authored" {
 			t.Fatalf("registered descriptor = %#v, publication proof = %#v", descriptor, proof)
 		}
 		return
@@ -494,7 +489,7 @@ func TestFlowScopedEventPublishDescriptorUsesCanonicalAuthoredIdentity(t *testin
 	t.Fatalf("descriptor %q missing from %#v", eventName, descriptors)
 }
 
-func TestOperatorEventPublishSQLiteCarriesExactOrdinaryFlowEndpoint(t *testing.T) {
+func TestOperatorEventPublishSQLiteRejectsPrivateOrdinaryFlowEndpoint(t *testing.T) {
 	ctx := context.Background()
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
@@ -509,42 +504,18 @@ func TestOperatorEventPublishSQLiteCarriesExactOrdinaryFlowEndpoint(t *testing.T
 	body := eventPublishBody("", runStartTestBundleHash, canonicalEventName, `{"topic":"medicine"}`, "", "idem-flow-scoped-sqlite")
 
 	published := rpcCall(t, handler, body)
-	if published.Error != nil {
-		t.Fatalf("event.publish flow-scoped SQLite error = %#v", published.Error)
+	if published.Error == nil {
+		t.Fatal("private static input was publicly admitted")
 	}
-	result := asMap(t, published.Result)
-	eventID := stringValue(t, result["event_id"], "event_id")
-	runID := stringValue(t, result["run_id"], "run_id")
-	deliveries := asSlice(t, result["deliveries"])
-	if len(deliveries) != 1 {
-		t.Fatalf("deliveries = %#v, want one exact static node delivery", deliveries)
+	data := asMap(t, published.Error.Data)
+	if data["code"] != EventNotDeclaredCode || asMap(t, data["details"])["reason"] != "selected_root_input_required" {
+		t.Fatalf("private input rejection = %#v", published.Error)
 	}
-	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", eventPublishRepoObserverNodeID(t), "pending", 1)
-	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(selected), runID, eventID, canonicalEventName, "cli-publish:"+actorTokenID(testToken))
-
-	var rawTarget string
-	if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `
-		SELECT delivery_target_route
-		FROM event_deliveries
-		WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?
-	`, eventID, eventPublishRepoObserverNodeID(t)).Scan(&rawTarget); err != nil {
-		t.Fatalf("load exact static delivery target: %v", err)
+	if got := countSQLiteEventsByName(t, storetest.DatabaseForTest(selected), canonicalEventName); got != 0 {
+		t.Fatalf("private publication wrote %d events", got)
 	}
-	var target map[string]any
-	if err := json.Unmarshal([]byte(rawTarget), &target); err != nil {
-		t.Fatalf("decode exact static delivery target: %v", err)
-	}
-	route := asMap(t, target["route"])
-	if target["kind"] != "entityless_receiver" || route["flow_id"] != "repo-scaffold" || route["flow_instance"] != "repo-scaffold" {
-		t.Fatalf("delivery target = %#v, want exact entityless repo-scaffold owner", target)
-	}
-
-	replay := rpcCall(t, handler, body)
-	if replay.Error != nil {
-		t.Fatalf("event.publish flow-scoped SQLite replay error = %#v", replay.Error)
-	}
-	if got := countSQLiteEventsByName(t, storetest.DatabaseForTest(selected), canonicalEventName); got != 1 {
-		t.Fatalf("event rows after replay = %d, want 1", got)
+	if countSQLiteAllRunRows(t, storetest.DatabaseForTest(selected)) != 0 || countSQLiteAPIIdempotencyRows(t, storetest.DatabaseForTest(selected)) != 0 {
+		t.Fatal("private publication wrote a run or receipt")
 	}
 }
 
@@ -596,7 +567,7 @@ func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T)
 			t.Fatalf("unknown flow-scoped data = %#v, want %s", data, EventNotDeclaredCode)
 		}
 		details := asMap(t, data["details"])
-		if details["event_name"] != "repo-scaffold/repo_scaffold.missing" || details["reason"] != "unknown_flow_scoped_event" {
+		if details["event_name"] != "repo-scaffold/repo_scaffold.missing" || details["reason"] != "selected_root_input_required" {
 			t.Fatalf("unknown flow-scoped details = %#v", details)
 		}
 		assertNoFlowScopedEventPublishPersistence(t, db)
@@ -621,7 +592,7 @@ func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T)
 			t.Fatalf("ambiguous leaf data = %#v, want %s", data, EventNotDeclaredCode)
 		}
 		details := asMap(t, data["details"])
-		if details["event_name"] != "workflow.completed" || details["reason"] != "ambiguous_event_name" {
+		if details["event_name"] != "workflow.completed" || details["reason"] != "selected_root_input_required" {
 			t.Fatalf("ambiguous leaf details = %#v", details)
 		}
 		assertNoFlowScopedEventPublishPersistence(t, db)
@@ -1131,14 +1102,11 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 		t.Fatalf("follow-up result = %#v, want selected existing run", followUpResult)
 	}
 	deliveries := asSlice(t, followUpResult["deliveries"])
-	if len(deliveries) != 1 {
-		t.Fatalf("follow-up deliveries = %#v, want one delivery", deliveries)
+	if len(deliveries) != 2 {
+		t.Fatalf("follow-up deliveries = %#v, want agent and node", deliveries)
 	}
-	if delivery := asMap(t, deliveries[0]); delivery["subscriber_id"] != "scan-orchestrator" {
-		t.Fatalf("follow-up delivery = %#v, want scan-orchestrator", delivery)
-	} else {
-		assertEventPublishDeliveryIdentity(t, delivery, "agent", "scan-orchestrator", "pending", 1)
-	}
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.RootNode(t, "scan-orchestrator").Key(), "pending", 1)
 	assertEventPublishEventRow(t, db, runID, followUpEventID, "scan.followup", "operator-test")
 	if got := countRunRowsByID(t, db, runID); got != 1 {
 		t.Fatalf("run rows for selected run = %d, want 1", got)
@@ -1150,7 +1118,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 		t.Fatalf("events for selected run = %d, want 2", got)
 	}
 	if got := countEventDeliveriesForEvent(t, ctx, db, followUpEventID); got != 1 {
-		t.Fatalf("event_deliveries for follow-up = %d, want 1", got)
+		t.Fatalf("agent event_deliveries for follow-up = %d, want 1", got)
 	}
 	got := requireAPIV1RuntimeBusEventID(t, followUpCh, followUpEventID, "follow-up delivery")
 	if got.ID() != followUpEventID || got.RunID() != runID {
@@ -1177,7 +1145,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	}
 }
 
-func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget(t *testing.T) {
+func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -1217,33 +1185,18 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 	}
 
 	targeted := rpcCall(t, handler, eventPublishBodyWithTarget(runID, "", bundleHash, "operating/opco.product_initialization_requested", `{"topic":"targeted"}`, "operator-test", "idem-target-route-positive", targetFlowInstance, targetEntityID))
-	if targeted.Error != nil {
-		t.Fatalf("targeted event.publish error = %#v", targeted.Error)
+	if targeted.Error == nil {
+		t.Fatal("complete target authorized a private input")
 	}
-	result := asMap(t, targeted.Result)
-	eventID := stringValue(t, result["event_id"], "event_id")
-	if result["run_id"] != runID || result["new_run_created"] != false {
-		t.Fatalf("targeted result = %#v, want selected existing run", result)
+	data := asMap(t, targeted.Error.Data)
+	if data["code"] != EventNotDeclaredCode || asMap(t, data["details"])["reason"] != "selected_root_input_required" {
+		t.Fatalf("private target rejection = %#v", targeted.Error)
 	}
-	assertEventPublishTargetRouteRow(t, db, runID, eventID, "operating/opco.product_initialization_requested", targetFlowInstance, targetEntityID)
-	assertEventPublishDeliveryTargetRoute(t, db, eventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), targetFlowInstance, targetEntityID)
-	if got := countEventRowsByRunID(t, db, runID); got != 2 {
-		t.Fatalf("events for selected run after targeted publish = %d, want 2", got)
+	if got := countEventRowsByRunID(t, db, runID); got != 1 {
+		t.Fatalf("private target wrote events: %d", got)
 	}
-	if got := countAPIIdempotencyRows(t, db); got != 2 {
-		t.Fatalf("api_idempotency rows after targeted publish = %d, want 2", got)
-	}
-
-	payloadOnly := rpcCall(t, handler, eventPublishBody(runID, bundleHash, "operating/opco.product_initialization_requested", fmt.Sprintf(`{"entity_id":%q,"topic":"payload-only"}`, targetEntityID), "operator-test", "idem-target-route-payload-only"))
-	if payloadOnly.Error == nil {
-		t.Fatal("payload-only target route event.publish error = nil")
-	}
-	payloadOnlyData := asMap(t, payloadOnly.Error.Data)
-	if payloadOnlyData["code"] != EventNotDeclaredCode {
-		t.Fatalf("payload-only target route data = %#v, want %s", payloadOnlyData, EventNotDeclaredCode)
-	}
-	if got := countEventRowsByRunID(t, db, runID); got != 2 {
-		t.Fatalf("events for selected run after payload-only target = %d, want 2", got)
+	if got := countAPIIdempotencyRows(t, db); got != 1 {
+		t.Fatalf("private target wrote an idempotency receipt: %d", got)
 	}
 }
 
@@ -1307,104 +1260,56 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	}
 }
 
-func TestOperatorEventPublishNewRunTemplateInputHandsExactEndpointToPublicAdmission(t *testing.T) {
+func TestOperatorEventPublishPrivateTemplateDeniedBeforePublication(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	source := semanticview.Wrap(eventPublishTargetRouteTestBundle(t))
-	bundleHash := runStartTestBundleHashForSource(source)
 	bus, err := newScopedAPITestEventBus(t, sqliteStore, runStartTestEventBusOptions(source))
 	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
+		t.Fatal(err)
 	}
 	publisher := &publicInputPublishProbe{EventBus: bus}
+	rootHandler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
+	initial := rpcCall(t, rootHandler, eventPublishBody("", runStartTestBundleHashForSource(source), "bootstrap.requested", `{}`, "operator-test", uuid.NewString()))
+	if initial.Error != nil {
+		t.Fatalf("create admitted root run: %+v", initial.Error)
+	}
+	existingRunID := stringValue(t, asMap(t, initial.Result)["run_id"], "run_id")
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, publisher, source)
-	resolved, err := resolveEventPublicationEventName(source, "operating/opco.product_initialization_requested")
-	if err != nil {
-		t.Fatalf("resolve template event: %v", err)
+	for _, runID := range []string{"", existingRunID} {
+		for _, name := range []string{"opco.product_initialization_requested", "operating/opco.product_initialization_requested"} {
+			response := rpcCall(t, handler, eventPublishBody(runID, runStartTestBundleHashForSource(source), name,
+				`{"topic":"private-template"}`, "operator-test", uuid.NewString()))
+			if response.Error == nil || asMap(t, response.Error.Data)["code"] != EventNotDeclaredCode {
+				t.Fatalf("private template publication %q run %q: error=%+v result=%#v", name, runID, response.Error, response.Result)
+			}
+		}
 	}
-	resolution := resolveEventPublicationTemplateInputEndpoint(source, "operating/opco.product_initialization_requested", resolved)
-	if _, err := runtimebus.NewTemplateAPIEventPublicationEndpoint(source, resolution.Endpoint); err != nil {
-		t.Fatalf("admit template API endpoint: resolution=%#v err=%v", resolution, err)
-	}
-
-	response := rpcCall(t, handler, eventPublishBody(
-		"", bundleHash, "operating/opco.product_initialization_requested",
-		`{"topic":"public-template-input"}`, "operator-test", "idem-public-template-input",
-	))
-	if response.Error != nil {
-		t.Fatalf("event.publish error = %#v", response.Error)
-	}
-	if publisher.publicInputCalls != 1 {
-		t.Fatalf("public-input admission calls = %d, want 1", publisher.publicInputCalls)
-	}
-	endpoint := publisher.endpoint
-	if endpoint.Kind != "template_input" || endpoint.PublicInput.FlowID != "operating" || endpoint.PublicInput.PinName != "opco.product_initialization_requested" {
-		t.Fatalf("public-input endpoint = %#v, want operating.opco.product_initialization_requested", endpoint)
-	}
-	if endpoint.PublicInput.Event.Canonical != "operating/opco.product_initialization_requested" {
-		t.Fatalf("public-input resolved event = %q, want operating/opco.product_initialization_requested", endpoint.PublicInput.Event.Canonical)
+	if publisher.publicInputCalls != 0 {
+		t.Fatalf("private endpoint reached publisher %d times", publisher.publicInputCalls)
 	}
 }
 
-func TestResolveEventPublicationTemplateInputEndpointDistinguishesRootFromUnscopedTemplate(t *testing.T) {
-	const eventName = "review.requested"
-	staticSource := semanticview.Wrap(flowScopedEventPublishTestBundle())
-	staticResolution := resolveEventPublicationTemplateInputEndpoint(
-		staticSource,
-		"repo-scaffold/repo_scaffold.repo_commit_succeeded",
-		"repo-scaffold/repo_scaffold.repo_commit_succeeded",
-	)
-	if staticResolution.Kind != eventPublicationEndpointOrdinary || staticResolution.FlowID != "repo-scaffold" {
-		t.Fatalf("ordinary flow endpoint resolution = %#v, want exact repo-scaffold owner", staticResolution)
+func TestPublicEventInputEligibilityIgnoresChildAndCatalogOnlyOwners(t *testing.T) {
+	const name = "review.requested"
+	root := eventPublishRootTemplateCollisionTestBundle()
+	if _, err := resolveEventPublicationEventName(semanticview.Wrap(root), name); err != nil {
+		t.Fatal(err)
 	}
-
-	rootAndTemplate := semanticview.Wrap(eventPublishRootTemplateCollisionTestBundle())
-	if resolution := resolveEventPublicationTemplateInputEndpoint(rootAndTemplate, eventName, eventName); resolution.Kind != eventPublicationEndpointOrdinary {
-		t.Fatalf("root/template collision resolution = %#v, want ordinary root publication", resolution)
+	root.RootSchema.Pins.Inputs.EventPins = nil
+	mustCompileEventPublishTestBundle(root)
+	if _, err := resolveEventPublicationEventName(semanticview.Wrap(root), name); err == nil {
+		t.Fatal("root catalog and private template acquired public authority without root input")
 	}
-
-	rootWithoutInputPin := eventPublishRootTemplateCollisionTestBundle()
-	rootWithoutInputPin.RootSchema.Pins.Inputs.EventPins = nil
-	mustCompileEventPublishTestBundle(rootWithoutInputPin)
-	if resolution := resolveEventPublicationTemplateInputEndpoint(semanticview.Wrap(rootWithoutInputPin), eventName, eventName); resolution.Kind != eventPublicationEndpointOrdinary {
-		t.Fatalf("authored root without input pin resolution = %#v, want ordinary root publication", resolution)
-	}
-
-	templateOnlyBundle := eventPublishTemplateInputTestBundle(eventName, false)
-	templateOnly := semanticview.Wrap(templateOnlyBundle)
-	resolvedTemplateEvent, err := resolveEventPublicationEventName(templateOnly, eventName)
-	if err != nil {
-		t.Fatalf("resolve template-only event name: %v", err)
-	}
-	resolution := resolveEventPublicationTemplateInputEndpoint(templateOnly, eventName, resolvedTemplateEvent)
-	if resolution.Kind != eventPublicationEndpointTemplate || resolution.Endpoint.FlowID != "operating" || resolution.Endpoint.PinName != eventName {
-		t.Fatalf("unscoped template endpoint = %#v, want operating.%s; scopes=%#v inputs=%#v", resolution, eventName, templateOnly.FlowScopes(), semanticview.BuildAuthoredEventEndpointCensus(templateOnly).InputPins())
-	}
-
-	const importedEvent = "inbound.telegram.text_message"
-	importedBundle := eventPublishTemplateInputTestBundle(importedEvent, false)
-	importedBundle.FlowTree.Root.Children[0].Events = nil
-	imports := []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegram", Event: importedEvent}}
-	operatingSchema := importedBundle.FlowTree.Root.Children[0].Schema
-	operatingSchema.Imports.ProviderTriggerEvents = imports
-	importedBundle.FlowSchemas["operating"] = operatingSchema
-	importedBundle.FlowTree.Root.Children[0].Schema = operatingSchema
-	mustCompileEventPublishTestBundle(importedBundle)
-	catalog := packfixture.TriggerCatalog(t)
-	importedSource, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(importedBundle), catalog)
-	if err != nil {
-		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
-	}
-	if _, authored := importedSource.AuthoredEventEntries()[importedEvent]; authored {
-		t.Fatal("imported Telegram schema was misclassified as authored root authority")
-	}
-	resolvedImportedEvent, err := resolveEventPublicationEventName(importedSource, importedEvent)
-	if err != nil {
-		t.Fatalf("resolve imported Telegram event name: %v", err)
-	}
-	resolution = resolveEventPublicationTemplateInputEndpoint(importedSource, importedEvent, resolvedImportedEvent)
-	if resolution.Kind != eventPublicationEndpointTemplate || resolution.Endpoint.FlowID != "operating" || resolution.Endpoint.PinName != importedEvent {
-		t.Fatalf("imported Telegram template endpoint = %#v, want operating.%s; resolved=%q inputs=%#v", resolution, importedEvent, resolvedImportedEvent, semanticview.BuildAuthoredEventEndpointCensus(importedSource).InputPins())
+	for _, source := range []semanticview.Source{
+		semanticview.Wrap(flowScopedEventPublishTestBundle()),
+		semanticview.Wrap(eventPublishTemplateInputTestBundle(name, false)),
+	} {
+		for _, event := range []string{name, "operating/" + name, "repo-scaffold/repo_scaffold.repo_commit_succeeded"} {
+			if _, err := resolveEventPublicationEventName(source, event); err == nil {
+				t.Fatalf("private %q admitted", event)
+			}
+		}
 	}
 }
 
@@ -1463,8 +1368,8 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 						t.Fatalf("event.publish data = %#v, want %s", data, EventNotDeclaredCode)
 					}
 					details := asMap(t, data["details"])
-					if details["reason"] != "missing_template_input_endpoint" {
-						t.Fatalf("event.publish details = %#v, want missing_template_input_endpoint", details)
+					if details["reason"] != "selected_root_input_required" {
+						t.Fatalf("event.publish details = %#v, want selected_root_input_required", details)
 					}
 					if got := countAllEventRows(t, f.db); got != 0 {
 						t.Fatalf("event rows after missing template input = %d, want 0", got)
@@ -1543,19 +1448,19 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 			name:       "nonexistent entity",
 			body:       eventPublishBodyWithTarget(runID, "", bundleHash, "operating/opco.product_initialization_requested", `{"topic":"missing-entity"}`, "operator-test", "idem-target-missing-entity", targetFlowInstance, uuid.NewString()),
 			wantCode:   EventNotDeclaredCode,
-			wantReason: "selected_target_entity_not_found",
+			wantReason: "selected_root_input_required",
 		},
 		{
 			name:       "mismatched entity flow",
 			body:       eventPublishBodyWithTarget(runID, "", bundleHash, "operating/opco.product_initialization_requested", `{"topic":"mismatch"}`, "operator-test", "idem-target-mismatch", targetFlowInstance, mismatchEntityID),
 			wantCode:   EventNotDeclaredCode,
-			wantReason: "selected_target_flow_instance_mismatch",
+			wantReason: "selected_root_input_required",
 		},
 		{
 			name:       "event not routable for target flow",
 			body:       eventPublishBodyWithTarget(runID, "", bundleHash, "operating/opco.product_initialization_requested", `{"topic":"unroutable"}`, "operator-test", "idem-target-unroutable", "orphan/inst-1", unroutableEntityID),
 			wantCode:   EventNotDeclaredCode,
-			wantReason: "selected_run_target_not_routable",
+			wantReason: "selected_root_input_required",
 		},
 	}
 	for _, tc := range tests {
@@ -1670,10 +1575,11 @@ func TestOperatorEventPublishSQLiteExplicitRunFollowUpUsesSelectedRun(t *testing
 		t.Fatalf("sqlite scan.followup rows = %d, want 1", got)
 	}
 	deliveries := asSlice(t, result["deliveries"])
-	if len(deliveries) != 1 {
-		t.Fatalf("sqlite follow-up deliveries = %#v, want 1", deliveries)
+	if len(deliveries) != 2 {
+		t.Fatalf("sqlite follow-up deliveries = %#v, want agent and node", deliveries)
 	}
-	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.RootNode(t, "scan-orchestrator").Key(), "pending", 1)
 	got := requireAPIV1RuntimeBusEventID(t, followUpCh, eventID, "sqlite follow-up delivery")
 	if got.ID() != eventID || got.RunID() != runID {
 		t.Fatalf("sqlite follow-up delivered id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), eventID, runID)
@@ -2182,12 +2088,6 @@ func (p *publicInputPublishProbe) LookupAPIEventPublication(ctx context.Context,
 	return p.EventBus.LookupAPIEventPublication(ctx, request)
 }
 
-func (p *publicInputPublishProbe) PublishPublicInputAcknowledged(ctx context.Context, evt events.Event, endpoint semanticview.AuthoredEventEndpoint) error {
-	p.publicInputCalls++
-	p.endpoint = runtimebus.APIEventPublicationEndpointReadback{Kind: "template_input", PublicInput: endpoint}
-	return p.EventBus.PublishAcknowledged(ctx, evt)
-}
-
 func (p *publicInputPublishProbe) PublishAPIEventAcknowledged(ctx context.Context, evt events.Event, endpoint *runtimebus.APIEventPublicationEndpoint, request apiidempotency.Request, completion apiidempotency.Completion) (apiidempotency.Completion, bool, error) {
 	p.publicInputCalls++
 	if endpoint != nil {
@@ -2494,41 +2394,21 @@ func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
 			"scan.followup":  {},
 		},
 	}
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
-		Path:  "discovery",
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Events: eventsByName,
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": node,
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
 		Events:    eventsByName,
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": node,
-		},
+		Nodes:     map[string]runtimecontracts.SystemNodeContract{"scan-orchestrator": node},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"discovery": flow.Schema,
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"discovery": &root.Children[0],
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}, {Event: "scan.followup"}, {Event: "scan.unhandled"}}},
 			},
 		},
 	}
+	root := &runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "."},
+		Schema: *bundle.RootSchema, Events: eventsByName, Nodes: bundle.Nodes,
+	}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}}
 	return mustCompileEventPublishTestBundle(bundle)
 }
 
@@ -3223,7 +3103,7 @@ func assertEventPublishDeliveryIdentity(t *testing.T, delivery map[string]any, w
 
 func eventPublishScanNodeID(t testing.TB) string {
 	t.Helper()
-	return identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key()
+	return identitytest.FlowNode(t, ".", "scan-orchestrator").Key()
 }
 
 func eventPublishRepoObserverNodeID(t testing.TB) string {

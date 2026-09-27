@@ -108,7 +108,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.ExistingRunRootIngress(
+			requestEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/inst-1/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -120,6 +120,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), "repo-scaffold/inst-1"),
 					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID},
 				),
+				eventtest.ConcreteTemplateRoutingSource("repo-scaffold", "repo-scaffold/inst-1", artifactActionResultEntityID),
 				time.Now().UTC(),
 			)
 
@@ -258,7 +259,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 			if err != nil {
 				t.Fatalf("marshal request payload: %v", err)
 			}
-			requestEvent := eventtest.ExistingRunRootIngress(
+			requestEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
 				tc.requestEventID,
 				events.EventType("repo-scaffold/repo_scaffold.repo_commit_requested"),
 				"test",
@@ -270,13 +271,13 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), tc.requestFlowPath),
 					events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: tc.requestFlowPath, EntityID: artifactActionResultEntityID},
 				),
-				time.Now().UTC(),
+				eventtest.StaticFlowRoutingSource("repo-scaffold", tc.requestFlowPath, artifactActionResultEntityID), time.Now().UTC(),
 			)
 			if childRequest {
 				requestEvent = eventtest.ExistingRunRootIngressWithRoutingSource(tc.requestEventID,
-					events.EventType("repo-scaffold/child-1/start.requested"), "test", "", requestPayload, 0, templateInstanceDeliveryRunID,
-					events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: tc.requestFlowPath, FlowInstance: tc.requestFlowPath}),
-					events.NoRoutingSource(), time.Now().UTC())
+					events.EventType("start.requested"), "test", "", requestPayload, 0, templateInstanceDeliveryRunID,
+					events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID),
+					eventtest.RootRoutingSource(artifactActionResultEntityID), time.Now().UTC())
 			}
 
 			if err := bus.Publish(ctx, requestEvent); err != nil {

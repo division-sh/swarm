@@ -50,7 +50,6 @@ normalized_events:
       one_of:
         callback_query.message.chat.type: [private, group, supergroup]
   - event: inbound.telegram.text_message
-    author_summary_field: text
     author_subject:
       type: chat
       field: conversation_reference

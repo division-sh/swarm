@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -107,10 +108,11 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			assertStageLifecycleGateIdentity(t, card, activation)
 			assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, true)
 
+			requireStageLifecyclePipelineSettlement(t, runtime, selected, activation.RunID)
 			if err := closeConformanceRuntimeGeneration(runtime, processCapability); err != nil {
 				t.Fatalf("close generation before lifecycle restart: %v", err)
 			}
-			runtime, _ = newStageLifecycleIdentityRuntime(t, selected, module)
+			runtime, processCapability = newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			runtimeCtx = testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
 			_, restored, err := runtime.EnsureStandingTargets(runtimeCtx)
@@ -184,8 +186,34 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			if results := join.Results(); len(results) != 2 || results[0] != float64(11) || results[1] != float64(22) {
 				t.Fatalf("singleton join results = %#v, want authored membership order [11 22]", results)
 			}
+			requireStageLifecyclePipelineSettlement(t, runtime, selected, activation.RunID)
+			if err := closeConformanceRuntimeGeneration(runtime, processCapability); err != nil {
+				t.Fatalf("close settled lifecycle runtime: %v", err)
+			}
 		})
 	}
+}
+
+func requireStageLifecyclePipelineSettlement(t *testing.T, rt *runtimepkg.Runtime, selected any, runID string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), rt.Options.SourceArtifactFact), 10*time.Second)
+	defer cancel()
+	owner := selected.(interface {
+		PipelineObligations() runtimepipelineobligation.Store
+	}).PipelineObligations()
+	var summary runtimepipelineobligation.RunSummary
+	for ctx.Err() == nil {
+		var err error
+		summary, err = owner.SummarizeRun(ctx, runID)
+		if err != nil {
+			t.Fatalf("read lifecycle pipeline settlement: %v", err)
+		}
+		if !summary.BlocksCompletion() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("lifecycle pipeline publications remain unsettled: %#v", summary)
 }
 
 func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conformanceLoadedWorkflowModule) (*runtimepkg.Runtime, runtimestartupownership.ProcessCapability) {
@@ -333,17 +361,16 @@ func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *
 		t.Fatalf("marshal %s: %v", localEvent, err)
 	}
 	eventID := uuid.NewString()
-	evt := eventtest.ExistingRunRootIngress(
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		eventID,
-		events.EventType(source.ResolveFlowEventReference("scout", localEvent)),
+		events.EventType(localEvent),
 		"scout",
 		"",
 		raw,
 		0,
 		activation.RunID,
-		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
-			FlowID: "scout", FlowInstance: activation.FlowInstance, EntityID: activation.EntityID,
-		}),
+		events.EventEnvelope{},
+		eventtest.RootRoutingSource(activation.RunID),
 		time.Now().UTC(),
 	)
 	if err := bus.PublishAcknowledged(ctx, evt); err != nil {

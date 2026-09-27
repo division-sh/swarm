@@ -14,9 +14,9 @@ type censusCountingSource struct {
 	withdraw bool
 }
 
-func (s *censusCountingSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
+func (s *censusCountingSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract {
 	s.builds++
-	return s.Source.AuthoredEventEntries()
+	return s.Source.WorkflowTimers()
 }
 
 func (s *censusCountingSource) FlowScopeByID(id string) (semanticview.FlowScope, bool) {
@@ -63,7 +63,7 @@ func TestCompileConnectGraphSharesOnlyOperationLocalCensus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			base, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
 			source := &censusCountingSource{Source: base}
-			if _, issue := LowerPublicInputRoutePlan(source, semanticview.AuthoredEventEndpoint{}); issue.Failure.Empty() || source.builds != 0 {
+			if _, issue := lowerTemplateInputReceiverPlan(source, semanticview.AuthoredEventEndpoint{}); issue.Failure.Empty() || source.builds != 0 {
 				t.Fatal("invalid endpoint was not rejected before census construction")
 			}
 			graph := CompileConnectGraph(source)
@@ -73,19 +73,19 @@ func TestCompileConnectGraphSharesOnlyOperationLocalCensus(t *testing.T) {
 			if len(graph.receiverPlans) != 1 || len(graph.issues) != 0 {
 				t.Fatalf("receiver plans/issues = %d/%v", len(graph.receiverPlans), graph.issues)
 			}
-			plan, issue := LowerPublicInputRoutePlan(source, endpoint)
+			plan, issue := lowerTemplateInputReceiverPlan(source, endpoint)
 			if !issue.Failure.Empty() || !reflect.DeepEqual(plan, graph.receiverPlans[0]) {
-				t.Fatalf("operation-local lowering differs from fresh public admission: %v", issue)
+				t.Fatalf("operation-local lowering differs from fresh private receiver registration: %v", issue)
 			}
 			if source.builds != 2 {
-				t.Fatalf("public admission reused old census: %d", source.builds)
+				t.Fatalf("receiver registration reused old census: %d", source.builds)
 			}
 			source.withdraw = true
 			if got := CompileConnectGraph(source); len(got.receiverPlans) != 0 || source.builds != 3 {
 				t.Fatalf("later compile reused withdrawn source: plans=%d builds=%d", len(got.receiverPlans), source.builds)
 			}
-			if _, issue := LowerPublicInputRoutePlan(source, endpoint); issue.Failure.Empty() {
-				t.Fatal("public admission accepted withdrawn source")
+			if _, issue := lowerTemplateInputReceiverPlan(source, endpoint); issue.Failure.Empty() {
+				t.Fatal("receiver registration accepted withdrawn source")
 			}
 		})
 	}

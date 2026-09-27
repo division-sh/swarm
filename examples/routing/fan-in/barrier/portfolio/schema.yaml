@@ -11,8 +11,7 @@ stages:
 pins:
   inputs:
     events:
-      - event: portfolio.setup
-        source: external
+      - portfolio.setup
       - event: operating.reported
         resolution:
           mode: fan-in

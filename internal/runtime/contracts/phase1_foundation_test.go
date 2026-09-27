@@ -50,12 +50,12 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 	expectMissingField(t, reflect.TypeOf(ToolSchemaEntry{}), "HandlerType")
 	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "StateSchema", reflect.TypeOf(NodeStateSchema{}))
 	expectFieldType(t, reflect.TypeOf(SystemNodeContract{}), "GateState", reflect.TypeOf(NodeGateStateSchema{}))
-	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Swarm", reflect.TypeOf(EventSwarmMetadata{}))
-	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Emitter", reflect.TypeOf(EventEmitterRef{}))
-	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Producer", reflect.TypeOf([]string{}))
-	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Consumer", reflect.TypeOf([]string{}))
-	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "ConsumerType", reflect.TypeOf([]string{}))
-	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "DeliveryChannel", reflect.TypeOf(""))
+	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Swarm")
+	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Emitter")
+	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Producer")
+	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "Consumer")
+	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "ConsumerType")
+	expectMissingField(t, reflect.TypeOf(EventCatalogEntry{}), "DeliveryChannel")
 	expectFieldType(t, reflect.TypeOf(EventCatalogEntry{}), "Payload", reflect.TypeOf(EventPayloadSpec{}))
 }
 

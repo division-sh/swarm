@@ -350,7 +350,7 @@ func TestReceiverInitializationImportedSchemaBindingIsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	pin, err := CompileFlowInputPin(FlowPinCompilationContext{FlowID: "worker", FlowPath: "worker", Configuration: config}, FlowInputEventPin{
-		Event: "work.requested", Source: FlowInputPinSourceExternal,
+		Event:      "work.requested",
 		Resolution: FlowInputPinResolution{Mode: FlowInputResolutionModeCreate}, Initialize: map[string]string{"count": "payload.count"},
 	})
 	if err != nil {

@@ -17,11 +17,12 @@ func CopyPublicationStateResult(t testing.TB, mode string) string {
 		t.Fatalf("unsupported state-result publication topology %q", mode)
 	}
 	connect := fmt.Sprintf("connect:\n  - {event: result.accepted, from: %s, to: sink}\n  - {event: result.rejected, from: %s, to: sink}\n", flow, flow)
-	schema := "name: state-result-publication\npins:\n  inputs:\n    events:\n      - {event: document.requested, source: external}\n  outputs:\n    events: [result.accepted, result.rejected]\n"
+	schema := "name: state-result-publication\npins:\n  inputs:\n    events:\n      - document.requested\n  outputs:\n    events: [result.accepted, result.rejected]\n"
 	if flow == "." {
 		schema += connect
 	} else {
-		writeClosedVariantFile(t, root, "schema.yaml", "name: result-root\n"+connect)
+		writeClosedVariantFile(t, root, "schema.yaml", "name: result-root\npins:\n  inputs:\n    events: [document.requested]\n  outputs:\n    events: [document.requested]\n"+connect+"  - {event: document.requested, from: ., to: source}\n")
+		writeClosedVariantFile(t, root, "events.yaml", "document.requested:\n  request_id: text\n  content: text\n  result_kind: text\n")
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
 	writeClosedVariantFile(t, root, prefix+"entities.yaml", `document:
@@ -29,7 +30,7 @@ func CopyPublicationStateResult(t testing.TB, mode string) string {
   content: text
   result_kind: text
 `)
-	writeClosedVariantFile(t, root, prefix+"events.yaml", `document.requested:
+	eventSchemas := `document.requested:
   request_id: text
   content: text
   result_kind: text
@@ -41,7 +42,19 @@ result.rejected:
   request_id: text
   content: text
   result_kind: text
-`)
+`
+	if flow != "." {
+		eventSchemas = `result.accepted:
+  request_id: text
+  content: text
+  result_kind: text
+result.rejected:
+  request_id: text
+  content: text
+  result_kind: text
+`
+	}
+	writeClosedVariantFile(t, root, prefix+"events.yaml", eventSchemas)
 	local := `local:
   execution_type: system_node
   subscribes_to: [result.accepted, result.rejected]

@@ -69,6 +69,7 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
+	plans = requireRootInputConnections(t, plans, "producer", "account.requested")
 	if len(plans) != 1 {
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one template route plan", plans)
 	}
@@ -205,6 +206,7 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
+	plans = requireRootInputConnections(t, plans, "producer", "account.requested")
 	if len(plans) != 1 {
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one select-or-create route plan", plans)
 	}
@@ -256,6 +258,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
+	plans = requireRootInputConnections(t, plans, "portfolio", "portfolio.opened", "portfolio.account.register.requested", "portfolio.accounts.register.requested", "portfolio.membership.seeded", "portfolio.notify.requested")
 	if len(plans) != 2 {
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want registration and notification plans", plans)
 	}
@@ -306,7 +309,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	parent := eventtest.RunCreatingRootIngress(
+	parent := eventtest.RunCreatingRootIngressWithRoutingSource(
 		eventtest.UUID("evt-notify-all-children-parent"),
 		events.EventType("portfolio/portfolio.notify.requested"),
 		"",
@@ -320,6 +323,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 			FlowInstance: "portfolio",
 			EntityID:     portfolioEntityID,
 		}),
+		eventtest.StaticFlowRoutingSource("portfolio", "portfolio", portfolioEntityID),
 		time.Now().UTC(),
 	)
 	claim, err := runtimedelivery.AdmitPersistedClaim(
@@ -563,7 +567,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			evt := eventtest.RunCreatingRootIngress(
+			evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 				eventtest.UUID("evt-notify-all-children-negative-"+tc.name),
 				events.EventType("portfolio/account.notify.requested"),
 				"",
@@ -577,6 +581,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 					FlowInstance: "portfolio",
 					EntityID:     portfolioEntityID,
 				}),
+				eventtest.StaticFlowRoutingSource("portfolio", "portfolio", portfolioEntityID),
 				time.Now().UTC(),
 			)
 			preflight, err := eb.CheckPublishRecipientPlan(testAuthorActivityContextForBundle(context.Background(), sourceFact), evt)

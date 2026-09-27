@@ -98,7 +98,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				source := semanticview.Wrap(bundle)
 				var nodes []runtimepipeline.WorkflowNode
 				for _, declaration := range []struct{ id, event string }{{"intake", "start"}, {"receiver", "work.ready"}} {
-					nodes = append(nodes, runtimepipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, "", declaration.id), Subscriptions: []events.EventType{events.EventType(declaration.event)}, ExecutionType: runtimecontracts.SystemNodeExecutionType, Policies: map[string]runtimepipeline.WorkflowEventPolicy{declaration.event: {Consume: true}}})
+					nodes = append(nodes, runtimepipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, "", declaration.id), Subscriptions: []events.EventType{events.EventType(declaration.event)}, ExecutionType: runtimecontracts.SystemNodeExecutionType})
 				}
 				canonical, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {

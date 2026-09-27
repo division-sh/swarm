@@ -50,7 +50,13 @@ func canonicalSelectedContractRouteTopology(frontier runfork.RunForkContractFron
 		return runfork.RunForkSelectedContractRouteTopology{}, err
 	}
 	dynamicSupported := len(dynamicFlowInstances) == 0 || len(dynamicProofs) == len(dynamicFlowInstances)
-	if len(dynamicFlowInstances) > 0 && !dynamicSupported {
+	// A proven frontier occurrence cannot prove an unresolved historical edge.
+	for _, blocker := range routeAdmission.UnsupportedBlockers {
+		if blocker.Code == runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven {
+			dynamicSupported = false
+		}
+	}
+	if !dynamicSupported {
 		dynamicDisposition = runfork.RunForkSelectedContractDispositionFailClosed
 		blockers = appendRunForkUnsupportedBlocker(blockers, runfork.RunForkUnsupportedBlocker{
 			Code:    runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven,

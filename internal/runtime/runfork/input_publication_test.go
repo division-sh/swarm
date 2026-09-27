@@ -15,7 +15,7 @@ func TestInputPublicationDoesNotReplaceOtherPublicationOwners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := events.NewRootRoutingSource(entity)
+	root, err := events.NewRootRoutingSource(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +33,8 @@ func TestInputPublicationDoesNotReplaceOtherPublicationOwners(t *testing.T) {
 		source events.RoutingSource
 		want   bool
 	}{
-		{"api_absence", events.NoRoutingSource(), true}, {"external_ingress", external, true},
-		{"declared_root", root, false}, {"static_producer", static, false}, {"template_producer", template, false},
+		{"api_absence", events.NoRoutingSource(), false}, {"external_ingress", external, true},
+		{"declared_root", root, true}, {"static_producer", static, false}, {"template_producer", template, false},
 		{"flow_control", control, false}, {"platform_control", events.NewPlatformControlRoutingSource(), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

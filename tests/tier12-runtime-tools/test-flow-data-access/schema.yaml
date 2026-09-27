@@ -2,3 +2,10 @@ name: test-flow-data-access
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]
+pins:
+  inputs:
+    events: [support.requested]
+  outputs:
+    events: [support.requested]
+connect:
+  - {event: support.requested, from: ., to: support}

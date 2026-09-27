@@ -58,7 +58,7 @@ func TestFanOutPreparationSharesOutputCompilationNotSettlement(t *testing.T) {
 		Path: ".", Paths: contracts.FlowContractPaths{FlowPath: "."},
 		Schema: contracts.FlowSchemaDocument{Pins: contracts.FlowPins{Outputs: contracts.FlowOutputPins{EventPins: []contracts.FlowOutputEventPin{{Event: "root.ready"}, {Event: "root.unconsumed"}}}}},
 		Events: map[string]contracts.EventCatalogEntry{
-			"root.ready":      {Swarm: contracts.EventSwarmMetadata{Consumer: []string{"external"}}},
+			"root.ready":      {},
 			"root.unconsumed": {},
 		},
 	}
@@ -88,10 +88,9 @@ func TestFanOutPreparationSharesOutputCompilationNotSettlement(t *testing.T) {
 		if err != nil || len(results) != len(requests) || group.prepared != len(requests) {
 			t.Fatalf("operation%d: results=%d recorded=%d err=%v", operation, len(results), group.prepared, err)
 		}
-		// IsAuthored still reads the catalog once per ordinal during admission;
-		// the remaining single read is the output classifier's endpoint census.
-		if reads := source.reads.Load() - before; reads != int64(len(requests)+1) {
-			t.Fatalf("operation%d read catalog %d times, want25 admissions plus1 output census", operation, reads)
+		// Admission reads once per ordinal; output classification uses compiled evidence.
+		if reads := source.reads.Load() - before; reads != int64(len(requests)) {
+			t.Fatalf("operation%d read catalog %d times, want %d admissions and no output rebuild", operation, reads, len(requests))
 		}
 		for i, result := range results {
 			if result.Err != nil {
@@ -102,9 +101,6 @@ func TestFanOutPreparationSharesOutputCompilationNotSettlement(t *testing.T) {
 				t.Fatalf("ordinal%d substituted publication identity", i)
 			}
 			want := events.NoDeliveryNoSubscriberByDesign
-			if i%2 == 1 {
-				want = events.NoDeliveryDeclaredConsumerNoPlan
-			}
 			if plan.prepared.settlement.Reason() != want {
 				t.Fatalf("ordinal%d reused another event's settlement: got=%v want=%v", i, plan.prepared.settlement.Reason(), want)
 			}

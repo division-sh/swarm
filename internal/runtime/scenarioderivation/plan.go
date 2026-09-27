@@ -39,7 +39,7 @@ func CompileCatalog(source semanticview.Source, identity scenarioexecution.Effec
 		return nil, fmt.Errorf("derived scenario catalog requires the effective semantic source")
 	}
 	profiles := make([]scenarioexecution.Profile, 0)
-	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).InputPins() {
+	for _, endpoint := range semanticview.SelectedRootInputEndpoints(source) {
 		profile, err := emptyProfile(identity, endpoint)
 		if err != nil {
 			return nil, err
@@ -72,15 +72,14 @@ func Compile(source semanticview.Source, identity scenarioexecution.EffectiveSou
 	if err := identity.Validate(); err != nil {
 		return nil, err
 	}
-	request.FlowID = strings.Trim(strings.TrimSpace(request.FlowID), "/")
 	request.Input = strings.TrimSpace(request.Input)
-	if request.FlowID == "" {
-		return nil, fmt.Errorf("--derive requires an exact flow id")
+	if request.FlowID != "." {
+		return nil, fmt.Errorf("--derive requires selected-root flow id .; select the child directory as the source root to derive its public inputs")
 	}
 	if request.AllInputs && request.Input != "" {
 		return nil, fmt.Errorf("--input and --all-inputs are mutually exclusive")
 	}
-	all := semanticview.BuildAuthoredEventEndpointCensus(source).InputPins()
+	all := semanticview.SelectedRootInputEndpoints(source)
 	candidates := make([]semanticview.AuthoredEventEndpoint, 0)
 	for _, endpoint := range all {
 		if strings.Trim(strings.TrimSpace(endpoint.FlowID), "/") != request.FlowID {

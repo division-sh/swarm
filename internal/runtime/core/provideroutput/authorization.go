@@ -17,8 +17,8 @@ const (
 	KindNormalized Kind = "normalized"
 )
 
-// Authorization is the admitted verified-pack provenance required to grant a
-// normalized provider output target-free input routing authority.
+// Authorization authenticates an admitted normalized output's pack and catalog
+// generation. It does not subscribe a receiver or grant cross-flow delivery.
 type Authorization struct {
 	provider     string
 	event        string

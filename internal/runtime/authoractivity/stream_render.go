@@ -134,7 +134,7 @@ func repetitionKey(occurrence Occurrence) (string, error) {
 	}
 	return strings.Join([]string{
 		string(occurrence.Kind), occurrence.Transition, subject, activityAction(occurrence), failureClass, failureCode,
-		diagnosticRoute(occurrence), occurrence.AuthorSafeSummary,
+		diagnosticRoute(occurrence),
 	}, "\x00"), nil
 }
 

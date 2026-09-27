@@ -9,9 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -157,52 +155,19 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		return nil, err
 	}
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
-		resolvedBeforePreflight := false
-		rootResolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-			Source:        e.workflowSource,
-			FlowID:        flowID,
-			EventType:     eventType,
-			RoutingSource: routingSource,
+		resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
+			Source: e.workflowSource, FlowID: flowID, EventType: eventType, RoutingSource: routingSource,
 		}, envelope)
-		if rootResolution.Failure == runtimepinrouting.FailureParentRouteIncomplete {
-			structuralParent, currentDeliveryOwner, err := e.emitTargetEvidenceForActor(ctx, actor, flowInstance)
-			if err != nil {
-				wrapped := failures.WrapDetail(
-					"parent_route_lookup_failed",
-					"tool-executor",
-					"handle_emit_tool.parent_route",
-					map[string]any{"event": eventType},
-					err,
-				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "parent_route_lookup_failed", "publish", "parent_route", wrapped)
-				return nil, wrapped
-			}
-			rootResolution = runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-				Source:               e.workflowSource,
-				FlowID:               flowID,
-				EventType:            eventType,
-				RoutingSource:        routingSource,
-				StructuralParent:     structuralParent,
-				CurrentDeliveryOwner: currentDeliveryOwner,
-			}, envelope)
-			if !rootResolution.Failure.Empty() {
-				wrapped := failures.NewTarget(
-					rootResolution.Failure.Code(),
-					"tool-executor",
-					"handle_emit_tool.pin_target_resolution",
-					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
-				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
-				return nil, wrapped
-			}
-			envelope = rootResolution.Envelope
-			emitted, err = events.ResolveEnvelope(emitted, envelope)
-			if err != nil {
-				return nil, err
-			}
-			resolvedBeforePreflight = true
+		if !resolution.Failure.Empty() {
+			wrapped := failures.NewTarget(resolution.Failure.Code(), "tool-executor", "handle_emit_tool.pin_target_resolution",
+				map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType})
+			e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
+			return nil, wrapped
 		}
-		usePublishAuthority := false
+		emitted, err = events.ResolveEnvelope(emitted, resolution.Envelope)
+		if err != nil {
+			return nil, err
+		}
 		if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
 			plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
 			if err != nil {
@@ -227,43 +192,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 					e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
 					return nil, wrapped
 				}
-				usePublishAuthority = true
-			}
-		}
-		if !usePublishAuthority && !resolvedBeforePreflight {
-			structuralParent, currentDeliveryOwner, err := e.emitTargetEvidenceForActor(ctx, actor, flowInstance)
-			if err != nil {
-				wrapped := failures.WrapDetail(
-					"parent_route_lookup_failed",
-					"tool-executor",
-					"handle_emit_tool.parent_route",
-					map[string]any{"event": eventType},
-					err,
-				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "parent_route_lookup_failed", "publish", "parent_route", wrapped)
-				return nil, wrapped
-			}
-			resolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-				Source:               e.workflowSource,
-				FlowID:               flowID,
-				EventType:            eventType,
-				RoutingSource:        routingSource,
-				StructuralParent:     structuralParent,
-				CurrentDeliveryOwner: currentDeliveryOwner,
-			}, envelope)
-			if !resolution.Failure.Empty() {
-				wrapped := failures.NewTarget(
-					resolution.Failure.Code(),
-					"tool-executor",
-					"handle_emit_tool.pin_target_resolution",
-					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
-				)
-				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.SomeEvent(emitted), "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
-				return nil, wrapped
-			}
-			emitted, err = events.ResolveEnvelope(emitted, resolution.Envelope)
-			if err != nil {
-				return nil, err
 			}
 		}
 	}
@@ -288,41 +216,4 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		"event_id":   emitted.ID(),
 		"event_type": eventType,
 	}, nil
-}
-
-func (e *Executor) emitTargetEvidenceForActor(ctx context.Context, actor models.AgentConfig, flowInstance string) (runtimepinrouting.PersistedStructuralParent, runtimepinrouting.CurrentDeliveryTarget, error) {
-	if e == nil {
-		return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, nil
-	}
-	delivery, deliveryPresent := runtimedelivery.RouteFromContext(ctx)
-	currentDeliveryOwner := runtimepinrouting.ClassifyCurrentDeliveryTarget(delivery, deliveryPresent)
-	if e.workflowInstances != nil {
-		instancePath := strings.Trim(strings.TrimSpace(flowInstance), "/")
-		if instancePath == "" {
-			instancePath = strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
-		}
-		if instancePath != "" {
-			flowIdentity, err := runtimeflowidentity.NewRunScopedFlowInstance(actor.Identity.RunID, runtimeflowidentity.RouteForInstancePath(instancePath))
-			if err != nil {
-				return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, err
-			}
-			instance, ok, err := e.workflowInstances.Load(ctx, flowIdentity)
-			if err != nil {
-				return runtimepinrouting.PersistedStructuralParent{}, runtimepinrouting.CurrentDeliveryTarget{}, err
-			}
-			if ok {
-				parent := (runtimeflowidentity.ParentRoute{
-					FlowID:       instance.ParentFlowID,
-					FlowInstance: instance.ParentFlowInstance,
-					EntityID:     instance.ParentEntityID,
-				}).Normalized()
-				return runtimepinrouting.ClassifyPersistedStructuralParent(events.RouteIdentity{
-					FlowID:       parent.FlowID,
-					FlowInstance: parent.FlowInstance,
-					EntityID:     parent.EntityID,
-				}), currentDeliveryOwner, nil
-			}
-		}
-	}
-	return runtimepinrouting.PersistedStructuralParent{}, currentDeliveryOwner, nil
 }

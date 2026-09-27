@@ -24,8 +24,9 @@ stages:
 pins:
   inputs:
     events:
-      - event: inbound.telegram
-        source: external
+      - inbound.telegram
+  outputs:
+    events: [inbound.telegram.text_message]
 activation: standing
 ingress:
   alias: chat

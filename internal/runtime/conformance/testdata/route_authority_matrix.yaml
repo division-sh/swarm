@@ -56,8 +56,7 @@ rows:
     proof_refs:
       - {kind: pr, pr: 1348}
       - {kind: go_test, name: TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly}
-      - {kind: go_test, name: TestRouteTableRootInputFlowNodeResolvesRootInputRoute}
-      - {kind: go_test, name: TestAPIEventPublicationRouteIntentProducerIsClosedTypedRole}
+      - {kind: go_test, name: TestRetiredRootSubscriptionSourceIsNotAdmitted}
       - {kind: go_test, name: TestDeliveryPlanner_LiveCarrierDoesNotAuthorizeNoTargetScopedRoutedNode}
       - {kind: go_test, name: TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforePersistence}
       - {kind: go_test, name: TestDeliveryPlanner_StaticRootSameInstanceRouteUsesSelectedRunOwner}
@@ -527,7 +526,7 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: live_dispatch}
       - {kind: spec_ref, path: platform-spec.yaml, ref: route_topology}
     proof_refs:
-      - {kind: go_test, name: TestEventBusPublish_RootInputFlowNodePersistsRouteBeforeInterceptorWithoutInternalCarrier}
+      - {kind: go_test, name: TestExternalIngressConnectionOnlyChangesAuthorizedBranch}
       - {kind: go_test, name: TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel}
       - {kind: go_test, name: TestDeliveryRecipientPolicy_KeepsInternalSubscribersLiveOnlyUnderDescriptorPlanning}
     notes: >

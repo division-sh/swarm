@@ -127,7 +127,7 @@ func BuildAuthoredEventEndpointCensus(source Source) AuthoredEventEndpointCensus
 		builder.addAutoEmitEndpoints()
 		builder.addLifecycleEndpoints()
 		builder.addPinEndpoints()
-		builder.addMetadataBoundaryEndpoints()
+		builder.addProviderIngressEndpoints()
 	}
 	return builder.build()
 }
@@ -669,22 +669,11 @@ func (b *endpointCensusBuilder) addPinEndpoints() {
 	}
 }
 
-func (b *endpointCensusBuilder) addMetadataBoundaryEndpoints() {
-	for eventType, entry := range b.source.AuthoredEventEntries() {
-		source := strings.ToLower(strings.TrimSpace(entry.SwarmSource()))
-		if strings.HasPrefix(source, "platform") || strings.HasPrefix(source, "external") {
-			kind := EventEndpointExternal
-			if strings.HasPrefix(source, "platform") {
-				kind = EventEndpointPlatform
-			}
-			endpoint := b.endpoint(EventEndpointProducer, kind, ".", eventType)
-			endpoint.SourceLocation = "swarm.source"
-			b.add(endpoint)
-		}
-		if boundary := entry.AcceptedConsumerBoundary(); boundary != runtimecontracts.EventConsumerBoundaryNone {
-			endpoint := b.endpoint(EventEndpointConsumer, EventEndpointExternal, ".", eventType)
-			endpoint.Role = runtimecontracts.EventConsumerBoundaryCode(boundary)
-			endpoint.SourceLocation = "swarm.consumer"
+func (b *endpointCensusBuilder) addProviderIngressEndpoints() {
+	for flowID, events := range b.source.SemanticCapabilities().ProviderIngressEvents() {
+		for _, event := range events {
+			endpoint := b.endpoint(EventEndpointProducer, EventEndpointExternal, flowID, event)
+			endpoint.SourceLocation = "ingress.providers"
 			b.add(endpoint)
 		}
 	}

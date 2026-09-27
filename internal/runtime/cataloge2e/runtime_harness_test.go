@@ -1368,7 +1368,10 @@ func (h *runtimeHarness) ensureTargetFlowInstance(target events.RouteIdentity, t
 			target.EntityID,
 			"",
 		),
-		Config:       config,
+		Config: config,
+		// This fixture pre-creates selectable entities, including their authored
+		// business key. Agent configuration is not entity field initialization.
+		Fields:       cloneStringAnyMap(config),
 		TriggerEvent: trigger,
 		OccurredAt:   trigger.CreatedAt(),
 	})

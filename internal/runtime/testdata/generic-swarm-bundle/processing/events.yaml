@@ -1,10 +1,4 @@
 item.review_requested:
-  emitter:
-    - intake-router
   score: number
-item.completed:
-  emitter:
-    - processing-node
-item.rejected:
-  emitter:
-    - processing-node
+item.completed: {}
+item.rejected: {}

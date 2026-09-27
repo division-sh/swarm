@@ -30,7 +30,7 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			assertArchetypeTreeEqual(t, source.Files, source.SourceRoot, destination)
 			requiredFiles := []string{"manifest.yaml"}
 			if archetype == "webhook-responder" {
-				requiredFiles = append(requiredFiles, "tests/smoke.yaml", "telegram-chat/schema.yaml", "telegram-ingress/schema.yaml")
+				requiredFiles = append(requiredFiles, "tests/smoke.yaml", "schema.yaml", "telegram-chat/schema.yaml", "telegram-ingress/schema.yaml")
 			} else {
 				requiredFiles = append(requiredFiles, "schema.yaml", "nodes.yaml", "events.yaml", "tests/smoke.yaml")
 			}

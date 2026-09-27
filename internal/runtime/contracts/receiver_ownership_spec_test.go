@@ -27,8 +27,8 @@ func TestReceiverCompositionAuthoritativeSpec(t *testing.T) {
 			[]string{"proof minted by the compiled graph", "proves shared structural ownership"}},
 		{"handler_specification.handler_fields.create_entity.default", []string{"admitted receiver ownership"}, []string{"(inherit)"}},
 		{"flow_model.state_composition.ownership_semantics", []string{"Parent event identity is source/causal context only"}, nil},
-		{"static_analyzer.slice_3a_pin_target_resolution.accepted_target_mechanisms.static_child_delivery_entity.rule",
-			[]string{"receiver-owned", "Entityless child execution does not qualify", "complete persisted ParentRoute"}, nil},
+		{"static_analyzer.slice_3a_pin_target_resolution.static_failure_reasons.target_required_missing",
+			[]string{"actual typed same-flow consumer", "compiled connection", "addresses and template mode or static path depth are not consumers"}, nil},
 	} {
 		t.Run(check.path, func(t *testing.T) {
 			var value any = document

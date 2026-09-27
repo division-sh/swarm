@@ -75,10 +75,17 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 			}
 			process := start()
 			hash := goldenServedBundleHash(t, process.rpc, "live")
+			assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
+				map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
 			persisted := map[string][]goldenEvent{}
 			for _, scope := range []string{".", "left", "right", "left/nested"} {
 				run, events := executeNodeIdentityWork(t, process, hash, scope, "before-"+scope)
 				persisted[run] = events
+				for _, event := range events {
+					if event.EventName == "entry.root" {
+						assertFullEventPayloadReadback(t, process, event, binary, base, config, token, env)
+					}
+				}
 			}
 			if err := process.stopAndWait(10 * time.Second); err != nil {
 				t.Fatal(err)
@@ -87,12 +94,19 @@ func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
 			if goldenServedBundleHash(t, process.rpc, "live") != hash {
 				t.Fatal("restart changed selected artifact")
 			}
+			assertSelectedRootRejectsPrivatePublication(t, process, hash, binary, base, config, token, env,
+				map[string]any{"marker": "must-not-create"}, "left/entry.left", "right/entry.right", "left/nested/entry.nested", "work.routed")
 			ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
 			defer cancel()
 			for run, want := range persisted {
 				got, err := listGoldenEvents(ctx, process.rpc, run)
 				if err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("restart readback: %v\nwant %#v\ngot %#v", err, want, got)
+				}
+				for _, event := range got {
+					if event.EventName == "entry.root" {
+						assertFullEventPayloadReadback(t, process, event, binary, base, config, token, env)
+					}
 				}
 			}
 			for _, scope := range []string{".", "left", "right", "left/nested"} {
@@ -146,7 +160,13 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 	if !ok {
 		t.Fatalf("unknown fixture scope %q", scope)
 	}
-	if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": prefix + expected.Request, "payload": map[string]any{"marker": marker}, "emitter": "releasee2e", "idempotency_key": marker}, &admitted); err != nil {
+	payload := map[string]any{"marker": marker}
+	if scope == "." {
+		payload["title"] = "not a selected preview"
+		payload["body"] = strings.Repeat("long \u03bb \u4e16\u754c payload ", 300)
+		payload["context"] = map[string]any{"title": "nested title", "values": []any{true, "complete", float64(42)}}
+	}
+	if err := process.rpc.call(ctx, "event.publish", map[string]any{"bundle_hash": hash, "event_name": expected.Request, "payload": payload, "emitter": "releasee2e", "idempotency_key": marker}, &admitted); err != nil {
 		t.Fatal(err)
 	}
 	if admitted.RunID == "" {
@@ -189,12 +209,15 @@ func executeNodeIdentityWork(t *testing.T, process *releaseServeProcess, hash, s
 	}
 	count := 0
 	for _, event := range observed {
-		if event.EventName != prefix+expected.Request && event.EventName != prefix+"work.processed" && !(scope == "." && event.EventName == "work.routed") {
+		if event.EventName != expected.Request && event.EventName != prefix+"work.processed" && !(scope == "." && event.EventName == "work.routed") {
 			continue
 		}
 		count++
 		if event.Payload["marker"] != marker {
 			t.Fatalf("payload leaked from another execution: %#v", event)
+		}
+		if event.EventName == expected.Request && !reflect.DeepEqual(event.Payload, payload) {
+			t.Fatalf("input payload was summarized or changed: got=%#v want=%#v", event.Payload, payload)
 		}
 		if strings.HasSuffix(event.EventName, "work.processed") && event.Payload["origin"] != scope {
 			t.Fatalf("wrong scoped handler: %#v", event)

@@ -17,45 +17,42 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestResolveTargetsCompleteParentRouteForPinDeclaredOutput(t *testing.T) {
+func TestResolveRejectsCompleteParentAddressWithoutConsumer(t *testing.T) {
 	parent := events.RouteIdentity{FlowID: "root", FlowInstance: "root/inst-1", EntityID: "parent-ent"}
 	result := Resolve(ResolutionInput{
 		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
-		StructuralParent: ClassifyPersistedStructuralParent(parent),
-	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if !result.Failure.Empty() || result.Target != parent || result.Event.TargetRoute() != parent {
-		t.Fatalf("resolution = %#v, want exact parent route", result)
+	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, parent), time.Time{}))
+	if result.Failure != FailureTargetRequiredMissing || !result.Target.Empty() {
+		t.Fatalf("resolution = %#v, want no consumer despite complete parent address", result)
 	}
 }
 
 func TestResolveFailsClosedWithoutCanonicalConsumer(t *testing.T) {
 	result := Resolve(ResolutionInput{
-		Source: testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: ".", EventType: "root.ready",
-	}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
+	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if result.Failure != FailureTargetRequiredMissing {
 		t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)
 	}
 }
 
-func TestResolveAllowsAcceptedExternalConsumerWithoutInventingRoute(t *testing.T) {
-	entry := runtimecontracts.EventCatalogEntry{}
-	entry.Swarm.Consumer = []string{"external"}
+func TestResolveAllowsSelectedRootExportWithoutInventingRoute(t *testing.T) {
 	result := Resolve(ResolutionInput{
-		Source: testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, map[string]runtimecontracts.EventCatalogEntry{"root.ready": entry}), FlowID: ".", EventType: "root.ready",
+		Source: testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: ".", EventType: "root.ready",
 	}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	if !result.Failure.Empty() || !result.Event.TargetRoute().Empty() || len(result.Event.TargetRoutes()) != 0 {
 		t.Fatalf("resolution = %#v, want targetless accepted external observation", result)
 	}
 }
 
-func TestResolveRejectsUnregisteredExternalConsumerMetadata(t *testing.T) {
-	for _, consumer := range []string{"external_catalog_harness", "externl", "webhook"} {
+func TestResolveRejectsPayloadDescriptionsAsConsumerAuthority(t *testing.T) {
+	for _, consumer := range []string{"external", "external_catalog_harness", "externl", "webhook"} {
 		t.Run(consumer, func(t *testing.T) {
 			entry := runtimecontracts.EventCatalogEntry{}
-			entry.Swarm.Consumer = []string{consumer}
+			entry.Payload = runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"destination": {Type: "text", Description: consumer}}}
 			result := Resolve(ResolutionInput{
-				Source: testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, map[string]runtimecontracts.EventCatalogEntry{"root.ready": entry}), FlowID: ".", EventType: "root.ready",
-			}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+				Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, map[string]runtimecontracts.EventCatalogEntry{"child.done": entry}), FlowID: "child", EventType: "child.done",
+			}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 			if result.Failure != FailureTargetRequiredMissing {
 				t.Fatalf("Failure = %q, want %q", result.Failure, FailureTargetRequiredMissing)
 			}
@@ -100,10 +97,9 @@ func TestResolveHarnessSinkCreatesNoRuntimeRoute(t *testing.T) {
 func TestResolveFailsClosedOnIncompleteParentRoute(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done",
-		StructuralParent: ClassifyPersistedStructuralParent(events.RouteIdentity{FlowID: "root", EntityID: "parent-ent"}),
-	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if result.Failure != FailureParentRouteIncomplete {
-		t.Fatalf("Failure = %q, want %q", result.Failure, FailureParentRouteIncomplete)
+	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "root", EntityID: "parent-ent"}), time.Time{}))
+	if result.Failure != FailureTargetRequiredMissing {
+		t.Fatalf("Failure = %q, want no consumer independently of incomplete address", result.Failure)
 	}
 }
 

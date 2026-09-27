@@ -34,8 +34,7 @@ func TestReceiverCompositionActivationReuseAndConflictBothStores(t *testing.T) {
 				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				source, node := targetedDeclaredKeyExecutionSource(t, "select_or_create")
 				module := proposedEffectProofModule{source: source,
-					nodes: []runtimepipeline.WorkflowNode{{Node: node, Subscriptions: []events.EventType{"review/work.keyed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType,
-						Policies: map[string]runtimepipeline.WorkflowEventPolicy{"review/work.keyed": {Consume: true}}}},
+					nodes: []runtimepipeline.WorkflowNode{{Node: node, Subscriptions: []events.EventType{"review/work.keyed"}, ExecutionType: runtimecontracts.SystemNodeExecutionType}},
 				}
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {

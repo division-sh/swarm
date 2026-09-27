@@ -9,44 +9,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
-func TestPinTargetResolutionFailsClosedWithoutCanonicalConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, false, false)), Options{})
-	if !reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
-		t.Fatalf("expected target_required_missing, got %#v", report.Errors())
+func TestPinTargetResolutionAllowsPublicRootExportWithoutRuntimeConsumer(t *testing.T) {
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, false)), Options{})
+	if reportContainsCheck(report.Errors(), "pin_target_resolution") {
+		t.Fatalf("public root export needs no internal consumer: %#v", report.Errors())
 	}
 }
 
 func TestPinTargetResolutionAllowsTypedSameFlowConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, true, false)), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, true)), Options{})
 	if reportContainsCheck(report.Errors(), "pin_target_resolution") {
 		t.Fatalf("same-flow consumer produced routing error: %#v", report.Errors())
 	}
 }
 
-func TestPinTargetResolutionAllowsAcceptedExternalConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, false, true)), Options{})
-	if reportContainsCheck(report.Errors(), "pin_target_resolution") {
-		t.Fatalf("accepted external consumer produced routing error: %#v", report.Errors())
-	}
-}
-
-func TestPinTargetResolutionRejectsUnregisteredExternalConsumerMetadata(t *testing.T) {
-	for _, consumer := range []string{"external_fixture_harness", "externl", "webhook"} {
-		t.Run(consumer, func(t *testing.T) {
-			bundle := pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkNone, false, false)
-			entry := bundle.Events["result.ready"]
-			entry.Swarm.Consumer = []string{consumer}
-			bundle.Events["result.ready"] = entry
-			report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
-			if !reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
-				t.Fatalf("metadata %q authorized routing: %#v", consumer, report.Errors())
-			}
-		})
-	}
-}
-
 func TestPinTargetResolutionAllowsHarnessObservationWithoutRuntimeConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkHarness, false, false)), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkHarness, false)), Options{})
 	if reportContainsCheck(report.Errors(), "pin_target_resolution") {
 		t.Fatalf("validation-only harness output produced routing error: %#v", report.Errors())
 	}
@@ -56,21 +34,14 @@ func TestPinTargetResolutionAllowsHarnessObservationWithoutRuntimeConsumer(t *te
 }
 
 func TestPinTargetResolutionRejectsHarnessWithSameFlowConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkHarness, true, false)), Options{})
+	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkHarness, true)), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "sink: harness and a canonical runtime consumer") {
 		t.Fatalf("expected harness/consumer conflict, got %#v", report.Errors())
 	}
 }
 
-func TestPinTargetResolutionRejectsHarnessWithAcceptedExternalConsumer(t *testing.T) {
-	report := Run(context.Background(), semanticviewtest.WrapRootAgents(pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkHarness, false, true)), Options{})
-	if !reportContains(report.Errors(), "pin_target_resolution", "sink: harness and a canonical runtime consumer") {
-		t.Fatalf("expected harness/external conflict, got %#v", report.Errors())
-	}
-}
-
 func TestPinTargetResolutionRejectsHarnessConflictWithoutProducer(t *testing.T) {
-	bundle := pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkHarness, true, false)
+	bundle := pinRoutingCheckBundle(runtimecontracts.FlowOutputSinkHarness, true)
 	delete(bundle.Nodes, "producer")
 	report := Run(context.Background(), semanticviewtest.WrapRootAgents(bundle), Options{})
 	if !reportContains(report.Errors(), "pin_target_resolution", "sink: harness and a canonical runtime consumer") {
@@ -78,18 +49,15 @@ func TestPinTargetResolutionRejectsHarnessConflictWithoutProducer(t *testing.T) 
 	}
 }
 
-func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsumer, externalConsumer bool) *runtimecontracts.WorkflowContractBundle {
+func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsumer bool) *runtimecontracts.WorkflowContractBundle {
 	ready := runtimecontracts.EventCatalogEntry{}
-	if externalConsumer {
-		ready.Swarm.Consumer = []string{"external"}
-	}
 	pin := runtimecontracts.FlowOutputEventPin{Event: "result.ready", Sink: sink}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{pin}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"request.started": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"}},
+			"request.started": {},
 			"result.ready":    ready,
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

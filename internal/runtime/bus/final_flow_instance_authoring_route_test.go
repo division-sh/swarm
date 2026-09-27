@@ -48,6 +48,13 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescrip
 	), nil
 }
 
+func (s *finalFlowInstanceAuthoringLifecycleStore) ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
+	if err := s.targetRouteMemoryStore.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
+		return FlowInstanceRouteTopologyResult{}, err
+	}
+	return FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
+}
+
 func (s *finalFlowInstanceAuthoringLifecycleStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
 	s.sourceArtifactFact = fact
 	s.workflowVersion = workflowVersion

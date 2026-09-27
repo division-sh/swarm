@@ -92,7 +92,7 @@ func (r FlowInputProducerResolver) resolveInputProducer(flowID, eventType string
 	}
 	connected := false
 	for _, plan := range r.graph.plans {
-		if plan.providerOutputAuthorization != nil || plan.receiver.IsRoot() != (flowID == ".") || plan.receiver.flowID.value != flowID {
+		if plan.receiver.IsRoot() != (flowID == ".") || plan.receiver.flowID.value != flowID {
 			continue
 		}
 		if string(plan.receiver.event.value) != eventType && string(plan.receiver.resolvedEvent.value) != eventType {

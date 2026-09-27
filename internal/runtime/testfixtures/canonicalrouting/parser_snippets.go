@@ -99,7 +99,7 @@ pins:
   inputs:
     events:
       - event: check.requested
-        source: external
+        source: harness
     reads:
       - entity.score
   outputs:

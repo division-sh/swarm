@@ -183,7 +183,6 @@ var targetDetailClasses = map[string]Class{
 	"target_unreachable_no_subscriber":         ClassTargetUnreachable,
 	"target_not_subscribed":                    ClassTargetUnreachable,
 	"target_unreachable_terminated":            ClassTargetUnreachable,
-	"parent_route_incomplete":                  ClassTargetUnreachable,
 	"route_plan_instance_source_value_missing": ClassTargetUnreachable,
 	"route_plan_target_unresolved":             ClassTargetUnreachable,
 	"route_plan_target_ambiguous":              ClassTargetAmbiguous,

@@ -1,6 +1,6 @@
 name: parent connect full authored path
 steps:
-  - publish: producer/work.requested
+  - publish: work.requested
     payload:
       work_id: work-1
 expect:

@@ -14,7 +14,7 @@ stages:
 pins:
   inputs:
     events:
-      - {event: parent.seeded, source: external}
+      - parent.seeded
   outputs:
     events: [work.requested]
 connect:
