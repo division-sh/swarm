@@ -22,6 +22,7 @@ type fanOutPublicationMember struct {
 	context         context.Context
 	admitted        events.AdmittedEvent
 	outputConsumers *runtimepinrouting.OutputConsumerResolver
+	topologySource  *routeTopologyCompilationScope
 }
 
 func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, requests []runtimepipeline.FanOutPublicationRequest) ([]runtimepipeline.FanOutPublicationPreparation, error) {
@@ -40,6 +41,7 @@ func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtime
 	accepted := make([]int, 0, len(requests))
 	seen := make(map[int]bool, len(requests))
 	outputConsumers := runtimepinrouting.NewOutputConsumerResolver(eb.semanticSource)
+	topologySource := new(routeTopologyCompilationScope)
 	for i, request := range requests {
 		if request.Ordinal < 0 || seen[request.Ordinal] {
 			return nil, errors.New("fan-out publication requests require distinct nonnegative ordinals")
@@ -51,7 +53,7 @@ func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtime
 			results[i].Err = err
 			continue
 		}
-		members[i] = fanOutPublicationMember{group: group, context: preparedCtx, admitted: admitted, outputConsumers: outputConsumers}
+		members[i] = fanOutPublicationMember{group: group, context: preparedCtx, admitted: admitted, outputConsumers: outputConsumers, topologySource: topologySource}
 		claims = append(claims, runtimepipelineobligation.PublicationClaimRequest{Ordinal: request.Ordinal, Event: admitted.Event()})
 		accepted = append(accepted, i)
 	}

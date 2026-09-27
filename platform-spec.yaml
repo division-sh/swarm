@@ -1589,6 +1589,10 @@ contract_formats:
             negative recipient evidence. A malformed registration within the selected scope still fails strict admission.
             The graph also selects the active flow-template/instance dependencies and affected route owners of an activation;
             EventBus derives only those complete owner route sets from freshly selected run/source-admitted descriptors.
+            A bounded fan-out publication group may share compiled static graph and authored-producer evidence among its
+            members only while the exact route-table source owner is unchanged. Every member still reads current route
+            and descriptor state and commits against its own fenced generation; compiled evidence is not retained beyond
+            the group or treated as a cache of mutable routing state.
             Selected-store queries may use conservative key prefilters, but only the canonical descriptor matcher decides
             identity; a prefilter may never exclude a possible canonical match. A run-wide descriptor or target-owner census,
             source-specific shortcut, stale process cache, or replacing only a newly created owner is not authority for
