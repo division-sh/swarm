@@ -15103,6 +15103,9 @@ platform_tables:
         may have several compatible activation consumers. Unknown launched writes remain durable
         and block overlapping successor writes and usable readiness, even if a later readback
         happens to match. Retirement is local only and never deletes a remote command.
+        Successfully recording an uncertain setting outcome is not successful installation:
+        delivery readiness requires the exact acknowledged write and successful readback,
+        and readback failure or mismatch remains non-usable.
         A text invocation is entry evidence only when its exact verified pending inbound intent
         resolves through the current binding, succeeded activation, current compatible consumer,
         and installed setting generation with the same opaque command reference. A shared
