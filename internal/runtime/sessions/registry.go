@@ -587,7 +587,6 @@ func (sr *InMemoryRegistry) ResetAll(metadata ResetMetadata) (ResetSummary, erro
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	summary := ResetSummary{}
-	clear(sr.rotationReceipts)
 	source := strings.TrimSpace(metadata.Source)
 	now := time.Now()
 	for key, rec := range sr.byKey {

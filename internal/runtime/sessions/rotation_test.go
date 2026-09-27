@@ -145,3 +145,30 @@ func TestInMemoryRotationSameKeyConcurrent(t *testing.T) {
 		t.Fatalf("concurrent rotation: results=%+v errors=%v history=%d", results, errs, len(registry.History(identity)))
 	}
 }
+
+func TestInMemoryRotationReceiptSurvivesReset(t *testing.T) {
+	ctx := context.Background()
+	registry := NewInMemoryRegistry(time.Minute)
+	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
+	if _, err := registry.Acquire(ctx, identity, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	metadata := RotationMetadata{OperationID: "rotation-before-reset", CheckpointSummary: "checkpoint"}
+	if _, err := registry.Rotate(ctx, identity, "owner", metadata); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.ResetAll(ResetMetadata{Source: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Acquire(ctx, identity, "owner"); err != nil {
+		t.Fatal(err)
+	}
+	historyLen := len(registry.History(identity))
+	_, err := registry.Rotate(ctx, identity, "owner", metadata)
+	requireRotationRefusal(t, err, RotationSuccessorNotCurrent)
+	_, err = registry.Rotate(ctx, identity, "owner", RotationMetadata{OperationID: metadata.OperationID, CheckpointSummary: "different"})
+	requireRotationRefusal(t, err, RotationRequestConflict)
+	if got := len(registry.History(identity)); got != historyLen {
+		t.Fatalf("reset replay changed history: got=%d want=%d", got, historyLen)
+	}
+}
