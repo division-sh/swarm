@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -90,13 +91,19 @@ func TestSelectedPartialActivationInventoryRetainsEveryFailedStage(t *testing.T)
 				generationGrant: grant, pipeline: probe,
 				pendingActivations: []selectedFlowActivation{{publication: probe, timersProjected: true}},
 			}
-			prepared := &PreparedSelectedFork{operation: selectedContractOperationForTest(t, runForkTestContext(t)), retainedRuntime: runtime}
+			operation := selectedContractOperationForTest(t, worklifetime.WithProcess(context.Background(), worklifetime.NewProcess()))
+			prepared := &PreparedSelectedFork{operation: operation, retainedRuntime: runtime}
 			for i := 0; i < 2; i++ {
 				if err := prepared.Close(); err == nil {
 					t.Fatal("failed activation cleanup reported success")
 				}
 				if prepared.retainedRuntime != runtime || len(runtime.pendingActivations) != 1 || grant.retireCalls != 0 {
 					t.Fatalf("failed %s stage released ownership or grant", stage)
+				}
+				waitCtx, cancel := context.WithCancel(context.Background())
+				cancel()
+				if err := operation.process.Wait(waitCtx); !errors.Is(err, context.Canceled) {
+					t.Fatalf("failed %s stage allowed process/store release: %v", stage, err)
 				}
 			}
 			probe.failing = false
@@ -105,6 +112,9 @@ func TestSelectedPartialActivationInventoryRetainsEveryFailedStage(t *testing.T)
 			}
 			if len(runtime.pendingActivations) != 0 || grant.retireCalls != 1 || probe.attempts == 0 {
 				t.Fatalf("successful %s retry did not settle activation before grant", stage)
+			}
+			if err := operation.process.Wait(context.Background()); err != nil {
+				t.Fatalf("settled %s stage did not join process: %v", stage, err)
 			}
 		})
 	}
@@ -134,7 +144,8 @@ func TestSelectedPartialRuntimeCleanupRemainsOwnedByPreparation(t *testing.T) {
 				if adopted {
 					runtime.manager = runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{WorkOwner: testGatewayWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution()}, nil)
 				}
-				prepared := &PreparedSelectedFork{operation: selectedContractOperationForTest(t, runForkTestContext(t)), retainedRuntime: runtime}
+				operation := selectedContractOperationForTest(t, worklifetime.WithProcess(context.Background(), worklifetime.NewProcess()))
+				prepared := &PreparedSelectedFork{operation: operation, retainedRuntime: runtime}
 				for i := 0; i < failures; i++ {
 					if err := prepared.Close(); err == nil {
 						t.Fatal("failed cleanup reported success")
@@ -142,12 +153,20 @@ func TestSelectedPartialRuntimeCleanupRemainsOwnedByPreparation(t *testing.T) {
 					if prepared.retainedRuntime != runtime || prepared.cleanupComplete || grant.retireCalls != 0 {
 						t.Fatalf("failed cleanup lost exact owner or retired grant: retained=%v complete=%v retire=%d", prepared.retainedRuntime == runtime, prepared.cleanupComplete, grant.retireCalls)
 					}
+					waitCtx, cancel := context.WithCancel(context.Background())
+					cancel()
+					if err := operation.process.Wait(waitCtx); !errors.Is(err, context.Canceled) {
+						t.Fatalf("failed cleanup allowed process/store release: %v", err)
+					}
 				}
 				if err := prepared.Close(); err != nil {
 					t.Fatalf("retry selected cleanup: %v", err)
 				}
 				if prepared.retainedRuntime != nil || !prepared.cleanupComplete || grant.retireCalls != 1 {
 					t.Fatalf("successful cleanup did not release exact owner: retained=%v complete=%v retire=%d", prepared.retainedRuntime != nil, prepared.cleanupComplete, grant.retireCalls)
+				}
+				if err := operation.process.Wait(context.Background()); err != nil {
+					t.Fatalf("successful cleanup did not join process: %v", err)
 				}
 			})
 		}
