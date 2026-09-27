@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
-func (s *PostgresStore) ListCurrentChannelDeliveryPlans(ctx context.Context, cursor string, limit int) ([]channeldelivery.Plan, error) {
+func (s *PostgresStore) ListCurrentChannelDeliveryPlans(ctx context.Context, cursor string, limit int) ([]render.Candidate, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres channel delivery store is unavailable")
 	}
@@ -22,10 +22,63 @@ func (s *PostgresStore) ListCurrentChannelDeliveryPlans(ctx context.Context, cur
 		plans, err = channeldelivery.ListCurrentPlans(txctx, tx, cursor, limit, true)
 		return err
 	})
-	return plans, err
+	return projectDeliveryCandidates(plans), err
 }
 
-func (s *SQLiteRuntimeStore) ListCurrentChannelDeliveryPlans(ctx context.Context, cursor string, limit int) ([]channeldelivery.Plan, error) {
+func (s *PostgresStore) GetCurrentChannelDeliveryPlan(ctx context.Context, deliveryID string) (render.Candidate, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.Candidate{}, false, fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.Candidate{}, false, err
+	}
+	var plan channeldelivery.Plan
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		plan, found, err = channeldelivery.LoadCurrentPlan(txctx, tx, deliveryID, true)
+		return err
+	})
+	if err != nil || !found {
+		return render.Candidate{}, found, err
+	}
+	return projectDeliveryCandidates([]channeldelivery.Plan{plan})[0], true, nil
+}
+
+func (s *PostgresStore) CurrentChannelDeliveryActivationID(ctx context.Context) (string, bool, error) {
+	if s == nil || s.backend == nil {
+		return "", false, fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", false, err
+	}
+	var id string
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		id, found, err = channeldelivery.CurrentActivationID(txctx, tx, true)
+		return err
+	})
+	return id, found, err
+}
+
+func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	var created bool
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		created, err = channeldelivery.PlanOpenCardTx(txctx, tx, cardID, true)
+		return err
+	})
+	return created, err
+}
+
+func (s *SQLiteRuntimeStore) ListCurrentChannelDeliveryPlans(ctx context.Context, cursor string, limit int) ([]render.Candidate, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite channel delivery store is unavailable")
 	}
@@ -38,17 +91,85 @@ func (s *SQLiteRuntimeStore) ListCurrentChannelDeliveryPlans(ctx context.Context
 		plans, err = channeldelivery.ListCurrentPlans(txctx, tx, cursor, limit, false)
 		return err
 	})
-	return plans, err
+	return projectDeliveryCandidates(plans), err
 }
 
-func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string) (channeldelivery.StoredRender, error) {
+func (s *SQLiteRuntimeStore) GetCurrentChannelDeliveryPlan(ctx context.Context, deliveryID string) (render.Candidate, bool, error) {
 	if s == nil || s.backend == nil {
-		return channeldelivery.StoredRender{}, fmt.Errorf("postgres channel delivery store is unavailable")
+		return render.Candidate{}, false, fmt.Errorf("sqlite channel delivery store is unavailable")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return channeldelivery.StoredRender{}, err
+		return render.Candidate{}, false, err
 	}
-	var stored channeldelivery.StoredRender
+	var plan channeldelivery.Plan
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		plan, found, err = channeldelivery.LoadCurrentPlan(txctx, tx, deliveryID, false)
+		return err
+	})
+	if err != nil || !found {
+		return render.Candidate{}, found, err
+	}
+	return projectDeliveryCandidates([]channeldelivery.Plan{plan})[0], true, nil
+}
+
+func projectDeliveryCandidates(plans []channeldelivery.Plan) []render.Candidate {
+	candidates := make([]render.Candidate, 0, len(plans))
+	for _, plan := range plans {
+		candidates = append(candidates, render.Candidate{
+			DeliveryID: plan.DeliveryID, SourceKind: plan.SourceKind, SourceID: plan.SourceID,
+			BindingRevision: plan.CurrentBindingRevision,
+			Audience: render.Audience{PrincipalID: plan.PrincipalID, InterfaceKey: plan.InterfaceKey,
+				DeliveryEpoch: plan.DeliveryEpoch, ExternalAccountRef: plan.ExternalAccountRef,
+				ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope},
+			State: plan.State, CurrentRenderID: plan.CurrentRenderID, CurrentReceiptID: plan.CurrentReceiptID,
+		})
+	}
+	return candidates
+}
+
+func (s *SQLiteRuntimeStore) CurrentChannelDeliveryActivationID(ctx context.Context) (string, bool, error) {
+	if s == nil || s.backend == nil {
+		return "", false, fmt.Errorf("sqlite channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", false, err
+	}
+	var id string
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		id, found, err = channeldelivery.CurrentActivationID(txctx, tx, false)
+		return err
+	})
+	return id, found, err
+}
+
+func (s *SQLiteRuntimeStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, fmt.Errorf("sqlite channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	var created bool
+	err := s.backend.RunTransaction(ctx, "plan open channel card", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		created, err = channeldelivery.PlanOpenCardTx(txctx, tx, cardID, false)
+		return err
+	})
+	return created, err
+}
+
+func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string) (render.PreparedRender, error) {
+	if s == nil || s.backend == nil {
+		return render.PreparedRender{}, fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.PreparedRender{}, err
+	}
+	var stored render.PreparedRender
 	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, true)
@@ -57,14 +178,14 @@ func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliv
 	return stored, err
 }
 
-func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string) (channeldelivery.StoredRender, error) {
+func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string) (render.PreparedRender, error) {
 	if s == nil || s.backend == nil {
-		return channeldelivery.StoredRender{}, fmt.Errorf("sqlite channel delivery store is unavailable")
+		return render.PreparedRender{}, fmt.Errorf("sqlite channel delivery store is unavailable")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return channeldelivery.StoredRender{}, err
+		return render.PreparedRender{}, err
 	}
-	var stored channeldelivery.StoredRender
+	var stored render.PreparedRender
 	err := s.backend.RunTransaction(ctx, "freeze channel delivery render", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, false)
@@ -73,22 +194,26 @@ func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, 
 	return stored, err
 }
 
-func freezeAndPersistChannelRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, postgres bool) (channeldelivery.StoredRender, error) {
+func freezeAndPersistChannelRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, postgres bool) (render.PreparedRender, error) {
 	plan, found, err := channeldelivery.LoadPlan(ctx, tx, deliveryID, postgres)
 	if err != nil {
-		return channeldelivery.StoredRender{}, err
+		return render.PreparedRender{}, err
 	}
 	if !found {
-		return channeldelivery.StoredRender{}, fmt.Errorf("channel delivery plan %s is missing", deliveryID)
+		return render.PreparedRender{}, fmt.Errorf("channel delivery plan %s is missing", deliveryID)
 	}
 	var frozen render.Frozen
 	frozen, err = channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
 	if err != nil {
-		return channeldelivery.StoredRender{}, err
+		return render.PreparedRender{}, err
 	}
 	id, _, err := channeldelivery.PersistRenderTx(ctx, tx, deliveryID, frozen, postgres)
 	if err != nil {
-		return channeldelivery.StoredRender{}, err
+		return render.PreparedRender{}, err
 	}
-	return channeldelivery.StoredRender{RenderID: id, DeliveryID: deliveryID, Frozen: frozen}, nil
+	actions, err := channeldelivery.EnsureRenderActionsTx(ctx, tx, id, frozen, postgres)
+	if err != nil {
+		return render.PreparedRender{}, err
+	}
+	return render.PreparedRender{RenderID: id, DeliveryID: deliveryID, Frozen: frozen, Actions: actions}, nil
 }
