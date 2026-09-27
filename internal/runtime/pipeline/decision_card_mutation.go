@@ -39,12 +39,18 @@ type DecisionCardMutation struct {
 	cancelInput         decisioncard.CancelInputRequest
 	observedContentHash string
 	channelAction       *operatorchannel.InboundAction
+	channelText         *operatorchannel.InboundText
+	channelChoice       *operatorchannel.InboundAction
+	channelSkip         *operatorchannel.InboundAction
 }
 
 func (m DecisionCardMutation) Kind() DecisionCardMutationKind { return m.kind }
 
 func (m DecisionCardMutation) WithChannelAction(fact operatorchannel.InboundAction) (DecisionCardMutation, error) {
-	if m.kind != DecisionCardMutationDecide && m.kind != DecisionCardMutationBeginInput {
+	if m.channelText != nil {
+		return DecisionCardMutation{}, fmt.Errorf("channel text already authorizes this card mutation")
+	}
+	if m.kind != DecisionCardMutationDecide && m.kind != DecisionCardMutationBeginInput && m.kind != DecisionCardMutationCancelInput {
 		return DecisionCardMutation{}, fmt.Errorf("channel action cannot authorize this card mutation")
 	}
 	if err := fact.Validate(); err != nil {
@@ -52,6 +58,67 @@ func (m DecisionCardMutation) WithChannelAction(fact operatorchannel.InboundActi
 	}
 	m.channelAction = &fact
 	return m, nil
+}
+
+func (m DecisionCardMutation) WithChannelText(fact operatorchannel.InboundText) (DecisionCardMutation, error) {
+	if m.kind != DecisionCardMutationDecide || m.decide.InputDraftID == "" || m.channelAction != nil {
+		return DecisionCardMutation{}, fmt.Errorf("channel text requires a draft-backed decision")
+	}
+	if err := fact.Validate(); err != nil {
+		return DecisionCardMutation{}, err
+	}
+	if fact.EntryReference != "" {
+		return DecisionCardMutation{}, fmt.Errorf("native inbox entry cannot authorize a decision")
+	}
+	m.channelText = &fact
+	return m, nil
+}
+
+func (m DecisionCardMutation) WithChannelChoice(fact operatorchannel.InboundAction) (DecisionCardMutation, error) {
+	if m.kind != DecisionCardMutationDecide || m.channelText == nil || m.channelAction != nil || m.channelChoice != nil {
+		return DecisionCardMutation{}, fmt.Errorf("channel choice requires one draft-backed text decision")
+	}
+	if err := fact.Validate(); err != nil {
+		return DecisionCardMutation{}, err
+	}
+	if fact.PublicationID == m.channelText.PublicationID {
+		return DecisionCardMutation{}, fmt.Errorf("channel choice and retained text must be distinct occurrences")
+	}
+	m.channelChoice = &fact
+	return m, nil
+}
+
+func (m DecisionCardMutation) ChannelChoice() (operatorchannel.InboundAction, bool) {
+	if m.channelChoice == nil {
+		return operatorchannel.InboundAction{}, false
+	}
+	return *m.channelChoice, true
+}
+
+func (m DecisionCardMutation) WithChannelSkip(fact operatorchannel.InboundAction) (DecisionCardMutation, error) {
+	if m.kind != DecisionCardMutationDecide || m.decide.InputDraftID == "" ||
+		m.channelText != nil || m.channelAction != nil || m.channelSkip != nil {
+		return DecisionCardMutation{}, fmt.Errorf("channel skip requires one draft-backed decision")
+	}
+	if err := fact.Validate(); err != nil {
+		return DecisionCardMutation{}, err
+	}
+	m.channelSkip = &fact
+	return m, nil
+}
+
+func (m DecisionCardMutation) ChannelSkip() (operatorchannel.InboundAction, bool) {
+	if m.channelSkip == nil {
+		return operatorchannel.InboundAction{}, false
+	}
+	return *m.channelSkip, true
+}
+
+func (m DecisionCardMutation) ChannelText() (operatorchannel.InboundText, bool) {
+	if m.channelText == nil {
+		return operatorchannel.InboundText{}, false
+	}
+	return *m.channelText, true
 }
 
 func (m DecisionCardMutation) ChannelAction() (operatorchannel.InboundAction, bool) {
@@ -126,6 +193,24 @@ func (m DecisionCardMutation) SameRequest(other DecisionCardMutation) bool {
 		return false
 	}
 	if m.channelAction != nil && *m.channelAction != *other.channelAction {
+		return false
+	}
+	if (m.channelText == nil) != (other.channelText == nil) {
+		return false
+	}
+	if m.channelText != nil && *m.channelText != *other.channelText {
+		return false
+	}
+	if (m.channelChoice == nil) != (other.channelChoice == nil) {
+		return false
+	}
+	if m.channelChoice != nil && *m.channelChoice != *other.channelChoice {
+		return false
+	}
+	if (m.channelSkip == nil) != (other.channelSkip == nil) {
+		return false
+	}
+	if m.channelSkip != nil && *m.channelSkip != *other.channelSkip {
 		return false
 	}
 	m.beginInput.TTL, other.beginInput.TTL = 0, 0
@@ -454,7 +539,7 @@ func (pc *PipelineCoordinator) prepareDecisionCardMutation(
 		}
 		req := mutation.beginInput
 		req.TTL = ttl
-		command.Mutation = NewDecisionCardInputBegin(req, mutation.observedContentHash)
+		command.Mutation.beginInput = req
 	}
 	if len(intents) == 0 {
 		if err := command.Validate(); err != nil {
