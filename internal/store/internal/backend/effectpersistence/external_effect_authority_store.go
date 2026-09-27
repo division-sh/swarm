@@ -67,6 +67,8 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		return serveRegistrationAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelConfirmation:
 		return channelConfirmationAuthorityCurrentPostgres(ctx, q, authority)
+	case runtimeeffects.AuthorityChannelDelivery:
+		return channelDeliveryAuthorityCurrent(ctx, q, authority, true, false)
 	default:
 		return false, nil
 	}
@@ -131,6 +133,8 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 		return serveRegistrationAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityChannelConfirmation:
 		return channelConfirmationAuthorityCurrentSQLite(ctx, q, authority)
+	case runtimeeffects.AuthorityChannelDelivery:
+		return channelDeliveryAuthorityCurrent(ctx, q, authority, false, false)
 	default:
 		return false, nil
 	}
@@ -178,7 +182,7 @@ func (s *EffectSQLiteOwner) RequireExternalEffectAuthorityTx(ctx context.Context
 }
 
 func externalEffectRunID(ctx context.Context, authority runtimeeffects.Authority) (string, bool, error) {
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe || authority.Kind == runtimeeffects.AuthorityServeRegistration || authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe || authority.Kind == runtimeeffects.AuthorityServeRegistration || authority.Kind == runtimeeffects.AuthorityChannelConfirmation || authority.Kind == runtimeeffects.AuthorityChannelDelivery {
 		return "", false, nil
 	}
 	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
@@ -331,6 +335,8 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			confirmation.PrincipalID, confirmation.BundleHash, confirmation.RuntimeInstanceID, confirmation.ContextPublicationGeneration,
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
+	case runtimeeffects.AuthorityChannelDelivery:
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, true)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -427,6 +433,8 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			confirmation.PrincipalID, confirmation.BundleHash, confirmation.RuntimeInstanceID, confirmation.ContextPublicationGeneration,
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
+	case runtimeeffects.AuthorityChannelDelivery:
+		return requireChannelDeliveryAuthorityTx(ctx, tx, authority, false)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -509,6 +517,8 @@ func externalEffectAttemptLeasePostgres(ctx context.Context, q schemaQueryer, au
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityChannelConfirmation:
 		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityChannelDelivery:
+		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease time.Time
 		err := q.QueryRowContext(ctx, `
@@ -545,6 +555,8 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 	case runtimeeffects.AuthorityServeRegistration:
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityChannelConfirmation:
+		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityChannelDelivery:
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease conversationForkTimeValue
