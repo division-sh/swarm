@@ -87,11 +87,11 @@ func TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwner
 			t.Fatalf("ResolveContainedOperationTarget(write[%d]): %v", idx, err)
 		}
 	}
-	if containedWrites[0].Key.Ref != "payload.lead_id" {
-		t.Fatalf("map set key = %#v, want explicit payload.lead_id ref", containedWrites[0].Key)
+	if key := containedWrites[0].Key; key.Kind != runtimecontracts.ExpressionKindCEL || key.CEL != "payload.lead_id" {
+		t.Fatalf("map set key = %#v, want typed payload.lead_id expression", key)
 	}
-	if containedWrites[2].Key.Ref != "payload.lead_id" {
-		t.Fatalf("map append key = %#v, want explicit payload.lead_id ref", containedWrites[2].Key)
+	if key := containedWrites[2].Key; key.Kind != runtimecontracts.ExpressionKindCEL || key.CEL != "payload.lead_id" {
+		t.Fatalf("map append key = %#v, want typed payload.lead_id expression", key)
 	}
 
 	plans, issues := compiledConnectPlans(source)
