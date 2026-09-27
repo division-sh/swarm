@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	"github.com/google/uuid"
 )
 
@@ -365,6 +366,9 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				ExecutionMode: "live", BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
 				Snapshot: freezeDecisionCardTestSnapshot(t, "review_check", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"accept": {Verdict: "accept", AdvancesTo: "done"},
+					"revise": {Verdict: "revise", AdvancesTo: "awaiting_review", Input: map[string]runtimecontracts.WorkflowGateInputField{
+						"feedback": {Type: "text", Required: true},
+					}, InputOrder: []string{"feedback"}},
 				}), CreatedAt: now,
 			})
 			if err != nil {
@@ -391,8 +395,17 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				t.Fatalf("planned card missing: %#v", plans)
 			}
 			prepared, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID)
-			if err != nil || len(prepared.Actions) != 1 || prepared.Actions[0].Kind != "verdict" {
+			if err != nil || len(prepared.Actions) != 2 {
 				t.Fatalf("prepared card = %#v, err=%v", prepared, err)
+			}
+			acceptToken := ""
+			for _, action := range prepared.Actions {
+				if action.Kind == "verdict" && action.Verdict == "accept" {
+					acceptToken = action.Token
+				}
+			}
+			if acceptToken == "" {
+				t.Fatalf("prepared card omitted accept: %#v", prepared.Actions)
 			}
 			operationID, err := runtimeeffects.ChannelDeliveryOperationID(candidate.DeliveryID, prepared.RenderID)
 			if err != nil {
@@ -437,7 +450,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			fact := operatorchannel.ActionFact{
 				Interface: binding.Interface, ExternalAccountRef: candidate.Audience.ExternalAccountRef,
 				ConversationRef: candidate.Audience.ConversationRef, ConversationScope: candidate.Audience.ConversationScope,
-				MessageReference: `{"id":91}`, InteractionRef: "callback-card-91", Token: prepared.Actions[0].Token,
+				MessageReference: `{"id":91}`, InteractionRef: "callback-card-91", Token: acceptToken,
 			}
 			demand := render.CardActionDemand{CardID: card.CardID, PrincipalID: principal.ID, Method: "mailbox.decide",
 				Verdict: "accept", ReceiptOperationID: operationID, RenderHash: prepared.Frozen.Hash}
@@ -454,8 +467,109 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			if err := require(fact, foreign); err == nil || !strings.Contains(err.Error(), "not current card authority") {
 				t.Fatalf("foreign verdict admission = %v", err)
 			}
-			if err := cards.SupersedeDecisionCardsForStage(ctx, runID, entityID, stageActivationID, "moved", now.Add(time.Minute)); err != nil {
+			draft, err := DecisionCardDomainForTest(cards).BeginInputForTest(ctx, decisioncard.BeginInputRequest{
+				CardID: card.CardID, Verdict: "revise", PrincipalID: principal.ID,
+				DeliveryReceiptID: operationID, Now: now.Add(30 * time.Second),
+			})
+			if err != nil {
 				t.Fatal(err)
+			}
+			prompted, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID)
+			if err != nil || !strings.Contains(prompted.Frozen.FullText, "Input: feedback (text) required") ||
+				prompted.Frozen.Hash == prepared.Frozen.Hash {
+				t.Fatalf("selected active draft prompt = %#v, %v", prompted, err)
+			}
+			selector, ok := cards.(interface {
+				HasCurrentChannelInputDraft(context.Context, operatorchannel.InboundText, time.Time) (bool, error)
+			})
+			if !ok {
+				t.Fatal("selected store lacks bare input classification")
+			}
+			text := operatorchannel.InboundText{
+				TextFact: operatorchannel.TextFact{
+					Interface: binding.Interface, ExternalAccountRef: candidate.Audience.ExternalAccountRef,
+					ConversationRef: candidate.Audience.ConversationRef, ConversationScope: candidate.Audience.ConversationScope,
+					Text: "feedback", MessageReference: `{"id":92}`,
+				}, Provider: activation.Provider, ProviderEventID: "bare-input-92",
+				PublicationID: uuid.NewString(), ProviderAuthorization: "verified-catalog",
+			}
+			if found, err := selector.HasCurrentChannelInputDraft(ctx, text, now.Add(time.Minute)); err != nil || !found {
+				t.Fatalf("current bare input draft = %t, %v", found, err)
+			}
+			admitText := func(fact operatorchannel.InboundText) {
+				t.Helper()
+				if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+					return channeldelivery.InsertTextIntentTx(txctx, tx, fact, now.Add(time.Minute), postgres)
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			admitText(text)
+			if drafts, next, err := selected.ListCurrentChannelInputDrafts(ctx, text, now.Add(time.Minute), "", 2); err != nil || len(drafts) != 1 || drafts[0].CardID != card.CardID || next != "" {
+				t.Fatalf("bare draft candidates = %+v next=%q err=%v", drafts, next, err)
+			}
+			input, ok := cards.(interface {
+				PreviewCurrentChannelInputDraftText(context.Context, operatorchannel.InboundText, time.Time, string) (decisioncard.InputFieldProgress, string, error)
+				AdvancePartialChannelInputDraftText(context.Context, operatorchannel.InboundText, time.Time, string) (decisioncard.InputFieldProgress, error)
+			})
+			if !ok {
+				t.Fatal("selected store lacks canonical channel input progression")
+			}
+			preview, actor, err := input.PreviewCurrentChannelInputDraftText(ctx, text, now.Add(time.Minute), draft.InputDraftID)
+			if err != nil || actor != principal.ID || !preview.Complete || preview.AcceptedField != "feedback" {
+				t.Fatalf("final input preview = %+v actor=%q err=%v", preview, actor, err)
+			}
+			if _, err := input.AdvancePartialChannelInputDraftText(ctx, text, now.Add(time.Minute), draft.InputDraftID); err == nil || !strings.Contains(err.Error(), "canonical decision") {
+				t.Fatalf("partial owner accepted final field: %v", err)
+			}
+			quoted := text
+			quoted.PublicationID = uuid.NewString()
+			quoted.ProviderEventID = "quoted-input-93"
+			quoted.MessageReference = `{"id":93}`
+			quoted.ReplyToReference = `{"id":91}`
+			admitText(quoted)
+			if drafts, next, err := selected.ListCurrentChannelInputDrafts(ctx, quoted, now.Add(time.Minute), "", 2); err != nil || len(drafts) != 1 || drafts[0].CardID != card.CardID || next != "" {
+				t.Fatalf("quoted draft candidates = %+v next=%q err=%v", drafts, next, err)
+			}
+			if preview, actor, err := input.PreviewCurrentChannelInputDraftText(ctx, quoted, now.Add(time.Minute), draft.InputDraftID); err != nil || actor != principal.ID || !preview.Complete {
+				t.Fatalf("quoted exact input preview = %+v actor=%q err=%v", preview, actor, err)
+			}
+			unknownQuote := quoted
+			unknownQuote.PublicationID = uuid.NewString()
+			unknownQuote.ProviderEventID = "unknown-quote-94"
+			unknownQuote.ReplyToReference = `{"id":999}`
+			admitText(unknownQuote)
+			if drafts, next, err := selected.ListCurrentChannelInputDrafts(ctx, unknownQuote, now.Add(time.Minute), "", 2); err != nil || len(drafts) != 0 || next != "" {
+				t.Fatalf("unknown quote fell back to bare draft: %+v next=%q err=%v", drafts, next, err)
+			}
+			if _, _, err := input.PreviewCurrentChannelInputDraftText(ctx, unknownQuote, now.Add(time.Minute), draft.InputDraftID); err == nil {
+				t.Fatal("unknown quote preview fell back to bare draft")
+			}
+			foreignText := text
+			foreignText.ExternalAccountRef = "foreign-account"
+			if found, err := selector.HasCurrentChannelInputDraft(ctx, foreignText, now.Add(time.Minute)); err != nil || found {
+				t.Fatalf("foreign bare input draft = %t, %v", found, err)
+			}
+			if found, err := selector.HasCurrentChannelInputDraft(ctx, text, now.Add(16*time.Minute)); err != nil || found {
+				t.Fatalf("expired bare input draft = %t, %v", found, err)
+			}
+			if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+				_, err := decisionpersistence.AdvanceInputDraftTextTx(txctx, tx, draft.InputDraftID, principal.ID,
+					"private-answer", now.Add(2*time.Minute), postgres)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			completed, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID)
+			if err != nil || !strings.Contains(completed.Frozen.FullText, "Input complete; decision pending") ||
+				strings.Contains(string(completed.Frozen.Input), "private-answer") || completed.Frozen.Hash == prompted.Frozen.Hash {
+				t.Fatalf("selected completed draft render = %#v, %v", completed, err)
+			}
+			if err := cards.SupersedeDecisionCardsForStage(ctx, runID, entityID, stageActivationID, "moved", now.Add(3*time.Minute)); err != nil {
+				t.Fatal(err)
+			}
+			if found, err := selector.HasCurrentChannelInputDraft(ctx, text, now.Add(4*time.Minute)); err != nil || found {
+				t.Fatalf("superseded bare input draft = %t, %v", found, err)
 			}
 			if _, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID); err != nil {
 				t.Fatal(err)

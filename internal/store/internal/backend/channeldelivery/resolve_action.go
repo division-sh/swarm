@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/google/uuid"
 )
@@ -36,8 +37,9 @@ func ResolveActionFactForMutationTx(ctx context.Context, tx *sql.Tx, fact operat
 // before idempotency replay and again in the card write transaction.
 func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, demand render.CardActionDemand, postgres, lock bool) error {
 	if uuid.Validate(demand.CardID) != nil || uuid.Validate(demand.PrincipalID) != nil ||
-		uuid.Validate(demand.ReceiptOperationID) != nil || demand.Verdict == "" ||
-		(demand.Method != "mailbox.decide" && demand.Method != "mailbox.begin_input") ||
+		(demand.Method != "mailbox.decide" && demand.Method != "mailbox.begin_input" && demand.Method != "mailbox.cancel_input") ||
+		(demand.Method == "mailbox.cancel_input" && uuid.Validate(demand.DraftID) != nil) ||
+		(demand.Method != "mailbox.cancel_input" && (uuid.Validate(demand.ReceiptOperationID) != nil || demand.Verdict == "")) ||
 		(demand.Method == "mailbox.decide" && demand.RenderHash == "") {
 		return fmt.Errorf("channel card action demand is incomplete")
 	}
@@ -54,8 +56,9 @@ func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 	}
 	if !found || !resolved.CurrentRender || resolved.SourceKind != "card" ||
 		resolved.SourceID != demand.CardID || resolved.PrincipalID != demand.PrincipalID ||
-		resolved.Action.Kind != "verdict" || resolved.Action.Verdict != demand.Verdict ||
-		resolved.ReceiptOperationID != demand.ReceiptOperationID ||
+		(demand.Method == "mailbox.cancel_input" && (resolved.Action.Kind != "cancel_input" || resolved.Action.DraftID != demand.DraftID)) ||
+		(demand.Method != "mailbox.cancel_input" && (resolved.Action.Kind != "verdict" || resolved.Action.Verdict != demand.Verdict ||
+			resolved.ReceiptOperationID != demand.ReceiptOperationID)) ||
 		(demand.Method == "mailbox.decide" && resolved.RenderHash != demand.RenderHash) {
 		return fmt.Errorf("channel action is not current card authority")
 	}
@@ -113,9 +116,9 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if uuid.Validate(fact.Token) != nil {
 		return render.ResolvedAction{}, false, nil
 	}
-	query := `SELECT action.action_token, action.action_kind, action.verdict, action.label,
-		plan.delivery_id, render.render_id, render.render_hash, receipt.effect_operation_id,
-		plan.source_kind, plan.source_id, plan.principal_id, selected.binding_revision,
+	query := `SELECT action.action_token, action.action_kind, action.verdict, action.label, action.action_position,
+		plan.delivery_id, render.render_id, render.render_hash, render.render_input, receipt.effect_operation_id,
+		plan.source_kind, plan.source_id, plan.principal_id, binding.binding_revision,
 		activation.activation_id, activation.activation_revision,
 		plan.current_render_id=render.render_id, receipt.provider_reference
 		FROM channel_delivery_actions action
@@ -123,32 +126,35 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 		JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
 		JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
 		JOIN channel_delivery_defaults selected ON selected.singleton_id=1
-		JOIN operator_channel_bindings binding ON binding.interface_key=selected.interface_key
+		JOIN operator_channel_bindings binding ON binding.interface_key=plan.interface_key
 		JOIN channel_onboarding_operations onboarding ON onboarding.identity_operation_id=binding.operation_id
 		JOIN connected_channel_activations activation ON activation.operation_id=onboarding.operation_id
 		WHERE action.action_token=? AND plan.interface_key=?
 		AND plan.external_account_reference=? AND plan.conversation_reference=? AND plan.conversation_scope=?
 		AND selected.state='current' AND selected.principal_id=plan.principal_id
-		AND selected.interface_key=plan.interface_key AND selected.delivery_epoch=plan.delivery_epoch
-		AND selected.external_account_reference=plan.external_account_reference
-		AND selected.conversation_reference=plan.conversation_reference
-		AND selected.conversation_scope=plan.conversation_scope
-		AND binding.status='current' AND binding.principal_id=selected.principal_id
-		AND binding.binding_revision=selected.binding_revision
-		AND binding.external_account_reference=selected.external_account_reference
-		AND binding.conversation_reference=selected.conversation_reference
-		AND binding.conversation_scope=selected.conversation_scope
+		AND selected.delivery_epoch=plan.delivery_epoch
+		AND binding.status='current' AND binding.principal_id=plan.principal_id
+		AND binding.binding_revision>=plan.binding_revision
+		AND binding.external_account_reference=plan.external_account_reference
+		AND binding.conversation_reference=plan.conversation_reference
+		AND binding.conversation_scope=plan.conversation_scope
+		AND ((plan.source_kind='response' AND activation.activation_id=plan.request_activation_id)
+		 OR (plan.source_kind<>'response' AND selected.interface_key=plan.interface_key
+			AND selected.binding_revision=binding.binding_revision
+			AND selected.external_account_reference=plan.external_account_reference
+			AND selected.conversation_reference=plan.conversation_reference
+			AND selected.conversation_scope=plan.conversation_scope))
 		AND onboarding.phase='succeeded' AND activation.status='current'
-		AND activation.principal_id=selected.principal_id AND activation.interface_key=selected.interface_key
-		AND activation.binding_revision=selected.binding_revision
-		AND activation.conversation_reference=selected.conversation_reference
+		AND activation.principal_id=plan.principal_id AND activation.interface_key=plan.interface_key
+		AND activation.binding_revision=binding.binding_revision
+		AND activation.conversation_reference=plan.conversation_reference
 		AND receipt.state='sent' AND receipt.delivery_id=plan.delivery_id
 		AND receipt.render_id=render.render_id
 		LIMIT 2`
 	if postgres {
-		query = `SELECT action.action_token::text, action.action_kind, action.verdict, action.label,
-			plan.delivery_id::text, render.render_id::text, render.render_hash, receipt.effect_operation_id::text,
-			plan.source_kind, plan.source_id::text, plan.principal_id::text, selected.binding_revision,
+		query = `SELECT action.action_token::text, action.action_kind, action.verdict, action.label, action.action_position,
+			plan.delivery_id::text, render.render_id::text, render.render_hash, render.render_input, receipt.effect_operation_id::text,
+			plan.source_kind, plan.source_id::text, plan.principal_id::text, binding.binding_revision,
 			activation.activation_id::text, activation.activation_revision,
 			plan.current_render_id=render.render_id, receipt.provider_reference
 			FROM channel_delivery_actions action
@@ -156,25 +162,28 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 			JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
 			JOIN channel_delivery_receipts receipt ON receipt.effect_operation_id=plan.current_receipt_operation_id
 			JOIN channel_delivery_defaults selected ON selected.singleton_id=1
-			JOIN operator_channel_bindings binding ON binding.interface_key=selected.interface_key
+			JOIN operator_channel_bindings binding ON binding.interface_key=plan.interface_key
 			JOIN channel_onboarding_operations onboarding ON onboarding.identity_operation_id=binding.operation_id
 			JOIN connected_channel_activations activation ON activation.operation_id=onboarding.operation_id
 			WHERE action.action_token=$1::uuid AND plan.interface_key=$2
 			AND plan.external_account_reference=$3 AND plan.conversation_reference=$4 AND plan.conversation_scope=$5
 			AND selected.state='current' AND selected.principal_id=plan.principal_id
-			AND selected.interface_key=plan.interface_key AND selected.delivery_epoch=plan.delivery_epoch
-			AND selected.external_account_reference=plan.external_account_reference
-			AND selected.conversation_reference=plan.conversation_reference
-			AND selected.conversation_scope=plan.conversation_scope
-			AND binding.status='current' AND binding.principal_id=selected.principal_id
-			AND binding.binding_revision=selected.binding_revision
-			AND binding.external_account_reference=selected.external_account_reference
-			AND binding.conversation_reference=selected.conversation_reference
-			AND binding.conversation_scope=selected.conversation_scope
+			AND selected.delivery_epoch=plan.delivery_epoch
+			AND binding.status='current' AND binding.principal_id=plan.principal_id
+			AND binding.binding_revision>=plan.binding_revision
+			AND binding.external_account_reference=plan.external_account_reference
+			AND binding.conversation_reference=plan.conversation_reference
+			AND binding.conversation_scope=plan.conversation_scope
+			AND ((plan.source_kind='response' AND activation.activation_id=plan.request_activation_id)
+			 OR (plan.source_kind<>'response' AND selected.interface_key=plan.interface_key
+				AND selected.binding_revision=binding.binding_revision
+				AND selected.external_account_reference=plan.external_account_reference
+				AND selected.conversation_reference=plan.conversation_reference
+				AND selected.conversation_scope=plan.conversation_scope))
 			AND onboarding.phase='succeeded' AND activation.status='current'
-			AND activation.principal_id=selected.principal_id AND activation.interface_key=selected.interface_key
-			AND activation.binding_revision=selected.binding_revision
-			AND activation.conversation_reference=selected.conversation_reference
+			AND activation.principal_id=plan.principal_id AND activation.interface_key=plan.interface_key
+			AND activation.binding_revision=binding.binding_revision
+			AND activation.conversation_reference=plan.conversation_reference
 			AND receipt.state='sent' AND receipt.delivery_id=plan.delivery_id
 			AND receipt.render_id=render.render_id
 			LIMIT 2`
@@ -190,12 +199,14 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	defer rows.Close()
 	var resolved render.ResolvedAction
 	var referenceRaw []byte
+	var renderRaw []byte
+	var position int
 	var verdict sql.NullString
 	if !rows.Next() {
 		return render.ResolvedAction{}, false, rows.Err()
 	}
-	if err := rows.Scan(&resolved.Action.Token, &resolved.Action.Kind, &verdict, &resolved.Action.Label,
-		&resolved.DeliveryID, &resolved.RenderID, &resolved.RenderHash, &resolved.ReceiptOperationID,
+	if err := rows.Scan(&resolved.Action.Token, &resolved.Action.Kind, &verdict, &resolved.Action.Label, &position,
+		&resolved.DeliveryID, &resolved.RenderID, &resolved.RenderHash, &renderRaw, &resolved.ReceiptOperationID,
 		&resolved.SourceKind, &resolved.SourceID, &resolved.PrincipalID, &resolved.BindingRevision,
 		&resolved.ActivationID, &resolved.ActivationRevision, &resolved.CurrentRender, &referenceRaw); err != nil {
 		return render.ResolvedAction{}, false, err
@@ -208,6 +219,27 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	}
 	if verdict.Valid {
 		resolved.Action.Verdict = verdict.String
+	}
+	renderRaw, err = canonicaljson.Canonicalize(renderRaw)
+	if err != nil {
+		return render.ResolvedAction{}, false, fmt.Errorf("canonicalize exact channel action render: %w", err)
+	}
+	frozen, err := render.Decode(renderRaw, resolved.RenderHash)
+	if err != nil {
+		return render.ResolvedAction{}, false, fmt.Errorf("decode exact channel action render: %w", err)
+	}
+	expected, err := actionsForFrozen(frozen)
+	if err != nil || position < 1 || position > len(expected) {
+		return render.ResolvedAction{}, false, fmt.Errorf("channel action position contradicts immutable render: %w", err)
+	}
+	if choice := expected[position-1]; choice.Kind != resolved.Action.Kind ||
+		choice.Verdict != resolved.Action.Verdict || choice.Label != resolved.Action.Label {
+		return render.ResolvedAction{}, false, fmt.Errorf("channel action contradicts immutable render projection")
+	} else {
+		resolved.Action.DraftID = choice.DraftID
+		resolved.Action.CardID = choice.CardID
+		resolved.Action.TextPublicationID = choice.TextPublicationID
+		resolved.Action.RecoveryDeliveryID = choice.RecoveryDeliveryID
 	}
 	if resolved.Action.Token != fact.Token || resolved.Action.Label == "" ||
 		resolved.ActivationID == "" || resolved.BindingRevision < 1 || resolved.ActivationRevision < 1 {
