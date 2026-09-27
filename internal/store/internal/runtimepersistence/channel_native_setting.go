@@ -64,3 +64,27 @@ func (s *SQLiteRuntimeStore) RetireStaleNativeInboxConsumers(ctx context.Context
 		return channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, false)
 	})
 }
+
+func (s *PostgresStore) MarkNativeInboxSettingUnavailable(ctx context.Context, settingID string, generation int64) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("postgres native inbox setting store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.MarkNativeInboxSettingUnavailableTx(txctx, tx, settingID, generation, true)
+	})
+}
+
+func (s *SQLiteRuntimeStore) MarkNativeInboxSettingUnavailable(ctx context.Context, settingID string, generation int64) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("sqlite native inbox setting store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, "mark native inbox setting unavailable", func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.MarkNativeInboxSettingUnavailableTx(txctx, tx, settingID, generation, false)
+	})
+}
