@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -384,8 +385,8 @@ func assertIssue2394RegistrationDelivery(t *testing.T, event operatorread.Operat
 		t.Fatalf("registration requires one root consumer: %+v", event)
 	}
 	delivery := event.Deliveries[0]
-	if delivery.SubscriberType != "node" || delivery.SubscriberID != "numeric-registration-reporter" || !delivery.Terminal || delivery.Status != "delivered" {
-		t.Fatalf("registration root delivery = %+v", delivery)
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != identitytest.FlowNode(t, "", "numeric-registration-reporter").Key() || !delivery.Terminal || delivery.Status != "delivered" {
+		t.Fatalf("registration root delivery: type=%q id=%q status=%q terminal=%t", delivery.SubscriberType, delivery.SubscriberID, delivery.Status, delivery.Terminal)
 	}
 }
 
