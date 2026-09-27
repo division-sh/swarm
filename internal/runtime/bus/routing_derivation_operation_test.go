@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -31,13 +34,29 @@ func (s *topologyOperationSource) AuthoredEventEntries() map[string]runtimecontr
 }
 
 type topologyOperationDescriptors struct {
-	rows  []ActiveFlowInstanceDescriptor
-	calls int
+	rows          []ActiveFlowInstanceDescriptor
+	calls         int
+	scopedCalls   int
+	templateScope [][]string
+	instanceScope [][]string
 }
 
 func (s *topologyOperationDescriptors) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
 	s.calls++
 	return append([]ActiveFlowInstanceDescriptor(nil), s.rows...), nil
+}
+
+func (s *topologyOperationDescriptors) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, _ string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.scopedCalls++
+	s.templateScope = append(s.templateScope, append([]string(nil), templateIDs...))
+	s.instanceScope = append(s.instanceScope, append([]string(nil), instancePaths...))
+	var out []ActiveFlowInstanceDescriptor
+	for _, row := range s.rows {
+		if slices.Contains(templateIDs, row.FlowTemplate) || slices.Contains(instancePaths, row.FlowInstance) {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 func topologyOperationFixture(t testing.TB) (*topologyOperationSource, *EventBus) {
@@ -85,8 +104,8 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 1 || len(got) != len(plans) {
-		t.Fatalf("publication work: censuses=%d reads=%d routes=%d", source.censuses.Load(), lister.calls, len(got))
+	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 0 || len(got) != len(plans) {
+		t.Fatalf("independent publication work: censuses=%d full_reads=%d scoped_reads=%d routes=%d", source.censuses.Load(), lister.calls, lister.scopedCalls, len(got))
 	}
 	independent, err := DeriveRouteTable(source.Source)
 	if err != nil {
@@ -109,14 +128,82 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	if want := flowInstanceRouteTopologyRecordSets(independent, identities); !reflect.DeepEqual(got, want) {
 		t.Fatalf("publication changed route evidence: got=%+v want=%+v", got, want)
 	}
-	// Another call must still reread and strictly admit the current descriptors.
+	// Unrelated descriptors, even hostile ones, are outside this activation's
+	// compiled dependency scope and must not be loaded or affect its routes.
 	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "workers/outsider"}}
 	source.censuses.Store(0)
-	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans); err == nil || !strings.Contains(err.Error(), "escaped selected run") {
-		t.Fatalf("foreign descriptor admitted: %v", err)
+	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans); err != nil {
+		t.Fatalf("unrelated descriptor affected independent activation: %v", err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 2 {
-		t.Fatalf("publication reused an earlier census/descriptor read: censuses=%d reads=%d", source.censuses.Load(), lister.calls)
+	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 0 {
+		t.Fatalf("independent activation read unrelated descriptors: censuses=%d full_reads=%d scoped_reads=%d", source.censuses.Load(), lister.calls, lister.scopedCalls)
+	}
+}
+
+func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.T) {
+	source, eb := topologyOperationFixture(t)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := routeTemplateSourceObserver{
+		RunID: busInternalTestRunID, SourceTemplatePath: "workers", SourceLocalEvent: "item.reported",
+		Subscriber:             Subscriber{Recipient: events.MustAgentDeliveryRecipient("observer-agent")},
+		SubscriberInstancePath: "workers/observer",
+	}
+	table.addTemplateSourceObserverLocked(observer)
+	eb.routeTable = table
+	old := topologyOperationIdentity(t, "old")
+	newPlan := runtimepipeline.FlowInstanceActivationPlan{
+		Identity:  runtimeflowidentity.Derive(source, "workers", "new"),
+		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
+	}
+	selected := ActiveFlowInstanceDescriptor{
+		RunID: busInternalTestRunID, InstanceID: old.Route.InstanceID,
+		FlowInstance: old.Route.InstancePath, FlowTemplate: "workers",
+		BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+	}
+	// This row would fail validation if a full-run read leaked into this operation.
+	unrelated := ActiveFlowInstanceDescriptor{RunID: "foreign-run", FlowInstance: "collector", FlowTemplate: "collector"}
+	lister := &topologyOperationDescriptors{rows: []ActiveFlowInstanceDescriptor{unrelated, selected}}
+	eb.durable.ActiveFlows = lister
+	source.censuses.Store(0)
+	got, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{newPlan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 1 || !reflect.DeepEqual(lister.templateScope[0], []string{"workers"}) || len(lister.instanceScope[0]) != 0 {
+		t.Fatalf("dependency reads: censuses=%d full=%d scoped=%d templates=%#v paths=%#v", source.censuses.Load(), lister.calls, lister.scopedCalls, lister.templateScope, lister.instanceScope)
+	}
+	newOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(busInternalTestRunID, newPlan.Identity.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	oracle, err := DeriveRouteTable(source.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oracle.addTemplateSourceObserverLocked(observer)
+	for _, identity := range []runtimeflowidentity.RunScopedFlowInstance{old, newOwner} {
+		if err := oracle.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := flowInstanceRouteTopologyRecordSets(oracle, []runtimeflowidentity.RunScopedFlowInstance{old, newOwner})
+	sort.Slice(got, func(i, j int) bool { return got[i].Identity.Route.InstancePath < got[j].Identity.Route.InstancePath })
+	sort.Slice(want, func(i, j int) bool { return want[i].Identity.Route.InstancePath < want[j].Identity.Route.InstancePath })
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scoped topology differs from full derivation: got=%#v want=%#v", got, want)
+	}
+
+	// Selected-scope corruption is still rejected, rather than masked by the
+	// exclusion of unrelated run rows.
+	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "workers/hostile", FlowTemplate: "workers"}}
+	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{newPlan}); err == nil || !strings.Contains(err.Error(), "escaped selected run") {
+		t.Fatalf("selected foreign descriptor admission = %v, want refusal", err)
+	}
+	if lister.calls != 0 || lister.scopedCalls != 2 {
+		t.Fatalf("selected foreign descriptor bypassed scoped read: full=%d scoped=%d", lister.calls, lister.scopedCalls)
 	}
 }
 
@@ -145,7 +232,7 @@ func BenchmarkFlowInstanceActivationRouteTopology64(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sets, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans)
-		if err != nil || len(sets) != 65 {
+		if err != nil || len(sets) != 1 {
 			b.Fatalf("sets=%d err=%v", len(sets), err)
 		}
 	}

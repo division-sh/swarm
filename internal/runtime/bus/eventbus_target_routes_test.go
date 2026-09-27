@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,6 +60,18 @@ func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context, st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]ActiveTargetDescriptor(nil), s.targetOwners...), nil
+}
+
+func (s *targetRouteMemoryStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, instancePaths []string) ([]ActiveTargetDescriptor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var selected []ActiveTargetDescriptor
+	for _, owner := range s.targetOwners {
+		if slices.Contains(instancePaths, owner.FlowInstance) {
+			selected = append(selected, owner)
+		}
+	}
+	return selected, nil
 }
 
 func (s *targetRouteMemoryStore) setTargetOwners(owners ...ActiveTargetDescriptor) {
