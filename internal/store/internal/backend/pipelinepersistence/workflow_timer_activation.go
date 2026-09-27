@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -57,6 +58,38 @@ func (s *PipelineSQLiteOwner) ListWorkflowTimerActivations(ctx context.Context, 
 	return listWorkflowTimerActivations(ctx, s.backend, true, runID, entityID, activeOnly)
 }
 
+func (s *PipelinePostgresOwner) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimepipeline.WorkflowTimerActivation, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres workflow timer reader is required")
+	}
+	return listActiveWorkflowTimerActivationsForRoute(ctx, s.backend, false, identity)
+}
+
+func (s *PipelineSQLiteOwner) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimepipeline.WorkflowTimerActivation, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite workflow timer reader is required")
+	}
+	return listActiveWorkflowTimerActivationsForRoute(ctx, s.backend, true, identity)
+}
+
+func listActiveWorkflowTimerActivationsForRoute(ctx context.Context, db dynamicFlowReadinessQueryer, sqlite bool, identity runtimeflowidentity.RunScopedFlowInstance) ([]runtimepipeline.WorkflowTimerActivation, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	where := "t.run_id = $1::uuid AND t.flow_instance = $2"
+	if sqlite {
+		where = "t.run_id = ? AND t.flow_instance = ?"
+	}
+	query := workflowTimerSelectColumns() + " WHERE " + where + " AND t.task_type = 'workflow_timer' AND t.status = 'active' ORDER BY t.created_at, t.timer_id"
+	rows, err := db.QueryContext(ctx, query, identity.RunID, identity.Route.InstancePath)
+	if err != nil {
+		return nil, fmt.Errorf("list active workflow timer activations for route: %w", err)
+	}
+	defer rows.Close()
+	return scanWorkflowTimerActivations(rows)
+}
+
 func listWorkflowTimerActivations(ctx context.Context, db dynamicFlowReadinessQueryer, sqlite bool, runID, entityID string, activeOnly bool) ([]runtimepipeline.WorkflowTimerActivation, error) {
 	query := workflowTimerActivationSelect(true, sqlite)
 	runID = strings.TrimSpace(runID)
@@ -75,6 +108,10 @@ func listWorkflowTimerActivations(ctx context.Context, db dynamicFlowReadinessQu
 		return nil, fmt.Errorf("list workflow timer activations: %w", err)
 	}
 	defer rows.Close()
+	return scanWorkflowTimerActivations(rows)
+}
+
+func scanWorkflowTimerActivations(rows *sql.Rows) ([]runtimepipeline.WorkflowTimerActivation, error) {
 	result := make([]runtimepipeline.WorkflowTimerActivation, 0)
 	for rows.Next() {
 		activation, err := scanWorkflowTimerActivation(rows)

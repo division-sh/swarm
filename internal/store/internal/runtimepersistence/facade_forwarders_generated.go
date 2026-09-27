@@ -503,6 +503,10 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Co
 	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, instancePaths)
 }
 
+func (s *PostgresStore) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]pipeline.WorkflowTimerActivation, error) {
+	return s.pipelinePostgresOwner.ListActiveWorkflowTimerActivationsForRoute(ctx, identity)
+}
+
 func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
 	return s.operatorAgentPostgres.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
@@ -1741,6 +1745,10 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptorsForKey(ctx context
 
 func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs []string, instancePaths []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
 	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, instancePaths)
+}
+
+func (s *SQLiteRuntimeStore) ListActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity flowidentity.RunScopedFlowInstance) ([]pipeline.WorkflowTimerActivation, error) {
+	return s.pipelineSQLiteOwner.ListActiveWorkflowTimerActivationsForRoute(ctx, identity)
 }
 
 func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {

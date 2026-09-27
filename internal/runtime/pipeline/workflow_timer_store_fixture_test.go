@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -145,6 +146,39 @@ func (s *workflowInstanceStore) listWorkflowTimerActivations(ctx context.Context
 	rows, err := exec.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list workflow timer activations: %w", err)
+	}
+	defer rows.Close()
+	out := make([]WorkflowTimerActivation, 0)
+	for rows.Next() {
+		activation, err := scanWorkflowTimerActivation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan workflow timer activation: %w", err)
+		}
+		out = append(out, activation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *workflowInstanceStore) listTestActiveWorkflowTimerActivationsForRoute(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance) ([]WorkflowTimerActivation, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	exec := workflowTimerQueryer(s.testDB())
+	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
+		exec = tx
+	}
+	where := "t.run_id = $1 AND t.flow_instance = $2"
+	if s.isSQLite() {
+		where = "t.run_id = ? AND t.flow_instance = ?"
+	}
+	query := workflowTimerSelectColumns() + " WHERE " + where + " AND t.task_type = 'workflow_timer' AND t.status = 'active' ORDER BY t.created_at, t.timer_id"
+	rows, err := exec.QueryContext(ctx, query, identity.RunID, identity.Route.InstancePath)
+	if err != nil {
+		return nil, fmt.Errorf("list active workflow timer activations for route: %w", err)
 	}
 	defer rows.Close()
 	out := make([]WorkflowTimerActivation, 0)

@@ -634,14 +634,17 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			if len(rows) != 2 {
 				t.Fatalf("active initial/event timers = %d, want 2: %#v", len(rows), rows)
 			}
-			var eventRef timeridentity.WorkflowTimerActivationRef
+			var eventRef, initialRef timeridentity.WorkflowTimerActivationRef
 			for _, row := range rows {
 				if row.Ref.Cause == timeridentity.WorkflowTimerActivationCauseEvent {
 					eventRef = row.Ref
 				}
+				if row.Ref.Cause == timeridentity.WorkflowTimerActivationCauseInitial {
+					initialRef = row.Ref
+				}
 			}
-			if !eventRef.Valid() {
-				t.Fatal("event-caused timer activation is missing")
+			if !eventRef.Valid() || !initialRef.Valid() {
+				t.Fatal("initial- or event-caused timer activation is missing")
 			}
 
 			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
@@ -665,6 +668,31 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 				active, draining := workflowTimerScheduledCounts(scheduler)
 				return active == 2 && draining == 0
 			}, "initial retry and preserved event wakeups")
+			if _, err := store.testDB().ExecContext(ctx, `DELETE FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runtimecorrelation.RunIDFromContext(ctx), rootRoute.InstancePath); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
+				t.Fatalf("retire initial wakeups after instance projection loss: %v", err)
+			}
+			waitForWorkflowTimerCondition(t, time.Second, func() bool {
+				active, draining := workflowTimerScheduledCounts(scheduler)
+				return active == 1 && draining == 0
+			}, "event wakeup preserved after instance projection loss")
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
+				t.Fatalf("repeat initial wakeup retirement after instance projection loss: %v", err)
+			}
+			if _, err := store.testDB().ExecContext(ctx, `UPDATE timers SET flow_instance=$1, timer_name=$2 WHERE timer_id=$3`, "other-route", "malformed", eventRef.ActivationID); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err != nil {
+				t.Fatalf("unrelated malformed timer blocked exact retirement: %v", err)
+			}
+			if _, err := store.testDB().ExecContext(ctx, `UPDATE timers SET timer_name=$1 WHERE timer_id=$2`, "malformed", initialRef.ActivationID); err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testRunScopedWorkflowRoute(ctx, rootRoute)); err == nil {
+				t.Fatal("matching malformed timer must fail closed")
+			}
 		})
 	}
 }
