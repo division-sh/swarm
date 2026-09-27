@@ -126,6 +126,27 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	}
 }
 
+func TestChannelResponseFreezesRequestedAudienceAndContent(t *testing.T) {
+	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 3,
+		ExternalAccountRef: "account", ConversationRef: "shared", ConversationScope: operatorchannel.ConversationScopeShared}
+	publicationID := uuid.NewString()
+	frozen, err := FreezeResponse(publicationID, "Inbox\nUnread notices: 2", audience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(frozen.Input, frozen.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.SourceKind != "response" || decoded.SourceID != publicationID || decoded.Audience != audience ||
+		decoded.FullText != "Inbox\nUnread notices: 2" || len(decoded.Choices) != 0 {
+		t.Fatalf("frozen response changed on readback: %#v", decoded)
+	}
+	if _, err := FreezeResponse(publicationID, " ", audience); err == nil {
+		t.Fatal("empty channel response was admitted")
+	}
+}
+
 func TestChannelRenderNoticeIsRunlessAndHasNoDecisionActions(t *testing.T) {
 	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 1,
 		ExternalAccountRef: "account", ConversationRef: "direct", ConversationScope: operatorchannel.ConversationScopeDirect}

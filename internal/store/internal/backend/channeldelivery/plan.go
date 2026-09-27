@@ -15,6 +15,7 @@ type Plan struct {
 	DeliveryID             string
 	SourceKind             string
 	SourceID               string
+	EntryActivationID      string
 	SummaryCount           int64
 	PrincipalID            string
 	InterfaceKey           string
@@ -33,6 +34,7 @@ const (
 	PlanNotice       = "notice"
 	PlanCard         = "card"
 	PlanSummary      = "summary"
+	PlanResponse     = "response"
 	PlanStatePlanned = "planned"
 )
 
@@ -40,19 +42,19 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 	if db == nil || uuid.Validate(deliveryID) != nil {
 		return Plan{}, false, fmt.Errorf("channel delivery plan requires a store and delivery id")
 	}
-	query := `SELECT delivery_id, source_kind, source_id, COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
+	query := `SELECT delivery_id, source_kind, source_id, COALESCE(entry_activation_id, ''), COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
 		external_account_reference, conversation_reference, conversation_scope, state,
 		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, '')
 		FROM channel_delivery_plans WHERE delivery_id = ?`
 	if postgres {
-		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
+		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(entry_activation_id::text, ''), COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
 			external_account_reference, conversation_reference, conversation_scope, state,
 			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, '')
 			FROM channel_delivery_plans WHERE delivery_id = $1::uuid`
 	}
 	var plan Plan
 	var scope string
-	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.SummaryCount,
+	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.EntryActivationID, &plan.SummaryCount,
 		&plan.PrincipalID, &plan.InterfaceKey, &plan.BindingRevision, &plan.DeliveryEpoch, &plan.ExternalAccountRef,
 		&plan.ConversationRef, &scope, &plan.State, &plan.CurrentRenderID, &plan.CurrentReceiptID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -78,13 +80,20 @@ func (p Plan) Validate() error {
 		return fmt.Errorf("selected binding revision predates channel delivery plan")
 	}
 	switch p.SourceKind {
-	case PlanNotice, PlanCard:
+	case PlanNotice, PlanCard, PlanResponse:
 		if p.SummaryCount != 0 {
 			return fmt.Errorf("non-summary delivery plan has summary count")
+		}
+		if (p.SourceKind == PlanResponse && uuid.Validate(p.EntryActivationID) != nil) ||
+			(p.SourceKind != PlanResponse && p.EntryActivationID != "") {
+			return fmt.Errorf("channel response activation ownership is invalid")
 		}
 	case PlanSummary:
 		if p.SummaryCount < 1 {
 			return fmt.Errorf("summary delivery plan has no notices")
+		}
+		if p.EntryActivationID != "" {
+			return fmt.Errorf("summary delivery has response activation")
 		}
 	default:
 		return fmt.Errorf("stored channel delivery source kind is invalid")
