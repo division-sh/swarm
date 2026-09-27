@@ -86,7 +86,13 @@ func checkStageGateValidation(c *checkerContext) []Finding {
 }
 
 func validateStageGateContextExpression(expression runtimecontracts.ExpressionValue, entityType *runtimecontracts.ResolvedCatalogType, known ...string) error {
-	text := stageGateExpressionText(expression)
+	if expression.HasLiteralValue() {
+		return nil
+	}
+	if !expression.HasCELValue() {
+		return fmt.Errorf("unsupported gate context expression kind %q", expression.Kind)
+	}
+	text := strings.TrimSpace(expression.CEL)
 	if text == "" {
 		return fmt.Errorf("expression is empty")
 	}
@@ -206,10 +212,6 @@ func stageGateExpressionText(expression runtimecontracts.ExpressionValue) string
 		return strings.TrimSpace(expression.CEL)
 	case runtimecontracts.ExpressionKindRef:
 		return strings.TrimSpace(expression.Ref)
-	default:
-		if text, ok := expression.Literal.(string); ok {
-			return strings.TrimSpace(text)
-		}
 	}
 	return ""
 }

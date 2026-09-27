@@ -412,6 +412,11 @@ func decodeExpressionValueNode(node *yaml.Node) (ExpressionValue, error) {
 	if node == nil || node.Kind == 0 {
 		return ExpressionValue{}, nil
 	}
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return ExpressionValue{}, err
+	}
+	node = resolved
 	switch node.Kind {
 	case yaml.ScalarNode:
 		if node.Tag == "!!str" || (node.Tag == "" && node.Style == yaml.DoubleQuotedStyle) {

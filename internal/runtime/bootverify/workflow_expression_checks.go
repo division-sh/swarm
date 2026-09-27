@@ -8,8 +8,10 @@ import (
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -102,6 +104,44 @@ func (c *checkerContext) conditionExpressions() []Finding {
 	return c.conditionExprFindings
 }
 
+func (c *checkerContext) literalEmitFieldFindings(node runtimeidentity.ExecutableNode, trigger, source, siteKey string, spec runtimecontracts.EmitSpec) []Finding {
+	if spec.Empty() {
+		return nil
+	}
+	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil {
+		lowered, err := bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
+			Node: node, TriggerEventType: trigger, Site: siteKey, SchemaProvider: c.source,
+		}, spec)
+		if err != nil {
+			return nil // The emit-lowering check reports this error.
+		}
+		spec = lowered
+	}
+	resolution := semanticview.ResolveEventSchema(c.source, node.FlowPath(), spec.EventType())
+	if !resolution.HasSchema {
+		return nil // The event-schema check reports missing schema authority.
+	}
+	fields := runtimesharedjson.SchemaProperties(resolution.Schema.Schema["properties"])
+	var findings []Finding
+	for name, value := range spec.Fields {
+		if !value.HasLiteralValue() {
+			continue
+		}
+		fieldSchema, ok := fields[name]
+		if !ok {
+			continue // The declared-field check owns unknown target names.
+		}
+		if err := runtimeeventschema.ValidateValueAgainstSchema(fieldSchema, value.Literal); err != nil {
+			findings = append(findings, Finding{
+				CheckID: "emit_field_expression_validation", Severity: SeverityHardInvalidity,
+				Message:  fmt.Sprintf("node %s handler %s %s emit field %s literal is incompatible with event %s schema: %v", node.Key(), trigger, source, name, spec.EventType(), err),
+				Location: node.Key(),
+			})
+		}
+	}
+	return findings
+}
+
 func executableCollectionItemStructuralType(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler, itemsFrom string) (*runtimecontracts.ResolvedCatalogType, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
@@ -168,6 +208,16 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
+			for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+				c.emitFieldExprFindings = append(c.emitFieldExprFindings, c.literalEmitFieldFindings(nodeRef, eventType, site.Source, site.SiteKey, site.Spec)...)
+			}
+			if handler.Guard != nil {
+				if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
+					if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
+						c.emitFieldExprFindings = append(c.emitFieldExprFindings, c.literalEmitFieldFindings(nodeRef, eventType, "guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec())...)
+					}
+				}
+			}
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)
 			entityType, _ := semanticview.ResolveEntityStructuralType(c.source, nodeRef.FlowPath())
 			for _, expr := range c.entityAssignmentReaders(nodeRef, eventType, handler) {
@@ -202,6 +252,35 @@ func (c *checkerContext) executableReaderExpressions() []Finding {
 	for _, record := range wave1ScopedNodeRecords(c.source) {
 		nodeRef, _ := record.Identity()
 		nodeID := nodeRef.Key()
+		for _, site := range runtimecontracts.ActivitySitesForNode(nodeRef, record.Entry.EventHandlers) {
+			tool, ok := c.source.ToolEntries()[site.Spec.Tool]
+			if !ok {
+				continue // Tool resolution has its own check.
+			}
+			input := tool.InputSchema()
+			for field, value := range site.Spec.Input {
+				if !value.HasLiteralValue() {
+					continue
+				}
+				property, ok := input.Property(field)
+				if !ok {
+					if additional, hasAdditional := input.AdditionalPropertiesSchema(); hasAdditional {
+						property, ok = additional, true
+					} else if allowed, declared := input.AdditionalPropertiesAllowed(); declared && allowed {
+						continue
+					}
+				}
+				if !ok {
+					continue // Tool input field admission has its own check.
+				}
+				if err := runtimeeventschema.ValidateValueAgainstSchema(property.Projection(), value.Literal); err != nil {
+					c.executableReaderExprFindings = append(c.executableReaderExprFindings, Finding{
+						CheckID: "executable_reader_expression_validation", Severity: SeverityHardInvalidity,
+						Message: fmt.Sprintf("node %s handler %s %s input %s literal is incompatible with tool %s schema: %v", nodeID, site.HandlerEventKey, site.Source, field, site.Spec.Tool, err), Location: nodeID,
+					})
+				}
+			}
+		}
 		for eventType, handler := range record.Entry.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			payloadType, payloadTypeErr := executablePayloadStructuralType(c.source, nodeRef, eventType)

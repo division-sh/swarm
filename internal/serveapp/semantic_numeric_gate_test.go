@@ -22,6 +22,10 @@ stages:
   review:
     gate:
       decision: numeric_review
+      context:
+        label: entity.name
+        count: 7
+        absent: null
       outcomes:
         approve:
           input:
@@ -71,6 +75,21 @@ pins:
 			rt, restart := startSemanticNumericLiveRuntime(t, backend, root)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "numeric.requested", "idempotency_key": uuid.NewString(), "payload": map[string]any{"value": 7, "nested": map[string]any{"numbers": []any{7}, "fraction": 7.5}}})
 			cardID := waitLifecycleGateCard(t, rt, published.RunID)
+			var card struct {
+				DecisionCard struct {
+					Snapshot struct {
+						Context map[string]any `json:"context"`
+					} `json:"snapshot"`
+				} `json:"decision_card"`
+			}
+			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &card)
+			context := card.DecisionCard.Snapshot.Context
+			if context["label"] != "entity.name" || context["count"] != float64(7) {
+				t.Fatalf("gate context literals changed in frozen card: %#v", context)
+			}
+			if absent, ok := context["absent"]; !ok || absent != nil {
+				t.Fatalf("gate context null changed in frozen card: %#v", context)
+			}
 			params := lifecycleDecisionParamsForCard(t, rt, cardID, "approve")
 			hash := params["observed_content_hash"].(string)
 			key := uuid.NewString()

@@ -242,7 +242,7 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	if err := validateWorkflowNumericEvidence(typeChecked); err != nil {
 		return nil, err
 	}
-	if err := validateWorkflowResultType(typeChecked.OutputType(), provider, opts); err != nil {
+	if err := validateWorkflowResultType(typeChecked, provider, opts); err != nil {
 		return nil, err
 	}
 	return compiled, nil
@@ -944,6 +944,8 @@ func projectCELValue(path string, value any) (any, error) {
 	switch typed := value.(type) {
 	case nil, bool, string:
 		return typed, nil
+	case celtypes.Null:
+		return nil, nil
 	case ref.Val:
 		return projectCELValue(path, typed.Value())
 	case []any:
@@ -1116,6 +1118,10 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 				cel.FunctionBinding(workflowCountGE),
 			),
 		),
+		cel.Function(runtimecontracts.R2FormatFunction,
+			cel.Overload("swarm_r2_format_dyn", []*cel.Type{cel.DynType}, cel.StringType,
+				cel.UnaryBinding(formatR2InterpolationValue)),
+		),
 	}
 	if opts.AllowAccumulated {
 		variables = append(variables, cel.Variable("accumulated", cel.DynType))
@@ -1156,6 +1162,21 @@ func newDataExpressionEnv(allowBareItem bool, itemAlias string, opts ValueExpres
 		}
 	}
 	return base, nil
+}
+
+func formatR2InterpolationValue(value ref.Val) ref.Val {
+	projected, err := ProjectCELValue(value)
+	if err != nil {
+		return celtypes.NewErr("interpolation value: %v", err)
+	}
+	if text, ok := projected.(string); ok {
+		return celtypes.String(text)
+	}
+	encoded, err := canonicaljson.Bytes(projected)
+	if err != nil {
+		return celtypes.NewErr("interpolation value: %v", err)
+	}
+	return celtypes.String(encoded)
 }
 
 func workflowCountGE(args ...ref.Val) ref.Val {

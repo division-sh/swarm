@@ -537,7 +537,8 @@ func (a workflowOptionalReadAnalyzer) ownsType(value *cel.Type) bool {
 	return false
 }
 
-func validateWorkflowResultType(output *cel.Type, provider *workflowStructuralTypeProvider, opts ValueExpressionOptions) error {
+func validateWorkflowResultType(compiled *cel.Ast, provider *workflowStructuralTypeProvider, opts ValueExpressionOptions) error {
+	output := compiled.OutputType()
 	if output == nil {
 		return fmt.Errorf("workflow expression result type is unavailable")
 	}
@@ -568,7 +569,90 @@ func validateWorkflowResultType(output *cel.Type, provider *workflowStructuralTy
 		return fmt.Errorf("workflow expression result type: %w", err)
 	}
 	if !expected.IsAssignableType(actual) {
+		if compiled.NativeRep() != nil && (compiled.NativeRep().Expr().Kind() == celast.MapKind || compiled.NativeRep().Expr().Kind() == celast.ListKind) {
+			return validateWorkflowContainerResult(compiled.NativeRep(), compiled.NativeRep().Expr(), provider, *opts.ResultType, "result")
+		}
 		return fmt.Errorf("workflow expression result %s is not assignable to %s", output, expected)
+	}
+	return nil
+}
+
+func validateWorkflowContainerResult(checked *celast.AST, expr celast.Expr, provider *workflowStructuralTypeProvider, target runtimecontracts.ResolvedCatalogType, path string) error {
+	switch target.Kind {
+	case runtimecontracts.CatalogTypeObject:
+		if expr.Kind() != celast.MapKind {
+			return fmt.Errorf("%s must be a declared record, got %s", path, checked.GetType(expr.ID()))
+		}
+		seen := make(map[string]struct{})
+		for _, entry := range expr.AsMap().Entries() {
+			pair := entry.AsMapEntry()
+			if pair.Key().Kind() != celast.LiteralKind {
+				return fmt.Errorf("%s record keys must be literal text", path)
+			}
+			key, ok := pair.Key().AsLiteral().Value().(string)
+			if !ok {
+				return fmt.Errorf("%s record keys must be literal text", path)
+			}
+			field, ok := target.Field(key)
+			if !ok {
+				return fmt.Errorf("%s has undeclared field %s", path, key)
+			}
+			if pair.IsOptional() && !field.IsOptional {
+				return fmt.Errorf("%s required field %s cannot be an optional entry", path, key)
+			}
+			if _, duplicate := seen[key]; duplicate {
+				return fmt.Errorf("%s has duplicate field %s", path, key)
+			}
+			seen[key] = struct{}{}
+			if err := validateWorkflowContainerResult(checked, pair.Value(), provider, field.Type, path+"."+key); err != nil {
+				return err
+			}
+		}
+		for _, field := range target.Fields {
+			if _, ok := seen[field.Name]; !ok && !field.IsOptional {
+				return fmt.Errorf("%s is missing required field %s", path, field.Name)
+			}
+		}
+		return nil
+	case runtimecontracts.CatalogTypeList:
+		if expr.Kind() == celast.ListKind && target.Element != nil {
+			for index, item := range expr.AsList().Elements() {
+				if err := validateWorkflowContainerResult(checked, item, provider, *target.Element, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	case runtimecontracts.CatalogTypeMap:
+		if expr.Kind() == celast.MapKind && target.Key != nil && target.Value != nil {
+			for _, entry := range expr.AsMap().Entries() {
+				pair := entry.AsMapEntry()
+				if err := validateWorkflowContainerResult(checked, pair.Key(), provider, *target.Key, path+".<key>"); err != nil {
+					return err
+				}
+				if err := validateWorkflowContainerResult(checked, pair.Value(), provider, *target.Value, path+".<value>"); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}
+	actual := checked.GetType(expr.ID())
+	if actual == nil || actual == cel.DynType {
+		return fmt.Errorf("%s has no exact type for %s", path, runtimecontracts.StructuralCatalogTypeSyntax(target))
+	}
+	if structural, ok := provider.resolvedType(actual); ok && runtimecontracts.StructuralCatalogTypeAssignable(structural, target) {
+		return nil
+	}
+	if target.Kind == runtimecontracts.CatalogTypeNumber && actual == cel.IntType {
+		return nil
+	}
+	expected, err := provider.register("result", path, target.Clone())
+	if err != nil {
+		return fmt.Errorf("%s type: %w", path, err)
+	}
+	if !expected.IsAssignableType(actual) {
+		return fmt.Errorf("%s type %s is not assignable to %s", path, actual, expected)
 	}
 	return nil
 }

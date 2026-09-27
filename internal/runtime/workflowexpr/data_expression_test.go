@@ -1,11 +1,150 @@
 package workflowexpr
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"gopkg.in/yaml.v3"
 )
+
+func TestProjectCELValuePreservesNullInsideContainers(t *testing.T) {
+	for _, tc := range []struct {
+		expression string
+		want       any
+	}{
+		{`{"keep": 1, "missing": null}`, map[string]any{"keep": int64(1), "missing": nil}},
+		{`[1, null]`, []any{int64(1), nil}},
+		{`{"escaped": {"missing": null}}`, map[string]any{"escaped": map[string]any{"missing": nil}}},
+	} {
+		got, err := EvalValueExpression(tc.expression, ValueContext{})
+		if err != nil {
+			t.Fatalf("EvalValueExpression(%s): %v", tc.expression, err)
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("EvalValueExpression(%s) = %#v, want %#v", tc.expression, got, tc.want)
+		}
+	}
+}
+
+func TestR2MixedInterpolationFormatsSupportedValues(t *testing.T) {
+	for _, tc := range []struct{ expression, want string }{
+		{`"v=" + __swarm_r2_format(null)`, "v=null"},
+		{`"v=" + __swarm_r2_format([1, 2])`, "v=[1,2]"},
+		{`"v=" + __swarm_r2_format({"b": 2, "a": 1})`, `v={"a":1,"b":2}`},
+		{`"v=" + __swarm_r2_format("raw")`, "v=raw"},
+	} {
+		got, err := EvalValueExpression(tc.expression, ValueContext{})
+		if err != nil || got != tc.want {
+			t.Fatalf("%s = %#v, %v; want %q", tc.expression, got, err, tc.want)
+		}
+	}
+}
+
+func TestR2AuthoredMixedInterpolationKeepsTypedSoleExpression(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   any
+	}{
+		{`v=${null}`, "v=null"},
+		{`v=${[1,2]}`, "v=[1,2]"},
+		{`v=${{"b":2,"a":1}}`, `v={"a":1,"b":2}`},
+		{`${[1,2]}`, []any{int64(1), int64(2)}},
+	} {
+		var expression runtimecontracts.ExpressionValue
+		if err := yaml.Unmarshal([]byte("'"+strings.ReplaceAll(tc.source, "'", "''")+"'"), &expression); err != nil {
+			t.Fatalf("decode %s: %v", tc.source, err)
+		}
+		got, err := EvalValueExpression(expression.CEL, ValueContext{})
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("%s = %#v, %v; want %#v", tc.source, got, err, tc.want)
+		}
+	}
+}
+
+func TestR2RecursiveRecordResultUsesDeclaredType(t *testing.T) {
+	record := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{
+		{Name: "name", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+		{Name: "count", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeInteger}},
+	}}
+	for _, expression := range []string{
+		`{"name": "Ada", "count": 1}`,
+		`{"name": "Ada", "count": 1 + 1}`,
+	} {
+		if _, err := EvalValueExpressionWithOptions(expression, ValueContext{}, ValueExpressionOptions{ResultType: &record}); err != nil {
+			t.Fatalf("valid record %s rejected: %v", expression, err)
+		}
+	}
+	for _, expression := range []string{
+		`{"name": "Ada"}`,
+		`{"name": "Ada", "count": "1"}`,
+		`{"name": "Ada", "count": 1, "extra": true}`,
+	} {
+		if err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{ResultType: &record}); err == nil {
+			t.Fatalf("invalid record %s accepted", expression)
+		}
+	}
+	list := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeList, Element: &record}
+	if _, err := EvalValueExpressionWithOptions(`[{"name": "Ada", "count": 1}]`, ValueContext{}, ValueExpressionOptions{ResultType: &list}); err != nil {
+		t.Fatalf("nested record list rejected: %v", err)
+	}
+	key := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}
+	objectMap := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeMap, Key: &key, Value: &record}
+	if _, err := EvalValueExpressionWithOptions(`{"first": {"name": "Ada", "count": 1}}`, ValueContext{}, ValueExpressionOptions{ResultType: &objectMap}); err != nil {
+		t.Fatalf("nested record map rejected: %v", err)
+	}
+}
+
+func TestR2DynamicContainerPreservesNullAndEscape(t *testing.T) {
+	for _, source := range []string{
+		`{keep: "${1}", missing: null}`,
+		`["${1}", null]`,
+		`{keep: "${1}", escaped: {literal: {missing: null}}}`,
+	} {
+		var expression runtimecontracts.ExpressionValue
+		if err := yaml.Unmarshal([]byte(source), &expression); err != nil {
+			t.Fatalf("%s: %v", source, err)
+		}
+		got, err := EvalValueExpression(expression.CEL, ValueContext{})
+		if err != nil {
+			t.Fatalf("%s: %v", source, err)
+		}
+		switch value := got.(type) {
+		case map[string]any:
+			if nested, ok := value["escaped"].(map[string]any); ok {
+				if inner, ok := nested["missing"]; !ok || inner != nil {
+					t.Fatalf("%s: escaped null became %#v", source, nested)
+				}
+			} else if missing, ok := value["missing"]; !ok || missing != nil {
+				t.Fatalf("%s: null became %#v", source, value)
+			}
+		case []any:
+			if len(value) != 2 || value[1] != nil {
+				t.Fatalf("%s: null became %#v", source, value)
+			}
+		default:
+			t.Fatalf("%s: got %#v", source, got)
+		}
+	}
+}
+
+func TestR2GeneratedCELLexicalFormsValidate(t *testing.T) {
+	for _, source := range []string{
+		`${r'\'}`,
+		`${"""a"}b"""}`,
+		`${b"a}b"}`,
+		"${1 // }\n + 2}",
+	} {
+		var expression runtimecontracts.ExpressionValue
+		if err := yaml.Unmarshal([]byte("|-\n  "+strings.ReplaceAll(source, "\n", "\n  ")+"\n"), &expression); err != nil {
+			t.Fatalf("decode %q: %v", source, err)
+		}
+		if err := ValidateValueExpressionWithOptions(expression.CEL, ValueExpressionOptions{}); err != nil {
+			t.Fatalf("CEL %q from %q: %v", expression.CEL, source, err)
+		}
+	}
+}
 
 func TestEvalValueExpression_RequiresExplicitPresenceCheckOnMissingField(t *testing.T) {
 	entityType := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "kill_reason", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}}}}

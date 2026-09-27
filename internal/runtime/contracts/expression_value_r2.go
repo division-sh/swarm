@@ -6,7 +6,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/antlr4-go/antlr/v4"
+	"github.com/google/cel-go/parser/gen"
 )
+
+const R2FormatFunction = "__swarm_r2_format"
 
 func decodeInterpolatedScalar(value string) (ExpressionValue, error) {
 	parts, expressions, err := splitExpressionInterpolation(value)
@@ -24,7 +29,7 @@ func decodeInterpolatedScalar(value string) (ExpressionValue, error) {
 		if parts[i] != "" {
 			terms = append(terms, strconv.Quote(parts[i]))
 		}
-		terms = append(terms, "string(("+expr+"))")
+		terms = append(terms, R2FormatFunction+"(("+expr+"))")
 	}
 	if parts[len(parts)-1] != "" {
 		terms = append(terms, strconv.Quote(parts[len(parts)-1]))
@@ -43,38 +48,11 @@ func splitExpressionInterpolation(value string) ([]string, []string, error) {
 		}
 		start += offset
 		parts = append(parts, value[offset:start])
-		depth, quote, escaped := 1, byte(0), false
-		end := -1
-		for i := start + 2; i < len(value); i++ {
-			c := value[i]
-			if quote != 0 {
-				if escaped {
-					escaped = false
-				} else if c == '\\' {
-					escaped = true
-				} else if c == quote {
-					quote = 0
-				}
-				continue
-			}
-			switch c {
-			case '\'', '"':
-				quote = c
-			case '{':
-				depth++
-			case '}':
-				depth--
-				if depth == 0 {
-					end = i
-				}
-			}
-			if end >= 0 {
-				break
-			}
-		}
+		end := interpolationEnd(value[start+2:])
 		if end < 0 {
 			return nil, nil, fmt.Errorf("unterminated ${...} expression")
 		}
+		end += start + 2
 		expr := strings.TrimSpace(value[start+2 : end])
 		if expr == "" {
 			return nil, nil, fmt.Errorf("empty ${...} expression")
@@ -83,6 +61,23 @@ func splitExpressionInterpolation(value string) ([]string, []string, error) {
 		offset = end + 1
 	}
 	return parts, expressions, nil
+}
+
+func interpolationEnd(source string) int {
+	lexer := gen.NewCELLexer(antlr.NewInputStream(source))
+	depth := 0
+	for token := lexer.NextToken(); token.GetTokenType() != antlr.TokenEOF; token = lexer.NextToken() {
+		switch token.GetTokenType() {
+		case gen.CELLexerLBRACE:
+			depth++
+		case gen.CELLexerRBRACE:
+			if depth == 0 {
+				return len(string([]rune(source)[:token.GetStart()]))
+			}
+			depth--
+		}
+	}
+	return -1
 }
 
 func expressionValueCELSource(value ExpressionValue) (string, error) {

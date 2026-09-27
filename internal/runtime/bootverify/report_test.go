@@ -2600,6 +2600,30 @@ func TestRunActivityInputUsesSchemaBoundExpressionAdmission(t *testing.T) {
 }
 
 func schemaBoundActivityInputSource(expression, payloadType string, toolInputType runtimecontracts.ToolSchemaKind, toolInputRequired bool) semanticview.Source {
+	return schemaBoundActivityInputValueSource(runtimecontracts.CELExpression(expression), payloadType, toolInputType, toolInputRequired)
+}
+
+func TestRunActivityLiteralInputUsesExactToolSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		value     any
+		wantError bool
+	}{
+		{name: "valid text", value: "ready"},
+		{name: "invalid integer", value: 7, wantError: true},
+		{name: "invalid null", value: nil, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := Run(context.Background(), schemaBoundActivityInputValueSource(runtimecontracts.LiteralExpression(tc.value), "text", runtimecontracts.ToolSchemaString, true), Options{})
+			found := reportContains(report.Errors(), "executable_reader_expression_validation", "")
+			if found != tc.wantError {
+				t.Fatalf("activity input findings = %#v, want error=%v", report.Errors(), tc.wantError)
+			}
+		})
+	}
+}
+
+func schemaBoundActivityInputValueSource(value runtimecontracts.ExpressionValue, payloadType string, toolInputType runtimecontracts.ToolSchemaKind, toolInputRequired bool) semanticview.Source {
 	inputOptions := []runtimecontracts.ToolInputSchemaOption{
 		runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"value": runtimecontracts.MustToolInputSchema(toolInputType),
@@ -2627,7 +2651,7 @@ func schemaBoundActivityInputSource(expression, payloadType string, toolInputTyp
 			"worker": {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"work.received": {Activity: runtimecontracts.ActivitySpec{Tool: "notify", Input: map[string]runtimecontracts.ExpressionValue{
-						"value": runtimecontracts.CELExpression(expression),
+						"value": value,
 					}}},
 				},
 			},
@@ -3233,6 +3257,35 @@ func TestRun_RejectsEmitFieldsForEmptyPayloadSchema(t *testing.T) {
 
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "authors undeclared payload field scan_id in emit.fields") {
 		t.Fatalf("expected undeclared emit field error for empty payload schema, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ValidatesLiteralEmitFieldAgainstResolvedSchema(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{Event: "market_research.scan_assigned", Fields: map[string]runtimecontracts.ExpressionValue{
+		"scan_id": runtimecontracts.LiteralExpression(7),
+	}}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
+	if !reportContains(report.Errors(), "emit_field_expression_validation", "scan_id literal is incompatible") {
+		t.Fatalf("integer literal to text field was accepted: %#v", report.Errors())
+	}
+	bundle = bootverifyPayloadCompletenessBundle()
+	node = bundle.Nodes["dispatcher"]
+	handler = node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{Event: "market_research.scan_assigned", Fields: map[string]runtimecontracts.ExpressionValue{
+		"scan_id": runtimecontracts.LiteralExpression("abc"),
+	}}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+	report = Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
+	if reportContains(report.Errors(), "emit_field_expression_validation", "scan_id literal is incompatible") {
+		t.Fatalf("valid text literal was rejected: %#v", report.Errors())
 	}
 }
 
