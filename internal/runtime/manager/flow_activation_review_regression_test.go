@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,28 +12,64 @@ import (
 )
 
 func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
-	instances := &flowActivationTestInstanceStore{}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
-	am := newFlowActivationManager(t, bus, instances)
-	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
-		instances.readinessLoadErr = errors.New("transient readback failure after acknowledged completion")
-	}
-	ctx := testAuthorActivityContext(context.Background())
-	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
-		t.Fatal("expected injected readback failure")
-	}
-	instances.readinessLoadErr = nil
-	if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("failed attempt retained a route")
-	}
-	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
-		t.Fatal("retry omitted the abandoned topology")
+	for _, outcome := range []string{"error", "cancellation", "panic"} {
+		t.Run(outcome, func(t *testing.T) {
+			instances := &flowActivationTestInstanceStore{}
+			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+			am := newFlowActivationManager(t, bus, instances)
+			bundle := testFlowBundle(t, "")
+			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+			ctx := testAuthorActivityContext(context.Background())
+			activationCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			var canceledAttemptDone <-chan struct{}
+			instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+				switch outcome {
+				case "error":
+					instances.readinessLoadErr = errors.New("transient readback failure after acknowledged completion")
+				case "cancellation":
+					key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.Route().InstancePath}
+					am.dynamicFlowReadinessMu.Lock()
+					canceledAttemptDone = am.dynamicFlowReadinessAttempts[key].done
+					am.dynamicFlowReadinessMu.Unlock()
+					cancel()
+					instances.readinessLoadErr = activationCtx.Err()
+				case "panic":
+					panic("injected panic after acknowledged topology completion")
+				}
+			}
+			var activationErr error
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				activationErr = activateFlowInstanceForTest(am, activationCtx, req)
+			}()
+			if outcome == "panic" {
+				if recovered != nil || activationErr == nil || !strings.Contains(activationErr.Error(), "panic") {
+					t.Fatalf("panic was not reported by the activation owner: err=%v panic=%v", activationErr, recovered)
+				}
+			} else if activationErr == nil || recovered != nil {
+				t.Fatalf("expected injected %s failure: err=%v panic=%v", outcome, activationErr, recovered)
+			}
+			if outcome == "cancellation" {
+				select {
+				case <-canceledAttemptDone:
+				case <-time.After(5 * time.Second):
+					t.Fatal("canceled caller returned before the accepted activation settled")
+				}
+			}
+			instances.readinessLoadErr = nil
+			if bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
+				t.Fatal("failed attempt retained a route")
+			}
+			if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if !bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)) {
+				t.Fatal("retry omitted the abandoned topology")
+			}
+		})
 	}
 }
 
