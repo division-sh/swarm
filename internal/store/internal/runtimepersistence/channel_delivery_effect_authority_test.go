@@ -31,6 +31,7 @@ type selectedChannelDeliveryTestStore interface {
 	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)
+	GetCurrentChannelSentReceipt(context.Context, string, string) (render.SentReceipt, bool, error)
 	FreezeAndPersistChannelRender(context.Context, string) (render.PreparedRender, error)
 }
 
@@ -514,6 +515,83 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if receiptState != "sent" || !strings.Contains(receiptJSON, "delivery_reference") {
 					t.Fatalf("late receipt = %s %s", receiptState, receiptJSON)
 				}
+				if !late {
+					previous, found, err := selected.GetCurrentChannelSentReceipt(ctx, deliveryID, effectOperationID)
+					if err != nil || !found || previous.RenderID != renderID {
+						t.Fatalf("current sent receipt = %#v, found=%t err=%v", previous, found, err)
+					}
+					if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+						query := `UPDATE mailbox SET summary=? WHERE item_id=?`
+						if postgres {
+							query = `UPDATE mailbox SET summary=$1 WHERE item_id=$2::uuid`
+						}
+						_, err := tx.ExecContext(txctx, query, "Delivery authority changed", noticeID)
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+					updated, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID)
+					if err != nil || updated.RenderID == renderID {
+						t.Fatalf("freeze changed source = %#v, err=%v", updated, err)
+					}
+					editID, err := runtimeeffects.ChannelDeliveryOperationID(deliveryID, updated.RenderID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					editAuthority := authority
+					editAuthority.ID = editID
+					editAuthority.ChannelDelivery.EffectOperationID = editID
+					editAuthority.ChannelDelivery.RenderID = updated.RenderID
+					editAuthority.ChannelDelivery.RenderHash = updated.Frozen.Hash
+					editAuthority.ChannelDelivery.PreviousReceiptOperationID = effectOperationID
+					if !current(editAuthority) {
+						t.Fatal("exact edit predecessor was not admitted")
+					}
+					wrongPredecessor := editAuthority
+					wrongPredecessor.ChannelDelivery.PreviousReceiptOperationID = uuid.NewString()
+					if current(wrongPredecessor) {
+						t.Fatal("foreign edit predecessor was admitted")
+					}
+					editCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
+						testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), editAuthority),
+						runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+					editHandle, err := runtimeeffects.BeginChannelDelivery(editCtx, []byte("edit"), nil)
+					if err != nil {
+						t.Fatalf("authorize exact edit: %v", err)
+					}
+					if err := editHandle.MarkLaunched(editCtx); err != nil {
+						t.Fatal(err)
+					}
+					if err := editHandle.MarkResponseObserved(editCtx, map[string]any{"provider": "edited"}); err != nil {
+						t.Fatal(err)
+					}
+					if err := editHandle.Succeed(editCtx, map[string]any{"projected_output": map[string]any{
+						"delivery_receipt": map[string]any{"id": 91},
+					}}); err != nil {
+						t.Fatalf("settle exact edit: %v", err)
+					}
+					if _, found, err := selected.GetCurrentChannelSentReceipt(ctx, deliveryID, effectOperationID); err != nil || found {
+						t.Fatalf("predecessor remained current: found=%t err=%v", found, err)
+					}
+					editedReceipt, found, err := selected.GetCurrentChannelSentReceipt(ctx, deliveryID, editID)
+					if err != nil || !found || editedReceipt.RenderID != updated.RenderID {
+						t.Fatalf("edited receipt = %#v, found=%t err=%v", editedReceipt, found, err)
+					}
+					if ref, valid, err := operatorchannel.OpaqueReference(editedReceipt.DeliveryReference); err != nil || !valid || ref != `{"id":91}` {
+						t.Fatalf("edited message reference = %q, valid=%t err=%v", ref, valid, err)
+					}
+					query := `SELECT provider_reference FROM channel_delivery_receipts WHERE effect_operation_id=?`
+					if postgres {
+						query = `SELECT provider_reference FROM channel_delivery_receipts WHERE effect_operation_id=$1::uuid`
+					}
+					var editedJSON string
+					if err := db.QueryRowContext(ctx, query, editID).Scan(&editedJSON); err != nil ||
+						!strings.Contains(editedJSON, "delivery_reference") || !strings.Contains(editedJSON, "delivery_receipt") {
+						t.Fatalf("edited receipt projection = %q, err=%v", editedJSON, err)
+					}
+					renderID, effectOperationID, frozen, actions = updated.RenderID, editID, updated.Frozen, updated.Actions
+					authority, effectCtx = editAuthority, editCtx
+				}
 				fact := operatorchannel.ActionFact{
 					Interface: binding.Interface, ExternalAccountRef: plan.ExternalAccountRef,
 					ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope,
@@ -543,6 +621,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}
 				if _, found, err := selected.ResolveChannelActionFact(ctx, fact); err != nil || found {
 					t.Fatalf("retired delivery action resolved: found=%t err=%v", found, err)
+				}
+				if _, found, err := selected.GetCurrentChannelSentReceipt(ctx, deliveryID, effectOperationID); err != nil || found {
+					t.Fatalf("retired delivery receipt retained edit authority: found=%t err=%v", found, err)
 				}
 				settledPlan, found, err := channeldelivery.LoadPlan(ctx, db, deliveryID, postgres)
 				if err != nil || !found || settledPlan.State != "sent" ||
