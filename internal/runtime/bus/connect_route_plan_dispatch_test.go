@@ -848,6 +848,27 @@ func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(_ co
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), nil
 }
 
+func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.flowInstanceDescriptorCalls++
+	if s.flowInstanceDescriptorErr != nil {
+		return nil, s.flowInstanceDescriptorErr
+	}
+	return connectRoutePlanScopedDescriptors(
+		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID),
+		templateIDs, instancePaths,
+	), nil
+}
+
+func connectRoutePlanScopedDescriptors(descriptors []ActiveFlowInstanceDescriptor, templateIDs, instancePaths []string) []ActiveFlowInstanceDescriptor {
+	var selected []ActiveFlowInstanceDescriptor
+	for _, descriptor := range descriptors {
+		if slices.Contains(templateIDs, descriptor.FlowTemplate) || slices.Contains(instancePaths, descriptor.FlowInstance) {
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected
+}
+
 func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	for _, descriptor := range s.flowInstances {
 		descriptor = descriptor.Normalized()
@@ -881,6 +902,16 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 	defer s.mu.Unlock()
 	s.flowInstanceDescriptorCalls++
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), nil
+}
+
+func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flowInstanceDescriptorCalls++
+	return connectRoutePlanScopedDescriptors(
+		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID),
+		templateIDs, instancePaths,
+	), nil
 }
 
 func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error) {
