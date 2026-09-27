@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -21,12 +22,15 @@ type operatorChannelContractStore interface {
 }
 
 type operatorChannelContractFixture struct {
-	store        operatorChannelContractStore
-	settle       func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
-	loadDefault  func(context.Context) (channeldelivery.Default, bool, error)
-	insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
-	countPlans   func(context.Context, string) (int, error)
-	loadPlan     func(context.Context, string) (channeldelivery.Plan, bool, error)
+	store         operatorChannelContractStore
+	settle        func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+	loadDefault   func(context.Context) (channeldelivery.Default, bool, error)
+	insertNotice  func(context.Context, runtimetools.MailboxItem) (string, error)
+	countPlans    func(context.Context, string) (int, error)
+	loadPlan      func(context.Context, string) (channeldelivery.Plan, bool, error)
+	loadSummary   func(context.Context, string) (channeldelivery.Plan, bool, error)
+	persistRender func(context.Context, string, render.Frozen) (string, bool, error)
+	loadRender    func(context.Context, string) (channeldelivery.StoredRender, bool, error)
 }
 
 func TestOperatorChannelSelectedStoreContractParity(t *testing.T) {
@@ -165,6 +169,24 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			summary, found, err := fixture.loadSummary(ctx, operationID)
+			if err != nil || !found || summary.SourceKind != channeldelivery.PlanSummary ||
+				summary.SourceID != operationID || summary.SummaryCount != 2 || summary.DeliveryEpoch != 1 ||
+				summary.PrincipalID != principal.ID || summary.ConversationRef != "conversation" {
+				t.Fatalf("first backlog summary = %#v, found=%t err=%v", summary, found, err)
+			}
+			summaryFrozen, err := render.FreezeSummary(summary.SourceID, summary.SummaryCount, render.Audience{
+				PrincipalID: summary.PrincipalID, InterfaceKey: summary.InterfaceKey, DeliveryEpoch: summary.DeliveryEpoch,
+				ExternalAccountRef: summary.ExternalAccountRef, ConversationRef: summary.ConversationRef,
+				ConversationScope: summary.ConversationScope,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			summaryRenderID, created, err := fixture.persistRender(ctx, summary.DeliveryID, summaryFrozen)
+			if err != nil || !created {
+				t.Fatalf("persist backlog summary = %s, created=%t err=%v", summaryRenderID, created, err)
+			}
 			assertPlans(beforePrincipal, 0)
 			assertPlans(beforeDefault, 0)
 			afterDefault := notice("after default")
@@ -176,6 +198,33 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 				plan.ConversationScope != operatorchannel.ConversationScopeDirect || plan.State != channeldelivery.PlanStatePlanned {
 				t.Fatalf("notice plan = %#v, found=%t err=%v", plan, found, err)
 			}
+			frozen, err := render.FreezeNotice(render.Notice{
+				ID: afterDefault, Type: runtimetools.NotifyHumanMailboxItemType, Summary: "after default",
+				Priority: "normal", Context: []byte(`{"message":"after default"}`),
+			}, render.Audience{
+				PrincipalID: plan.PrincipalID, InterfaceKey: plan.InterfaceKey, DeliveryEpoch: plan.DeliveryEpoch,
+				ExternalAccountRef: plan.ExternalAccountRef, ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			renderID, created, err := fixture.persistRender(ctx, plan.DeliveryID, frozen)
+			if err != nil || !created {
+				t.Fatalf("persist notice render = %s, created=%t err=%v", renderID, created, err)
+			}
+			stored, found, err := fixture.loadRender(ctx, renderID)
+			if err != nil || !found || stored.DeliveryID != plan.DeliveryID || stored.Frozen.Hash != frozen.Hash ||
+				string(stored.Frozen.Input) != string(frozen.Input) {
+				t.Fatalf("notice render readback = %#v, found=%t err=%v", stored, found, err)
+			}
+			if replayID, created, err := fixture.persistRender(ctx, plan.DeliveryID, frozen); err != nil || created || replayID != renderID {
+				t.Fatalf("notice render replay = %s, created=%t err=%v", replayID, created, err)
+			}
+			corrupt := frozen
+			corrupt.Hash = "sha256:bad"
+			if _, _, err := fixture.persistRender(ctx, plan.DeliveryID, corrupt); err == nil {
+				t.Fatal("corrupt render hash was admitted")
+			}
 			_, retired, err := fixture.store.UnbindOperatorChannel(ctx, operatorchannel.UnbindRequest{
 				OperationID: uuid.NewString(), PrincipalID: principal.ID, Interface: identity,
 				ExpectedRevision: binding.Revision, RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), RequestedAt: now.Add(3 * time.Second),
@@ -186,6 +235,9 @@ func TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores(t *testing.T) {
 			whileRetired := notice("while retired")
 			assertPlans(whileRetired, 0)
 			assertPlans(afterDefault, 1)
+			if _, _, err := fixture.persistRender(ctx, plan.DeliveryID, frozen); err == nil {
+				t.Fatal("retired default admitted new render")
+			}
 		})
 	}
 }
@@ -629,6 +681,30 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 				}
 				return channeldelivery.LoadPlan(ctx, selected.backend, deliveryID, false)
 			},
+			loadSummary: func(ctx context.Context, operationID string) (channeldelivery.Plan, bool, error) {
+				var deliveryID string
+				err := selected.backend.QueryRowContext(ctx, `SELECT delivery_id FROM channel_delivery_plans WHERE source_kind = 'summary' AND source_id = ?`, operationID).Scan(&deliveryID)
+				if errors.Is(err, sql.ErrNoRows) {
+					return channeldelivery.Plan{}, false, nil
+				}
+				if err != nil {
+					return channeldelivery.Plan{}, false, err
+				}
+				return channeldelivery.LoadPlan(ctx, selected.backend, deliveryID, false)
+			},
+			persistRender: func(ctx context.Context, deliveryID string, frozen render.Frozen) (string, bool, error) {
+				var id string
+				var created bool
+				err := selected.backend.RunTransaction(ctx, "persist channel render", func(txctx context.Context, tx *sql.Tx) error {
+					var err error
+					id, created, err = channeldelivery.PersistRenderTx(txctx, tx, deliveryID, frozen, false)
+					return err
+				})
+				return id, created, err
+			},
+			loadRender: func(ctx context.Context, renderID string) (channeldelivery.StoredRender, bool, error) {
+				return channeldelivery.LoadRender(ctx, selected.backend, renderID, false)
+			},
 			loadDefault: func(ctx context.Context) (channeldelivery.Default, bool, error) {
 				return channeldelivery.LoadDefault(ctx, selected.backend, false)
 			},
@@ -664,6 +740,32 @@ func openOperatorChannelContractFixture(t *testing.T, backend string) operatorCh
 					return channeldelivery.Plan{}, false, err
 				}
 				return channeldelivery.LoadPlan(ctx, db, deliveryID, true)
+			},
+			loadSummary: func(ctx context.Context, operationID string) (channeldelivery.Plan, bool, error) {
+				var deliveryID string
+				err := db.QueryRowContext(ctx, `SELECT delivery_id::text FROM channel_delivery_plans WHERE source_kind = 'summary' AND source_id = $1::uuid`, operationID).Scan(&deliveryID)
+				if errors.Is(err, sql.ErrNoRows) {
+					return channeldelivery.Plan{}, false, nil
+				}
+				if err != nil {
+					return channeldelivery.Plan{}, false, err
+				}
+				return channeldelivery.LoadPlan(ctx, db, deliveryID, true)
+			},
+			persistRender: func(ctx context.Context, deliveryID string, frozen render.Frozen) (string, bool, error) {
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					return "", false, err
+				}
+				id, created, err := channeldelivery.PersistRenderTx(ctx, tx, deliveryID, frozen, true)
+				if err != nil {
+					_ = tx.Rollback()
+					return "", false, err
+				}
+				return id, created, tx.Commit()
+			},
+			loadRender: func(ctx context.Context, renderID string) (channeldelivery.StoredRender, bool, error) {
+				return channeldelivery.LoadRender(ctx, db, renderID, true)
 			},
 			loadDefault: func(ctx context.Context) (channeldelivery.Default, bool, error) {
 				return channeldelivery.LoadDefault(ctx, selected.backend, true)
