@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -259,6 +260,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOperatorChannelClaimProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationOperatorChannelActionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	if _, err := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "inbound-proof"}); err != nil {
 		t.Fatalf("suspend inbound standing service: %v", err)
 	}
@@ -275,6 +277,62 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 		t.Fatalf("suspended standing inbound error = %v, want typed suspended disposition", err)
 	}
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, blocked.ProviderEventID, 0)
+}
+
+func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
+	t.Helper()
+	command := func(providerEventID string) runtimeinbound.CommitCommand {
+		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, providerEventID)
+		identity := operatorChannelContractIdentity("inbound-action-generation")
+		fact := operatorchannel.ActionFact{
+			Interface: identity, ExternalAccountRef: "account-action", ConversationRef: "conversation-action",
+			ConversationScope: operatorchannel.ConversationScopeDirect, MessageReference: `{"id":91}`,
+			InteractionRef: "callback-91", Token: uuid.NewString(),
+		}
+		return runtimeinbound.CommitCommand{
+			Request: request, Finalization: runtimeinbound.Finalization{EvidenceEvent: inboundPublicationZeroOutputEvidence(t, request)},
+			OperatorChannelAction: &operatorchannel.InboundAction{
+				ActionFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+				PublicationID: request.PublicationID, ProviderAuthorization: "verified-action-auth",
+			},
+		}
+	}
+	fault := command("operator-channel-action-fault")
+	drop := installOperatorChannelClaimFailureTrigger(t, db, sqlite, "operator_channel_action_intents", "INSERT")
+	if _, err := store.CommitInboundPublication(ctx, fault); err == nil {
+		drop()
+		t.Fatal("failed action intent insert committed inbound publication")
+	}
+	drop()
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE publication_id = `, fault.Request.PublicationID, 0)
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE event_id = `, fault.Request.MarkerEventID, 0)
+	result, err := store.CommitInboundPublication(ctx, fault)
+	if err != nil || !result.Acknowledged || !result.Record.Created || result.Record.OutputCount != 0 {
+		t.Fatalf("action intent clean retry = %#v, err=%v", result, err)
+	}
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM operator_channel_action_intents WHERE publication_id = `, fault.Request.PublicationID, 1)
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, fault.Request.PublicationID, 0)
+	actions, ok := any(store).(interface {
+		ListPendingChannelActions(context.Context, string, int) ([]runtimechanneldelivery.PendingAction, error)
+	})
+	if !ok {
+		t.Fatalf("selected store %T lacks pending channel action readback", store)
+	}
+	pending, err := actions.ListPendingChannelActions(ctx, "", 500)
+	if err != nil || len(pending) != 1 || pending[0].PublicationID != fault.Request.PublicationID ||
+		pending[0].Fact.ActionFact != fault.OperatorChannelAction.ActionFact {
+		t.Fatalf("pending verified channel action = %#v, err=%v", pending, err)
+	}
+	replayed, err := store.CommitInboundPublication(ctx, fault)
+	if err != nil || !replayed.Acknowledged || replayed.Record.Created || replayed.Record.OutputCount != 0 {
+		t.Fatalf("action intent duplicate = %#v, err=%v", replayed, err)
+	}
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM operator_channel_action_intents WHERE publication_id = `, fault.Request.PublicationID, 1)
+	changed := fault
+	changed.Request.RequestFingerprint = strings.Repeat("e", 64)
+	if _, err := store.CommitInboundPublication(ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
+		t.Fatalf("changed action intent replay error = %v", err)
+	}
 }
 
 func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
