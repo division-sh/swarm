@@ -167,7 +167,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				}
 				snapshot, err := decisioncard.FreezeSnapshot("human_task", "Review provider result", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 					"approve": {Verdict: "approve", Label: "Approve"},
-					"reject":  {Verdict: "reject", Label: "Reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}},
+					"reject":  {Verdict: "reject", Label: "Reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}, InputOrder: []string{"reason"}},
 				})
 				if err != nil {
 					t.Fatal(err)

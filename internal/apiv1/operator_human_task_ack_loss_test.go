@@ -184,7 +184,7 @@ func newAPIHumanTaskAckLossCard(t *testing.T, runID, bundleHash string, now time
 	}
 	snapshot := mustTestDecisionSnapshot("human_task", "Review provider result", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {Verdict: "approve"},
-		"reject":  {Verdict: "reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}},
+		"reject":  {Verdict: "reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}, InputOrder: []string{"reason"}},
 	})
 	card, err := decisioncard.New(decisioncard.Card{
 		CardID: uuid.NewString(), RunID: runID, Anchor: anchor, Snapshot: snapshot,
