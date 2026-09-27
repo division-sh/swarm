@@ -4,9 +4,12 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/google/uuid"
 )
 
 type channelDeliveryWorkerCards struct {
@@ -75,5 +78,37 @@ func TestChannelDeliveryReconciliationPlansOpenCardsWithoutResending(t *testing.
 	want := []string{"pending-a", "pending-b", "deferred-c"}
 	if !reflect.DeepEqual(selected.planned, want) {
 		t.Fatalf("planned cards = %v, want %v", selected.planned, want)
+	}
+}
+
+type rejectedChannelActionStore struct {
+	runtimechanneldelivery.Store
+	pending []runtimechanneldelivery.PendingAction
+	settled []runtimechanneldelivery.ActionDisposition
+}
+
+func (s *rejectedChannelActionStore) ListPendingChannelActions(context.Context, string, int) ([]runtimechanneldelivery.PendingAction, error) {
+	return s.pending, nil
+}
+
+func (*rejectedChannelActionStore) ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (runtimechanneldelivery.ResolvedAction, bool, error) {
+	return runtimechanneldelivery.ResolvedAction{}, false, nil
+}
+
+func (s *rejectedChannelActionStore) SettleUnappliedChannelAction(_ context.Context, _ operatorchannel.InboundAction, disposition runtimechanneldelivery.ActionDisposition) error {
+	s.settled = append(s.settled, disposition)
+	return nil
+}
+
+func TestChannelActionWorkerRejectsUnresolvedIntentWithoutMutation(t *testing.T) {
+	store := &rejectedChannelActionStore{pending: []runtimechanneldelivery.PendingAction{{
+		PublicationID: uuid.NewString(), ReceivedAt: time.Now().UTC(),
+	}}}
+	d := &serveChannelDeliveryDispatcher{store: store, cards: channelDeliveryWorkerCards{}}
+	if err := d.reconcileCardActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.settled, []runtimechanneldelivery.ActionDisposition{runtimechanneldelivery.ActionRejected}) {
+		t.Fatalf("unresolved callback dispositions = %v", store.settled)
 	}
 }

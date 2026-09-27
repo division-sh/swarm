@@ -315,6 +315,7 @@ func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.C
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, fault.Request.PublicationID, 0)
 	actions, ok := any(store).(interface {
 		ListPendingChannelActions(context.Context, string, int) ([]runtimechanneldelivery.PendingAction, error)
+		SettleUnappliedChannelAction(context.Context, operatorchannel.InboundAction, runtimechanneldelivery.ActionDisposition) error
 	})
 	if !ok {
 		t.Fatalf("selected store %T lacks pending channel action readback", store)
@@ -333,6 +334,24 @@ func runInboundPublicationOperatorChannelActionProof(t *testing.T, ctx context.C
 	changed.Request.RequestFingerprint = strings.Repeat("e", 64)
 	if _, err := store.CommitInboundPublication(ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
 		t.Fatalf("changed action intent replay error = %v", err)
+	}
+	foreign := *fault.OperatorChannelAction
+	foreign.Token = uuid.NewString()
+	if err := actions.SettleUnappliedChannelAction(ctx, foreign, runtimechanneldelivery.ActionRejected); err == nil {
+		t.Fatal("foreign callback fact settled verified intent")
+	}
+	if err := actions.SettleUnappliedChannelAction(ctx, *fault.OperatorChannelAction, runtimechanneldelivery.ActionRejected); err != nil {
+		t.Fatalf("settle verified rejected callback: %v", err)
+	}
+	if err := actions.SettleUnappliedChannelAction(ctx, *fault.OperatorChannelAction, runtimechanneldelivery.ActionRejected); err != nil {
+		t.Fatalf("exact rejected callback replay: %v", err)
+	}
+	if err := actions.SettleUnappliedChannelAction(ctx, *fault.OperatorChannelAction, runtimechanneldelivery.ActionStale); err == nil {
+		t.Fatal("settled callback changed disposition")
+	}
+	pending, err = actions.ListPendingChannelActions(ctx, "", 500)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("settled callback remains pending = %#v, err=%v", pending, err)
 	}
 }
 
