@@ -2,6 +2,7 @@ package decisioncard
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +76,45 @@ func TestPublicJSONOmitsUnsetOptionalTimestampsAndIncludesTransitions(t *testing
 	}
 	if want := now.Add(time.Hour).Format(time.RFC3339Nano); !strings.Contains(string(listRaw), `"deferred_until":"`+want+`"`) {
 		t.Fatalf("list deferred_until = %s, want %s", listRaw, want)
+	}
+}
+
+func TestDecisionCardInputOrderChangesPresentationNotDecisionSchema(t *testing.T) {
+	fields := map[string]runtimecontracts.WorkflowGateInputField{
+		"zeta":  {Type: "text", Required: true},
+		"alpha": {Type: "integer", Required: true},
+	}
+	build := func(order []string) Card {
+		card, err := New(baseTestDecisionCard(map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"approve": {Verdict: "approve", Input: fields, InputOrder: order},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+	a := build([]string{"zeta", "alpha"})
+	b := build([]string{"alpha", "zeta"})
+	if a.CardContentHash == b.CardContentHash || a.DecisionSchemaHash != b.DecisionSchemaHash {
+		t.Fatalf("order must change content but not acceptance schema: a=%s/%s b=%s/%s", a.CardContentHash, a.DecisionSchemaHash, b.CardContentHash, b.DecisionSchemaHash)
+	}
+	raw, err := SnapshotJSON(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeSnapshot(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded.Outcomes["approve"].InputOrder; !reflect.DeepEqual(got, []string{"zeta", "alpha"}) {
+		t.Fatalf("round-tripped input order = %#v", got)
+	}
+	for _, order := range [][]string{nil, {"zeta"}, {"zeta", "zeta"}, {"zeta", "foreign"}} {
+		if _, err := FreezeSnapshot("review", "", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"approve": {Verdict: "approve", Input: fields, InputOrder: order},
+		}); err == nil {
+			t.Fatalf("invalid input order %#v was admitted", order)
+		}
 	}
 }
 
@@ -156,6 +196,7 @@ func TestNewRejectsNonCanonicalGateInputTypeInSnapshot(t *testing.T) {
 				Input: map[string]runtimecontracts.WorkflowGateInputField{
 					"feedback": {Type: "string", Required: true},
 				},
+				InputOrder: []string{"feedback"},
 			},
 		}, nil),
 	})
@@ -173,6 +214,7 @@ func TestNewRejectsNonExactCanonicalGateInputTypeBeforeHashing(t *testing.T) {
 				Input: map[string]runtimecontracts.WorkflowGateInputField{
 					"feedback": {Type: " TEXT ", Required: true},
 				},
+				InputOrder: []string{"feedback"},
 			},
 		}, nil),
 	})
@@ -222,6 +264,7 @@ func TestDecisionSchemaHashTracksVerdictInputsAndIgnoresExecutionRoutes(t *testi
 				Input: map[string]runtimecontracts.WorkflowGateInputField{
 					"code": {Type: "text", Required: true, Label: inputLabel},
 				},
+				InputOrder: []string{"code"},
 				Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
 					"code": runtimecontracts.CELExpression("decision.code"),
 				}},
@@ -284,6 +327,7 @@ func TestValidateRecomputesImmutableSnapshotHashes(t *testing.T) {
 			Input: map[string]runtimecontracts.WorkflowGateInputField{
 				"feedback": {Type: "text", Required: true},
 			},
+			InputOrder: []string{"feedback"},
 		},
 	}))
 	if err != nil {
@@ -381,7 +425,8 @@ func TestDecodeSnapshotRejectsStructuralSemanticDriftAtEveryTypedLevel(t *testin
 	snapshot, err := FreezeSnapshot("launch_review", "", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"revise": {
 			Verdict: "revise", AdvancesTo: "building",
-			Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
+			Input:      map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
+			InputOrder: []string{"feedback"},
 			Emit: runtimecontracts.EmitSpec{Event: "review.completed", Fields: map[string]runtimecontracts.ExpressionValue{
 				"feedback": runtimecontracts.CELExpression("decision.feedback"),
 			}},
@@ -446,7 +491,7 @@ func TestNewRejectsNonCanonicalGateMapIdentityBeforeHashing(t *testing.T) {
 	}{
 		{name: "verdict", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{" approve ": {AdvancesTo: "operating"}}},
 		{name: "input", outcomes: map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {
-			AdvancesTo: "operating", Input: map[string]runtimecontracts.WorkflowGateInputField{" note ": {Type: "text"}},
+			AdvancesTo: "operating", Input: map[string]runtimecontracts.WorkflowGateInputField{" note ": {Type: "text"}}, InputOrder: []string{" note "},
 		}}},
 	}
 	for _, tc := range tests {
