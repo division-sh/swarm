@@ -24,6 +24,7 @@ type Double struct {
 	acknowledgments              []map[string]any
 	rejectNextCredential         bool
 	loseNextRegistrationResponse bool
+	loseNextDeliveryResponse     bool
 	loseNextEditResponse         bool
 	loseNextAckResponse          bool
 	registrationResponseBarrier  *responseBarrier
@@ -155,12 +156,18 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		p.mu.Lock()
 		p.deliveries = append(p.deliveries, clonePayload(payload))
 		messageID := len(p.deliveries)
+		loseResponse := p.loseNextDeliveryResponse
+		p.loseNextDeliveryResponse = false
 		barrier := p.deliveryResponseBarrier
 		p.deliveryResponseBarrier = nil
 		p.mu.Unlock()
 		if barrier != nil {
 			close(barrier.arrived)
 			<-barrier.release
+		}
+		if loseResponse {
+			loseProviderResponse(w)
+			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": messageID}})
 	case strings.HasSuffix(request.URL.Path, "/editMessageText"):
@@ -321,6 +328,12 @@ func (p *Double) LoseNextEditAcknowledgment() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.loseNextEditResponse = true
+}
+
+func (p *Double) LoseNextDeliveryAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextDeliveryResponse = true
 }
 
 func (p *Double) LoseNextCallbackAcknowledgment() {
