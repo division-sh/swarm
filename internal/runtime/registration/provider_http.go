@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -48,6 +49,8 @@ func (e *ProviderCredentialRejectedError) Unwrap() error {
 type PendingApply struct {
 	handle           *runtimeeffects.Handle
 	responseObserved bool
+	accepted         bool
+	source           string
 }
 
 type ApplyResult struct {
@@ -84,6 +87,19 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 	if tool.Category() != runtimecontracts.ToolCategoryProviderRegistration || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return ApplyResult{}, fmt.Errorf("provider registration apply tool %q has an invalid contract", strings.TrimSpace(toolID))
 	}
+	return e.applyWithReadback(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginServeRegistration, providerRegistrationSource)
+}
+
+func (e HTTPExecutor) ApplyChannelNativeSetting(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (ApplyResult, error) {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return ApplyResult{}, fmt.Errorf("channel native setting tool %q has an invalid contract", strings.TrimSpace(toolID))
+	}
+	return e.applyWithReadback(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelNativeSetting, "channel_native_setting")
+}
+
+func (e HTTPExecutor) applyWithReadback(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string,
+	begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string,
+) (ApplyResult, error) {
 	prepared, secrets, err := prepareProviderRequest(toolID, tool, input, credentials)
 	if err != nil {
 		return ApplyResult{}, err
@@ -92,18 +108,18 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	handle, err := runtimeeffects.BeginServeRegistration(ctx, fingerprint, lineage)
+	handle, err := begin(ctx, fingerprint, lineage)
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	pending := &PendingApply{handle: handle}
+	pending := &PendingApply{handle: handle, source: source}
 	response, raw, launched, launchErr, err := e.executeProviderApply(ctx, prepared, handle)
 	if err != nil {
 		if !launched {
 			if launchErr != nil {
 				return ApplyResult{}, errors.Join(launchErr, handle.Fail(
 					context.WithoutCancel(ctx), runtimeeffects.StateTerminalFailure, runtimefailures.ClassLifecycleConflict,
-					"provider_registration_launch_dispatch_blocked", providerRegistrationSource, "dispatch",
+					source+"_launch_dispatch_blocked", source, "dispatch",
 					map[string]any{"tool": strings.TrimSpace(toolID), "no_dispatch": true}, err,
 				))
 			}
@@ -111,14 +127,14 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 				ctx,
 				runtimeeffects.StateTerminalFailure,
 				runtimefailures.ClassDependencyUnavailable,
-				"provider_registration_prelaunch_rejected",
-				providerRegistrationSource,
+				source+"_prelaunch_rejected",
+				source,
 				"dispatch",
 				map[string]any{"tool": strings.TrimSpace(toolID), "launch_rejected": true},
 				err,
 			)
 		}
-		return ApplyResult{Pending: pending}, errors.Join(launchErr, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_acknowledgment_lost", providerRegistrationSource, "dispatch", map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets)))
+		return ApplyResult{Pending: pending}, errors.Join(launchErr, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, source+"_acknowledgment_lost", source, "dispatch", map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets)))
 	}
 	observationErr := handle.MarkResponseObserved(ctx, map[string]any{"status": response.StatusCode})
 	if observationErr != nil && !runtimeeffects.CommittedMutationPhase(observationErr, runtimeeffects.MutationObservation, handle.Attempt()) {
@@ -127,8 +143,18 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 	pending.responseObserved = true
 	output, err := projectProviderResponse(toolID, tool, response, raw, secrets)
 	if err != nil {
-		return ApplyResult{Pending: pending}, errors.Join(launchErr, observationErr, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_registration_response_unconfirmed", providerRegistrationSource, "validate_response", map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err))
+		return ApplyResult{Pending: pending}, errors.Join(launchErr, observationErr, runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, source+"_response_unconfirmed", source, "validate_response", map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err))
 	}
+	if source == "channel_native_setting" {
+		projected, ok := output.(map[string]any)
+		accepted, valid := projected["accepted"].(bool)
+		if !ok || !valid || !accepted {
+			return ApplyResult{Pending: pending}, errors.Join(launchErr, observationErr,
+				runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "channel_native_setting_not_accepted", source,
+					"validate_response", map[string]any{"tool": strings.TrimSpace(toolID)}))
+		}
+	}
+	pending.accepted = true
 	// Provider acknowledgment is not authoritative registration state. Keep the
 	// durable attempt live until readback proves the exact callback intent.
 	return ApplyResult{Output: output, Pending: pending, Acknowledged: true}, errors.Join(launchErr, observationErr)
@@ -227,7 +253,7 @@ func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, to
 }
 
 func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause error) error {
-	if p == nil || p.handle == nil {
+	if p == nil || p.handle == nil || p.source != providerRegistrationSource {
 		return fmt.Errorf("provider registration pending apply is missing")
 	}
 	if exact {
@@ -260,6 +286,40 @@ func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause err
 	return p.handle.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{
 		"authority": "provider_readback",
 		"matched":   false,
+	})
+}
+
+func (p *PendingApply) SettleNativeSettingReadback(ctx context.Context, observed []byte, cause error) error {
+	if p == nil || p.handle == nil || p.source != "channel_native_setting" {
+		return fmt.Errorf("channel native setting pending apply is missing")
+	}
+	if !p.responseObserved || !p.accepted {
+		cause = fmt.Errorf("native setting write acknowledgment is unconfirmed")
+	}
+	if cause == nil {
+		var err error
+		observed, err = canonicaljson.Canonicalize(observed)
+		if err != nil {
+			cause = err
+		} else {
+			desired, desiredErr := channelnative.DesiredCommands()
+			if desiredErr != nil {
+				return desiredErr
+			}
+			if !bytes.Equal(observed, desired) {
+				cause = fmt.Errorf("native setting readback contradicts desired commands")
+			} else {
+				return p.handle.Succeed(ctx, map[string]any{"authority": "provider_readback", "matched": true,
+					"readback_hash": runtimeeffects.Fingerprint(desired)})
+			}
+		}
+	}
+	failureErr := runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain,
+		"channel_native_setting_readback_unconfirmed", "channel_native_setting", "settle_readback",
+		map[string]any{"authority": "provider_readback", "matched": false}, cause)
+	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
+	return p.handle.Settle(ctx, runtimeeffects.StateOutcomeUncertain, &failure, map[string]any{
+		"authority": "provider_readback", "matched": false,
 	})
 }
 
