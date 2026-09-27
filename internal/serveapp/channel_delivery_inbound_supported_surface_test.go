@@ -50,6 +50,14 @@ func TestChannelDeliveryNativeInboxLostAcknowledgmentE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "verdict")
+		})
+	}
+}
+
 type telegramNoticeLLMRuntime struct{ telegramPhraseBotLLMRuntime }
 
 func (r telegramNoticeLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
@@ -138,13 +146,48 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		provider.LoseNextDeliveryAcknowledgment()
 	}
 	callbackURL, signing, _ := provider.Registration()
-	requestBody, err := json.Marshal(map[string]any{
+	update := map[string]any{
 		"update_id": time.Now().UnixMilli(),
 		"message": map[string]any{
 			"message_id": 9101, "from": map[string]any{"id": 7000},
 			"chat": map[string]any{"id": 1001, "type": "private"}, "text": inputText,
 		},
-	})
+	}
+	if scenario == "verdict" {
+		deadline := time.Now().Add(15 * time.Second)
+		for provider.Delivery(1) == nil {
+			if time.Now().After(deadline) {
+				t.Fatal("card was not delivered before callback")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		cardMessage := provider.Delivery(1)
+		markup, ok := cardMessage["reply_markup"].(map[string]any)
+		if !ok {
+			t.Fatalf("card has no callback controls: %v", cardMessage)
+		}
+		rows, ok := markup["inline_keyboard"].([]any)
+		if !ok || len(rows) == 0 {
+			t.Fatalf("card has no callback rows: %v", markup)
+		}
+		row, ok := rows[0].([]any)
+		if !ok || len(row) == 0 {
+			t.Fatalf("card has no first callback row: %v", rows)
+		}
+		control, ok := row[0].(map[string]any)
+		if !ok || fmt.Sprint(control["callback_data"]) == "" {
+			t.Fatalf("card has no callback token: %v", row)
+		}
+		update = map[string]any{
+			"update_id": time.Now().UnixMilli(),
+			"callback_query": map[string]any{
+				"id": "callback-9102", "from": map[string]any{"id": 7000},
+				"message": map[string]any{"message_id": 2, "chat": map[string]any{"id": 1001, "type": "private"}},
+				"data":    control["callback_data"],
+			},
+		}
+	}
+	requestBody, err := json.Marshal(update)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,14 +215,17 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	if err := json.Unmarshal(responseBody, &admitted); err != nil {
 		t.Fatal(err)
 	}
-	if (scenario == "inbox" || scenario == "inbox_loss") && len(admitted.EventNames) != 0 {
+	if (scenario == "inbox" || scenario == "inbox_loss" || scenario == "verdict") && len(admitted.EventNames) != 0 {
 		t.Fatalf("native inbox entry leaked into business events: %v", admitted.EventNames)
 	}
-	if scenario != "inbox" && scenario != "inbox_loss" && len(admitted.EventNames) == 0 {
+	if scenario != "inbox" && scenario != "inbox_loss" && scenario != "verdict" && len(admitted.EventNames) == 0 {
 		t.Fatalf("ordinary text was consumed without a business event: status=%d events=%v", response.StatusCode, admitted.EventNames)
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
+		if scenario == "verdict" && len(provider.Acknowledgments()) > 0 && len(provider.Edits()) > 0 {
+			return
+		}
 		for index := 1; ; index++ {
 			delivery := provider.Delivery(index)
 			if delivery == nil {
@@ -208,7 +254,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s flow did not answer %q; deliveries=%v", scenario, inputText, provider.Delivery(1))
+			t.Fatalf("%s flow did not answer %q; deliveries=%v acknowledgments=%v edits=%v", scenario, inputText, provider.Delivery(1), provider.Acknowledgments(), provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
