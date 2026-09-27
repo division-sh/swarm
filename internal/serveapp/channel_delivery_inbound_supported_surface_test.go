@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 )
@@ -20,12 +21,36 @@ import (
 func TestChannelDeliveryInboundDispositionE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runChannelDeliveryInboundDispositionE2E(t, backend)
+			runChannelDeliveryInboundDispositionE2E(t, backend, false)
 		})
 	}
 }
 
-func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend string) {
+func TestChannelDeliveryNoticeFirstE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, true)
+		})
+	}
+}
+
+type telegramNoticeLLMRuntime struct{ telegramPhraseBotLLMRuntime }
+
+func (r telegramNoticeLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
+	response, err := r.telegramPhraseBotLLMRuntime.ContinueManagedSession(ctx, session, call)
+	if err != nil || len(response.ToolCalls) == 0 {
+		return response, err
+	}
+	response.ToolCalls[0].Name = "notify_human"
+	response.ToolCalls[0].Arguments = map[string]any{
+		"summary": "Observed ordinary business text",
+		"context": map[string]any{"source": "signed Telegram inbound"},
+	}
+	response.Message.ToolCalls = append([]runtimellm.ToolCall(nil), response.ToolCalls...)
+	return response, nil
+}
+
+func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend string, notice bool) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	configureStandingLifecycleCredentials(t)
@@ -52,6 +77,9 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend string) {
 		PublicWebhookListener: publicListener, SelfCheck: true, AbandonActiveRuns: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 		StoreMode: backend, StoreModeSet: true,
+	}
+	if notice {
+		opts.TestLLMRuntime = telegramNoticeLLMRuntime{}
 	}
 	process := startServeRuntimeTestProcess(t, opts)
 	t.Cleanup(func() { _ = process.stop() })
@@ -104,6 +132,9 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend string) {
 				break
 			}
 			if fmt.Sprint(delivery["chat_id"]) == "1001" && strings.Contains(fmt.Sprint(delivery["text"]), "ordinary business text") {
+				if notice && !strings.Contains(fmt.Sprint(delivery["text"]), "Observed ordinary business text") {
+					continue
+				}
 				return
 			}
 		}
