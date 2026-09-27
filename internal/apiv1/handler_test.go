@@ -779,20 +779,42 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	if quiescence["ready"] != true || quiescence["active_deliveries"] != float64(0) || quiescence["fan_out_unsettled"] != float64(0) {
 		t.Fatalf("run.diagnose test_quiescence = %#v, want ready zero-count projection", quiescence)
 	}
-	report := fakeRuns.reports[runID]
-	report.TestQuiescence = operatorread.RunTestQuiescence{FanOutUnsettled: 1}
-	report.FanOut = fanoutobligation.RunSummary{
-		RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, Committed: 1, Unsettled: 1,
-		MinNextChunk: fanoutobligation.InitialChunkSize, MaxNextChunk: fanoutobligation.InitialChunkSize,
-	}
-	fakeRuns.reports[runID] = report
-	diagnose = rpcCall(t, handler, `{"jsonrpc":"2.0","id":"unsettled","method":"run.diagnose","params":{"run_id":"run-1"}}`)
-	if diagnose.Error != nil {
-		t.Fatalf("run.diagnose unsettled error = %#v", diagnose.Error)
-	}
-	quiescence = asMap(t, asMap(t, diagnose.Result)["test_quiescence"])
-	if quiescence["ready"] != false || quiescence["fan_out_unsettled"] != float64(1) {
-		t.Fatalf("run.diagnose must preserve store-owned unsettled readiness: %#v", quiescence)
+	for _, tc := range []struct {
+		name       string
+		field      string
+		quiescence operatorread.RunTestQuiescence
+		fanOut     fanoutobligation.RunSummary
+	}{
+		{
+			name: "owed", field: "fan_out_owed",
+			quiescence: operatorread.RunTestQuiescence{FanOutOwed: 1},
+			fanOut:     fanoutobligation.RunSummary{RunID: runID, Intents: 1, Open: 1, Cardinality: 1, Owed: 1},
+		},
+		{
+			name: "unsettled", field: "fan_out_unsettled",
+			quiescence: operatorread.RunTestQuiescence{FanOutUnsettled: 1},
+			fanOut:     fanoutobligation.RunSummary{RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, Committed: 1, Unsettled: 1},
+		},
+		{
+			name: "barrier", field: "fan_out_barriers",
+			quiescence: operatorread.RunTestQuiescence{FanOutBarriers: 1},
+			fanOut:     fanoutobligation.RunSummary{RunID: runID, Intents: 1, Cardinality: 1, Cursor: 1, Committed: 1, Settled: 1, BarrierPending: 1},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			report := fakeRuns.reports[runID]
+			report.TestQuiescence = tc.quiescence
+			report.FanOut = tc.fanOut
+			fakeRuns.reports[runID] = report
+			diagnose := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"blocked","method":"run.diagnose","params":{"run_id":"run-1"}}`)
+			if diagnose.Error != nil {
+				t.Fatalf("run.diagnose %s error = %#v", tc.name, diagnose.Error)
+			}
+			quiescence := asMap(t, asMap(t, diagnose.Result)["test_quiescence"])
+			if quiescence["ready"] != false || quiescence[tc.field] != float64(1) {
+				t.Fatalf("run.diagnose must preserve store-owned %s blocker: %#v", tc.name, quiescence)
+			}
+		})
 	}
 }
 
