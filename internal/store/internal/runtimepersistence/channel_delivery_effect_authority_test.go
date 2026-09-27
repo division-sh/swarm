@@ -22,6 +22,7 @@ import (
 type selectedChannelDeliveryTestStore interface {
 	channelOnboardingEffectSelectedStore
 	InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error)
+	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 }
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
@@ -77,7 +78,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bindingOperationID := uuid.NewString()
+			bindingOperationID := onboarding.IdentityOperationID
 			bindingOperation, err := selected.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
 				OperationID: bindingOperationID, Kind: operatorchannel.OperationConnect,
 				PrincipalID: principal.ID, Interface: activation.Interface, ExpectedRevision: 0,
@@ -108,6 +109,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if selectedActivationID, found, err := selected.CurrentChannelDeliveryActivationID(ctx); err != nil || found || selectedActivationID != "" {
+				t.Fatalf("pre-success activation = %s, found=%t err=%v", selectedActivationID, found, err)
 			}
 			noticeID, err := selected.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 				Type: runtimetools.NotifyHumanMailboxItemType, Summary: "Delivery authority proof",
@@ -194,6 +198,10 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+			selectedActivationID, found, err := selected.CurrentChannelDeliveryActivationID(ctx)
+			if err != nil || !found || selectedActivationID != activation.ActivationID {
+				t.Fatalf("selected activation = %s, found=%t err=%v", selectedActivationID, found, err)
 			}
 			if !current(authority) {
 				t.Fatal("succeeded channel activation rejected exact delivery")
