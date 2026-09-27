@@ -12,20 +12,21 @@ import (
 )
 
 type Plan struct {
-	DeliveryID         string
-	SourceKind         string
-	SourceID           string
-	SummaryCount       int64
-	PrincipalID        string
-	InterfaceKey       string
-	BindingRevision    int64
-	DeliveryEpoch      int64
-	ExternalAccountRef string
-	ConversationRef    string
-	ConversationScope  operatorchannel.ConversationScope
-	State              string
-	CurrentRenderID    string
-	CurrentReceiptID   string
+	DeliveryID             string
+	SourceKind             string
+	SourceID               string
+	SummaryCount           int64
+	PrincipalID            string
+	InterfaceKey           string
+	BindingRevision        int64
+	CurrentBindingRevision int64
+	DeliveryEpoch          int64
+	ExternalAccountRef     string
+	ConversationRef        string
+	ConversationScope      operatorchannel.ConversationScope
+	State                  string
+	CurrentRenderID        string
+	CurrentReceiptID       string
 }
 
 const (
@@ -72,6 +73,9 @@ func (p Plan) Validate() error {
 		p.InterfaceKey == "" || p.BindingRevision < 1 || p.DeliveryEpoch < 1 || p.ExternalAccountRef == "" || p.ConversationRef == "" ||
 		!p.ConversationScope.Valid() {
 		return fmt.Errorf("stored channel delivery plan identity is invalid")
+	}
+	if p.CurrentBindingRevision != 0 && p.CurrentBindingRevision < p.BindingRevision {
+		return fmt.Errorf("selected binding revision predates channel delivery plan")
 	}
 	switch p.SourceKind {
 	case PlanNotice, PlanCard:
