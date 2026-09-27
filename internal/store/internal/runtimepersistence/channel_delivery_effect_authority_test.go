@@ -277,6 +277,64 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					replayedSetting.CurrentConsumerCount != 1 || replayedSetting.InstallOperationID != expectedInstallID {
 					t.Fatalf("native setting replay = %#v, %v", replayedSetting, err)
 				}
+				if mode == "current" {
+					siblingID, siblingRuntimeID := uuid.NewString(), uuid.NewString()
+					err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+						idArg, runtimeArg, sourceArg := "?", "?", "?"
+						if postgres {
+							idArg, runtimeArg, sourceArg = "$1::uuid", "$2::uuid", "$3::uuid"
+						}
+						query := fmt.Sprintf(`INSERT INTO connected_channel_activations
+							(activation_id, slot_key, operation_id, operation_revision, principal_id, provider,
+							interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash,
+							semantic_generation, bundle_hash, bundle_identity, pack_inventory_generation,
+							runtime_instance_id, context_publication_generation, plan_generation, target_selector,
+							target_generation, activation_posture, binding_revision, conversation_reference,
+							proof_id, proof_revision, credential_admissions, activation_revision, status,
+							retirement_reason, created_at, updated_at, retired_at)
+							SELECT %s, slot_key || ':sibling', operation_id, operation_revision, principal_id, provider,
+							interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash,
+							semantic_generation, bundle_hash, bundle_identity, pack_inventory_generation,
+							%s, context_publication_generation, plan_generation, target_selector,
+							target_generation, activation_posture, binding_revision, conversation_reference,
+							proof_id, proof_revision, credential_admissions, activation_revision, status,
+							retirement_reason, created_at, updated_at, retired_at
+							FROM connected_channel_activations WHERE activation_id=%s`, idArg, runtimeArg, sourceArg)
+						_, err := tx.ExecContext(txctx, query, siblingID, siblingRuntimeID, activation.ActivationID)
+						return err
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					siblingAdmission := admission
+					siblingAdmission.ActivationID = siblingID
+					attached, err := native.AttachNativeInboxSetting(ctx, siblingAdmission)
+					if err != nil || attached.SettingID != setting.SettingID || attached.Generation != setting.Generation ||
+						attached.InstallOperationID != setting.InstallOperationID || attached.CurrentConsumerCount != 2 {
+						t.Fatalf("compatible sibling changed physical setting: %#v, %v", attached, err)
+					}
+					err = runTx(func(txctx context.Context, tx *sql.Tx) error {
+						query := `UPDATE connected_channel_activations SET status='retired', retirement_reason='test sibling retirement',
+							retired_at=?, updated_at=? WHERE activation_id=?`
+						if postgres {
+							query = `UPDATE connected_channel_activations SET status='retired', retirement_reason='test sibling retirement',
+								retired_at=$1, updated_at=$2 WHERE activation_id=$3::uuid`
+						}
+						_, err := tx.ExecContext(txctx, query, now.Add(3*time.Second), now.Add(3*time.Second), siblingID)
+						return err
+					})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := native.RetireStaleNativeInboxConsumers(ctx); err != nil {
+						t.Fatal(err)
+					}
+					retained, err := native.AttachNativeInboxSetting(ctx, admission)
+					if err != nil || retained.SettingID != setting.SettingID || retained.InstallOperationID != setting.InstallOperationID ||
+						retained.CurrentConsumerCount != 1 || retained.State != setting.State {
+						t.Fatalf("sibling retirement changed retained physical setting: %#v, %v", retained, err)
+					}
+				}
 				for _, stale := range []struct {
 					name, sqliteUpdate, postgresUpdate string
 				}{
