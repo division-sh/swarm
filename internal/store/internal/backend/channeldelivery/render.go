@@ -54,6 +54,9 @@ func PersistRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, frozen 
 		selected.ConversationScope != plan.ConversationScope {
 		return "", false, fmt.Errorf("channel render plan is not exact-current")
 	}
+	if err := requireExactSourceRenderTx(ctx, tx, plan, verified, postgres); err != nil {
+		return "", false, err
+	}
 	id := uuid.NewString()
 	query := `INSERT INTO channel_delivery_renders (render_id, delivery_id, source_revision,
 		projection_version, render_input, render_hash, created_at)
