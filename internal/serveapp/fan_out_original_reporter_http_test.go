@@ -385,7 +385,7 @@ func assertIssue2394RegistrationDelivery(t *testing.T, event operatorread.Operat
 		t.Fatalf("registration requires one root consumer: %+v", event)
 	}
 	delivery := event.Deliveries[0]
-	if delivery.SubscriberType != "node" || delivery.SubscriberID != identitytest.FlowNode(t, "", "numeric-registration-reporter").Key() || !delivery.Terminal || delivery.Status != "delivered" {
+	if delivery.SubscriberType != "node" || delivery.SubscriberID != identitytest.RootNode(t, "numeric-registration-reporter").Key() || !delivery.Terminal || delivery.Status != "delivered" {
 		t.Fatalf("registration root delivery: type=%q id=%q status=%q terminal=%t", delivery.SubscriberType, delivery.SubscriberID, delivery.Status, delivery.Terminal)
 	}
 }
