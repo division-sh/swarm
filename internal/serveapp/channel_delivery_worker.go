@@ -137,7 +137,29 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 			if err := d.acknowledgeChannelAction(ctx, intent, resolved); err != nil {
 				failures = errors.Join(failures, fmt.Errorf("acknowledge channel action %s: %w", intent.PublicationID, err))
 			}
+			if resolved.Action.Kind == "open_inbox" || resolved.Action.Kind == "view_full" || resolved.Action.Kind == "next_page" {
+				inboxText := ""
+				if resolved.Action.Kind == "open_inbox" {
+					inboxText, err = d.inboxContent(ctx)
+				}
+				if err == nil {
+					_, err = d.store.PlanChannelActionResponse(ctx, intent.Fact, resolved, inboxText)
+				}
+				if err != nil {
+					failures = errors.Join(failures, fmt.Errorf("plan channel navigation %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
+			if resolved.SourceKind == "notice" && resolved.Action.Kind == "acknowledge_notice" {
+				if err := d.processNoticeAction(ctx, intent, resolved); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("acknowledge channel notice %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
 			if resolved.SourceKind != "card" || resolved.Action.Kind != "verdict" {
+				if err := d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionUnsupported); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("reject unsupported channel action %s: %w", intent.PublicationID, err))
+				}
 				continue
 			}
 			card, err := d.cards.GetDecisionCard(ctx, resolved.SourceID)
@@ -186,49 +208,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 			if !found {
 				continue
 			}
-			page, err := apiv1.ListMailboxProjectionPage(ctx, apiv1.DecisionCardHandlerOptions{
-				Cards: d.cards, ProposedEffects: d.proposedEffects, Mailbox: d.mailbox,
-			}, decisioncard.StatusPending, "", 5)
-			if err != nil {
-				failures = errors.Join(failures, err)
-				continue
-			}
-			entries := make([]runtimechanneldelivery.InboxEntry, 0, len(page.Items))
-			for _, item := range page.Items {
-				projection, ok := item.(map[string]any)
-				if !ok {
-					err = fmt.Errorf("mailbox projection item is not tagged")
-					break
-				}
-				var entry runtimechanneldelivery.InboxEntry
-				switch projection["kind"] {
-				case decisioncard.KindNotice:
-					notice, ok := projection["notice"].(mailbox.V1Item)
-					if !ok {
-						err = fmt.Errorf("mailbox notice projection is not typed")
-						break
-					}
-					entry, err = runtimechanneldelivery.InboxNoticeEntry(notice)
-				case decisioncard.KindDecisionCard:
-					card, ok := projection["decision_card"].(decisioncard.ListItem)
-					if !ok {
-						err = fmt.Errorf("mailbox card projection is not typed")
-						break
-					}
-					entry, err = runtimechanneldelivery.InboxCardEntry(card)
-				default:
-					err = fmt.Errorf("mailbox projection item has unknown kind")
-				}
-				if err != nil {
-					break
-				}
-				entries = append(entries, entry)
-			}
-			if err != nil {
-				failures = errors.Join(failures, err)
-				continue
-			}
-			content, err := runtimechanneldelivery.InboxText(page.UnreadInformationalNotices, entries, page.NextCursor != "")
+			content, err := d.inboxContent(ctx)
 			if err != nil {
 				failures = errors.Join(failures, err)
 				continue
@@ -246,6 +226,67 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 		}
 		cursor = last
 	}
+}
+
+func (d *serveChannelDeliveryDispatcher) inboxContent(ctx context.Context) (string, error) {
+	if d == nil || d.cards == nil || d.mailbox == nil || d.proposedEffects == nil {
+		return "", fmt.Errorf("channel inbox projection owners are unavailable")
+	}
+	owners := apiv1.DecisionCardHandlerOptions{
+		Cards: d.cards, ProposedEffects: d.proposedEffects, Mailbox: d.mailbox,
+	}
+	entries := make([]runtimechanneldelivery.InboxEntry, 0)
+	cursor := ""
+	seen := map[string]struct{}{}
+	unread := 0
+	for {
+		page, err := apiv1.ListMailboxProjectionPage(ctx, owners, decisioncard.StatusPending, cursor, 5)
+		if err != nil {
+			return "", err
+		}
+		if cursor == "" {
+			unread = page.UnreadInformationalNotices
+		}
+		for _, item := range page.Items {
+			projection, ok := item.(map[string]any)
+			if !ok {
+				return "", fmt.Errorf("mailbox projection item is not tagged")
+			}
+			var entry runtimechanneldelivery.InboxEntry
+			switch projection["kind"] {
+			case decisioncard.KindNotice:
+				notice, ok := projection["notice"].(mailbox.V1Item)
+				if !ok {
+					return "", fmt.Errorf("mailbox notice projection is not typed")
+				}
+				entry, err = runtimechanneldelivery.InboxNoticeEntry(notice)
+			case decisioncard.KindDecisionCard:
+				card, ok := projection["decision_card"].(decisioncard.ListItem)
+				if !ok {
+					return "", fmt.Errorf("mailbox card projection is not typed")
+				}
+				entry, err = runtimechanneldelivery.InboxCardEntry(card)
+			default:
+				return "", fmt.Errorf("mailbox projection item has unknown kind")
+			}
+			if err != nil {
+				return "", err
+			}
+			entries = append(entries, entry)
+		}
+		if page.NextCursor == "" {
+			break
+		}
+		if page.NextCursor == cursor {
+			return "", fmt.Errorf("channel inbox cursor did not advance")
+		}
+		if _, duplicate := seen[page.NextCursor]; duplicate {
+			return "", fmt.Errorf("channel inbox cursor repeated")
+		}
+		seen[page.NextCursor] = struct{}{}
+		cursor = page.NextCursor
+	}
+	return runtimechanneldelivery.InboxText(unread, entries, false)
 }
 
 func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher) error {

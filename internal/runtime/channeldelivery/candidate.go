@@ -4,21 +4,22 @@ import (
 	"context"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
 // Candidate is a selected-store projection for one current destination.
 // Dispatch must still acquire current activation and effect authority.
 type Candidate struct {
-	DeliveryID        string
-	SourceKind        string
-	SourceID          string
-	EntryActivationID string
-	BindingRevision   int64
-	Audience          Audience
-	State             string
-	CurrentRenderID   string
-	CurrentReceiptID  string
+	DeliveryID          string
+	SourceKind          string
+	SourceID            string
+	RequestActivationID string
+	BindingRevision     int64
+	Audience            Audience
+	State               string
+	CurrentRenderID     string
+	CurrentReceiptID    string
 }
 
 type PreparedRender struct {
@@ -128,4 +129,6 @@ type Store interface {
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (ResolvedText, bool, error)
 	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (ResolvedNativeEntry, bool, error)
 	PlanNativeInboxResponse(context.Context, operatorchannel.InboundText, ResolvedNativeEntry, string) (string, error)
+	PlanChannelActionResponse(context.Context, operatorchannel.InboundAction, ResolvedAction, string) (string, error)
+	AcknowledgeChannelNotice(context.Context, apiidempotency.Request, operatorchannel.InboundAction) (apiidempotency.Completion, bool, error)
 }

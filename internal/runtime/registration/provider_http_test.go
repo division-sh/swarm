@@ -216,6 +216,78 @@ func TestChannelDeliveryEffectOutcomes(t *testing.T) {
 	})
 }
 
+type channelActionAckHarness struct{ *effecttest.Harness }
+
+func (h *channelActionAckHarness) IsExternalEffectAuthorityCurrent(_ context.Context, authority runtimeeffects.Authority) (bool, error) {
+	return authority.Kind == runtimeeffects.AuthorityChannelActionAck && authority.Valid(), nil
+}
+
+func channelActionAckTestContext(h *channelActionAckHarness) context.Context {
+	plan, err := plangeneration.FromCanonicalValue(map[string]string{"test": "channel-action-ack"})
+	if err != nil {
+		panic(err)
+	}
+	publicationID := uuid.NewString()
+	operationID, err := runtimeeffects.ChannelActionAckOperationID(publicationID)
+	if err != nil {
+		panic(err)
+	}
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityChannelActionAck, ID: operationID,
+		ExecutionOwner: "channel-action:test", LeaseExpiresAt: time.Now().Add(time.Minute), FenceGeneration: 7,
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		ChannelActionAck: runtimeeffects.ChannelActionAckAuthority{
+			EffectOperationID: operationID, PublicationID: publicationID,
+			Provider: "telegram", ProviderEventID: "update:1", ProviderAuthorization: "verified",
+			InterfaceKey: "telegram:v2", ExternalAccountRef: "account", ConversationRef: "chat",
+			ConversationScope: "direct", MessageReference: "91", InteractionRef: "callback:1", Token: uuid.NewString(),
+			ReceiptOperationID: uuid.NewString(), PrincipalID: uuid.NewString(), BindingRevision: 2,
+			ActivationID: uuid.NewString(), ActivationRevision: 3,
+			BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), BundleIdentity: "bundle:test@sha256:ack",
+			PackInventoryGeneration: "sha256:ack-inventory", RuntimeInstanceID: uuid.NewString(),
+			ContextPublicationGeneration: 7, PlanGeneration: plan, TargetGeneration: 1,
+		},
+	}
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
+	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(h).WithExecutionPosture(executionposture.Live))
+	return runtimeeffects.WithAuthority(ctx, authority)
+}
+
+func TestChannelActionAckEffectOutcomes(t *testing.T) {
+	tool := packfixture.ConnectorTool(t, "telegram", "telegram.answer_callback").Tool
+	input := map[string]any{"callback_query_id": "callback:1"}
+	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+	for _, tc := range []struct {
+		name     string
+		response string
+		want     runtimeeffects.State
+	}{
+		{name: "provider success", response: `{"ok":true,"result":true}`, want: runtimeeffects.StateSettled},
+		{name: "provider response lost", want: runtimeeffects.StateOutcomeUncertain},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &channelActionAckHarness{Harness: effecttest.New()}
+			executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+				if err := h.RequireState("channel_action_ack", runtimeeffects.StateLaunched); err != nil {
+					t.Fatal(err)
+				}
+				if tc.response == "" {
+					return nil, errors.New("transport lost bot-secret")
+				}
+				return registrationResponse(http.StatusOK, tc.response), nil
+			})}}
+			result, err := executor.AcknowledgeChannelAction(channelActionAckTestContext(h), "telegram.answer_callback", tool, input, credentials, nil)
+			if result.OperationID == "" || (tc.want == runtimeeffects.StateSettled && err != nil) ||
+				(tc.want == runtimeeffects.StateOutcomeUncertain && (err == nil || strings.Contains(err.Error(), "bot-secret"))) {
+				t.Fatalf("channel action acknowledgment = %#v, %v", result, err)
+			}
+			if err := h.RequireState("channel_action_ack", tc.want); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func serveRegistrationTestContext(harness *effecttest.Harness, identity string) context.Context {
 	intentID := uuid.NewString()
 	startupID := uuid.NewString()
