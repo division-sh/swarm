@@ -40,6 +40,9 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		if condition == "" {
 			return fmt.Errorf("POLICY-SHEET-ROW: when row %q requires a non-empty condition", strings.TrimSpace(rule.ID))
 		}
+		if strings.EqualFold(condition, "else") {
+			return fmt.Errorf("POLICY-SHEET-ROW: when must be a CEL predicate; use else: true for a default row")
+		}
 		rule.Condition = condition
 		rule.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}
 	case rowNodes["case"] != nil:
@@ -214,7 +217,7 @@ func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecode
 	caseKeys := map[string]int{}
 	rangesByValue := map[string][]policySheetRangeForValidation{}
 	for idx, rule := range rules {
-		if strings.EqualFold(strings.TrimSpace(rule.Condition), "else") {
+		if rule.PolicyRow.Kind == PolicySheetRowKindDefault {
 			hasDefault = true
 		}
 		if rule.PolicyRow.Kind == PolicySheetRowKindWhen || rule.PolicyRow.Kind == PolicySheetRowKindCase || rule.PolicyRow.Kind == PolicySheetRowKindRange {
