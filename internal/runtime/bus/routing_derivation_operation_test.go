@@ -206,6 +206,64 @@ func TestRouteTopologyPublicationGroupSharesCompilationButRereadsCurrentTopology
 	}
 }
 
+func TestConnectPreviewSharesOnlyGroupedSourceCompilation(t *testing.T) {
+	source, _ := topologyOperationFixture(t)
+	live, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := newConnectRoutePlanResolver(source, live, nil, nil, nil)
+	resolver.topologySource = new(routeTopologyCompilationScope)
+	preview := func(id string) {
+		t.Helper()
+		current := &connectRoutePlanPreviewRoutes{}
+		ctx := context.WithValue(context.Background(), connectRoutePlanPreviewRoutesKey{}, current)
+		decision := TemplateInstanceLifecycleDecision{
+			Action: templateInstanceLifecycleActionPreviewCreate, InstanceID: id, InstancePath: "workers/" + id,
+		}
+		if err := resolver.installTemplateInstanceLifecyclePreview(ctx, busInternalTestRunID, decision); err != nil {
+			t.Fatal(err)
+		}
+		identity := topologyOperationIdentity(t, id)
+		if current.table == nil || !current.table.HasFlowInstanceRoute(identity) || live.HasFlowInstanceRoute(identity) {
+			t.Fatalf("preview %s must be isolated from live routes", id)
+		}
+		oracle, err := DeriveRouteTable(source.Source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := oracle.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := current.table.MaterializedRoutes(identity), oracle.MaterializedRoutes(identity); !reflect.DeepEqual(got, want) {
+			t.Fatalf("preview %s differs from independent derivation: got=%#v want=%#v", id, got, want)
+		}
+	}
+	source.censuses.Store(0)
+	for _, id := range []string{"alpha", "beta", "gamma"} {
+		preview(id)
+	}
+	if got := source.censuses.Load(); got != 1 {
+		t.Fatalf("three independent previews compiled source %d times, want one per group", got)
+	}
+	live, err = DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.routeTable = live
+	source.censuses.Store(0)
+	preview("delta")
+	if got := source.censuses.Load(); got != 1 {
+		t.Fatalf("new route-table source compiled %d times, want one", got)
+	}
+	resolver.topologySource = nil
+	source.censuses.Store(0)
+	preview("epsilon")
+	if got := source.censuses.Load(); got != 2 {
+		t.Fatalf("ungrouped preview compiled source %d times, want independent derivation", got)
+	}
+}
+
 func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.T) {
 	source, eb := topologyOperationFixture(t)
 	table, err := DeriveRouteTable(source)
