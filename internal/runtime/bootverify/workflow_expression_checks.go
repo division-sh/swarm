@@ -208,7 +208,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 		node := record.Entry
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+			for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, c.source.FanOutPlansForHandler(nodeRef, eventType)) {
 				c.emitFieldExprFindings = append(c.emitFieldExprFindings, c.literalEmitFieldFindings(nodeRef, eventType, site.Source, site.SiteKey, site.Spec)...)
 			}
 			if handler.Guard != nil {
