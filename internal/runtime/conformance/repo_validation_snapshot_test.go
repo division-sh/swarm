@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 type conformanceRepoSnapshotFile struct {
@@ -99,7 +101,9 @@ func (c *conformanceRepoSnapshotCache) load(root string) (*conformanceRepoSnapsh
 
 func defaultConformanceRepoSnapshotIO() conformanceRepoSnapshotIO {
 	return conformanceRepoSnapshotIO{
-		walkDir:  filepath.WalkDir,
+		walkDir: func(root string, fn fs.WalkDirFunc) error {
+			return checkoutsource.WalkDir(root, root, fn)
+		},
 		readFile: os.ReadFile,
 		relPath:  filepath.Rel,
 	}
@@ -464,6 +468,94 @@ func TestConformanceRepoSnapshotSeparatesCanonicalAndRouteExclusions(t *testing.
 	}
 }
 
+func TestConformanceRepoSnapshotCheckoutMembershipAcrossConsumers(t *testing.T) {
+	const proof = "TestRequiredSnapshotProof"
+	for _, marker := range []string{"file", "directory"} {
+		t.Run(marker, func(t *testing.T) {
+			makeRoot := func(localProof bool) string {
+				root := t.TempDir()
+				localSource := "package fixture\n"
+				if localProof {
+					localSource += "// MarkAgentLifecycleDiagnosticProjected route-needle\n"
+					writeConformanceSnapshotFixture(t, root, "required_test.go", "package fixture\nfunc "+proof+"(t *testing.T) {}\n")
+				}
+				writeConformanceSnapshotFixture(t, root, "local.go", localSource)
+				foreign := filepath.Join(root, "nested", "foreign")
+				if err := os.MkdirAll(foreign, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if marker == "file" {
+					writeConformanceSnapshotFixture(t, root, "nested/foreign/.git", "gitdir: elsewhere\n")
+				} else if err := os.Mkdir(filepath.Join(foreign, ".git"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				writeConformanceSnapshotFixture(t, root, "nested/foreign/foreign.go", "package fixture\n// MarkAgentLifecycleDiagnosticProjected route-needle\n")
+				writeConformanceSnapshotFixture(t, root, "nested/foreign/required_test.go", "package fixture\nfunc "+proof+"(t *testing.T) {}\n")
+				return root
+			}
+
+			root := makeRoot(true)
+			snapshot, err := buildConformanceRepoSnapshot(root, defaultConformanceRepoSnapshotIO())
+			if err != nil {
+				t.Fatalf("acquire current checkout: %v", err)
+			}
+			if _, err := snapshot.file("local.go"); err != nil {
+				t.Fatalf("current untracked source omitted: %v", err)
+			}
+			if _, err := snapshot.file("nested/foreign/foreign.go"); err == nil {
+				t.Fatal("foreign source entered the cached file projection")
+			}
+			if got := snapshot.fileList(); len(got) != 2 {
+				t.Fatalf("cached file list = %#v, want only two current files", got)
+			}
+			if got := lifecycleDiagnosticSourceProblems(snapshot); len(got) != 1 || !strings.Contains(got[0], "local.go") {
+				t.Fatalf("lifecycle policy problems = %#v, want only the current source", got)
+			}
+			corpus := routeAuthorityDriftNewValidationCorpus(t, root)
+			if got := routeAuthorityDriftMatchingFiles(corpus, "route-needle", regexp.MustCompile("route-needle")); len(got) != 1 || got[0] != "local.go" {
+				t.Fatalf("route-drift source matches = %#v, want only local.go", got)
+			}
+			if _, err := routeAuthorityDriftPathMatches(corpus, "nested/foreign/foreign.go", regexp.MustCompile("route-needle")); err == nil {
+				t.Fatal("route-drift required path accepted a foreign source")
+			}
+			localNames := conformanceGoTestNames(t, root)
+			if !localNames[proof] {
+				t.Fatal("current untracked proof declaration omitted")
+			}
+			if problems := validateRouteAuthorityProofRef(root, "fixture", routeAuthorityProofRef{Kind: "go_test", Name: proof}, routeAuthorityValidationContext{goTests: localNames}, nil); len(problems) != 0 {
+				t.Fatalf("route matrix rejected current local proof: %#v", problems)
+			}
+			if problems := validateForkReplayResumeProofRef("fixture", forkReplayResumeProofRef{Kind: "go_test", Name: proof}, forkReplayResumeValidationContext{goTests: localNames}); len(problems) != 0 {
+				t.Fatalf("fork/replay record rejected current local proof: %#v", problems)
+			}
+
+			foreignOnlyRoot := makeRoot(false)
+			foreignOnly := mustConformanceRepoSnapshot(t, foreignOnlyRoot)
+			if got := lifecycleDiagnosticSourceProblems(foreignOnly); len(got) != 0 {
+				t.Fatalf("foreign-only lifecycle token affected policy: %#v", got)
+			}
+			if got := routeAuthorityDriftMatchingFiles(routeAuthorityDriftNewValidationCorpus(t, foreignOnlyRoot), "route-needle", regexp.MustCompile("route-needle")); len(got) != 0 {
+				t.Fatalf("foreign-only route token affected policy: %#v", got)
+			}
+			names := conformanceGoTestNames(t, foreignOnlyRoot)
+			if names[proof] {
+				t.Fatal("foreign-only declaration credited as a required local proof")
+			}
+			routeProblems := validateRouteAuthorityProofRef(foreignOnlyRoot, "fixture", routeAuthorityProofRef{Kind: "go_test", Name: proof}, routeAuthorityValidationContext{goTests: names}, nil)
+			if !routeAuthorityProblemsContain(routeProblems, "fixture go_test proof_ref "+proof+" does not resolve") {
+				t.Fatalf("route matrix credited foreign-only proof: %#v", routeProblems)
+			}
+			forkProblems := validateForkReplayResumeProofRef("fixture", forkReplayResumeProofRef{Kind: "go_test", Name: proof}, forkReplayResumeValidationContext{goTests: names})
+			if !routeAuthorityProblemsContain(forkProblems, "fixture go_test proof_ref "+proof+" does not resolve") {
+				t.Fatalf("fork/replay record credited foreign-only proof: %#v", forkProblems)
+			}
+			if _, err := buildConformanceRepoSnapshot(filepath.Join(root, "missing"), defaultConformanceRepoSnapshotIO()); err == nil {
+				t.Fatal("missing snapshot root was accepted")
+			}
+		})
+	}
+}
+
 func TestConformanceRepoSnapshotCacheRetainsBuildError(t *testing.T) {
 	sentinel := errors.New("snapshot unavailable")
 	builds := 0
@@ -602,7 +694,12 @@ func TestRouteAuthorityRequiredPathLookupDistinguishesUnavailableFromNonMatch(t 
 
 func TestCanonicalConformanceRepoSnapshotBuildsOnce(t *testing.T) {
 	root := conformanceRepoRoot(t)
+	before := conformanceRepoSnapshotBuilds.Load()
 	first := mustConformanceRepoSnapshot(t, root)
+	afterFirst := conformanceRepoSnapshotBuilds.Load()
+	if afterFirst < before || afterFirst-before > 1 {
+		t.Fatalf("canonical snapshot first load added %d builds, want at most 1", afterFirst-before)
+	}
 	second := routeAuthorityDriftNewValidationCorpus(t, root).snapshot
 	names := conformanceGoTestNames(t, root)
 	if first != second {
@@ -616,8 +713,8 @@ func TestCanonicalConformanceRepoSnapshotBuildsOnce(t *testing.T) {
 			t.Fatalf("shared Go-test index omitted route-view self-audit test %s", name)
 		}
 	}
-	if got := conformanceRepoSnapshotBuilds.Load(); got != 1 {
-		t.Fatalf("canonical snapshot builds = %d, want 1", got)
+	if got := conformanceRepoSnapshotBuilds.Load(); got != afterFirst {
+		t.Fatalf("canonical snapshot repeated consumers added %d builds, want 0", got-afterFirst)
 	}
 }
 
