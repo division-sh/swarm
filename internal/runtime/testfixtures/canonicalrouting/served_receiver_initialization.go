@@ -43,8 +43,8 @@ work.ready:
       emit:
         event: work.ready
         fields:
-          account_id: payload.account_id
-          values: payload.values
+          account_id: ${payload.account_id}
+          values: ${payload.values}
 `,
 		"account/schema.yaml": `name: account
 mode: template
