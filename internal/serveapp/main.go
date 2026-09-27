@@ -1907,7 +1907,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
 		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
-		mailbox:     stores.Mailbox(),
+		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
 		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,
