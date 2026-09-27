@@ -37,9 +37,6 @@ func TestServedPublicationDirectRestartBothStores(t *testing.T) {
 				opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyPublicationDirectTextSite(t, mode))
 				first, rt := start()
 				name := "direct.requested"
-				if mode == "static" {
-					name = "source/" + name
-				}
 				params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"case_id": "alpha", "choice": 1, "items": []string{}}, "idempotency_key": "publication-restart-seed"}
 				published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)

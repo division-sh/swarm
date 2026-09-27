@@ -37,7 +37,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					prefix = "outer/inner/"
 				}
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": prefix + "work.requested", "bundle_hash": rt.BundleHash,
+					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
 					"payload": map[string]any{"seed": true}, "idempotency_key": "release-seed",
 				})
 				if gate {

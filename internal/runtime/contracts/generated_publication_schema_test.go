@@ -110,8 +110,10 @@ func TestGeneratedPublicationSchemaOwnershipDoesNotBorrowSibling(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, schema := range importable {
-				if schema.FlowPath() == flow && strings.Contains(schema.EventName(), "send.") {
-					t.Errorf("generated activity became importable: %+v", schema)
+				for _, local := range []string{"send.succeeded", "send.failed", "send.revision_requested", "send.rejected"} {
+					if schema.FlowPath() == flow && schema.EventName() == local {
+						t.Errorf("generated activity became importable: %+v", schema)
+					}
 				}
 			}
 		})

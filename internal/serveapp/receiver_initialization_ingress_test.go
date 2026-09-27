@@ -16,8 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-// R18: public admission of a provider-imported creating input, with no authored
-// producer/connect hop. This is not a Telegram transport or private-harness proof.
+// R18: public admission of a provider-imported creating input through the
+// selected root's explicit connection, not private API injection.
 func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -31,11 +31,15 @@ func TestReceiverInitializationPublicProviderSchemaIngressBothStores(t *testing.
 				t.Fatal("provider schema was replaced by an authored event declaration")
 			}
 			if len(source.ExecutableNodeRecords()) != 1 {
-				t.Fatal("direct input proof unexpectedly has an intermediate producer")
+				t.Fatal("connected input proof unexpectedly has an intermediate producer")
 			}
 			for path, schema := range source.FlowSchemaEntries() {
-				if len(schema.Connect) != 0 {
-					t.Fatalf("direct input proof contains authored connect at %s", path)
+				if path == "." {
+					if len(schema.Connect) != 1 || schema.Connect[0].Event != input || schema.Connect[0].From != "." || schema.Connect[0].To != "telegram-chat" {
+						t.Fatalf("public provider input lacks its exact root connection: %+v", schema.Connect)
+					}
+				} else if len(schema.Connect) != 0 {
+					t.Fatalf("private flow %s introduced another connection: %+v", path, schema.Connect)
 				}
 			}
 			requireReceiverInitializationPublicProviderIngressCases(t, rt)

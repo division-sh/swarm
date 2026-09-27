@@ -1181,7 +1181,7 @@ telegram-revision:
   event_handlers:
     telegram_send_message.revision_requested: {}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "telegram-chat", "tests", "public-mock-approval.yaml"), fmt.Sprintf(`
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests", "public-mock-approval.yaml"), fmt.Sprintf(`
 name: public generated Telegram mock approval
 steps:
   - publish: inbound.telegram.text_message
