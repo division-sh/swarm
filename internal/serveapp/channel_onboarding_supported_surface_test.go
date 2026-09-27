@@ -32,6 +32,8 @@ import (
 var channelOnboardingChallengePattern = regexp.MustCompile(`SWARM-[A-Z2-7]{16}`)
 var channelOnboardingOperationIDPattern = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`)
 
+const channelSharedConfirmationText = "Swarm channel connected. Future notices, decision cards, and updates sent here will be visible to this group."
+
 type channelOnboardingTelegramProvider = telegramapi.Double
 
 func TestChannelConnectTelegramFirstUserJourney(t *testing.T) {
@@ -156,7 +158,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 			t.Fatalf("%s E2E-03 readiness/secret contract violated\n%s", backend, surface)
 		}
 		delivery := waitChannelOnboardingDelivery(t, provider, 2)
-		if fmt.Sprint(delivery["chat_id"]) != "-2001" || delivery["text"] != "Swarm channel connected." {
+		if fmt.Sprint(delivery["chat_id"]) != "-2001" || delivery["text"] != channelSharedConfirmationText {
 			t.Fatalf("%s E2E-03 confirmation = %#v", backend, delivery)
 		}
 		retired := submitChannelOnboardingClaim(t, predecessorCallback, predecessorSigning, challenge, 2004, "retired_predecessor")
@@ -684,10 +686,15 @@ func runChannelOnboardingReconnectJourney(t *testing.T, configPath, endpoint str
 		t.Fatalf("channel reconnect readiness/ceremony contract violated\n%s", surface)
 	}
 	delivery := waitChannelOnboardingDelivery(t, provider, deliveryIndex)
-	if delivery["text"] != "Swarm channel connected." {
+	journey := readCurrentChannelOnboardingJourney(t, configPath, endpoint)
+	wantText := "Swarm channel connected."
+	if journey.Identity.ConversationScope == "shared" {
+		wantText = channelSharedConfirmationText
+	}
+	if delivery["text"] != wantText {
 		t.Fatalf("channel reconnect confirmation = %#v", delivery)
 	}
-	return readCurrentChannelOnboardingJourney(t, configPath, endpoint)
+	return journey
 }
 
 func runRejectedChannelOnboardingReplacement(t *testing.T, configPath, endpoint, credential string) string {
@@ -738,7 +745,7 @@ func runChannelOnboardingResumeJourney(t *testing.T, configPath, endpoint string
 		t.Fatalf("channel resume readiness/secret/ceremony contract violated\n%s", surface)
 	}
 	delivery := waitChannelOnboardingDelivery(t, provider, deliveryIndex)
-	if delivery["text"] != "Swarm channel connected." {
+	if delivery["text"] != channelSharedConfirmationText {
 		t.Fatalf("channel resume confirmation = %#v", delivery)
 	}
 	return readCurrentChannelOnboardingJourney(t, configPath, endpoint)
@@ -888,7 +895,11 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 		t.Fatalf("channel %s output violated readiness/secret contract\n%s", verb, secretSurface)
 	}
 	delivery := waitChannelOnboardingDelivery(t, provider, deliveryIndex)
-	if fmt.Sprint(delivery["chat_id"]) != fmt.Sprint(chatID) || delivery["text"] != "Swarm channel connected." {
+	wantText := "Swarm channel connected."
+	if chatType == "group" || chatType == "supergroup" {
+		wantText = channelSharedConfirmationText
+	}
+	if fmt.Sprint(delivery["chat_id"]) != fmt.Sprint(chatID) || delivery["text"] != wantText {
 		t.Fatalf("channel %s confirmation = %#v", verb, delivery)
 	}
 
