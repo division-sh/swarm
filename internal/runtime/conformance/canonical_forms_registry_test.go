@@ -328,6 +328,30 @@ func decode(raw []byte) error { return yaml.Unmarshal(raw, new(any)) }
 	}
 }
 
+func TestDecodeBypassFamilyCorrectionRequiresUnchangedAgentWriteSite(t *testing.T) {
+	const agentWrites = "internal/runtime/contracts/workflow_contract_agent_writes.go"
+	base := canonicalDecodeBypassInventory{NodeSiteCeiling: 1, Files: map[string]canonicalDecodeBypassFile{
+		agentWrites: {Family: "wave_4_node_handler", NodeSites: 1},
+	}}
+	current := canonicalDecodeBypassInventory{NodeSiteCeiling: 1, Files: map[string]canonicalDecodeBypassFile{
+		agentWrites: {Family: "wave_5_agent_tool_policy", NodeSites: 1},
+	}}
+	if err := validateDecodeBypassMonotone(base, current); err != nil {
+		t.Fatalf("approved metadata correction changed the decode budget: %v", err)
+	}
+	current.Files[agentWrites] = canonicalDecodeBypassFile{Family: "wave_5_agent_tool_policy", NodeSites: 2}
+	if err := validateDecodeBypassMonotone(base, current); err == nil {
+		t.Fatal("agent-write site growth bypassed the ratchet")
+	}
+	const other = "internal/runtime/contracts/other.go"
+	base.Files[other] = canonicalDecodeBypassFile{Family: "wave_4_node_handler", NodeSites: 1}
+	current.Files[agentWrites] = canonicalDecodeBypassFile{Family: "wave_5_agent_tool_policy", NodeSites: 1}
+	current.Files[other] = canonicalDecodeBypassFile{Family: "wave_5_agent_tool_policy", NodeSites: 1}
+	if err := validateDecodeBypassMonotone(base, current); err == nil {
+		t.Fatal("unapproved family move bypassed the ratchet")
+	}
+}
+
 func TestCanonicalFormsRegistryRejectsUnregisteredDecodeBypasses(t *testing.T) {
 	root := t.TempDir()
 	writeRegistryMutationFile(t, filepath.Join(root, "internal/runtime/contracts/new.go"), `package contracts
@@ -894,13 +918,20 @@ func validateDecodeBypassMonotone(base, current canonicalDecodeBypassInventory) 
 		if entry.NodeSites > prior.NodeSites || entry.DirectDecodeRoots > prior.DirectDecodeRoots {
 			return fmt.Errorf("decode site %s rose from node/root %d/%d to %d/%d", path, prior.NodeSites, prior.DirectDecodeRoots, entry.NodeSites, entry.DirectDecodeRoots)
 		}
+		budgetFamily := entry.Family
 		if prior.Family != entry.Family && (entry.NodeSites != 0 || entry.DirectDecodeRoots != 0) {
-			return fmt.Errorf("decode site %s moved from family %q to %q", path, prior.Family, entry.Family)
+			// Gate D reclassified agent writes into W5 without moving or adding a decoder.
+			if path != "internal/runtime/contracts/workflow_contract_agent_writes.go" ||
+				prior.Family != "wave_4_node_handler" || entry.Family != "wave_5_agent_tool_policy" ||
+				entry.NodeSites != prior.NodeSites || entry.DirectDecodeRoots != prior.DirectDecodeRoots {
+				return fmt.Errorf("decode site %s moved from family %q to %q", path, prior.Family, entry.Family)
+			}
+			budgetFamily = prior.Family
 		}
-		total := currentFamilies[entry.Family]
+		total := currentFamilies[budgetFamily]
 		total.NodeSites += entry.NodeSites
 		total.DirectDecodeRoots += entry.DirectDecodeRoots
-		currentFamilies[entry.Family] = total
+		currentFamilies[budgetFamily] = total
 	}
 	for family, total := range currentFamilies {
 		prior := baseFamilies[family]

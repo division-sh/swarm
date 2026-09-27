@@ -339,9 +339,31 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 	default:
 		return fmt.Errorf("unsupported workflow data write yaml node kind %d", node.Kind)
 	}
+	if err := validateUniqueNormalizedMappingKeys(node, "workflow data write"); err != nil {
+		return err
+	}
+	var keyValue, indexValue, valueValue ExpressionValue
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		switch strings.TrimSpace(node.Content[i].Value) {
-		case "", "field", "source_field", "target_field", "target_path", "target", "op", "key", "index", "value":
+		case "", "field", "source_field", "target_field", "target_path", "target", "op":
+		case "key":
+			value, err := decodeExpressionValueNode(node.Content[i+1])
+			if err != nil {
+				return fmt.Errorf("workflow data write key: %w", err)
+			}
+			keyValue = value
+		case "index":
+			value, err := decodeExpressionValueNode(node.Content[i+1])
+			if err != nil {
+				return fmt.Errorf("workflow data write index: %w", err)
+			}
+			indexValue = value
+		case "value":
+			value, err := decodeExpressionValueNode(node.Content[i+1])
+			if err != nil {
+				return fmt.Errorf("workflow data write value: %w", err)
+			}
+			valueValue = value
 		case "expression":
 			return fmt.Errorf("retired workflow data write expression field; use value: ${...}")
 		default:
@@ -355,9 +377,6 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		Target      string                `yaml:"target"`
 		TargetField string                `yaml:"target_field"`
 		TargetPath  string                `yaml:"target_path"`
-		Key         yaml.Node             `yaml:"key"`
-		Index       yaml.Node             `yaml:"index"`
-		Value       yaml.Node             `yaml:"value"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -369,27 +388,9 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		TargetRef:     strings.TrimSpace(aux.Target),
 		TargetField:   strings.TrimSpace(aux.TargetField),
 		TargetPathRef: strings.TrimSpace(aux.TargetPath),
-	}
-	if aux.Key.Kind != 0 {
-		value, err := decodeExpressionValueNode(&aux.Key)
-		if err != nil {
-			return fmt.Errorf("workflow data write key: %w", err)
-		}
-		w.Key = value
-	}
-	if aux.Index.Kind != 0 {
-		value, err := decodeExpressionValueNode(&aux.Index)
-		if err != nil {
-			return fmt.Errorf("workflow data write index: %w", err)
-		}
-		w.Index = value
-	}
-	if aux.Value.Kind != 0 {
-		value, err := decodeWorkflowDataWriteValueNode(&aux.Value)
-		if err != nil {
-			return err
-		}
-		w.Value = value
+		Key:           keyValue,
+		Index:         indexValue,
+		Value:         valueValue,
 	}
 	return hydrateWorkflowDataWrite(w)
 }
@@ -687,8 +688,4 @@ func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 		}
 	}
 	return nil
-}
-
-func decodeWorkflowDataWriteValueNode(node *yaml.Node) (ExpressionValue, error) {
-	return decodeExpressionValueNode(node)
 }
