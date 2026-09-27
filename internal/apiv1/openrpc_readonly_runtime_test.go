@@ -560,6 +560,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 					LastEventAt:    now.Add(-time.Minute),
 					EventCount:     1,
 					EntityCount:    1,
+					TestQuiescence: operatorread.RunTestQuiescence{Ready: true},
 				},
 			},
 		},
