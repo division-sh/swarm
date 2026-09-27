@@ -129,6 +129,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 			t.Fatalf("%s direct channel readback = %#v", backend, direct)
 		}
 		assertChannelOnboardingReadinessGeneration(t, string(backend)+" direct", direct)
+		waitNativeInboxCommand(t, provider, "chat", "1001", "")
 	})
 	t.Run("E2E-02_reconnect_preserves_identity", func(t *testing.T) {
 		reconnected = runChannelOnboardingReconnectJourney(t, opts.ConfigPath, endpoint, provider, 1, "")
@@ -170,6 +171,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 			t.Fatalf("%s shared channel readback = %#v", backend, shared)
 		}
 		assertChannelOnboardingReadinessGeneration(t, string(backend)+" shared", shared)
+		waitNativeInboxCommand(t, provider, "chat_member", "-2001", "7002")
 		if shared.Identity.BindingRevision <= direct.Identity.BindingRevision || shared.Activation == nil || shared.Activation.Revision <= reconnected.Activation.Revision {
 			t.Fatalf("%s rebind revisions direct/reconnected/shared = %#v/%#v/%#v", backend, direct, reconnected, shared)
 		}
@@ -203,7 +205,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		t.Fatalf("%s reset channel list lacks reconnect teaching:\n%s", backend, listOut.String())
 	}
 	deleteAllChannelOnboardingCredentials(t, credentialPath, string(backend)+" credential loss after proof restore")
-	registrationsBeforeBlock, deliveriesBeforeBlock := provider.Counts()
+	registrationsBeforeBlock, deliveriesBeforeBlock := provider.OnboardingCounts()
 	blockedOut, blockedErr := &lockedBuffer{}, &lockedBuffer{}
 	blockedCode := executeCLI(context.Background(), []string{
 		"--config", opts.ConfigPath, "channel", "reconnect", "telegram", "--yes", "--api-server", endpoint,
@@ -230,7 +232,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if secondCode == 0 || !strings.Contains(secondErr.String(), "operation_pending") {
 		t.Fatalf("%s E2E-04 second reconnect code=%d\nstdout:\n%s\nstderr:\n%s", backend, secondCode, secondOut.String(), secondErr.String())
 	}
-	if registrations, deliveries := provider.Counts(); registrations != registrationsBeforeBlock || deliveries != deliveriesBeforeBlock {
+	if registrations, deliveries := provider.OnboardingCounts(); registrations != registrationsBeforeBlock || deliveries != deliveriesBeforeBlock {
 		t.Fatalf("%s E2E-04 blocked provider effects registrations=%d/%d deliveries=%d/%d", backend, registrations, registrationsBeforeBlock, deliveries, deliveriesBeforeBlock)
 	}
 
@@ -248,7 +250,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if restartedBlockedRow.Operation.Coordinate.RuntimeInstanceID == blockedRow.Operation.Coordinate.RuntimeInstanceID {
 		t.Fatalf("%s E2E-06 retained predecessor runtime instance %s across restart", backend, blockedRow.Operation.Coordinate.RuntimeInstanceID)
 	}
-	if registrations, deliveries := provider.Counts(); registrations != registrationsBeforeBlock || deliveries != deliveriesBeforeBlock {
+	if registrations, deliveries := provider.OnboardingCounts(); registrations != registrationsBeforeBlock || deliveries != deliveriesBeforeBlock {
 		t.Fatalf("%s E2E-06 restart replayed provider effects registrations=%d/%d deliveries=%d/%d", backend, registrations, registrationsBeforeBlock, deliveries, deliveriesBeforeBlock)
 	}
 
@@ -266,21 +268,21 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if recovered.Readiness.ActivationGeneration == shared.Readiness.ActivationGeneration {
 		t.Fatalf("%s reset reconnect retained unavailable predecessor activation generation %q", backend, shared.Readiness.ActivationGeneration)
 	}
-	if registrations, deliveries := provider.Counts(); registrations != registrationsBeforeBlock+1 || deliveries != deliveriesBeforeBlock+1 {
+	if registrations, deliveries := provider.OnboardingCounts(); registrations != registrationsBeforeBlock+1 || deliveries != deliveriesBeforeBlock+1 {
 		t.Fatalf("%s E2E-05 resume effects registrations=%d deliveries=%d, want %d/%d", backend, registrations, deliveries, registrationsBeforeBlock+1, deliveriesBeforeBlock+1)
 	}
 
-	registrationsBeforeLoss, deliveriesBeforeLoss := provider.Counts()
+	registrationsBeforeLoss, deliveriesBeforeLoss := provider.OnboardingCounts()
 	provider.LoseNextRegistrationAcknowledgment()
 	reconciled := runChannelOnboardingReconnectJourney(t, opts.ConfigPath, endpoint, provider, 4, "")
 	if reconciled.Operation == nil || reconciled.Operation.Phase != "succeeded" || reconciled.Readiness == nil || !reconciled.Readiness.Ready {
 		t.Fatalf("%s E2E-15 response-loss reconciliation = %#v", backend, reconciled)
 	}
-	if registrations, deliveries := provider.Counts(); registrations != registrationsBeforeLoss+1 || deliveries != deliveriesBeforeLoss+1 {
+	if registrations, deliveries := provider.OnboardingCounts(); registrations != registrationsBeforeLoss+1 || deliveries != deliveriesBeforeLoss+1 {
 		t.Fatalf("%s E2E-15 replayed uncertain provider effect registrations=%d deliveries=%d, want %d/%d", backend, registrations, deliveries, registrationsBeforeLoss+1, deliveriesBeforeLoss+1)
 	}
 
-	registrationsBeforeReject, deliveriesBeforeReject := provider.Counts()
+	registrationsBeforeReject, deliveriesBeforeReject := provider.OnboardingCounts()
 	provider.RejectNextCredentialPreflight()
 	rejectedSurface := runRejectedChannelOnboardingReplacement(t, opts.ConfigPath, endpoint, "rejected-replacement-token")
 	if !strings.Contains(rejectedSurface, "CHANNEL_CREDENTIAL_REQUIRED") || !strings.Contains(rejectedSurface, "rejected its credential with HTTP 401") {
@@ -306,14 +308,14 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if len(rejectedOperation.Recovery.Commands) != 1 || rejectedOperation.Recovery.Commands[0] != wantRejectedResume {
 		t.Fatalf("%s E2E-10 rejected replacement recovery = %#v, want %q", backend, rejectedOperation.Recovery, wantRejectedResume)
 	}
-	if registrations, deliveries := provider.Counts(); registrations != registrationsBeforeReject || deliveries != deliveriesBeforeReject {
+	if registrations, deliveries := provider.OnboardingCounts(); registrations != registrationsBeforeReject || deliveries != deliveriesBeforeReject {
 		t.Fatalf("%s E2E-10 rejected preflight changed provider effects registrations=%d/%d deliveries=%d/%d", backend, registrations, registrationsBeforeReject, deliveries, deliveriesBeforeReject)
 	}
 	corrected := runChannelOnboardingResumeJourney(t, opts.ConfigPath, endpoint, provider, rejectedOperationID, 5, "corrected-replacement-token")
 	if corrected.Operation == nil || corrected.Operation.OperationID != rejectedOperationID || corrected.Operation.Phase != "succeeded" || corrected.Readiness == nil || !corrected.Readiness.Ready {
 		t.Fatalf("%s E2E-10 corrected replacement = %#v", backend, corrected)
 	}
-	if registrations, deliveries := provider.Counts(); registrations != registrationsBeforeReject+1 || deliveries != deliveriesBeforeReject+1 {
+	if registrations, deliveries := provider.OnboardingCounts(); registrations != registrationsBeforeReject+1 || deliveries != deliveriesBeforeReject+1 {
 		t.Fatalf("%s E2E-10 corrected replacement effects registrations=%d deliveries=%d, want %d/%d", backend, registrations, deliveries, registrationsBeforeReject+1, deliveriesBeforeReject+1)
 	}
 	recovered = corrected
@@ -338,6 +340,34 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if elapsed := time.Since(started); elapsed >= time.Minute {
 		t.Fatalf("%s first-user channel journey took %s, want under 60s", backend, elapsed)
 	}
+}
+
+func waitNativeInboxCommand(t *testing.T, provider *channelOnboardingTelegramProvider, scopeKind, conversation, member string) string {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, write := range provider.CommandWrites() {
+			scope, ok := write["scope"].(map[string]any)
+			if !ok || scope["type"] != scopeKind || scope["chat_id"] != conversation {
+				continue
+			}
+			if scopeKind == "chat_member" && scope["user_id"] != member {
+				continue
+			}
+			commands, ok := write["commands"].([]map[string]any)
+			if !ok || len(commands) != 1 {
+				t.Fatalf("native inbox commands = %#v", write["commands"])
+			}
+			command, ok := commands[0]["command"].(string)
+			if !ok || !regexp.MustCompile(`^inbox_[0-9a-f]{24}$`).MatchString(command) || commands[0]["description"] != "Open inbox" {
+				t.Fatalf("native inbox command = %#v", commands[0])
+			}
+			return command
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("native inbox command for %s/%s/%s was not installed", scopeKind, conversation, member)
+	return ""
 }
 
 func channelOnboardingOperationDiagnostic(t *testing.T, backend servedparity.Backend, dsn, operationID string) string {
@@ -730,7 +760,7 @@ func runRejectedChannelOnboardingReplacement(t *testing.T, configPath, endpoint,
 
 func runChannelOnboardingResumeJourney(t *testing.T, configPath, endpoint string, provider *channelOnboardingTelegramProvider, operationID string, deliveryIndex int, credential string) channelOnboardingJourneyReadback {
 	t.Helper()
-	registrationsBefore, _ := provider.Counts()
+	registrationsBefore, _ := provider.OnboardingCounts()
 	command := startChannelOnboardingCLICommand(t, configPath, endpoint, []string{
 		"channel", "resume", operationID, "--yes", "--credential-stdin",
 	}, credential+"\n")
@@ -1024,7 +1054,7 @@ func waitChannelOnboardingDelivery(t *testing.T, provider *channelOnboardingTele
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if delivery := provider.Delivery(index); delivery != nil {
+		if delivery := provider.Confirmation(index); delivery != nil {
 			return delivery
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -358,6 +358,28 @@ tools:
     http:
       method: GET
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMe
+  telegram.read_bot_address:
+    category: provider_registration
+    description: read the current Telegram bot command address
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema: {type: object, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [address]
+      properties:
+        address: {type: string, pattern: '^[A-Za-z0-9_]{5,32}$', minLength: 5, maxLength: 32}
+    response_success:
+      kind: json_field_equals
+      path: response.body.ok
+      equals: true
+    response_mapping:
+      address: "{{response.body.result.username}}"
+    http:
+      method: GET
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMe
   telegram.apply_webhook:
     category: provider_registration
     description: register the current Swarm callback generation
