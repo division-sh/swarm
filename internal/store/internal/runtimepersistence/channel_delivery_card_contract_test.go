@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	channeldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
@@ -22,8 +23,8 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			var settle func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
 			var plan func(string) (bool, error)
 			var count func(string) (int, error)
-			var list func() ([]channeldelivery.Plan, error)
-			var freeze func(string) (channeldelivery.StoredRender, error)
+			var list func() ([]render.Candidate, error)
+			var freeze func(string) (render.PreparedRender, error)
 			switch store := cards.(type) {
 			case *SQLiteRuntimeStore:
 				settle = func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
@@ -49,10 +50,10 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					err := store.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind = 'card' AND source_id = ?`, id).Scan(&n)
 					return n, err
 				}
-				list = func() ([]channeldelivery.Plan, error) {
+				list = func() ([]render.Candidate, error) {
 					return store.ListCurrentChannelDeliveryPlans(ctx, "", 100)
 				}
-				freeze = func(id string) (channeldelivery.StoredRender, error) {
+				freeze = func(id string) (render.PreparedRender, error) {
 					return store.FreezeAndPersistChannelRender(ctx, id)
 				}
 			case *PostgresStore:
@@ -85,10 +86,10 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					err := store.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans WHERE source_kind = 'card' AND source_id = $1::uuid`, id).Scan(&n)
 					return n, err
 				}
-				list = func() ([]channeldelivery.Plan, error) {
+				list = func() ([]render.Candidate, error) {
 					return store.ListCurrentChannelDeliveryPlans(ctx, "", 100)
 				}
-				freeze = func(id string) (channeldelivery.StoredRender, error) {
+				freeze = func(id string) (render.PreparedRender, error) {
 					return store.FreezeAndPersistChannelRender(ctx, id)
 				}
 			default:
@@ -167,11 +168,14 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 				t.Fatalf("current card plan missing from scan: %#v", firstPlans)
 			}
 			firstRender, err := freeze(firstDeliveryID)
-			if err != nil || firstRender.Frozen.SourceKind != channeldelivery.PlanCard {
+			if err != nil || firstRender.Frozen.SourceKind != channeldelivery.PlanCard ||
+				len(firstRender.Actions) != 1 || firstRender.Actions[0].Kind != "verdict" ||
+				firstRender.Actions[0].Verdict != "accept" || uuid.Validate(firstRender.Actions[0].Token) != nil {
 				t.Fatalf("freeze pending card = %#v, %v", firstRender, err)
 			}
 			repeated, err := freeze(firstDeliveryID)
-			if err != nil || repeated.RenderID != firstRender.RenderID {
+			if err != nil || repeated.RenderID != firstRender.RenderID ||
+				len(repeated.Actions) != 1 || repeated.Actions[0].Token != firstRender.Actions[0].Token {
 				t.Fatalf("repeated render = %#v, %v", repeated, err)
 			}
 			if created, err := plan(backlog.CardID); err != nil || created {
@@ -180,6 +184,15 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			reconnected := connect(operatorchannel.OperationReconnect, bound.Revision, "account-a", "chat-a")
 			if created, err := plan(backlog.CardID); err != nil || created {
 				t.Fatalf("reconnect plan = %t, %v", created, err)
+			}
+			reconnectedPlans, err := list()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range reconnectedPlans {
+				if item.DeliveryID == firstDeliveryID && item.BindingRevision != reconnected.Revision {
+					t.Fatalf("same-destination reconnect did not renew dispatch binding revision: %#v", item)
+				}
 			}
 			rebound := connect(operatorchannel.OperationRebind, reconnected.Revision, "account-b", "chat-b")
 			if created, err := plan(backlog.CardID); err != nil || !created {
