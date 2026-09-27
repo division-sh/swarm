@@ -219,6 +219,10 @@ func platformTableOrder(name string) int {
 		return 6
 	case "connected_channel_activations":
 		return 7
+	case "channel_native_settings":
+		return 8
+	case "channel_native_setting_consumers":
+		return 9
 	case "agent_topology_source_set_head":
 		return 13
 	case "agent_topology_source_set_operations":

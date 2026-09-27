@@ -14356,6 +14356,8 @@ platform_tables:
         - operator_channel_claim_receipts
         - operator_channel_action_intents
         - channel_delivery_defaults
+        - channel_native_settings
+        - channel_native_setting_consumers
         - channel_delivery_plans
         - channel_delivery_renders
         - channel_delivery_receipts
@@ -15057,6 +15059,56 @@ platform_tables:
             state TEXT NOT NULL CHECK (state IN ('current','retired')),
             first_operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
             updated_at TIMESTAMPTZ NOT NULL
+        );
+    channel_native_settings:
+      description: >-
+        One selected-store owner for a provider-authenticated physical bot resource and exact
+        native Open inbox scope. The provider slot comes from verified registration identity;
+        credential aliases and runtime contexts are not independent settings. A current setting
+        may have several compatible activation consumers. Unknown launched writes remain durable
+        and block overlapping successor writes and usable readiness, even if a later readback
+        happens to match. Retirement is local only and never deletes a remote command.
+      ddl: |
+        CREATE TABLE channel_native_settings (
+            setting_id UUID PRIMARY KEY,
+            provider TEXT NOT NULL,
+            resource_slot_id TEXT NOT NULL,
+            conversation_reference TEXT NOT NULL,
+            scope_kind TEXT NOT NULL CHECK (scope_kind = 'chat'),
+            language_code TEXT NOT NULL CHECK (language_code = ''),
+            pack_id TEXT NOT NULL,
+            pack_version TEXT NOT NULL,
+            pack_manifest_hash TEXT NOT NULL,
+            entry_contract_hash TEXT NOT NULL,
+            desired_commands JSONB NOT NULL,
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            generation BIGINT NOT NULL CHECK (generation > 0),
+            state TEXT NOT NULL CHECK (state IN ('planned','installed','uncertain','unavailable','retired')),
+            install_operation_id UUID,
+            readback_hash TEXT,
+            created_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (provider, resource_slot_id, conversation_reference, scope_kind, language_code),
+            INDEX idx_channel_native_setting_state (state, updated_at)
+        );
+    channel_native_setting_consumers:
+      description: >-
+        Exact current activation/context references to one physical setting. A compatible
+        sibling remains attached when another context retires. The last consumer's retirement
+        fences local entry authority without issuing a provider delete.
+      ddl: |
+        CREATE TABLE channel_native_setting_consumers (
+            setting_id UUID NOT NULL REFERENCES channel_native_settings(setting_id),
+            activation_id UUID NOT NULL REFERENCES connected_channel_activations(activation_id),
+            activation_revision BIGINT NOT NULL CHECK (activation_revision > 0),
+            interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
+            state TEXT NOT NULL CHECK (state IN ('current','retired')),
+            updated_at TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (setting_id, activation_id),
+            UNIQUE (activation_id),
+            INDEX idx_channel_native_setting_consumer_current (setting_id, state)
         );
     channel_delivery_plans:
       description: >-
