@@ -186,7 +186,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 				break
 			}
 			message := fmt.Sprint(delivery["text"])
-			if (scenario == "inbox" || scenario == "inbox_loss") && fmt.Sprint(delivery["chat_id"]) == "1001" && strings.HasPrefix(message, "Inbox\nUnread notices: ") {
+			if (scenario == "inbox" || scenario == "inbox_loss") && fmt.Sprint(delivery["chat_id"]) == "1001" &&
+				strings.HasPrefix(message, "Inbox\nUnread notices: ") && strings.Contains(message, "Retire service") {
 				if scenario == "inbox_loss" {
 					_, before := provider.Counts()
 					time.Sleep(2500 * time.Millisecond)
