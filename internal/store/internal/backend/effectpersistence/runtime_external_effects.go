@@ -833,6 +833,7 @@ var externalEffectStoryDispositions = map[string]externalEffectStoryDisposition{
 	"channel_confirmation/channel_confirmation":         {Launch: true},
 	"channel_delivery/channel_delivery":                 {Launch: true},
 	"channel_native_setting/channel_native_setting":     {Launch: true},
+	"channel_action_ack/channel_action_ack":             {Launch: true},
 	"http_tool_target/authored_http_tool":               {Launch: true},
 	"managed_credential_request/managed_credential":     {},
 	"native_web_search_http/native_web_search":          {Launch: true},
@@ -1638,6 +1639,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 	}
 	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && bundleHash != strings.TrimSpace(authority.ChannelDelivery.BundleHash) {
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel delivery bundle")
+	}
+	if authority.Kind == runtimeeffects.AuthorityChannelActionAck && bundleHash != strings.TrimSpace(authority.ChannelActionAck.BundleHash) {
+		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel action acknowledgment bundle")
 	}
 	if authority.Kind == runtimeeffects.AuthorityChannelNativeSetting && bundleHash != strings.TrimSpace(authority.ChannelNativeSetting.BundleHash) {
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel native setting bundle")

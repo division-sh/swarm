@@ -310,7 +310,7 @@ func serveRegistrationPrimitive(adapters []string, owner primitiveOwner) bool {
 	}
 	for _, adapter := range adapters {
 		registration, ok := RegistrationFor(adapter)
-		if !ok || (registration.Kind != KindServeRegistration && registration.Kind != KindChannelConfirmation && registration.Kind != KindChannelDelivery && registration.Kind != KindChannelNativeSetting) {
+		if !ok || (registration.Kind != KindServeRegistration && registration.Kind != KindChannelConfirmation && registration.Kind != KindChannelDelivery && registration.Kind != KindChannelActionAck && registration.Kind != KindChannelNativeSetting) {
 			return false
 		}
 	}
