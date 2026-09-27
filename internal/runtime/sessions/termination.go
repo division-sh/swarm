@@ -57,18 +57,6 @@ func validateRuntimeTerminationReason(reason TerminationReason) error {
 	return nil
 }
 
-func rotationTermination(reason string) (TerminationReason, string, error) {
-	detail := strings.TrimSpace(reason)
-	switch detail {
-	case "":
-		return TerminationReasonNormal, "", nil
-	case "session in use", "session not found":
-		return TerminationReasonContaminated, detail, nil
-	default:
-		return TerminationReasonFailed, detail, nil
-	}
-}
-
 type TerminationMetadata struct {
 	Reason             TerminationReason
 	Detail             string

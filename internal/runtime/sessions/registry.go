@@ -184,6 +184,7 @@ type InMemoryRegistry struct {
 	mu                  sync.Mutex
 	byKey               map[agentmemory.Identity]*Record
 	history             map[agentmemory.Identity][]*Record
+	rotationReceipts    map[string]RotationReceipt
 	lifecycle           map[agentidentity.Identity]inMemoryLifecycleProjection
 	lifecycleOperations map[string]inMemoryLifecycleOperation
 	lockTTL             time.Duration
@@ -206,6 +207,7 @@ func NewInMemoryRegistry(lockTTL time.Duration) *InMemoryRegistry {
 	return &InMemoryRegistry{
 		byKey:               make(map[agentmemory.Identity]*Record),
 		history:             make(map[agentmemory.Identity][]*Record),
+		rotationReceipts:    make(map[string]RotationReceipt),
 		lifecycle:           make(map[agentidentity.Identity]inMemoryLifecycleProjection),
 		lifecycleOperations: make(map[string]inMemoryLifecycleOperation),
 		lockTTL:             lockTTL,
@@ -298,10 +300,11 @@ func (sr *InMemoryRegistry) ReleaseOutcome(_ context.Context, lease *Lease) (Rel
 }
 
 func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error) {
-	identity = identity.Normalize()
-	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
+	request, err := NormalizeRotationRequest(identity, lockOwner, rotation)
+	if err != nil {
 		return nil, err
 	}
+	identity, lockOwner, rotation = request.Identity, request.LockOwner, request.Metadata
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
@@ -311,41 +314,32 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 
 	key := registryKey(identity)
 	rec, ok := sr.byKey[key]
-	if !ok {
+	now := time.Now()
+	if rotation.OperationID != "" {
+		if receipt, found := sr.rotationReceipts[rotation.OperationID]; found {
+			var current *Lease
+			if ok && rec != nil && rec.Status == "active" {
+				current = &Lease{SessionID: rec.SessionID, ProviderSessionID: rec.ProviderSessionID, Identity: rec.Identity,
+					RetryReason: rec.RetryReason, RetriesFromSessionID: rec.RetriesFromSessionID,
+					LockOwner: rec.LockOwner, ExpiresAt: rec.LockExpiresAt}
+			}
+			return ReplayRotation(request, &receipt, current, now)
+		}
+	}
+	if !ok || rec == nil {
 		return nil, fmt.Errorf("session for agent %s not found", identity.AgentID())
 	}
-	operationID := strings.TrimSpace(rotation.OperationID)
-	if operationID != "" && rec.RotationOperationID == operationID && rec.Status == "active" {
-		return &Lease{
-			SessionID: rec.SessionID, ProviderSessionID: rec.ProviderSessionID, Identity: rec.Identity, RetryReason: rec.RetryReason,
-			RetriesFromSessionID: rec.RetriesFromSessionID, LockOwner: rec.LockOwner,
-			ExpiresAt: rec.LockExpiresAt,
-		}, nil
-	}
-
-	now := time.Now()
 	if rec.LockOwner != "" && rec.LockOwner != lockOwner && rec.LockExpiresAt.After(now) {
 		return nil, fmt.Errorf("cannot rotate: leased by %s", rec.LockOwner)
 	}
 
-	retryReason := strings.TrimSpace(rotation.RetryReason)
-	terminationReason := rotation.TerminationReason
-	if terminationReason == "" {
-		mappedReason, _, err := rotationTermination(retryReason)
-		if err != nil {
-			return nil, err
-		}
-		terminationReason = mappedReason
-	}
-	if err := validateRuntimeTerminationReason(terminationReason); err != nil {
-		return nil, err
-	}
+	retryReason := rotation.RetryReason
 	oldSessionID := rec.SessionID
 	terminated := *rec
 	terminated.Status = "terminated"
 	terminated.LockOwner = ""
 	terminated.LockExpiresAt = time.Time{}
-	terminated.TerminationReason = terminationReason.String()
+	terminated.TerminationReason = rotation.TerminationReason.String()
 	terminated.TerminationDetail = retryReason
 	terminated.SuccessorSessionID = uuid.NewString()
 	terminated.TerminatedAt = now
@@ -366,9 +360,9 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 	rec.TerminationDetail = ""
 	rec.SuccessorSessionID = ""
 	rec.TerminatedAt = time.Time{}
-	rec.RotationOperationID = operationID
+	rec.RotationOperationID = rotation.OperationID
 
-	return &Lease{
+	lease := Lease{
 		SessionID:            rec.SessionID,
 		ProviderSessionID:    rec.ProviderSessionID,
 		Identity:             rec.Identity,
@@ -376,7 +370,11 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 		RetriesFromSessionID: rec.RetriesFromSessionID,
 		LockOwner:            rec.LockOwner,
 		ExpiresAt:            rec.LockExpiresAt,
-	}, nil
+	}
+	if rotation.OperationID != "" {
+		sr.rotationReceipts[rotation.OperationID] = RotationReceipt{OperationID: rotation.OperationID, RequestDigest: request.Digest, Result: lease}
+	}
+	return &lease, nil
 }
 
 func (sr *InMemoryRegistry) IncrementTurnOutcome(ctx context.Context, identity agentmemory.Identity, sessionID string) (TurnIncrementResult, error) {
@@ -589,6 +587,7 @@ func (sr *InMemoryRegistry) ResetAll(metadata ResetMetadata) (ResetSummary, erro
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	summary := ResetSummary{}
+	clear(sr.rotationReceipts)
 	source := strings.TrimSpace(metadata.Source)
 	now := time.Now()
 	for key, rec := range sr.byKey {

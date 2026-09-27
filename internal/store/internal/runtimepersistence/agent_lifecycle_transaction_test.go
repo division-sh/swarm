@@ -162,6 +162,10 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		if conversation != "[]" || turnCount != 0 || strings.Contains(runtimeState, "provider_session_id") || status != mutation.PreviousStatus {
 			t.Fatalf("successor retained mutable state: conversation=%s runtime_state=%s turns=%d status=%s mutation=%#v", conversation, runtimeState, turnCount, status, mutation)
 		}
+		var registryReceipts int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE session_id=$1 AND rotation_operation_id IS NOT NULL`, mutation.SuccessorSessionID).Scan(&registryReceipts); err != nil || registryReceipts != 0 || !strings.Contains(runtimeState, "rotation_operation_id") {
+			t.Fatalf("lifecycle successor gained registry receipt: receipts=%d runtime_state=%s err=%v", registryReceipts, runtimeState, err)
+		}
 		previousRevision := requireLifecycleSessionHistory(t, ctx, db, sqlite, mutation.RunID, mutation.PreviousSessionID, "terminated")
 		successorRevision := requireLifecycleSessionHistory(t, ctx, db, sqlite, mutation.RunID, mutation.SuccessorSessionID, mutation.SuccessorStatus)
 		if previousRevision != successorRevision {

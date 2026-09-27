@@ -6660,6 +6660,8 @@ engine:
           - Platform session IDs remain platform-owned; external provider session IDs, when present, are stored only as provider
             implementation details.
           - Session rotation and retry lineage must be accounted for by the adapter contract.
+          - 'Standalone Registry.Rotate normalizes exact memory identity, requested lease owner, optional operation ID, checkpoint summary, retry diagnostic, and termination reason once. Omitted termination reason is normal; explicit reasons use the closed current enum and are canonicalized before digest and persistence. Unknown and legacy reasons fail before mutation. Retry text never classifies termination. Managed parse-failure rotation explicitly uses failed; turn-limit rotation uses normal.'
+          - 'A nonempty Registry.Rotate operation ID is a store-wide logical key. A matching canonical request digest may replay only the complete immutable stored lease result, and only while the exact successor and original lease authority are current and unexpired. A changed request returns typed request_conflict; stale successor or lease authority returns typed successor_not_current. Neither refusal nor replay mutates session lineage, revisions, story, or run candidates. An empty operation ID requests a new rotation. Lookup, authority validation, rotation, receipt persistence, and coupled effects commit atomically under one selected-store transaction; the process-local registry follows the same policy under its lock.'
           - Claude CLI provider child-session identity is the durable external-effect attempt ID. First turns start that child;
             continued turns resume the selected-store confirmed provider head and fork into a fresh attempt-owned child.
           - A missing confirmed Claude provider head is never reconstructed from the platform session ID. Provider response
@@ -15489,6 +15491,9 @@ platform_tables:
             conversation         JSONB NOT NULL DEFAULT '[]',
             turn_count           INTEGER NOT NULL DEFAULT 0,
             runtime_state        JSONB NOT NULL DEFAULT '{}',
+            rotation_operation_id TEXT,
+            rotation_request_digest TEXT,
+            rotation_result      JSONB,
             lease_holder         TEXT,
             lease_expires_at     TIMESTAMPTZ,
             status               TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),
@@ -15502,9 +15507,11 @@ platform_tables:
             CHECK (termination_detail IS NULL OR termination_reason IS NOT NULL),
             CHECK (successor_session_id IS NULL OR status = 'terminated'),
             CHECK (successor_session_id IS NULL OR successor_session_id <> session_id),
+            CHECK ((rotation_operation_id IS NULL AND rotation_request_digest IS NULL AND rotation_result IS NULL) OR (rotation_operation_id IS NOT NULL AND rotation_request_digest IS NOT NULL AND rotation_result IS NOT NULL)),
             FOREIGN KEY (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE (session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE INDEX agent_sessions_nonterminated_unique (run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) WHERE status <> 'terminated',
+            UNIQUE INDEX agent_sessions_rotation_operation_unique (rotation_operation_id) WHERE rotation_operation_id IS NOT NULL,
             INDEX idx_sessions_run (run_id),
             INDEX idx_sessions_agent (agent_id, flow_instance, status),
             INDEX idx_sessions_lease (lease_expires_at) WHERE lease_holder IS NOT NULL,

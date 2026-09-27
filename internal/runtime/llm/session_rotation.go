@@ -102,6 +102,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 	summary := BuildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
 	lease, err := registry.Rotate(ctx, s.MemoryIdentity, lockOwner, sessions.RotationMetadata{
 		CheckpointSummary: summary,
+		TerminationReason: sessions.TerminationReasonFailed,
 	})
 	if lease == nil {
 		return nil, err
