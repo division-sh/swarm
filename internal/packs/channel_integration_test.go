@@ -755,6 +755,23 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 	}
 }
 
+func TestChannelNativeInboxCapabilityConformance(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	for _, operation := range []string{
+		"identify_inbox_address", "install_inbox_entry", "read_inbox_entry",
+		"install_shared_inbox_entry", "read_shared_inbox_entry",
+	} {
+		t.Run(operation, func(t *testing.T) {
+			channel, trigger, connector := mockChannelSatisfier()
+			delete(channel.Manifest.Operations, operation)
+			if _, err := packs.CompileChannel(registry, channel,
+				[]packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector}); err == nil {
+				t.Fatalf("mock satisfier without %s was admitted", operation)
+			}
+		})
+	}
+}
+
 func TestChannelDeliveryOptionalEventBindingAdmission(t *testing.T) {
 	registry := loadChannelInterfaceRegistry(t)
 	tests := []struct {
