@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"gopkg.in/yaml.v3"
 )
 
 type fanOutCensusCountingSource struct {
@@ -31,7 +32,7 @@ func (s *fanOutCensusCountingSource) ExecutableNodeRecords() []rc.ScopedNodeReco
 	return s.Source.ExecutableNodeRecords()
 }
 
-func preparedFanOutFixture(t testing.TB) (*Executor, fanoutobligation.Intent, events.Event, *fanOutCensusCountingSource) {
+func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobligation.Intent, events.Event, *fanOutCensusCountingSource) {
 	t.Helper()
 	node := testRootExecutableNode(t, "worker")
 	handler, err := rc.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.ready", rc.SystemNodeEventHandler{FanOut: &rc.FanOutSpec{
@@ -43,10 +44,19 @@ func preparedFanOutFixture(t testing.TB) (*Executor, fanoutobligation.Intent, ev
 	if err != nil {
 		t.Fatal(err)
 	}
+	itemFields := map[string]rc.EventFieldSpec{"value": {Type: "integer"}, "index": {Type: "integer"}, "count": {Type: "integer"}}
+	if len(r2Mixed) > 0 && r2Mixed[0] {
+		var note rc.ExpressionValue
+		if err := yaml.Unmarshal([]byte(`'row=${row},meta=${{"missing":null}}'`), &note); err != nil {
+			t.Fatal(err)
+		}
+		handler.FanOut.Emit.Fields["note"] = note
+		itemFields["note"] = rc.EventFieldSpec{Type: "text"}
+	}
 	schema := rc.FlowSchemaDocument{Pins: rc.FlowPins{Outputs: rc.FlowOutputPins{EventPins: []rc.FlowOutputEventPin{{Event: "item.ready", Sink: rc.FlowOutputSinkHarness}}}}}
 	catalog := map[string]rc.EventCatalogEntry{
 		"batch.ready": requiredEventPayload(map[string]rc.EventFieldSpec{"items": {Type: "[integer]"}}),
-		"item.ready":  requiredEventPayload(map[string]rc.EventFieldSpec{"value": {Type: "integer"}, "index": {Type: "integer"}, "count": {Type: "integer"}}),
+		"item.ready":  requiredEventPayload(itemFields),
 	}
 	root := &rc.FlowContractView{Path: ".", Paths: rc.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"}, Schema: schema, Events: catalog}
 	bundle := &rc.WorkflowContractBundle{
@@ -78,6 +88,25 @@ func preparedFanOutFixture(t testing.TB) (*Executor, fanoutobligation.Intent, ev
 	now := time.Now().UTC()
 	intent := fanoutobligation.Intent{Request: *result.FanOutIntent, Source: result.FanOutIntent.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
 	return exec, intent, trigger, source
+}
+
+func TestPreparedFanOutEvaluatesAuthoredR2MixedValue(t *testing.T) {
+	exec, intent, trigger, _ := preparedFanOutFixture(t, true)
+	preparation, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emit, err := preparation.EvaluateOrdinal(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emit.Event.Payload(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["note"] != `row=0,meta={"missing":null}` || payload["value"] != float64(5) {
+		t.Fatalf("prepared R2 payload = %#v", payload)
+	}
 }
 
 func TestFanOutPreparationBoundsCensusAndPreservesOrdinals(t *testing.T) {
