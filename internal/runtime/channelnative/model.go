@@ -3,7 +3,6 @@ package channelnative
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -12,10 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	Command     = "inbox"
-	Description = "Open inbox"
-)
+const Description = "Open inbox"
 
 type Admission struct {
 	Provider                     string
@@ -53,21 +49,30 @@ func (a Admission) Validate() error {
 	return nil
 }
 
-func DesiredCommands() ([]byte, error) {
-	return canonicaljson.Bytes([]map[string]string{{"command": Command, "description": Description}})
+func EntryCommand(settingID string, generation int64) (string, error) {
+	if uuid.Validate(settingID) != nil || generation < 1 {
+		return "", fmt.Errorf("native inbox command requires exact setting generation")
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("native-inbox-entry-v1:%s:%d", settingID, generation)))
+	return fmt.Sprintf("inbox_%x", sum[:12]), nil
+}
+
+func DesiredCommands(settingID string, generation int64) ([]byte, error) {
+	command, err := EntryCommand(settingID, generation)
+	if err != nil {
+		return nil, err
+	}
+	return canonicaljson.Bytes([]map[string]string{{"command": command, "description": Description}})
 }
 
 func EntryContractHash(plan plangeneration.Generation) (string, error) {
 	if !plan.Valid() {
 		return "", fmt.Errorf("native inbox setting requires a compiled plan")
 	}
-	desired, err := DesiredCommands()
-	if err != nil {
-		return "", err
-	}
 	value, err := canonicaljson.Bytes(map[string]any{
 		"kind": "native_inbox_chat_commands_v1", "plan_generation": plan.Diagnostic(),
-		"scope_kind": "chat", "language_code": "", "commands": json.RawMessage(desired),
+		"scope_kinds": []string{"chat", "chat_member"}, "language_code": "",
+		"command_template": "inbox_<setting-generation-digest>", "description": Description,
 	})
 	if err != nil {
 		return "", err
@@ -88,7 +93,10 @@ type Setting struct {
 	Provider             string
 	ResourceSlotID       string
 	ConversationRef      string
+	ScopeKind            string
+	MemberReference      string
 	EntryContractHash    string
+	EntryCommand         string
 	PrincipalID          string
 	Generation           int64
 	State                string

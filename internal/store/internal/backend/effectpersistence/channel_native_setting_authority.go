@@ -33,8 +33,9 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 	}
 	s := authority.ChannelNativeSetting
 	query := `SELECT setting.setting_id, setting.provider, setting.resource_slot_id,
-		setting.conversation_reference, setting.principal_id, setting.generation,
-		setting.state, setting.install_operation_id, setting.entry_contract_hash,
+		setting.conversation_reference, setting.scope_kind, setting.member_reference,
+		setting.principal_id, setting.generation,
+		setting.state, setting.install_operation_id, setting.entry_contract_hash, setting.entry_command,
 		setting.pack_id, setting.pack_version, setting.pack_manifest_hash, setting.desired_commands,
 		consumer.activation_revision, consumer.binding_revision, consumer.context_publication_generation,
 		activation.activation_revision, activation.binding_revision, activation.context_publication_generation,
@@ -48,7 +49,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 		JOIN operator_channel_bindings binding ON binding.interface_key=activation.interface_key
 		WHERE setting.setting_id=? AND consumer.activation_id=?
-		AND setting.scope_kind='chat' AND setting.language_code=''
+		AND setting.language_code=''
 		AND consumer.state='current' AND activation.status='current'
 		AND consumer.activation_revision=activation.activation_revision
 		AND consumer.binding_revision=activation.binding_revision
@@ -58,6 +59,9 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		AND binding.status='current' AND binding.principal_id=activation.principal_id
 		AND binding.binding_revision=activation.binding_revision
 		AND binding.conversation_reference=activation.conversation_reference
+		AND ((setting.scope_kind='chat' AND binding.conversation_scope='direct' AND setting.member_reference='')
+			OR (setting.scope_kind='chat_member' AND binding.conversation_scope='shared'
+			AND setting.member_reference=binding.external_account_reference))
 		AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations prior
 			WHERE prior.authority_kind='channel_native_setting'
 			AND json_extract(prior.authority_evidence, '$.setting_id')=setting.setting_id
@@ -65,8 +69,9 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			AND prior.state IN ('launched','response_observed','outcome_uncertain'))`
 	if postgres {
 		query = `SELECT setting.setting_id::text, setting.provider, setting.resource_slot_id,
-			setting.conversation_reference, setting.principal_id::text, setting.generation,
-			setting.state, setting.install_operation_id::text, setting.entry_contract_hash,
+			setting.conversation_reference, setting.scope_kind, setting.member_reference,
+			setting.principal_id::text, setting.generation,
+			setting.state, setting.install_operation_id::text, setting.entry_contract_hash, setting.entry_command,
 			setting.pack_id, setting.pack_version, setting.pack_manifest_hash, setting.desired_commands,
 			consumer.activation_revision, consumer.binding_revision, consumer.context_publication_generation,
 			activation.activation_revision, activation.binding_revision, activation.context_publication_generation,
@@ -80,7 +85,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			JOIN channel_onboarding_operations onboarding ON onboarding.operation_id=activation.operation_id
 			JOIN operator_channel_bindings binding ON binding.interface_key=activation.interface_key
 			WHERE setting.setting_id=$1::uuid AND consumer.activation_id=$2::uuid
-			AND setting.scope_kind='chat' AND setting.language_code=''
+			AND setting.language_code=''
 			AND consumer.state='current' AND activation.status='current'
 			AND consumer.activation_revision=activation.activation_revision
 			AND consumer.binding_revision=activation.binding_revision
@@ -90,6 +95,9 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			AND binding.status='current' AND binding.principal_id=activation.principal_id
 			AND binding.binding_revision=activation.binding_revision
 			AND binding.conversation_reference=activation.conversation_reference
+			AND ((setting.scope_kind='chat' AND binding.conversation_scope='direct' AND setting.member_reference='')
+				OR (setting.scope_kind='chat_member' AND binding.conversation_scope='shared'
+				AND setting.member_reference=binding.external_account_reference))
 			AND NOT EXISTS (SELECT 1 FROM runtime_external_effect_operations prior
 				WHERE prior.authority_kind='channel_native_setting'
 				AND prior.authority_evidence->>'setting_id'=setting.setting_id::text
@@ -99,7 +107,7 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			query += ` FOR UPDATE OF setting, consumer, activation, onboarding, binding`
 		}
 	}
-	var settingID, provider, slotID, conversation, principalID, state, operationID, contract string
+	var settingID, provider, slotID, conversation, scopeKind, memberReference, principalID, state, operationID, contract, entryCommand string
 	var packID, packVersion, packHash string
 	var desired []byte
 	var generation, consumerActivationRevision, consumerBindingRevision, consumerContextGeneration int64
@@ -108,8 +116,8 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 	var bundleHash, bundleIdentity, inventoryGeneration, runtimeInstanceID, planGeneration string
 	var targetGeneration int64
 	err := q.QueryRowContext(ctx, query, s.SettingID, s.ActivationID).Scan(
-		&settingID, &provider, &slotID, &conversation, &principalID, &generation,
-		&state, &operationID, &contract, &packID, &packVersion, &packHash, &desired,
+		&settingID, &provider, &slotID, &conversation, &scopeKind, &memberReference, &principalID, &generation,
+		&state, &operationID, &contract, &entryCommand, &packID, &packVersion, &packHash, &desired,
 		&consumerActivationRevision, &consumerBindingRevision, &consumerContextGeneration,
 		&activationRevision, &activationBindingRevision, &activationContextGeneration,
 		&activationProvider, &activationPrincipal, &activationConversation,
@@ -125,12 +133,13 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 	if err != nil {
 		return false, err
 	}
-	expected, err := channelnative.DesiredCommands()
+	expected, err := channelnative.DesiredCommands(s.SettingID, s.SettingGeneration)
 	if err != nil {
 		return false, err
 	}
 	return state == "planned" && settingID == s.SettingID && provider == s.Provider &&
-		slotID == s.ResourceSlotID && conversation == s.ConversationRef && principalID == s.PrincipalID &&
+		slotID == s.ResourceSlotID && conversation == s.ConversationRef && scopeKind == s.ScopeKind &&
+		memberReference == s.MemberReference && principalID == s.PrincipalID && entryCommand == s.EntryCommand &&
 		generation == s.SettingGeneration && operationID == s.EffectOperationID &&
 		contract == s.EntryContractHash && packID == s.PackID && packVersion == s.PackVersion &&
 		packHash == s.PackManifestHash && bytes.Equal(canonical, expected) &&

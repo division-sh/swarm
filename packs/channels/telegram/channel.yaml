@@ -95,6 +95,19 @@ operations:
       chat_id: context.destination
     output:
       commands: result.commands
+  install_shared_inbox_entry:
+    tool: telegram.install_shared_inbox_commands
+    input:
+      chat_id: context.destination
+      user_id: input.member_reference
+      commands: input.commands
+  read_shared_inbox_entry:
+    tool: telegram.read_shared_inbox_commands
+    input:
+      chat_id: context.destination
+      user_id: input.member_reference
+    output:
+      commands: result.commands
 events:
   action:
     event: inbound.telegram.callback_action
