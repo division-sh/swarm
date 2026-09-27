@@ -5314,6 +5314,9 @@ engine:
           `{bundle_hash, workflow_version}` matches the current EventBus semantic source. It MUST replace the complete
           route set for every affected owner in the same mutation, including
           inactivating previously active rows absent from the derived set; additive upsert is not an exact-set operation.
+          Selecting an affected observer also selects every active producer dependency needed to derive that observer's
+          complete set, including unchanged and older producer instances in other scopes. Selecting only the changed
+          producer may delete valid observer routes during exact-set replacement; unrelated owners remain outside scope.
           Descriptor `flow_template` is an authored template ID. Route scope is the semantic full template path; exact-set
           derivation MUST resolve that scope through the current semantic route-template registry and compare the resulting
           template ID. Direct equality between a nested scope path and template ID is invalid.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -405,6 +406,65 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteTopologyIsAtomic(t *testing.T
 	ctx := testAuthorActivityContext()
 	selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	testFlowInstanceRouteTopologyAtomicity(t, ctx, selected.backend.ConstructionHandle(), selected, false)
+}
+
+func TestFlowInstanceRouteTopologyReplacementPreservesOlderObserverSources(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			var db *sql.DB
+			var selected flowRouteTopologyTestStore
+			postgres := backend == "postgres"
+			if postgres {
+				_, db, _ = testutil.StartPostgres(t)
+				selected = admitTestPostgresStore(t, db)
+				ensureFlowInstanceRouteTables(t, ctx, db)
+			} else {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				selected = store
+				db = store.backend.ConstructionHandle()
+			}
+			ctx = seedFlowRouteTestRun(t, ctx, db, postgres)
+			observer := flowRouteTestIdentity(runtimeflowidentity.DeriveRoute("review", "observer"))
+			if postgres {
+				if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES ($1::uuid, $2, 'review', 'template', '{}'::jsonb, 'active', NOW())`, flowRouteTestRunID, observer.Route.InstancePath); err != nil {
+					t.Fatal(err)
+				}
+			} else if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at) VALUES (?, ?, 'review', 'template', '{}', 'active', ?)`, flowRouteTestRunID, observer.Route.InstancePath, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			seedFlowRouteTestEntities(t, ctx, db, postgres, observer.Route.InstancePath)
+			patterns := []string{"producer/old-a/work.ready", "producer/old-b/work.ready", "other/old/other.ready"}
+			replace := func(patterns []string) {
+				t.Helper()
+				routes := make([]runtimebus.FlowInstanceRouteRecord, 0, len(patterns))
+				for _, pattern := range patterns {
+					routes = append(routes, runtimebus.FlowInstanceRouteRecord{
+						Identity: observer, EventPattern: pattern, SubscriberType: "node", SubscriberID: "observer-node", SourceFlow: "review",
+					})
+				}
+				result, err := selected.ReplaceFlowInstanceRouteTopology(ctx, []runtimebus.FlowInstanceRouteRecordSet{{Identity: observer, Routes: routes}})
+				if err != nil || !result.Acknowledged {
+					t.Fatalf("replace complete observer set: result=%#v err=%v", result, err)
+				}
+			}
+			replace(patterns)
+			replace(append(patterns, "producer/new/work.ready"))
+			got, err := selected.ListFlowInstanceRouteRecords(ctx, observer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotPatterns := make([]string, 0, len(got))
+			for _, route := range got {
+				gotPatterns = append(gotPatterns, route.EventPattern)
+			}
+			sort.Strings(gotPatterns)
+			want := []string{"other/old/other.ready", "producer/new/work.ready", "producer/old-a/work.ready", "producer/old-b/work.ready"}
+			if strings.Join(gotPatterns, ",") != strings.Join(want, ",") {
+				t.Fatalf("observer replacement lost valid routes: got=%#v want=%#v", gotPatterns, want)
+			}
+		})
+	}
 }
 
 func testFlowInstanceRouteTopologyAtomicity(

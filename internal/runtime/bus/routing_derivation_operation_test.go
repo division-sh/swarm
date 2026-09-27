@@ -74,6 +74,22 @@ func topologyOperationFixture(t testing.TB) (*topologyOperationSource, *EventBus
 	return source, &EventBus{semanticSource: source, sourceArtifactFact: fact}
 }
 
+func completeObserverFixture(t testing.TB) (*topologyOperationSource, *EventBus) {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyCompleteObserverDependencies(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &topologyOperationSource{Source: semanticview.Wrap(bundle)}
+	fact, err := runtimecorrelation.DecodeSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source, &EventBus{semanticSource: source, sourceArtifactFact: fact}
+}
+
 func topologyOperationIdentity(t *testing.T, id string) runtimeflowidentity.RunScopedFlowInstance {
 	t.Helper()
 	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(busInternalTestRunID, runtimeflowidentity.DeriveRoute("workers", id))
@@ -104,7 +120,7 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 0 || len(got) != len(plans) {
+	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 1 || len(got) != len(plans) {
 		t.Fatalf("independent publication work: censuses=%d full_reads=%d scoped_reads=%d routes=%d", source.censuses.Load(), lister.calls, lister.scopedCalls, len(got))
 	}
 	independent, err := DeriveRouteTable(source.Source)
@@ -130,12 +146,12 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	}
 	// Unrelated descriptors, even hostile ones, are outside this activation's
 	// compiled dependency scope and must not be loaded or affect its routes.
-	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "workers/outsider"}}
+	lister.rows = []ActiveFlowInstanceDescriptor{{RunID: "foreign-run", FlowInstance: "collector/outsider", FlowTemplate: "collector"}}
 	source.censuses.Store(0)
 	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans); err != nil {
 		t.Fatalf("unrelated descriptor affected independent activation: %v", err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 0 {
+	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 2 {
 		t.Fatalf("independent activation read unrelated descriptors: censuses=%d full_reads=%d scoped_reads=%d", source.censuses.Load(), lister.calls, lister.scopedCalls)
 	}
 }
@@ -204,6 +220,73 @@ func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.
 	}
 	if lister.calls != 0 || lister.scopedCalls != 2 {
 		t.Fatalf("selected foreign descriptor bypassed scoped read: full=%d scoped=%d", lister.calls, lister.scopedCalls)
+	}
+}
+
+func TestRouteTopologyPublicationLoadsCompleteCompiledObserverContext(t *testing.T) {
+	for _, observerFirst := range []bool{false, true} {
+		name := "producers_first"
+		if observerFirst {
+			name = "observer_first"
+		}
+		t.Run(name, func(t *testing.T) {
+			source, eb := completeObserverFixture(t)
+			table, err := DeriveRouteTable(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			eb.routeTable = table
+			graph := runtimepinrouting.CompileConnectGraph(source)
+			if len(graph.Issues()) != 0 || len(graph.Plans()) != 2 {
+				t.Fatalf("compiled two-producer fixture: plans=%d issues=%#v", len(graph.Plans()), graph.Issues())
+			}
+			oldA, oldB := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "old-a")), testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "old-b"))
+			otherOld := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("other", "old"))
+			observer, err := runtimeflowidentity.NewRunScopedFlowInstance(busInternalTestRunID, runtimeflowidentity.Derive(source, "observer", "one").Route())
+			if err != nil {
+				t.Fatal(err)
+			}
+			newOwner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "new"))
+			descriptor := func(identity runtimeflowidentity.RunScopedFlowInstance, template string) ActiveFlowInstanceDescriptor {
+				return ActiveFlowInstanceDescriptor{
+					RunID: identity.RunID, InstanceID: identity.Route.InstanceID,
+					FlowInstance: identity.Route.InstancePath, FlowTemplate: template,
+					BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+				}
+			}
+			rows := []ActiveFlowInstanceDescriptor{descriptor(oldA, "producer"), descriptor(oldB, "producer"), descriptor(otherOld, "other"), descriptor(observer, "observer")}
+			if observerFirst {
+				rows[0], rows[3] = rows[3], rows[0]
+			}
+			lister := &topologyOperationDescriptors{rows: rows}
+			eb.durable.ActiveFlows = lister
+			plan := runtimepipeline.FlowInstanceActivationPlan{
+				Identity:  runtimeflowidentity.Derive(source, "producer", "new"),
+				Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
+			}
+			got, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if lister.calls != 0 || lister.scopedCalls != 1 || !slices.Equal(lister.templateScope[0], []string{"observer", "other", "producer"}) {
+				t.Fatalf("dependency scope full=%d scoped=%d templates=%#v", lister.calls, lister.scopedCalls, lister.templateScope)
+			}
+			oracle, err := DeriveRouteTable(source.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, identity := range []runtimeflowidentity.RunScopedFlowInstance{oldA, oldB, otherOld, observer, newOwner} {
+				if err := oracle.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := flowInstanceRouteTopologyRecordSets(oracle, []runtimeflowidentity.RunScopedFlowInstance{observer, newOwner})
+			sort.Slice(got, func(i, j int) bool { return got[i].Identity.Key() < got[j].Identity.Key() })
+			sort.Slice(want, func(i, j int) bool { return want[i].Identity.Key() < want[j].Identity.Key() })
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("observer replacement lost earlier producers: got=%#v want=%#v", got, want)
+			}
+		})
 	}
 }
 

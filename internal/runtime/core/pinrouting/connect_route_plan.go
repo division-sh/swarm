@@ -1436,6 +1436,18 @@ func (g CompiledConnectGraph) SelectRouteDependencies(changedFlowPaths []string,
 			context[source] = struct{}{}
 		}
 	}
+	// An affected owner is replaced with its complete derived route set. Load
+	// every producer it observes, not only the producer in this activation.
+	for _, dependency := range dependencies {
+		source := strings.Trim(strings.TrimSpace(dependency.SourceFlowPath), "/")
+		receiver := strings.Trim(strings.TrimSpace(dependency.ReceiverFlowPath), "/")
+		if source == "" || receiver == "" {
+			continue
+		}
+		if _, ownsReplacement := affected[receiver]; ownsReplacement {
+			context[source] = struct{}{}
+		}
+	}
 	selection := RouteDependencySelection{
 		ContextFlowPaths: make([]string, 0, len(context)), AffectedFlowPaths: make([]string, 0, len(affected)),
 	}

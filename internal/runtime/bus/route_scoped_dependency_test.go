@@ -68,3 +68,60 @@ func TestCompiledRouteDependenciesPreserveCrossInstanceObserverInBothCreationOrd
 		})
 	}
 }
+
+func TestObserverRouteReplacementRetainsOlderProducerFamilies(t *testing.T) {
+	for _, observerFirst := range []bool{false, true} {
+		name := "producers_first"
+		if observerFirst {
+			name = "observer_first"
+		}
+		t.Run(name, func(t *testing.T) {
+			rt := newRouteTableWithGraph(nil, runtimepinrouting.CompiledConnectGraph{})
+			observerOwner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("observer", "one"))
+			rt.instanceOwners[observerOwner] = observerOwner
+			for _, source := range []struct{ flow, event string }{{"producer", "work.ready"}, {"other", "other.ready"}} {
+				observe := routeTemplateSourceObserver{
+					RunID: busInternalTestRunID, SourceTemplatePath: source.flow, SourceLocalEvent: source.event,
+					Subscriber:             Subscriber{Recipient: events.MustAgentDeliveryRecipient("observer-agent")},
+					SubscriberInstancePath: observerOwner.Route.InstancePath,
+				}
+				if observerFirst {
+					rt.addTemplateSourceObserverLocked(observe)
+				}
+			}
+			addProducer := func(flow, id, event string) {
+				owner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute(flow, id))
+				rt.instanceOwners[owner] = owner
+				rt.eventPath[owner.Route.InstancePath+"/"+event] = struct{}{}
+				rt.materializeTemplateSourceObserversLocked(owner)
+			}
+			addProducer("producer", "old-a", "work.ready")
+			addProducer("producer", "old-b", "work.ready")
+			addProducer("other", "old", "other.ready")
+			if !observerFirst {
+				for _, source := range []struct{ flow, event string }{{"producer", "work.ready"}, {"other", "other.ready"}} {
+					rt.addTemplateSourceObserverLocked(routeTemplateSourceObserver{
+						RunID: busInternalTestRunID, SourceTemplatePath: source.flow, SourceLocalEvent: source.event,
+						Subscriber:             Subscriber{Recipient: events.MustAgentDeliveryRecipient("observer-agent")},
+						SubscriberInstancePath: observerOwner.Route.InstancePath,
+					})
+				}
+			}
+			before := rt.MaterializedRoutes(observerOwner)
+			if len(before) != 3 {
+				t.Fatalf("initial observer routes = %#v, want three older producers", before)
+			}
+			addProducer("producer", "new", "work.ready")
+			got := rt.MaterializedRoutes(observerOwner)
+			patterns := make([]string, 0, len(got))
+			for _, route := range got {
+				patterns = append(patterns, route.EventPattern)
+			}
+			sort.Strings(patterns)
+			want := []string{"other/old/other.ready", "producer/new/work.ready", "producer/old-a/work.ready", "producer/old-b/work.ready"}
+			if !reflect.DeepEqual(patterns, want) {
+				t.Fatalf("complete replacement patterns = %#v, want %#v", patterns, want)
+			}
+		})
+	}
+}
