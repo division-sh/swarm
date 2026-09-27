@@ -165,7 +165,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 			if err := d.acknowledgeChannelAction(ctx, intent, resolved); err != nil {
 				failures = errors.Join(failures, fmt.Errorf("acknowledge channel action %s: %w", intent.PublicationID, err))
 			}
-			if resolved.Action.Kind == "open_inbox" || resolved.Action.Kind == "view_full" || resolved.Action.Kind == "next_page" {
+			if resolved.Action.Kind == "open_inbox" || resolved.Action.Kind == "view_full" ||
+				resolved.Action.Kind == "next_page" || resolved.Action.Kind == "next_draft_page" ||
+				resolved.Action.Kind == "next_recovery_page" {
 				inboxText := ""
 				if resolved.Action.Kind == "open_inbox" {
 					inboxText, err = d.inboxContent(ctx)
@@ -184,7 +186,25 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 				}
 				continue
 			}
-			if resolved.SourceKind != "card" || resolved.Action.Kind != "verdict" {
+			if resolved.SourceKind == "response" && resolved.Action.Kind == "select_draft" {
+				if err := d.processDraftChoice(ctx, intent, resolved); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("select channel draft %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
+			if resolved.SourceKind == "response" && resolved.Action.Kind == "resend" {
+				if _, err := d.store.PlanManualChannelResend(ctx, intent.Fact, resolved); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("plan manual channel resend %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
+			if resolved.SourceKind == "card" && resolved.Action.Kind == "skip_input" {
+				if err := d.processInputSkip(ctx, intent, resolved); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("skip channel input %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
+			if resolved.SourceKind != "card" || (resolved.Action.Kind != "verdict" && resolved.Action.Kind != "cancel_input") {
 				if err := d.store.SettleUnappliedChannelAction(ctx, intent.Fact, runtimechanneldelivery.ActionUnsupported); err != nil {
 					failures = errors.Join(failures, fmt.Errorf("reject unsupported channel action %s: %w", intent.PublicationID, err))
 				}
@@ -213,6 +233,42 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 	}
 }
 
+func (d *serveChannelDeliveryDispatcher) processInputSkip(ctx context.Context, intent runtimechanneldelivery.PendingAction,
+	expected runtimechanneldelivery.ResolvedAction) error {
+	resolved, progress, draft, err := d.store.PreviewChannelInputSkip(ctx, intent.Fact, intent.ReceivedAt)
+	if err != nil {
+		return err
+	}
+	if resolved != expected || draft.InputDraftID != resolved.Action.DraftID {
+		return fmt.Errorf("channel skip changed before processing")
+	}
+	if progress.Complete {
+		return d.processFinalCardSkip(ctx, intent, resolved, draft, progress)
+	}
+	_, err = d.store.AdvancePartialChannelInputSkip(ctx, intent.Fact, intent.ReceivedAt)
+	return err
+}
+
+func (d *serveChannelDeliveryDispatcher) processDraftChoice(ctx context.Context, intent runtimechanneldelivery.PendingAction,
+	resolved runtimechanneldelivery.ResolvedAction) error {
+	candidate, text, progress, principalID, err := d.store.PreviewChosenChannelInputDraftText(ctx, intent.Fact, intent.ReceivedAt)
+	if err != nil {
+		if errors.Is(err, decisioncard.ErrInvalidInput) {
+			_, err = d.store.PlanChannelActionResponse(ctx, intent.Fact, resolved, "")
+		}
+		return err
+	}
+	if candidate.DraftID != resolved.Action.DraftID || candidate.CardID != resolved.Action.CardID ||
+		text.PublicationID != resolved.Action.TextPublicationID {
+		return fmt.Errorf("chosen channel draft changed before processing")
+	}
+	if progress.Complete {
+		return d.processFinalCardText(ctx, text, candidate, progress, principalID, &intent)
+	}
+	_, err = d.store.AdvancePartialChosenChannelInputDraftText(ctx, intent.Fact, intent.ReceivedAt)
+	return err
+}
+
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context.Context) error {
 	if d == nil || d.store == nil || d.cards == nil || d.mailbox == nil || d.proposedEffects == nil {
 		return fmt.Errorf("channel inbox response owners are unavailable")
@@ -226,6 +282,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 		}
 		for _, intent := range pending {
 			if intent.Fact.EntryReference == "" {
+				if err := d.processPendingInputText(ctx, intent); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("process channel input %s: %w", intent.PublicationID, err))
+				}
 				continue
 			}
 			entry, found, err := d.resolveNativeInboxEntry(ctx, intent.Fact)
@@ -254,6 +313,60 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 		}
 		cursor = last
 	}
+}
+
+func (d *serveChannelDeliveryDispatcher) processPendingInputText(ctx context.Context, intent runtimechanneldelivery.PendingText) error {
+	var selected runtimechanneldelivery.InputDraftCandidate
+	multiple := false
+	cursor := ""
+	for {
+		candidates, next, err := d.store.ListCurrentChannelInputDrafts(ctx, intent.Fact, intent.ReceivedAt, cursor, 200)
+		if err != nil {
+			return err
+		}
+		for _, candidate := range candidates {
+			if selected.DraftID != "" {
+				multiple = true
+				break
+			}
+			selected = candidate
+		}
+		if multiple {
+			break
+		}
+		if next == "" {
+			break
+		}
+		if next == cursor {
+			return fmt.Errorf("channel input draft cursor did not advance")
+		}
+		cursor = next
+	}
+	if multiple {
+		if intent.Fact.ReplyToReference != "" {
+			return fmt.Errorf("quoted channel input selects multiple current drafts")
+		}
+		_, err := d.store.PlanChannelDraftChooser(ctx, intent.Fact, intent.ReceivedAt)
+		return err
+	}
+	if selected.DraftID == "" {
+		_, err := d.store.PlanChannelTextResponse(ctx, intent.Fact,
+			"That reply does not match a current card prompt. Open inbox to review current actions.", "teaching")
+		return err
+	}
+	progress, principalID, err := d.store.PreviewCurrentChannelInputDraftText(ctx, intent.Fact, intent.ReceivedAt, selected.DraftID)
+	if err != nil {
+		if errors.Is(err, decisioncard.ErrInvalidInput) {
+			_, err = d.store.PlanChannelTextResponse(ctx, intent.Fact,
+				"That answer does not match the requested field. Reply with a value of the required type, or use the card controls.", "teaching")
+		}
+		return err
+	}
+	if progress.Complete {
+		return d.processFinalCardText(ctx, intent, selected, progress, principalID, nil)
+	}
+	_, err = d.store.AdvancePartialChannelInputDraftText(ctx, intent.Fact, intent.ReceivedAt, selected.DraftID)
+	return err
 }
 
 func (d *serveChannelDeliveryDispatcher) inboxContent(ctx context.Context) (string, error) {

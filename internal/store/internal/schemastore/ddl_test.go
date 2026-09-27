@@ -108,6 +108,31 @@ func TestGeneratePlatformTableDDLs(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryPlanResendDDL(t *testing.T) {
+	repoRoot := repoRootForRuntimeWriterGuard(t)
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, plan := range plans {
+		if plan.TableName != "channel_delivery_plans" {
+			continue
+		}
+		for _, dialect := range []SchemaDialect{SchemaDialectPostgres, SchemaDialectSQLite} {
+			statements, err := StatementsForSchemaDialect(plan, dialect)
+			if err != nil {
+				t.Fatalf("%s: %v", dialect, err)
+			}
+			if len(statements) == 0 || !strings.Contains(statements[0], "resend_generation > 0 AND resend_of_delivery_id IS NOT NULL") || strings.Contains(statements[0], "OR,") {
+				t.Fatalf("%s resend constraint is malformed: %v", dialect, statements)
+			}
+		}
+		return
+	}
+	t.Fatal("channel_delivery_plans DDL missing")
+}
+
 func TestGeneratePlatformTableDDLs_ExtractsInlineUniquePartialIndex(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {

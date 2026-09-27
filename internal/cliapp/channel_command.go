@@ -320,6 +320,7 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 
 func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
 	identityAnnounced := false
+	sharedAudienceAnnounced := false
 	for {
 		switch result.Operation.Phase {
 		case "succeeded":
@@ -355,6 +356,10 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			}
 			if channelClaimantConfirmationRequired(result, now) {
 				fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
+				if identity.ConversationScope == "shared" && !sharedAudienceAnnounced {
+					fmt.Fprintln(progressOut, "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.")
+					sharedAudienceAnnounced = true
+				}
 				approve := opts.yes
 				var err error
 				if !approve {

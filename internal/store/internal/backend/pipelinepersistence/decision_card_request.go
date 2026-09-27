@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storechanneldelivery "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
@@ -75,6 +76,9 @@ func requireChannelCardActionTx(ctx context.Context, tx *sql.Tx, req apiidempote
 	case pipeline.DecisionCardMutationBeginInput:
 		begin, _, _ := mutation.InputBegin()
 		demand.Verdict, demand.ReceiptOperationID = begin.Verdict, begin.DeliveryReceiptID
+	case pipeline.DecisionCardMutationCancelInput:
+		cancel, _ := mutation.InputCancellation()
+		demand.DraftID = cancel.InputDraftID
 	default:
 		return fmt.Errorf("channel action does not authorize this card method")
 	}
@@ -92,21 +96,120 @@ func settleChannelCardActionTx(ctx context.Context, tx *sql.Tx, mutation pipelin
 		disposition = channeldelivery.ActionApplied
 	case pipeline.DecisionCardMutationBeginInput:
 		disposition = channeldelivery.ActionInputStarted
+	case pipeline.DecisionCardMutationCancelInput:
+		disposition = channeldelivery.ActionApplied
 	default:
 		return fmt.Errorf("channel action does not authorize this card method")
 	}
 	return storechanneldelivery.SettleAppliedActionIntentTx(ctx, tx, fact, disposition, postgres)
 }
 
+func requireChannelCardTextTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request, mutation pipeline.DecisionCardMutation, postgres, lock bool) error {
+	text, present := mutation.ChannelText()
+	if !present {
+		return nil
+	}
+	decision, ok := mutation.Decision()
+	if !ok || decision.InputDraftID == "" || decision.CardID != req.ResourceID || decision.PrincipalID != req.Actor.ID {
+		return fmt.Errorf("channel text requires an exact draft-backed decision")
+	}
+	choice, chosen := mutation.ChannelChoice()
+	var selected channeldelivery.InputDraftCandidate
+	var resolved channeldelivery.ResolvedText
+	var err error
+	if chosen {
+		var retained channeldelivery.PendingText
+		selected, retained, resolved, err = storechanneldelivery.RequireChosenInputDraftTx(ctx, tx, choice, decision.Now, lock, postgres)
+		if err == nil && retained.Fact != text {
+			return fmt.Errorf("channel choice does not bind the exact retained text")
+		}
+	} else {
+		selected, resolved, err = storechanneldelivery.RequireCurrentInputDraftTx(ctx, tx, text, decision.Now,
+			decision.InputDraftID, lock, postgres)
+	}
+	if err != nil {
+		return err
+	}
+	if resolved.PrincipalID != req.Actor.ID {
+		return fmt.Errorf("channel text principal is no longer current")
+	}
+	if selected.CardID != decision.CardID ||
+		selected.Verdict != decision.Verdict || selected.ReceiptOperationID != decision.DeliveryReceiptID {
+		return fmt.Errorf("channel text draft is no longer exact current authority")
+	}
+	progress, err := storedecision.PreviewInputDraftTextTx(ctx, tx, selected.DraftID, resolved.PrincipalID, text.Text, decision.Now, postgres)
+	if err != nil {
+		return err
+	}
+	if !progress.Complete || !progress.Fields.Equal(decision.Fields) {
+		return fmt.Errorf("channel text does not complete the exact current draft fields")
+	}
+	return nil
+}
+
+func settleChannelCardTextTx(ctx context.Context, tx *sql.Tx, mutation pipeline.DecisionCardMutation, postgres bool) error {
+	text, present := mutation.ChannelText()
+	if !present {
+		return nil
+	}
+	if choice, chosen := mutation.ChannelChoice(); chosen {
+		return storechanneldelivery.SettleAppliedActionIntentTx(ctx, tx, choice, channeldelivery.ActionApplied, postgres)
+	}
+	return storechanneldelivery.SettleTextIntentTx(ctx, tx, text, "input_complete", postgres)
+}
+
+func requireChannelCardSkipTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request,
+	mutation pipeline.DecisionCardMutation, postgres, lock bool) error {
+	skip, present := mutation.ChannelSkip()
+	if !present {
+		return nil
+	}
+	decision, ok := mutation.Decision()
+	if !ok || decision.InputDraftID == "" || decision.CardID != req.ResourceID || decision.PrincipalID != req.Actor.ID {
+		return fmt.Errorf("channel skip requires an exact draft-backed decision")
+	}
+	resolved, progress, draft, err := storechanneldelivery.RequireCurrentSkipActionTx(ctx, tx, skip, decision.Now, lock, postgres)
+	if err != nil {
+		return err
+	}
+	if !progress.Complete || !progress.Fields.Equal(decision.Fields) ||
+		draft.InputDraftID != decision.InputDraftID || draft.CardID != decision.CardID ||
+		draft.Verdict != decision.Verdict || draft.DeliveryReceiptID != decision.DeliveryReceiptID ||
+		resolved.PrincipalID != decision.PrincipalID {
+		return fmt.Errorf("channel skip does not complete the exact current draft")
+	}
+	return nil
+}
+
+func settleChannelCardSkipTx(ctx context.Context, tx *sql.Tx, mutation pipeline.DecisionCardMutation, postgres bool) error {
+	skip, present := mutation.ChannelSkip()
+	if !present {
+		return nil
+	}
+	return storechanneldelivery.SettleAppliedActionIntentTx(ctx, tx, skip, channeldelivery.ActionApplied, postgres)
+}
+
 func (s *PipelinePostgresOwner) requireChannelCardAction(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) error {
 	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return requireChannelCardActionTx(txctx, tx, req, mutation, true, false)
+		if err := requireChannelCardActionTx(txctx, tx, req, mutation, true, false); err != nil {
+			return err
+		}
+		if err := requireChannelCardTextTx(txctx, tx, req, mutation, true, false); err != nil {
+			return err
+		}
+		return requireChannelCardSkipTx(txctx, tx, req, mutation, true, false)
 	})
 }
 
 func (s *PipelineSQLiteOwner) requireChannelCardAction(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) error {
 	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return requireChannelCardActionTx(txctx, tx, req, mutation, false, false)
+		if err := requireChannelCardActionTx(txctx, tx, req, mutation, false, false); err != nil {
+			return err
+		}
+		if err := requireChannelCardTextTx(txctx, tx, req, mutation, false, false); err != nil {
+			return err
+		}
+		return requireChannelCardSkipTx(txctx, tx, req, mutation, false, false)
 	})
 }
 
@@ -217,6 +320,12 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 					if err := requireChannelCardActionTx(txctx, tx, l.request, l.mutation, true, true); err != nil {
 						return err
 					}
+					if err := requireChannelCardTextTx(txctx, tx, l.request, l.mutation, true, true); err != nil {
+						return err
+					}
+					if err := requireChannelCardSkipTx(txctx, tx, l.request, l.mutation, true, true); err != nil {
+						return err
+					}
 					return nil
 				})
 				if err != nil {
@@ -226,6 +335,12 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 			})
 		}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
 			if err := settleChannelCardActionTx(ctx, tx, l.mutation, true); err != nil {
+				return err
+			}
+			if err := settleChannelCardTextTx(ctx, tx, l.mutation, true); err != nil {
+				return err
+			}
+			if err := settleChannelCardSkipTx(ctx, tx, l.mutation, true); err != nil {
 				return err
 			}
 			return storeapiidempotency.StorePostgresCompletionTx(ctx, l.pgLease, tx, completion)
@@ -248,6 +363,12 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 				if err := requireChannelCardActionTx(txctx, tx, l.request, l.mutation, false, true); err != nil {
 					return err
 				}
+				if err := requireChannelCardTextTx(txctx, tx, l.request, l.mutation, false, true); err != nil {
+					return err
+				}
+				if err := requireChannelCardSkipTx(txctx, tx, l.request, l.mutation, false, true); err != nil {
+					return err
+				}
 				return nil
 			})
 			if err != nil {
@@ -257,6 +378,12 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 		})
 	}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
 		if err := settleChannelCardActionTx(ctx, tx, l.mutation, false); err != nil {
+			return err
+		}
+		if err := settleChannelCardTextTx(ctx, tx, l.mutation, false); err != nil {
+			return err
+		}
+		if err := settleChannelCardSkipTx(ctx, tx, l.mutation, false); err != nil {
 			return err
 		}
 		return storeapiidempotency.StoreSQLiteCompletionTx(ctx, l.sqLease, tx, completion)
