@@ -5,10 +5,31 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
+
+func (s *PostgresStore) AcknowledgeChannelNotice(ctx context.Context, req apiidempotency.Request, action operatorchannel.InboundAction) (apiidempotency.Completion, bool, error) {
+	if s == nil || s.mailboxPostgresOwner == nil {
+		return apiidempotency.Completion{}, false, fmt.Errorf("postgres channel notice owner is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	return s.mailboxPostgresOwner.AcknowledgeChannelNotice(ctx, req, action)
+}
+
+func (s *SQLiteRuntimeStore) AcknowledgeChannelNotice(ctx context.Context, req apiidempotency.Request, action operatorchannel.InboundAction) (apiidempotency.Completion, bool, error) {
+	if s == nil || s.mailboxSQLiteOwner == nil {
+		return apiidempotency.Completion{}, false, fmt.Errorf("sqlite channel notice owner is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return apiidempotency.Completion{}, false, err
+	}
+	return s.mailboxSQLiteOwner.AcknowledgeChannelNotice(ctx, req, action)
+}
 
 func (s *PostgresStore) ListCurrentChannelDeliveryPlans(ctx context.Context, cursor string, limit int) ([]render.Candidate, error) {
 	if s == nil || s.backend == nil {
@@ -191,6 +212,22 @@ func (s *PostgresStore) PlanNativeInboxResponse(ctx context.Context, text operat
 	return deliveryID, err
 }
 
+func (s *PostgresStore) PlanChannelActionResponse(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("postgres channel response store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, true)
+		return err
+	})
+	return deliveryID, err
+}
+
 func (s *PostgresStore) PlanOpenChannelCard(ctx context.Context, cardID string) (bool, error) {
 	if s == nil || s.backend == nil {
 		return false, fmt.Errorf("postgres channel delivery store is unavailable")
@@ -265,8 +302,8 @@ func projectDeliveryCandidates(plans []channeldelivery.Plan) []render.Candidate 
 	for _, plan := range plans {
 		candidates = append(candidates, render.Candidate{
 			DeliveryID: plan.DeliveryID, SourceKind: plan.SourceKind, SourceID: plan.SourceID,
-			EntryActivationID: plan.EntryActivationID,
-			BindingRevision:   plan.CurrentBindingRevision,
+			RequestActivationID: plan.RequestActivationID,
+			BindingRevision:     plan.CurrentBindingRevision,
 			Audience: render.Audience{PrincipalID: plan.PrincipalID, InterfaceKey: plan.InterfaceKey,
 				DeliveryEpoch: plan.DeliveryEpoch, ExternalAccountRef: plan.ExternalAccountRef,
 				ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope},
@@ -399,6 +436,22 @@ func (s *SQLiteRuntimeStore) PlanNativeInboxResponse(ctx context.Context, text o
 	err := s.backend.RunTransaction(ctx, "plan native inbox response", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		deliveryID, err = channeldelivery.PlanNativeInboxResponseTx(txctx, tx, text, entry, fullText, false)
+		return err
+	})
+	return deliveryID, err
+}
+
+func (s *SQLiteRuntimeStore) PlanChannelActionResponse(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction, inboxText string) (string, error) {
+	if s == nil || s.backend == nil {
+		return "", fmt.Errorf("sqlite channel response store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return "", err
+	}
+	var deliveryID string
+	err := s.backend.RunTransaction(ctx, "plan channel action response", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		deliveryID, err = channeldelivery.PlanActionResponseTx(txctx, tx, action, resolved, inboxText, false)
 		return err
 	})
 	return deliveryID, err
