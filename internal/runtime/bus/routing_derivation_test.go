@@ -610,14 +610,20 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 }
 
 func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBeforeReplacement(t *testing.T) {
-	source := routeMaterializationNodeSource("producer", runtimecontracts.SystemNodeContract{})
+	repo := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyCompleteObserverDependencies(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
 	current := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "current"))
-	foreign := runtimeflowidentity.DeriveRoute("producer", "foreign")
+	foreign := runtimeflowidentity.DeriveRoute("observer", "foreign")
 	store := &routePersistenceTestStore{
 		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
 			{InstanceID: current.Route.InstanceID, FlowInstance: current.Route.InstancePath, FlowTemplate: "producer"},
 			{
-				InstanceID: foreign.InstanceID, FlowInstance: foreign.InstancePath, FlowTemplate: "producer",
+				InstanceID: foreign.InstanceID, FlowInstance: foreign.InstancePath, FlowTemplate: "observer",
 				BundleHash:      "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 				WorkflowVersion: "1.0.0",
 			},
@@ -1703,20 +1709,22 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 	for _, route := range store.replaceCalls {
 		replaced[route] = true
 	}
-	if !replaced[identity] || !replaced[second] {
-		t.Fatalf("replaced nested route owners = %#v, want existing %s and included %s", store.replaceCalls, firstRoute.InstancePath, secondRoute.InstancePath)
+	if len(replaced) != 1 || !replaced[second] {
+		t.Fatalf("replaced nested route owners = %#v, want only independent %s", store.replaceCalls, secondRoute.InstancePath)
 	}
 
+	// An unrelated existing sibling is not part of this replacement's
+	// compiled dependency scope, even if its descriptor is malformed.
 	store.flowInstances[0].FlowTemplate = "child"
 	store.replaceCalls = nil
 	store.stagedRoutes = nil
-	_, err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
+	committed, err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: second,
 	})
-	if err == nil || !strings.Contains(err.Error(), "template child does not match route template grandchild") {
-		t.Fatalf("mismatched nested descriptor error = %v, want exact template mapping rejection", err)
+	if err != nil || !committed.Acknowledged {
+		t.Fatalf("unrelated malformed sibling blocked exact nested replacement: committed=%+v err=%v", committed, err)
 	}
-	if len(store.replaceCalls) != 0 || len(store.stagedRoutes) != 0 {
-		t.Fatalf("mismatched nested descriptor mutated routes: replacements=%#v staged=%#v", store.replaceCalls, store.stagedRoutes)
+	if len(store.replaceCalls) != 1 || store.replaceCalls[0] != second {
+		t.Fatalf("nested replacement included unrelated malformed sibling: replacements=%#v", store.replaceCalls)
 	}
 }

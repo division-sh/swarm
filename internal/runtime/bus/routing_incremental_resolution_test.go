@@ -5,11 +5,10 @@ import (
 	"testing"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 )
 
 func TestRouteIncrementalResolutionMatchesFullRebuild(t *testing.T) {
-	rt := newRouteTableWithGraph(nil, runtimepinrouting.CompiledConnectGraph{})
+	rt := newRouteTable(nil)
 	rt.templates["workers"] = routeFlowTemplate{
 		FlowID: "workers", LocalEvents: map[string]struct{}{"data": {}},
 	}

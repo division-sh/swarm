@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -393,7 +392,6 @@ type eventBusCommitPublishPlan struct {
 	publicationClaim      *pipelinePublicationClaim
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
-	topologySource        *routeTopologyCompilationScope
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -592,7 +590,6 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 
 	planner := eb.deliveryPlanner
 	planner.recipientPolicy.prospective = publication.prospective
-	planner.connectPlanner.topologySource = publication.topologySource
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
@@ -680,7 +677,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		prepared.receiver = receiver
 	}
 	request := prepared.CommitRequest()
-	routeTopology, err := eb.prepareFlowInstanceActivationRouteTopologyWithSource(ctx, routePlan.ActivationPlans, publication.topologySource)
+	routeTopology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, routePlan.ActivationPlans)
 	if err != nil {
 		return releaseFailure(err)
 	}
@@ -696,38 +693,9 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}, nil
 }
 
-type routeTopologyCompilationScope struct {
-	compiled *routeTopologyCompiledSource
-}
-
-type routeTopologyCompiledSource struct {
-	table          *RouteTable
-	graph          runtimepinrouting.CompiledConnectGraph
-	inputProducers runtimepinrouting.FlowInputProducerResolver
-}
-
-func (scope *routeTopologyCompilationScope) forTable(table *RouteTable) (runtimepinrouting.CompiledConnectGraph, runtimepinrouting.FlowInputProducerResolver) {
-	if scope == nil {
-		return runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
-	}
-	if scope.compiled == nil || scope.compiled.table != table {
-		graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
-		scope.compiled = &routeTopologyCompiledSource{table: table, graph: graph, inputProducers: inputProducers}
-	}
-	return scope.compiled.graph, scope.compiled.inputProducers
-}
-
 func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 	ctx context.Context,
 	plans []runtimepipeline.FlowInstanceActivationPlan,
-) ([]FlowInstanceRouteRecordSet, error) {
-	return eb.prepareFlowInstanceActivationRouteTopologyWithSource(ctx, plans, nil)
-}
-
-func (eb *EventBus) prepareFlowInstanceActivationRouteTopologyWithSource(
-	ctx context.Context,
-	plans []runtimepipeline.FlowInstanceActivationPlan,
-	source *routeTopologyCompilationScope,
 ) ([]FlowInstanceRouteRecordSet, error) {
 	if len(plans) == 0 {
 		return nil, nil
@@ -739,28 +707,13 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopologyWithSource(
 	if table == nil || lister == nil {
 		return nil, errors.New("flow activation publication requires route topology owners")
 	}
-	graph, inputProducers := source.forTable(table)
 	changedPaths := make([]string, 0, len(plans))
 	for _, plan := range plans {
 		changedPaths = append(changedPaths, plan.Identity.Route().ScopeKey)
 	}
-	selection := graph.SelectRouteDependencies(changedPaths, table.compiledRouteOwnerDependencies(inputProducers))
-	templateIDs := table.activeTemplateIDsForFlowPaths(selection.ContextFlowPaths)
-	var descriptors []ActiveFlowInstanceDescriptor
-	if len(templateIDs) > 0 {
-		scoped, ok := lister.(ScopedActiveFlowInstanceDescriptorLister)
-		if !ok {
-			return nil, errors.New("flow activation requires graph-scoped active descriptor owner")
-		}
-		var err error
-		descriptors, err = scoped.ListActiveFlowInstanceDescriptorsForScope(ctx, plans[0].Readiness.RunID, templateIDs, nil)
-		if err != nil {
-			return nil, fmt.Errorf("list graph-selected active route descriptors: %w", err)
-		}
-		descriptors, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(plans[0].Readiness.RunID, descriptors)
-		if err != nil {
-			return nil, err
-		}
+	selected, err := eb.selectFlowInstanceRouteContext(ctx, table, lister, plans[0].Readiness.RunID, changedPaths)
+	if err != nil {
+		return nil, err
 	}
 	staged, contextIdentities, err := eb.deriveFlowInstanceRouteTopologyFromDescriptors(
 		ctx,
@@ -768,24 +721,15 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopologyWithSource(
 		plans[0].Readiness.RunID,
 		nil,
 		runtimeflowidentity.RunScopedFlowInstance{},
-		graph,
-		inputProducers,
+		selected.graph,
+		selected.inputProducers,
 		true,
-		descriptors,
+		selected.descriptors,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("derive selected route topology before activation: %w", err)
 	}
-	byIdentity := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(contextIdentities)+len(plans))
-	affectedPaths := make(map[string]struct{}, len(selection.AffectedFlowPaths))
-	for _, path := range selection.AffectedFlowPaths {
-		affectedPaths[path] = struct{}{}
-	}
-	for _, identity := range contextIdentities {
-		if _, affected := affectedPaths[identity.Route.ScopeKey]; affected {
-			byIdentity[identity] = struct{}{}
-		}
-	}
+	explicit := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(plans))
 	for index, plan := range plans {
 		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.Readiness.RunID, plan.Identity.Route())
 		if err != nil {
@@ -795,20 +739,16 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopologyWithSource(
 			Identity:            identity,
 			ActivationVariables: plan.ActivationVariables,
 		}
-		_, err = staged.addFlowInstanceRouteForTopology(request, &inputProducers)
+		_, err = staged.addFlowInstanceRouteForTopology(request, &selected.inputProducers)
 		if err != nil {
 			return nil, fmt.Errorf("derive publication activation route %d: %w", index, err)
 		}
 		identity = request.Normalized().Identity
-		byIdentity[identity] = struct{}{}
+		explicit = append(explicit, identity)
 	}
 	// The staged table is discarded after record projection; it is never used
 	// to resolve subscribers, so rebuilding its resolution index is unnecessary.
-	identities := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(byIdentity))
-	for identity := range byIdentity {
-		identities = append(identities, identity)
-	}
-	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
+	identities := selectedFlowInstanceRouteOwners(selected.selection, contextIdentities, explicit...)
 	return flowInstanceRouteTopologyRecordSets(staged, identities), nil
 }
 

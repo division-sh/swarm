@@ -39,6 +39,12 @@ type topologyOperationDescriptors struct {
 	scopedCalls   int
 	templateScope [][]string
 	instanceScope [][]string
+	replacements  [][]FlowInstanceRouteRecordSet
+}
+
+func (s *topologyOperationDescriptors) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) (FlowInstanceRouteTopologyResult, error) {
+	s.replacements = append(s.replacements, sets)
+	return FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
 }
 
 func (s *topologyOperationDescriptors) ListActiveFlowInstanceDescriptors(context.Context, string) ([]ActiveFlowInstanceDescriptor, error) {
@@ -99,6 +105,15 @@ func topologyOperationIdentity(t *testing.T, id string) runtimeflowidentity.RunS
 	return identity
 }
 
+func deriveFullRouteTopologyForTest(eb *EventBus, table *RouteTable, lister ActiveFlowInstanceDescriptorLister, runID string, include *FlowInstanceRouteMaterializationRequest, exclude runtimeflowidentity.RunScopedFlowInstance) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
+	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
+	descriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(context.Background(), lister, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return eb.deriveFlowInstanceRouteTopologyFromDescriptors(context.Background(), table, runID, include, exclude, graph, inputProducers, false, descriptors)
+}
+
 func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.T) {
 	source, eb := topologyOperationFixture(t)
 	table, err := DeriveRouteTable(source)
@@ -120,7 +135,7 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 1 || len(got) != len(plans) {
+	if source.censuses.Load() != 0 || lister.calls != 0 || lister.scopedCalls != 1 || len(got) != len(plans) {
 		t.Fatalf("independent publication work: censuses=%d full_reads=%d scoped_reads=%d routes=%d", source.censuses.Load(), lister.calls, lister.scopedCalls, len(got))
 	}
 	independent, err := DeriveRouteTable(source.Source)
@@ -151,12 +166,12 @@ func TestRouteTopologyPublicationSharesOneCensusAcrossNewActivations(t *testing.
 	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), plans); err != nil {
 		t.Fatalf("unrelated descriptor affected independent activation: %v", err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 2 {
+	if source.censuses.Load() != 0 || lister.calls != 0 || lister.scopedCalls != 2 {
 		t.Fatalf("independent activation read unrelated descriptors: censuses=%d full_reads=%d scoped_reads=%d", source.censuses.Load(), lister.calls, lister.scopedCalls)
 	}
 }
 
-func TestRouteTopologyPublicationGroupSharesCompilationButRereadsCurrentTopology(t *testing.T) {
+func TestRouteTopologyPublicationUsesTableCompilationButRereadsCurrentTopology(t *testing.T) {
 	source, eb := topologyOperationFixture(t)
 	table, err := DeriveRouteTable(source)
 	if err != nil {
@@ -165,25 +180,28 @@ func TestRouteTopologyPublicationGroupSharesCompilationButRereadsCurrentTopology
 	eb.routeTable = table
 	lister := &topologyOperationDescriptors{}
 	eb.durable.ActiveFlows = lister
-	scope := new(routeTopologyCompilationScope)
 	source.censuses.Store(0)
 	for _, id := range []string{"alpha", "beta", "gamma"} {
 		plan := runtimepipeline.FlowInstanceActivationPlan{
 			Identity:  runtimeflowidentity.Derive(source, "workers", id),
 			Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 		}
-		sets, err := eb.prepareFlowInstanceActivationRouteTopologyWithSource(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}, scope)
+		sets, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan})
 		if err != nil || len(sets) != 1 {
 			t.Fatalf("prepare grouped route %s: sets=%d err=%v", id, len(sets), err)
 		}
 	}
-	if source.censuses.Load() != 1 || lister.scopedCalls != 3 {
-		t.Fatalf("grouped source and descriptor reads: censuses=%d scoped=%d", source.censuses.Load(), lister.scopedCalls)
+	if source.censuses.Load() != 0 || lister.scopedCalls != 3 {
+		t.Fatalf("table-owned source and fresh descriptor reads: censuses=%d scoped=%d", source.censuses.Load(), lister.scopedCalls)
 	}
-	first := scope.compiled
+	first := table
+	source.censuses.Store(0)
 	table, err = DeriveRouteTable(source)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if source.censuses.Load() != 1 || table == first {
+		t.Fatalf("route-table replacement did not recompile its source: censuses=%d same=%t", source.censuses.Load(), table == first)
 	}
 	eb.routeTable = table
 	source.censuses.Store(0)
@@ -191,29 +209,28 @@ func TestRouteTopologyPublicationGroupSharesCompilationButRereadsCurrentTopology
 		Identity:  runtimeflowidentity.Derive(source, "workers", "delta"),
 		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{RunID: busInternalTestRunID},
 	}
-	if _, err := eb.prepareFlowInstanceActivationRouteTopologyWithSource(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}, scope); err != nil {
+	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}); err != nil {
 		t.Fatal(err)
 	}
-	if scope.compiled == first || source.censuses.Load() != 1 || lister.scopedCalls != 4 {
-		t.Fatalf("route-table replacement reused source evidence or skipped descriptors: same=%t censuses=%d scoped=%d", scope.compiled == first, source.censuses.Load(), lister.scopedCalls)
+	if source.censuses.Load() != 0 || lister.scopedCalls != 4 {
+		t.Fatalf("route-table replacement recompiled during publication or skipped descriptors: censuses=%d scoped=%d", source.censuses.Load(), lister.scopedCalls)
 	}
 	source.censuses.Store(0)
 	if _, err := eb.prepareFlowInstanceActivationRouteTopology(context.Background(), []runtimepipeline.FlowInstanceActivationPlan{plan}); err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || lister.scopedCalls != 5 {
-		t.Fatalf("ordinary publication retained grouped evidence or skipped descriptors: censuses=%d scoped=%d", source.censuses.Load(), lister.scopedCalls)
+	if source.censuses.Load() != 0 || lister.scopedCalls != 5 {
+		t.Fatalf("ordinary publication recompiled table source or skipped descriptors: censuses=%d scoped=%d", source.censuses.Load(), lister.scopedCalls)
 	}
 }
 
-func TestConnectPreviewSharesOnlyGroupedSourceCompilation(t *testing.T) {
+func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 	source, _ := topologyOperationFixture(t)
 	live, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resolver := newConnectRoutePlanResolver(source, live, nil, nil, nil)
-	resolver.topologySource = new(routeTopologyCompilationScope)
 	preview := func(id string) {
 		t.Helper()
 		current := &connectRoutePlanPreviewRoutes{}
@@ -243,24 +260,27 @@ func TestConnectPreviewSharesOnlyGroupedSourceCompilation(t *testing.T) {
 	for _, id := range []string{"alpha", "beta", "gamma"} {
 		preview(id)
 	}
-	if got := source.censuses.Load(); got != 1 {
-		t.Fatalf("three independent previews compiled source %d times, want one per group", got)
+	if got := source.censuses.Load(); got != 0 {
+		t.Fatalf("three independent previews recompiled table source %d times", got)
 	}
+	source.censuses.Store(0)
 	live, err = DeriveRouteTable(source)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got := source.censuses.Load(); got != 1 {
+		t.Fatalf("replacement route table compiled source %d times, want one", got)
+	}
 	resolver.routeTable = live
 	source.censuses.Store(0)
 	preview("delta")
-	if got := source.censuses.Load(); got != 1 {
-		t.Fatalf("new route-table source compiled %d times, want one", got)
+	if got := source.censuses.Load(); got != 0 {
+		t.Fatalf("new route-table preview recompiled source %d times", got)
 	}
-	resolver.topologySource = nil
 	source.censuses.Store(0)
 	preview("epsilon")
-	if got := source.censuses.Load(); got != 2 {
-		t.Fatalf("ungrouped preview compiled source %d times, want independent derivation", got)
+	if got := source.censuses.Load(); got != 0 {
+		t.Fatalf("later preview recompiled unchanged table source %d times", got)
 	}
 }
 
@@ -296,7 +316,7 @@ func TestRouteTopologyPublicationReadsOnlyCompiledObserverDependency(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || lister.calls != 0 || lister.scopedCalls != 1 || !reflect.DeepEqual(lister.templateScope[0], []string{"workers"}) || len(lister.instanceScope[0]) != 0 {
+	if source.censuses.Load() != 0 || lister.calls != 0 || lister.scopedCalls != 1 || !reflect.DeepEqual(lister.templateScope[0], []string{"workers"}) || len(lister.instanceScope[0]) != 0 {
 		t.Fatalf("dependency reads: censuses=%d full=%d scoped=%d templates=%#v paths=%#v", source.censuses.Load(), lister.calls, lister.scopedCalls, lister.templateScope, lister.instanceScope)
 	}
 	newOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(busInternalTestRunID, newPlan.Identity.Route())
@@ -398,6 +418,149 @@ func TestRouteTopologyPublicationLoadsCompleteCompiledObserverContext(t *testing
 	}
 }
 
+func TestRouteTopologyLifecycleStageReadsOnlyCompiledDependencies(t *testing.T) {
+	source, eb := completeObserverFixture(t)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eb.routeTable = table
+	newOwner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("observer", "new"))
+	producer := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "source"))
+	other := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("other", "source"))
+	lister := &topologyOperationDescriptors{rows: []ActiveFlowInstanceDescriptor{{
+		RunID: "foreign-run", FlowInstance: "unrelated/hostile", FlowTemplate: "unrelated",
+	}}}
+	for _, identity := range []runtimeflowidentity.RunScopedFlowInstance{producer, other} {
+		lister.rows = append(lister.rows, ActiveFlowInstanceDescriptor{
+			RunID: identity.RunID, InstanceID: identity.Route.InstanceID,
+			FlowInstance: identity.Route.InstancePath, FlowTemplate: identity.Route.ScopeKey,
+			BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+		})
+	}
+	for index := 0; index < 128; index++ {
+		identity := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("observer", fmt.Sprintf("older-%03d", index)))
+		lister.rows = append(lister.rows, ActiveFlowInstanceDescriptor{
+			RunID: identity.RunID, InstanceID: identity.Route.InstanceID,
+			FlowInstance: identity.Route.InstancePath, FlowTemplate: "observer",
+			BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+		})
+	}
+	eb.durable.ActiveFlows = lister
+	eb.durable.FlowRouteTopology = lister
+	source.censuses.Store(0)
+	result, err := eb.StageFlowInstanceRouteContext(context.Background(), FlowInstanceRouteMaterializationRequest{Identity: newOwner})
+	if err != nil || !result.Acknowledged {
+		t.Fatalf("stage independent child: acknowledged=%t err=%v", result.Acknowledged, err)
+	}
+	if source.censuses.Load() != 0 || lister.calls != 0 || lister.scopedCalls != 1 || !slices.Equal(lister.templateScope[0], []string{"other", "producer"}) {
+		t.Fatalf("new observer stage selected wrong dependencies: census=%d full=%d scoped=%d templates=%#v", source.censuses.Load(), lister.calls, lister.scopedCalls, lister.templateScope)
+	}
+	oracle, err := DeriveRouteTable(source.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, identity := range []runtimeflowidentity.RunScopedFlowInstance{producer, other, newOwner} {
+		if err := oracle.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := lister.replacements[0], flowInstanceRouteTopologyRecordSets(oracle, []runtimeflowidentity.RunScopedFlowInstance{newOwner}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("independent child stage changed route evidence: got=%#v want=%#v", got, want)
+	}
+}
+
+func TestRouteTopologyLifecycleStagePreservesCompleteObserverContext(t *testing.T) {
+	for _, observerFirst := range []bool{false, true} {
+		name := "producers_first"
+		if observerFirst {
+			name = "observer_first"
+		}
+		t.Run(name, func(t *testing.T) {
+			source, eb := completeObserverFixture(t)
+			table, err := DeriveRouteTable(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			eb.routeTable = table
+			oldA := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "old-a"))
+			oldB := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "old-b"))
+			otherOld := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("other", "old"))
+			observer := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("observer", "one"))
+			newOwner := testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("producer", "new"))
+			descriptor := func(identity runtimeflowidentity.RunScopedFlowInstance) ActiveFlowInstanceDescriptor {
+				return ActiveFlowInstanceDescriptor{
+					RunID: identity.RunID, InstanceID: identity.Route.InstanceID,
+					FlowInstance: identity.Route.InstancePath, FlowTemplate: identity.Route.ScopeKey,
+					BundleHash: eb.sourceArtifactFact.BundleHash(), WorkflowVersion: source.WorkflowVersion(),
+				}
+			}
+			rows := []ActiveFlowInstanceDescriptor{descriptor(oldA), descriptor(oldB), descriptor(otherOld), descriptor(observer)}
+			if observerFirst {
+				rows[0], rows[3] = rows[3], rows[0]
+			}
+			lister := &topologyOperationDescriptors{rows: append(rows, ActiveFlowInstanceDescriptor{
+				RunID: "foreign-run", FlowInstance: "unrelated/hostile", FlowTemplate: "unrelated",
+			})}
+			eb.durable.ActiveFlows = lister
+			eb.durable.FlowRouteTopology = lister
+			result, err := eb.StageFlowInstanceRouteContext(context.Background(), FlowInstanceRouteMaterializationRequest{Identity: newOwner})
+			if err != nil || !result.Acknowledged {
+				t.Fatalf("stage observer dependency: acknowledged=%t err=%v", result.Acknowledged, err)
+			}
+			if lister.calls != 0 || lister.scopedCalls != 1 || !slices.Equal(lister.templateScope[0], []string{"observer", "other", "producer"}) {
+				t.Fatalf("observer stage scope full=%d scoped=%d templates=%#v", lister.calls, lister.scopedCalls, lister.templateScope)
+			}
+			oracle, err := DeriveRouteTable(source.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, identity := range []runtimeflowidentity.RunScopedFlowInstance{oldA, oldB, otherOld, observer, newOwner} {
+				if err := oracle.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := flowInstanceRouteTopologyRecordSets(oracle, []runtimeflowidentity.RunScopedFlowInstance{observer, newOwner})
+			if got := lister.replacements[0]; !reflect.DeepEqual(got, want) {
+				t.Fatalf("observer stage lost older producer context: got=%#v want=%#v", got, want)
+			}
+			lister.rows = append(lister.rows, descriptor(newOwner))
+			if err := eb.RemoveFlowInstanceRouteContext(context.Background(), oldA); err != nil {
+				t.Fatalf("remove one producer: %v", err)
+			}
+			if lister.calls != 0 || lister.scopedCalls != 2 || !slices.Equal(lister.templateScope[1], []string{"observer", "other", "producer"}) {
+				t.Fatalf("observer removal scope full=%d scoped=%d templates=%#v", lister.calls, lister.scopedCalls, lister.templateScope)
+			}
+			remaining, err := DeriveRouteTable(source.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, identity := range []runtimeflowidentity.RunScopedFlowInstance{oldB, otherOld, observer, newOwner} {
+				if err := remaining.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: identity}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			removedOwners := []runtimeflowidentity.RunScopedFlowInstance{oldA, observer}
+			sort.Slice(removedOwners, func(i, j int) bool { return removedOwners[i].Key() < removedOwners[j].Key() })
+			if got, want := lister.replacements[1], flowInstanceRouteTopologyRecordSets(remaining, removedOwners); !reflect.DeepEqual(got, want) {
+				t.Fatalf("observer removal lost surviving producers: got=%#v want=%#v", got, want)
+			}
+			for index := range lister.rows {
+				if lister.rows[index].FlowInstance == observer.Route.InstancePath {
+					lister.rows[index].FlowTemplate = "producer"
+				}
+			}
+			_, err = eb.StageFlowInstanceRouteContext(context.Background(), FlowInstanceRouteMaterializationRequest{Identity: newOwner})
+			if err == nil || !strings.Contains(err.Error(), "template producer does not match route template observer") {
+				t.Fatalf("selected observer template mismatch = %v, want refusal", err)
+			}
+			if len(lister.replacements) != 2 {
+				t.Fatalf("selected observer corruption replaced routes: calls=%d", len(lister.replacements))
+			}
+		})
+	}
+}
+
 func BenchmarkFlowInstanceActivationRouteTopology64(b *testing.B) {
 	source, eb := topologyOperationFixture(b)
 	table, err := DeriveRouteTable(source)
@@ -451,7 +614,7 @@ func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T
 	lister := &topologyOperationDescriptors{rows: []ActiveFlowInstanceDescriptor{descriptor(beta), descriptor(alpha)}}
 	include := &FlowInstanceRouteMaterializationRequest{Identity: gamma}
 	source.censuses.Store(0)
-	staged, identities, err := eb.deriveFlowInstanceRouteTopology(context.Background(), table, lister, busInternalTestRunID, include, runtimeflowidentity.RunScopedFlowInstance{})
+	staged, identities, err := deriveFullRouteTopologyForTest(eb, table, lister, busInternalTestRunID, include, runtimeflowidentity.RunScopedFlowInstance{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +648,7 @@ func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T
 	// operation's membership or resolver on the route table.
 	lister.rows = []ActiveFlowInstanceDescriptor{descriptor(gamma), descriptor(beta)}
 	source.censuses.Store(0)
-	next, nextIDs, err := eb.deriveFlowInstanceRouteTopology(context.Background(), staged, lister, busInternalTestRunID, nil, beta)
+	next, nextIDs, err := deriveFullRouteTopologyForTest(eb, staged, lister, busInternalTestRunID, nil, beta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +657,7 @@ func TestRouteTopologyOperationSharesOneCensusAndRereadsDescriptors(t *testing.T
 	}
 }
 
-func TestRouteTopologyRecordOnlyMatchesIndexedDerivation(t *testing.T) {
+func TestRouteTopologySelectedRecordMatchesIndependentFullDerivation(t *testing.T) {
 	source, eb := topologyOperationFixture(t)
 	table, err := DeriveRouteTable(source)
 	if err != nil {
@@ -520,16 +683,25 @@ func TestRouteTopologyRecordOnlyMatchesIndexedDerivation(t *testing.T) {
 		{name: "retirement", exclude: beta},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			indexed, indexedIDs, err := eb.deriveFlowInstanceRouteTopology(context.Background(), table, lister, busInternalTestRunID, tc.include, tc.exclude)
+			indexed, indexedIDs, err := deriveFullRouteTopologyForTest(eb, table, lister, busInternalTestRunID, tc.include, tc.exclude)
 			if err != nil {
 				t.Fatal(err)
 			}
+			fullReads := lister.calls
 			recordOnly, recordIDs, err := eb.deriveFlowInstanceRouteRecordTopology(context.Background(), table, lister, busInternalTestRunID, tc.include, tc.exclude)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(recordIDs, indexedIDs) || !reflect.DeepEqual(flowInstanceRouteTopologyRecordSets(recordOnly, recordIDs), flowInstanceRouteTopologyRecordSets(indexed, indexedIDs)) {
-				t.Fatalf("record-only topology differs from indexed topology for %s", tc.name)
+			if lister.calls != fullReads {
+				t.Fatalf("selected record derivation performed a full-run descriptor read: before=%d after=%d", fullReads, lister.calls)
+			}
+			for _, identity := range recordIDs {
+				if !slices.Contains(indexedIDs, identity) && identity != tc.exclude {
+					t.Fatalf("selected record owner %s is absent from full derivation", identity.Key())
+				}
+			}
+			if !reflect.DeepEqual(flowInstanceRouteTopologyRecordSets(recordOnly, recordIDs), flowInstanceRouteTopologyRecordSets(indexed, recordIDs)) {
+				t.Fatalf("selected record topology differs from full derivation for %s: owners=%v", tc.name, recordIDs)
 			}
 		})
 	}
@@ -547,15 +719,15 @@ func TestRouteTopologyOperationStandaloneReplayAndGenerationLease(t *testing.T) 
 	if err := table.AddFlowInstanceRoute(req); err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || table.snapshotGenerationCurrent(before) {
-		t.Fatal("standalone addition must prepare once and invalidate the generation")
+	if source.censuses.Load() != 0 || table.snapshotGenerationCurrent(before) {
+		t.Fatal("standalone addition must use table preparation and invalidate the generation")
 	}
 	before = table.snapshotGeneration()
 	if err := table.AddFlowInstanceRoute(req); err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || !table.snapshotGenerationCurrent(before) {
-		t.Fatal("replay must neither prepare nor change the generation")
+	if source.censuses.Load() != 0 || !table.snapshotGenerationCurrent(before) {
+		t.Fatal("replay must neither recompile nor change the generation")
 	}
 	_, resolver := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
 	source.censuses.Store(0)

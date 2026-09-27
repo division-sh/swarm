@@ -826,16 +826,65 @@ func (eb *EventBus) validateActiveFlowInstanceDescriptorsForSemanticSource(runID
 	return out, nil
 }
 
-func (eb *EventBus) deriveFlowInstanceRouteTopology(
+type selectedFlowInstanceRouteContext struct {
+	graph          runtimepinrouting.CompiledConnectGraph
+	inputProducers runtimepinrouting.FlowInputProducerResolver
+	selection      runtimepinrouting.RouteDependencySelection
+	descriptors    []ActiveFlowInstanceDescriptor
+}
+
+func (eb *EventBus) selectFlowInstanceRouteContext(
 	ctx context.Context,
 	table *RouteTable,
 	lister ActiveFlowInstanceDescriptorLister,
 	runID string,
-	include *FlowInstanceRouteMaterializationRequest,
-	exclude runtimeflowidentity.RunScopedFlowInstance,
-) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
-	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
-	return eb.deriveFlowInstanceRouteTopologyWithInputProducers(ctx, table, lister, runID, include, exclude, graph, inputProducers, false)
+	changedPaths []string,
+) (selectedFlowInstanceRouteContext, error) {
+	if !table.compiledSourceReady {
+		return selectedFlowInstanceRouteContext{}, errors.New("route topology requires a paired compiled source")
+	}
+	graph, inputProducers := table.connectGraph, table.inputProducers
+	selection := graph.SelectRouteDependencies(changedPaths, table.compiledRouteOwnerDependencies(inputProducers))
+	context := selectedFlowInstanceRouteContext{graph: graph, inputProducers: inputProducers, selection: selection}
+	templateIDs := table.activeTemplateIDsForFlowPaths(selection.ContextFlowPaths)
+	if len(templateIDs) == 0 {
+		return context, nil
+	}
+	scoped, ok := lister.(ScopedActiveFlowInstanceDescriptorLister)
+	if !ok {
+		return selectedFlowInstanceRouteContext{}, errors.New("route topology requires graph-scoped active descriptor owner")
+	}
+	descriptors, err := scoped.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, nil)
+	if err != nil {
+		return selectedFlowInstanceRouteContext{}, fmt.Errorf("list graph-selected route descriptors: %w", err)
+	}
+	context.descriptors, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, descriptors)
+	if err != nil {
+		return selectedFlowInstanceRouteContext{}, err
+	}
+	return context, nil
+}
+
+func selectedFlowInstanceRouteOwners(selection runtimepinrouting.RouteDependencySelection, contextIdentities []runtimeflowidentity.RunScopedFlowInstance, explicit ...runtimeflowidentity.RunScopedFlowInstance) []runtimeflowidentity.RunScopedFlowInstance {
+	affected := make(map[string]struct{}, len(selection.AffectedFlowPaths))
+	for _, path := range selection.AffectedFlowPaths {
+		affected[path] = struct{}{}
+	}
+	owners := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(contextIdentities)+len(explicit))
+	for _, identity := range contextIdentities {
+		if _, selected := affected[identity.Route.ScopeKey]; selected {
+			owners[identity] = struct{}{}
+		}
+	}
+	for _, identity := range explicit {
+		owners[identity] = struct{}{}
+	}
+	identities := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(owners))
+	for identity := range owners {
+		identities = append(identities, identity)
+	}
+	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
+	return identities
 }
 
 func (eb *EventBus) deriveFlowInstanceRouteRecordTopology(
@@ -846,26 +895,33 @@ func (eb *EventBus) deriveFlowInstanceRouteRecordTopology(
 	include *FlowInstanceRouteMaterializationRequest,
 	exclude runtimeflowidentity.RunScopedFlowInstance,
 ) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
-	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
-	return eb.deriveFlowInstanceRouteTopologyWithInputProducers(ctx, table, lister, runID, include, exclude, graph, inputProducers, true)
-}
-
-func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
-	ctx context.Context,
-	table *RouteTable,
-	lister ActiveFlowInstanceDescriptorLister,
-	runID string,
-	include *FlowInstanceRouteMaterializationRequest,
-	exclude runtimeflowidentity.RunScopedFlowInstance,
-	graph runtimepinrouting.CompiledConnectGraph,
-	inputProducers runtimepinrouting.FlowInputProducerResolver,
-	deferRebuild bool,
-) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
-	descriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("list active flow-instance route topology: %w", err)
+	changedPaths := make([]string, 0, 2)
+	if include != nil {
+		changedPaths = append(changedPaths, include.Normalized().Identity.Route.ScopeKey)
 	}
-	return eb.deriveFlowInstanceRouteTopologyFromDescriptors(ctx, table, runID, include, exclude, graph, inputProducers, deferRebuild, descriptors)
+	exclude = exclude.Normalize()
+	if exclude.Validate() == nil {
+		changedPaths = append(changedPaths, exclude.Route.ScopeKey)
+	}
+	if len(changedPaths) == 0 {
+		return nil, nil, errors.New("route record replacement requires an exact changed owner")
+	}
+	selected, err := eb.selectFlowInstanceRouteContext(ctx, table, lister, runID, changedPaths)
+	if err != nil {
+		return nil, nil, err
+	}
+	staged, contextIdentities, err := eb.deriveFlowInstanceRouteTopologyFromDescriptors(ctx, table, runID, include, exclude, selected.graph, selected.inputProducers, true, selected.descriptors)
+	if err != nil {
+		return nil, nil, err
+	}
+	explicit := make([]runtimeflowidentity.RunScopedFlowInstance, 0, 2)
+	if include != nil {
+		explicit = append(explicit, include.Normalized().Identity)
+	}
+	if exclude.Validate() == nil {
+		explicit = append(explicit, exclude)
+	}
+	return staged, selectedFlowInstanceRouteOwners(selected.selection, contextIdentities, explicit...), nil
 }
 
 func (eb *EventBus) deriveFlowInstanceRouteTopologyFromDescriptors(
@@ -1091,8 +1147,6 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 	if err != nil {
 		return err
 	}
-	identities = append(identities, owner)
-	sort.Slice(identities, func(i, j int) bool { return identities[i].Key() < identities[j].Key() })
 	sets := flowInstanceRouteTopologyRecordSets(staged, identities)
 	committed, commitErr := persister.ReplaceFlowInstanceRouteTopology(ctx, sets)
 	if !committed.Acknowledged {

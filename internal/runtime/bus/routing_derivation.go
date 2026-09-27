@@ -113,6 +113,8 @@ type RouteTable struct {
 	instanceEventPath           map[runtimeflowidentity.RunScopedFlowInstance][]string
 	templateObservers           map[string][]routeTemplateSourceObserver
 	connectGraph                runtimepinrouting.CompiledConnectGraph
+	inputProducers              runtimepinrouting.FlowInputProducerResolver
+	compiledSourceReady         bool
 	connectRecipients           []routeConnectRecipientRegistration
 	connectRecipientsByInstance map[routeConnectRecipientKey][]routeConnectRecipientRegistration
 	nextConnectRecipientOrdinal uint64
@@ -257,6 +259,8 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 
 func deriveRouteTableWithInputProducers(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph, inputProducers runtimepinrouting.FlowInputProducerResolver) (*RouteTable, error) {
 	rt := newRouteTableWithGraph(source, graph)
+	rt.inputProducers = inputProducers
+	rt.compiledSourceReady = true
 	if source == nil {
 		return rt, nil
 	}
@@ -584,7 +588,10 @@ func (rt *RouteTable) addFlowInstanceRouteLocked(req FlowInstanceRouteMaterializ
 		return false, nil, fmt.Errorf("route template %q not found", templateScope)
 	}
 	if inputProducers == nil {
-		_, prepared := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(rt.source)
+		if !rt.compiledSourceReady {
+			return false, nil, fmt.Errorf("flow-instance route materialization requires paired compiled source")
+		}
+		prepared := rt.inputProducers
 		inputProducers = &prepared
 	}
 	rt.instanceOwners[identity] = identity
@@ -840,7 +847,11 @@ func (rt *RouteTable) materializedRouteRecordSets(identities []runtimeflowidenti
 }
 
 func newRouteTable(source semanticview.Source) *RouteTable {
-	return newRouteTableWithGraph(source, runtimepinrouting.CompileConnectGraph(source))
+	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(source)
+	rt := newRouteTableWithGraph(source, graph)
+	rt.inputProducers = inputProducers
+	rt.compiledSourceReady = true
+	return rt
 }
 
 func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
