@@ -131,6 +131,12 @@ func TestFailedFlowActivationRetirementIsPendingBothStores(t *testing.T) {
 			if err := f.selected.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, admitted.Attempt); err != nil {
 				t.Fatal(err)
 			}
+			if err := f.selected.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, admitted.Attempt); err != nil {
+				t.Fatalf("repeat failure abandonment: %v", err)
+			}
+			if err := f.selected.RetireDynamicFlowRuntimeActivationAttempt(f.ctx, admitted.Attempt); err == nil {
+				t.Fatal("orderly disposition replaced settled failure abandonment")
+			}
 			projection, err := f.workflow.InspectDynamicFlowRuntimeReadinessForSource(f.ctx, observed.OwningRunSource)
 			if err != nil {
 				t.Fatal(err)

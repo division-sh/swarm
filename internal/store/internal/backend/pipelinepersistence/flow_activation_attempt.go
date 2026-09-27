@@ -105,7 +105,7 @@ func beginDynamicFlowRuntimeActivation(
 					admitted.reused = true
 					return err
 				}
-				if oldState.String != "aborted" {
+				if oldState.String != "aborted" && oldState.String != "retired" {
 					otherProcess, err := agentpersistence.FlowActivationPredecessorIsFromAnotherProcessTx(txctx, tx, oldGrantID.String, binding)
 					if err != nil {
 						return err
@@ -280,16 +280,23 @@ func retireDynamicFlowRuntimeActivationAttempt(
 	if err := attempt.Validate(); err != nil {
 		return err
 	}
+	settledState := "retired"
+	if failed {
+		settledState = "aborted"
+	}
 	outcome := run(ctx, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := agentpersistence.VerifyFlowActivationRetirementBindingTx(txctx, tx, attempt.ProcessBinding()); err != nil {
 				return err
 			}
-			query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', topology_ready_at=CASE WHEN $1 THEN NULL ELSE topology_ready_at END, updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5::uuid AND activation_attempt_grant_id=$6::uuid AND activation_attempt_revision=$7 AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`
+			query := `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=$1, topology_ready_at=CASE WHEN $2 THEN NULL ELSE topology_ready_at END, updated_at=$3 WHERE run_id=$4::uuid AND instance_path=$5 AND activation_attempt_id=$6::uuid AND activation_attempt_grant_id=$7::uuid AND activation_attempt_revision=$8 AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', $1)`
 			if !postgres {
-				query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state='aborted', topology_ready_at=CASE WHEN ? THEN NULL ELSE topology_ready_at END, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_revision=? AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', 'aborted')`
+				query = `UPDATE flow_instance_runtime_readiness SET activation_attempt_state=?, topology_ready_at=CASE WHEN ? THEN NULL ELSE topology_ready_at END, updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND activation_attempt_grant_id=? AND activation_attempt_revision=? AND activation_attempt_state IN ('accepted', 'topology_committed', 'superseded', ?)`
 			}
-			args := []any{failed, time.Now().UTC(), attempt.RunID(), attempt.InstancePath(), attempt.ID(), attempt.ProcessBinding().GenerationGrantID, attempt.PlanRevision()}
+			args := []any{settledState, failed, time.Now().UTC(), attempt.RunID(), attempt.InstancePath(), attempt.ID(), attempt.ProcessBinding().GenerationGrantID, attempt.PlanRevision()}
+			if !postgres {
+				args = append(args, settledState)
+			}
 			result, err := tx.ExecContext(txctx, query, args...)
 			if err != nil {
 				return err
