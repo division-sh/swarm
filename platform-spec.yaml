@@ -3797,7 +3797,10 @@ handler_specification:
           and inert sets_gate.value are not expression-value slots."
         scalar: "A YAML scalar without `${...}` is a typed literal, including empty string, zero and false. A scalar
           exactly equal to one `${CEL}` evaluates to the typed CEL result. A scalar mixing text and one or more `${CEL}`
-          fragments evaluates to a string. Missing or invalid expressions fail closed."
+          fragments evaluates to a string. Mixed fragments format strings without quotes and all other supported
+          values as canonical JSON text (null as `null`, lists/objects with deterministic key order). The shared
+          workflow value owner applies this formatting once; sole-interpolation results remain typed. Missing or
+          invalid expressions fail closed."
         recursive: "Lists and object values recursively apply the same rule to leaves; object keys remain literal names.
           Dynamic containers evaluate to a typed list or object. Literal numeric kinds must not change during lowering."
         escape: "`{literal: <value>}` preserves its entire value without interpolation, including nested `${` text."

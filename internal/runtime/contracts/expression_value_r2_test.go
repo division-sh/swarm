@@ -20,7 +20,7 @@ func TestExpressionValueR2Authoring(t *testing.T) {
 		{"empty string", `""`, ExpressionKindLiteral, "", ""},
 		{"number", "42", ExpressionKindLiteral, 42, ""},
 		{"typed expression", `"${payload.count}"`, ExpressionKindCEL, nil, "payload.count"},
-		{"mixed string", `"count=${payload.count}!"`, ExpressionKindCEL, nil, `"count=" + string((payload.count)) + "!"`},
+		{"mixed string", `"count=${payload.count}!"`, ExpressionKindCEL, nil, `"count=" + __swarm_r2_format((payload.count)) + "!"`},
 		{"escaped", `{literal: "${payload.count}"}`, ExpressionKindLiteral, "${payload.count}", ""},
 		{"object", `{a: "${payload.count}", b: [true, "x"]}`, ExpressionKindCEL, nil, `{"a": (payload.count), "b": [true, "x"]}`},
 		{"escaped nested", `{a: {literal: "${payload.count}"}}`, ExpressionKindLiteral, map[string]any{"a": "${payload.count}"}, ""},
@@ -35,6 +35,71 @@ func TestExpressionValueR2Authoring(t *testing.T) {
 				t.Fatalf("value = %#v, want kind=%q literal=%#v cel=%q", got, test.kind, test.literal, test.cel)
 			}
 		})
+	}
+}
+
+func TestExpressionValueR2PreservesYAMLAliases(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   any
+	}{
+		{"key: &label abc\nvalue: *label\n", "abc"},
+		{"value: {a: &v 1, b: *v}\n", map[string]any{"a": 1, "b": 1}},
+		{"value: {a: &v null, b: {literal: *v}}\n", map[string]any{"a": nil, "b": nil}},
+	} {
+		var row struct {
+			Value ExpressionValue `yaml:"value"`
+		}
+		if err := yaml.Unmarshal([]byte(tc.source), &row); err != nil {
+			t.Fatalf("%s: %v", tc.source, err)
+		}
+		if !row.Value.HasLiteralValue() || !reflect.DeepEqual(row.Value.Literal, tc.want) {
+			t.Fatalf("%s: value = %#v, want %#v", tc.source, row.Value, tc.want)
+		}
+	}
+	cycle := &yaml.Node{Kind: yaml.AliasNode}
+	cycle.Alias = cycle
+	if _, err := decodeExpressionValueNode(cycle); err == nil {
+		t.Fatal("recursive alias was accepted")
+	}
+}
+
+func TestExpressionValueR2DataWriteAliasOperands(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   any
+	}{
+		{"op: set\ntarget: entity.name\nkey: &label abc\nvalue: *label\n", "abc"},
+		{"op: set\ntarget: entity.details\nkey: details\nvalue: {a: &v 1, b: *v}\n", map[string]any{"a": 1, "b": 1}},
+	} {
+		var write WorkflowDataWrite
+		if err := yaml.Unmarshal([]byte(tc.source), &write); err != nil {
+			t.Fatalf("write %q: %v", tc.source, err)
+		}
+		if !write.Value.HasLiteralValue() || !reflect.DeepEqual(write.Value.Literal, tc.want) {
+			t.Fatalf("write %q value = %#v, want %#v", tc.source, write.Value, tc.want)
+		}
+	}
+}
+
+func TestExpressionValueR2UsesCELDelimiterLexing(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   string
+	}{
+		{`${r'\'}`, `r'\'`},
+		{`${"""a"}b"""}`, `"""a"}b"""`},
+		{`${b"a}b"}`, `b"a}b"`},
+		{"${1 // }\n + 2}", "1 // }\n + 2"},
+		{`${{"a": {"b": 1}}}`, `{"a": {"b": 1}}`},
+	} {
+		parts, expressions, err := splitExpressionInterpolation(tc.source)
+		if err != nil || !reflect.DeepEqual(parts, []string{"", ""}) || !reflect.DeepEqual(expressions, []string{tc.want}) {
+			t.Fatalf("%q: parts=%q expressions=%q error=%v", tc.source, parts, expressions, err)
+		}
+	}
+	if _, _, err := splitExpressionInterpolation(`${"unterminated}`); err == nil {
+		t.Fatal("unterminated CEL string was accepted")
 	}
 }
 
@@ -91,7 +156,7 @@ func TestExpressionValueR2SharedAuthoringSurfaces(t *testing.T) {
 		{"empty list", "[]", "", []any{}, ExpressionKindLiteral},
 		{"empty object", "{}", "", map[string]any{}, ExpressionKindLiteral},
 		{"typed", `"${payload.count}"`, "payload.count", nil, ExpressionKindCEL},
-		{"mixed", `"count=${payload.count}"`, `"count=" + string((payload.count))`, nil, ExpressionKindCEL},
+		{"mixed", `"count=${payload.count}"`, `"count=" + __swarm_r2_format((payload.count))`, nil, ExpressionKindCEL},
 		{"escaped", `{literal: "${payload.count}"}`, "", "${payload.count}", ExpressionKindLiteral},
 	}
 	for _, surface := range surfaces {
