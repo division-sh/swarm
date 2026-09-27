@@ -231,12 +231,15 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 				}
 				var digest string
 				var raw []byte
-				err := tx.QueryRowContext(sqlCtx, `SELECT rotation_request_digest, rotation_result FROM agent_sessions WHERE rotation_operation_id=$1 FOR UPDATE`, rotation.OperationID).Scan(&digest, &raw)
+				err := tx.QueryRowContext(sqlCtx, `SELECT rotation_request_digest, rotation_result FROM agent_sessions WHERE rotation_operation_id=$1`, rotation.OperationID).Scan(&digest, &raw)
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
 				}
 				if err == nil {
 					receipt = &runtimesessions.RotationReceipt{OperationID: rotation.OperationID, RequestDigest: digest}
+					if err := runtimesessions.CheckRotationReceiptRequest(request, receipt); err != nil {
+						return err
+					}
 					if err := json.Unmarshal(raw, &receipt.Result); err != nil {
 						return fmt.Errorf("decode rotation receipt: %w", err)
 					}
@@ -300,7 +303,7 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 			if err != nil {
 				return err
 			}
-			expires := now.Add(s.postgresSessionLockTTL())
+			expires := now.Add(s.postgresSessionLockTTL()).Truncate(time.Microsecond)
 			lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: currentID, LockOwner: lockOwner, ExpiresAt: expires}
 			var receiptJSON []byte
 			if rotation.OperationID != "" {

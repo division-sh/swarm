@@ -94,6 +94,11 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if err != nil {
 		t.Fatalf("acquire active session: %v", err)
 	}
+	operationID := uuid.NewString()
+	active, err = store.Rotate(staleCtx, activeIdentity, "worker-1", runtimesessions.RotationMetadata{OperationID: operationID})
+	if err != nil {
+		t.Fatalf("seed registry receipt with lifecycle operation ID: %v", err)
+	}
 	if _, err := store.ReleaseOutcome(staleCtx, active); err != nil {
 		t.Fatalf("release active session: %v", err)
 	}
@@ -131,7 +136,6 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		t.Fatalf("seed suspended session: %v", err)
 	}
 
-	operationID := uuid.NewString()
 	rotate := runtimemanager.AgentLifecycleTransition{
 		OperationID: operationID, OperationKind: "restart", RequestHash: "restart-with-complete-set-rotation",
 		Identity: identity, AgentID: agentID, Trigger: "restart", ExpectedEpoch: started.RuntimeEpoch,
@@ -152,6 +156,18 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	}
 	if len(rotated.Subordinate.Sessions) != 1 {
 		t.Fatalf("rotated set = %#v, want one exact-run session", rotated.Subordinate)
+	}
+	var registryReceiptRows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE run_id=$1 AND rotation_operation_id=$2`, activeRunID, operationID).Scan(&registryReceiptRows); err != nil || registryReceiptRows != 1 {
+		t.Fatalf("registry receipt with lifecycle operation ID rows=%d err=%v", registryReceiptRows, err)
+	}
+	currentToken := staleToken
+	currentToken.Generation = rotated.Generation
+	currentCtx := runtimeeffects.WithLifecycleToken(ctx, currentToken)
+	_, err = store.Rotate(currentCtx, activeIdentity, "worker-1", runtimesessions.RotationMetadata{OperationID: operationID})
+	var staleReceipt *runtimesessions.RotationRefusal
+	if !errors.As(err, &staleReceipt) || staleReceipt.Reason != runtimesessions.RotationSuccessorNotCurrent {
+		t.Fatalf("registry receipt after same-ID lifecycle rotation=%v, want stale receipt", err)
 	}
 	for _, mutation := range rotated.Subordinate.Sessions {
 		want := runtimesessions.LifecycleSuccessorSessionID(operationID, mutation.PreviousSessionID)

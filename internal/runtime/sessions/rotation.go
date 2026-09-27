@@ -83,8 +83,8 @@ func ReplayRotation(request RotationRequest, receipt *RotationReceipt, current *
 	if receipt == nil {
 		return nil, nil
 	}
-	if receipt.OperationID != request.Metadata.OperationID || receipt.RequestDigest != request.Digest {
-		return nil, &RotationRefusal{Reason: RotationRequestConflict}
+	if err := CheckRotationReceiptRequest(request, receipt); err != nil {
+		return nil, err
 	}
 	result := receipt.Result
 	if current == nil || result.SessionID != current.SessionID || result.Identity.Normalize() != current.Identity.Normalize() ||
@@ -94,4 +94,13 @@ func ReplayRotation(request RotationRequest, receipt *RotationReceipt, current *
 		return nil, &RotationRefusal{Reason: RotationSuccessorNotCurrent}
 	}
 	return &result, nil
+}
+
+// CheckRotationReceiptRequest permits a known request to proceed to the live
+// successor check without locking a foreign identity's receipt row.
+func CheckRotationReceiptRequest(request RotationRequest, receipt *RotationReceipt) error {
+	if receipt != nil && (receipt.OperationID != request.Metadata.OperationID || receipt.RequestDigest != request.Digest) {
+		return &RotationRefusal{Reason: RotationRequestConflict}
+	}
+	return nil
 }
