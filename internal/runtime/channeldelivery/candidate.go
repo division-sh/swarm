@@ -27,6 +27,13 @@ type PreparedRender struct {
 	Actions    []Action
 }
 
+type SentReceipt struct {
+	OperationID       string
+	DeliveryID        string
+	RenderID          string
+	DeliveryReference any
+}
+
 type Action struct {
 	Token   string
 	Kind    string
@@ -110,6 +117,7 @@ type Store interface {
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]Candidate, error)
 	GetCurrentChannelDeliveryPlan(context.Context, string) (Candidate, bool, error)
+	GetCurrentChannelSentReceipt(context.Context, string, string) (SentReceipt, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	FreezeAndPersistChannelRender(context.Context, string) (PreparedRender, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)

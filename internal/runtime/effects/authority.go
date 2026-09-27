@@ -211,6 +211,7 @@ type ChannelDeliveryAuthority struct {
 	DeliveryID                   string
 	RenderID                     string
 	RenderHash                   string
+	PreviousReceiptOperationID   string
 	PrincipalID                  string
 	InterfaceKey                 string
 	DeliveryEpoch                int64
@@ -362,6 +363,7 @@ func (a Authority) Valid() bool {
 		delivery := a.ChannelDelivery
 		operationID, err := ChannelDeliveryOperationID(delivery.DeliveryID, delivery.RenderID)
 		return err == nil && delivery.EffectOperationID == operationID && a.ID == operationID &&
+			(delivery.PreviousReceiptOperationID == "" || validUUIDs(delivery.PreviousReceiptOperationID)) &&
 			validUUIDs(delivery.PrincipalID, delivery.ActivationID, delivery.RuntimeInstanceID) &&
 			delivery.DeliveryEpoch > 0 && delivery.BindingRevision > 0 && delivery.ActivationRevision > 0 &&
 			delivery.ContextPublicationGeneration == a.FenceGeneration && delivery.TargetGeneration > 0 &&
@@ -495,6 +497,9 @@ func (a Authority) Evidence() map[string]any {
 		evidence["delivery_id"] = delivery.DeliveryID
 		evidence["render_id"] = delivery.RenderID
 		evidence["render_hash"] = delivery.RenderHash
+		if delivery.PreviousReceiptOperationID != "" {
+			evidence["previous_receipt_operation_id"] = delivery.PreviousReceiptOperationID
+		}
 		evidence["principal_id"] = delivery.PrincipalID
 		evidence["interface_key"] = delivery.InterfaceKey
 		evidence["delivery_epoch"] = delivery.DeliveryEpoch
