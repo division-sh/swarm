@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
@@ -37,7 +38,7 @@ type selectedChannelDeliveryTestStore interface {
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range []string{"current", "late", "shared_current", "shared_late"} {
+		for _, mode := range []string{"current", "late", "shared_current", "shared_late", "edit_uncertain"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				late := strings.HasSuffix(mode, "late")
 				conversationScope := operatorchannel.ConversationScopeDirect
@@ -591,6 +592,59 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 					renderID, effectOperationID, frozen, actions = updated.RenderID, editID, updated.Frozen, updated.Actions
 					authority, effectCtx = editAuthority, editCtx
+					if mode == "edit_uncertain" {
+						if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+							query := `UPDATE mailbox SET summary=? WHERE item_id=?`
+							if postgres {
+								query = `UPDATE mailbox SET summary=$1 WHERE item_id=$2::uuid`
+							}
+							_, err := tx.ExecContext(txctx, query, "Delivery authority changed again", noticeID)
+							return err
+						}); err != nil {
+							t.Fatal(err)
+						}
+						latest, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID)
+						if err != nil || latest.RenderID == renderID {
+							t.Fatalf("freeze second edit = %#v, %v", latest, err)
+						}
+						uncertainID, err := runtimeeffects.ChannelDeliveryOperationID(deliveryID, latest.RenderID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						uncertainAuthority := editAuthority
+						uncertainAuthority.ID = uncertainID
+						uncertainAuthority.ChannelDelivery.EffectOperationID = uncertainID
+						uncertainAuthority.ChannelDelivery.RenderID = latest.RenderID
+						uncertainAuthority.ChannelDelivery.RenderHash = latest.Frozen.Hash
+						uncertainAuthority.ChannelDelivery.PreviousReceiptOperationID = editID
+						uncertainCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
+							testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), uncertainAuthority),
+							runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+						uncertainHandle, err := runtimeeffects.BeginChannelDelivery(uncertainCtx, []byte("uncertain edit"), nil)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if err := uncertainHandle.MarkLaunched(uncertainCtx); err != nil {
+							t.Fatal(err)
+						}
+						failureErr := failures.New(failures.ClassOutcomeUncertain, "test_channel_edit_uncertain", "test", "settle", nil)
+						failure, _ := failures.EnvelopeFromError(failureErr)
+						if err := uncertainHandle.Settle(uncertainCtx, runtimeeffects.StateOutcomeUncertain, &failure, nil); err != nil {
+							t.Fatal(err)
+						}
+						uncertainPlan, found, err := channeldelivery.LoadPlan(ctx, db, deliveryID, postgres)
+						if err != nil || !found || uncertainPlan.State != "uncertain" || uncertainPlan.CurrentReceiptID != editID ||
+							uncertainPlan.CurrentRenderID != latest.RenderID {
+							t.Fatalf("uncertain edit retained plan = %#v, found=%t err=%v", uncertainPlan, found, err)
+						}
+						if current(uncertainAuthority) {
+							t.Fatal("uncertain edit retained automatic launch authority")
+						}
+						if _, err := runtimeeffects.BeginChannelDelivery(uncertainCtx, []byte("uncertain edit"), nil); err == nil {
+							t.Fatal("uncertain edit was automatically redispatched")
+						}
+						return
+					}
 				}
 				fact := operatorchannel.ActionFact{
 					Interface: binding.Interface, ExternalAccountRef: plan.ExternalAccountRef,
