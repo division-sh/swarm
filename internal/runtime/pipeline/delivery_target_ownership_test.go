@@ -617,7 +617,7 @@ nested-reader:
     nested.ready:
       rules:
         entity-rows:
-          condition: "true"
+          when: "true"
           fan_out:
             items_from: entity.items
             as: row
@@ -626,6 +626,8 @@ nested-reader:
               event: item.requested
               fields:
                 item: row
+        otherwise:
+          else: true
 `,
 	})
 	source := semanticview.Wrap(bundle)

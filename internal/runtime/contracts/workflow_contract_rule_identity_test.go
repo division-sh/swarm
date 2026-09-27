@@ -26,8 +26,8 @@ func TestHandlerRuleIdentityDerivesFromCanonicalDeclarationSite(t *testing.T) {
 		return handler.Rules[0]
 	}
 
-	before := decode("rules:\n  - id: original-label\n    condition: else\n")
-	after := decode("rules:\n  - id: renamed-label\n    condition: else\n")
+	before := decode("rules:\n  - id: original-label\n    else: true\n")
+	after := decode("rules:\n  - id: renamed-label\n    else: true\n")
 	beforeRef, beforeOK := before.DeclarationIdentity()
 	afterRef, afterOK := after.DeclarationIdentity()
 	if !beforeOK || !afterOK || !beforeRef.Equal(afterRef) {
@@ -67,8 +67,8 @@ func TestHandlerRuleReorderIsDeleteAndAdd(t *testing.T) {
 		return out
 	}
 
-	before := decode("rules:\n  - {id: first, condition: payload.ready}\n  - {id: second, condition: else}\n")
-	after := decode("rules:\n  - {id: second, condition: else}\n  - {id: first, condition: payload.ready}\n")
+	before := decode("rules:\n  - {id: first, when: payload.ready}\n  - {id: second, else: true}\n")
+	after := decode("rules:\n  - {id: second, else: true}\n  - {id: first, when: payload.ready}\n")
 	if before["first"].Equal(after["first"]) || before["second"].Equal(after["second"]) {
 		t.Fatalf("reordered rows retained positional identity: before=%#v after=%#v", before, after)
 	}
@@ -76,7 +76,7 @@ func TestHandlerRuleReorderIsDeleteAndAdd(t *testing.T) {
 
 func TestHandlerRuleIdentitySeparatesFlowsAndEvents(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("rules:\n  - {condition: else}\n"), &handler); err != nil {
+	if err := yaml.Unmarshal([]byte("rules:\n  - {else: true}\n"), &handler); err != nil {
 		t.Fatal(err)
 	}
 	qualify := func(flowPath, event string) runtimeidentity.DeclarationIdentity {
@@ -106,7 +106,7 @@ func TestHandlerRuleIdentitySeparatesFlowsAndEvents(t *testing.T) {
 
 func TestAuthoredElementIDIsRetired(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := yaml.Unmarshal([]byte("rules:\n  - element_id: 00000000-0000-4000-8000-000000000001\n    condition: else\n"), &handler)
+	err := yaml.Unmarshal([]byte("rules:\n  - element_id: 00000000-0000-4000-8000-000000000001\n    else: true\n"), &handler)
 	if err == nil || !strings.Contains(err.Error(), "RETIRED: rule.element_id") {
 		t.Fatalf("retired element_id error = %v", err)
 	}

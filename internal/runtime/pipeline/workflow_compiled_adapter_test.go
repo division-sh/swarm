@@ -37,7 +37,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 	files := map[string]string{
 		"schema.yaml":   "name: adapter-proof\nstages:\n  ready: {initial: true}\n  Ready: {terminal: true}\n  working: {}\n  shared: {}\n  done: {terminal: true}\n" + killStages,
 		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "direct: {}\ninherited: {}\nrule: {}\ncomplete: {}\nself: {}\nwrite_only: {}\nunmatched: {}\nemit_only: {}\nobserved: {}\nkill: {}\nreject: {}\ndiscard: {}\nguarded: {}\nguard_observed:\n  marker: text\n",
+		"events.yaml":   "direct: {}\ninherited: {}\nrule: {}\ncomplete: {}\nself: {}\nwrite_only: {}\nfallback: {}\nemit_only: {}\nobserved: {}\nkill: {}\nreject: {}\ndiscard: {}\nguarded: {}\nguard_observed:\n  marker: text\n",
 		"nodes.yaml": `router:
   execution_type: system_node
   event_handlers:
@@ -45,12 +45,12 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
     inherited:
       advances_to: done
       rules:
-        - {id: inherited-choice, condition: else}
+        - {id: inherited-choice, else: true}
     rule:
       rules:
-        - {id: not-selected, condition: "false", advances_to: done}
-        - {id: explicit-choice, condition: "true", advances_to: done}
-        - {id: fallback, condition: else, advances_to: done}
+        - {id: not-selected, when: "false", advances_to: done}
+        - {id: explicit-choice, when: "true", advances_to: done}
+        - {id: fallback, else: true, advances_to: done}
     complete:
       data_accumulation:
         writes:
@@ -62,9 +62,10 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
       data_accumulation:
         writes:
           - {target_field: marker, value: "${'written'}"}
-    unmatched:
+    fallback:
       rules:
-        - {id: never, condition: "false", advances_to: done}
+        - {id: never, when: "false", advances_to: done}
+        - {id: fallback-choice, else: true}
     emit_only: {emit: observed}
     guarded:
       guard:
@@ -76,11 +77,12 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
           - {target_field: marker, value: "${'guarded'}"}
       rules:
         - id: explicit-choice
-          condition: "true"
+          when: "true"
           advances_to: done
           emit:
             event: guard_observed
             fields: {marker: guard-output}
+        - {id: guard-fallback, else: true}
     kill:
       guard: {id: kill-check, check: "false", on_fail: kill}
       advances_to: done
@@ -111,11 +113,12 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
           - {target_field: marker, value: "${'guarded'}"}
       rules:
         - id: explicit-choice
-          condition: "true"
+          when: "true"
           advances_to: done
           emit:
             event: guard_observed
             fields: {marker: guard-output}
+        - {id: guard-fallback, else: true}
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {
@@ -299,7 +302,7 @@ func TestPipelineCompiledOrdinaryCarrierExecutionOnBothStores(t *testing.T) {
 func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
 	bundle := compiledAdapterSource(t, true)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, event := range []string{"self", "write_only", "unmatched", "emit_only"} {
+		for _, event := range []string{"self", "write_only", "fallback", "emit_only"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "", false)
 				if _, err := f.store.MaterializeInitialEntry(f.ctx, testRunScopedWorkflowInstanceFromContext(f.ctx, f.path), f.initialInstance("ready"), time.Now().UTC()); err != nil {
@@ -329,8 +332,8 @@ func TestPipelineCompiledTransitionNoOpOnBothStores(t *testing.T) {
 				if event == "emit_only" && f.bus.publishedCount() != 1 {
 					t.Fatal("emit-only effect was lost")
 				}
-				if event == "unmatched" && requireResolvedSelection(t, result.RuleSelection).Disposition() != handlerselection.DispositionNoMatch {
-					t.Fatalf("no-match disposition = %#v", result.RuleSelection)
+				if event == "fallback" && requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "fallback-choice" {
+					t.Fatalf("fallback selection = %#v", result.RuleSelection)
 				}
 			})
 		}
@@ -671,13 +674,13 @@ func TestInactiveCompanionRefusesNonterminalClaimBothStores(t *testing.T) {
 	}
 }
 
-func TestNoMatchClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
+func TestFallbackClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
-			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"unmatched"}}}
-			evt := f.event("unmatched")
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"fallback"}, Policies: map[string]WorkflowEventPolicy{"fallback": {Consume: true}}}}
+			evt := f.event("fallback")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: f.path, EntityID: f.entityID}),
@@ -694,31 +697,31 @@ func TestNoMatchClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
 			attempt := withWorkflowNodeDeliveryRoute(f.ctx, route)
 			handled, err := f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
 			if err != nil || !handled {
-				t.Fatalf("no-match delivery: handled=%v err=%v", handled, err)
+				t.Fatalf("fallback delivery: handled=%v err=%v", handled, err)
 			}
 			after, _ := f.load()
 			if before.CurrentState != after.CurrentState || !reflect.DeepEqual(before.Fields, after.Fields) || len(after.TransitionHistory) != 0 || f.bus.publishedCount() != 0 {
-				t.Fatalf("no-match changed business stage/fields or emitted work: before=%#v after=%#v", before, after)
+				t.Fatalf("fallback changed business stage/fields or emitted work: before=%#v after=%#v", before, after)
 			}
 			snapshot, err := owner.Snapshot(f.ctx, id)
 			if err != nil || snapshot.Status != runtimedelivery.StatusDelivered {
-				t.Fatalf("no-match did not settle exact delivery: snapshot=%#v err=%v", snapshot, err)
+				t.Fatalf("fallback did not settle exact delivery: snapshot=%#v err=%v", snapshot, err)
 			}
 			selection, err := snapshot.FinalSelection.Fact()
-			if err != nil || selection.Disposition() != handlerselection.DispositionNoMatch {
-				t.Fatalf("no-match selection=%#v err=%v", selection, err)
+			if err != nil || selection.Disposition() != handlerselection.DispositionSelected || selection.DisplayLabel() != "fallback-choice" {
+				t.Fatalf("fallback selection=%#v err=%v", selection, err)
 			}
 			outcomes, err := owner.Outcomes(f.ctx, id)
 			if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != string(runtimedelivery.StatusDelivered) {
-				t.Fatalf("no-match outcomes=%#v err=%v", outcomes, err)
+				t.Fatalf("fallback outcomes=%#v err=%v", outcomes, err)
 			}
 			handled, err = f.pc.dispatchWorkflowNodeEventResult(attempt, evt)
 			if err != nil || !handled {
-				t.Fatalf("no-match duplicate: handled=%v err=%v", handled, err)
+				t.Fatalf("fallback duplicate: handled=%v err=%v", handled, err)
 			}
 			outcomes, err = owner.Outcomes(f.ctx, id)
 			if err != nil || len(outcomes) != 1 {
-				t.Fatalf("duplicate no-match added outcome: outcomes=%#v err=%v", outcomes, err)
+				t.Fatalf("duplicate fallback added outcome: outcomes=%#v err=%v", outcomes, err)
 			}
 		})
 	}
@@ -965,7 +968,7 @@ func requireGuardedPreviewEvidence(t *testing.T, f *compiledAdapterFixture, prev
 func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 	bundle := compiledAdapterSource(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, event := range []string{"direct", "inherited", "rule", "complete", "self", "unmatched", "write_only", "emit_only", "guarded", "kill", "reject", "discard"} {
+		for _, event := range []string{"direct", "inherited", "rule", "complete", "self", "fallback", "write_only", "emit_only", "guarded", "kill", "reject", "discard"} {
 			t.Run(backend+"/"+event, func(t *testing.T) {
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "ready", true)
 				evt := f.event(event)

@@ -395,18 +395,18 @@ rows:
 
   - id: handler.policy_selection_rows
     ruled: mechanical-ratified
-    paths: "rule.condition, rule.when, rule.case.selector, rule.case.selectors, rule.case.equals, rule.range.*, rule.lookup.*, rule.validate.*, rule.compute_module.*, rule.else, rule.default"
-    owner: lowerPolicySheetRuleNode
+    paths: "rule.when, retired handler.rules.condition, rule.case.selector, rule.case.selectors, rule.case.equals, rule.range.*, rule.lookup.*, rule.validate.*, rule.compute_module.*, rule.else, rule.default"
+    owner: decodeHandlerRuleEntriesNode + lowerPolicySheetRuleNode
     information:
       choice: [predicate, case/range/lookup/validation/module selection, default branch]
       fact: [stable row id, module and validation references]
       annotation: [description]
     spelling:
-      canonical_candidate: typed_policy_sheet_rows
-      retired_duplicates: [condition_when_predicate, else_default, selector_one_item_selectors, scalar_one_item_equals]
+      canonical_candidate: typed_policy_sheet_rows_with_when_only_predicate
+      retired_duplicates: [condition_under_handler_rules, else_default, selector_one_item_selectors, scalar_one_item_equals]
       distinct_overrides: [multi_selector_case, literal_and_typed_lookup_values]
-    f2_bug: "condition and when can express the same predicate but only when retains PolicyRow metadata and typed-row validation"
-    corpus: {condition: 1, when: 0, else: 0, default: 0}
+    f2_resolution: "handler.rules.condition rejects at context-aware admission; when retains PolicyRow metadata and typed-row validation; on_complete.condition remains distinct"
+    corpus: {condition: 0, when: 1, else: 1, default: 0}
 
   - id: handler.emit_action_activity
     ruled: mechanical-ratified

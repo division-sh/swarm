@@ -1736,7 +1736,9 @@ func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`rules:
   - id: attempted-rule
-    condition: evaluator.failure
+    when: evaluator.failure
+  - id: unmatched
+    else: true
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
@@ -1782,10 +1784,16 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler runtimecontracts.SystemNodeEventHandler
+			predicate := "condition"
+			fallback := ""
+			if tc.field == "rules" {
+				predicate = "when"
+				fallback = "  - else: true\n"
+			}
 			raw := fmt.Sprintf(`%s:
   - id: unsupported-condition
-    condition: unsupported.condition
-`, tc.field)
+    %s: unsupported.condition
+`, tc.field, predicate) + fallback
 			if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
 				t.Fatal(err)
 			}

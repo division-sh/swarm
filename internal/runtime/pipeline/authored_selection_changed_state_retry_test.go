@@ -41,7 +41,7 @@ func (s *selectionRetryMutationFault) CommitWorkflowEngineMutation(ctx context.C
 
 func TestAuthoredSelectionRetryReloadsCurrentStateBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, first := range []string{"selected", "no_match", "evaluation_failed"} {
+		for _, first := range []string{"selected", "fallback", "evaluation_failed"} {
 			t.Run(backend+"/"+first, func(t *testing.T) {
 				nodes := `router:
   execution_type: system_node
@@ -49,8 +49,9 @@ func TestAuthoredSelectionRetryReloadsCurrentStateBothStores(t *testing.T) {
   event_handlers:
     source.evt:
       rules:
-        - {id: first, condition: "entity.marker == 'first'", advances_to: done}
-        - {id: second, condition: "entity.marker == 'second'", advances_to: done}
+        - {id: first, when: "entity.marker == 'first'", advances_to: done}
+        - {id: second, when: "entity.marker == 'second'", advances_to: done}
+        - {id: unmatched, else: true}
 `
 				if first == "evaluation_failed" {
 					nodes = strings.Replace(nodes, "entity.marker == 'first'", "query_entities(marker == 'first').count == 1", 1)
@@ -87,9 +88,6 @@ func TestAuthoredSelectionRetryReloadsCurrentStateBothStores(t *testing.T) {
 					t.Fatalf("retry not retained: handled=%v err=%v", handled, err)
 				}
 				wantFirst := handlerselection.DispositionSelected
-				if first == "no_match" {
-					wantFirst = handlerselection.DispositionNoMatch
-				}
 				if first == "evaluation_failed" {
 					wantFirst = handlerselection.DispositionEvaluationFailed
 				}

@@ -38,7 +38,7 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 						contents = strings.ReplaceAll(contents, "_entity.current_state", "_entity.stage")
 					case "naive optional without decision", "naive optional fallback":
 						contents = strings.Replace(contents, "          - business_brief\n", "", 1)
-						contents = strings.Replace(contents, "    work.assessed:\n", "    work.assessed:\n      rules:\n        - condition: payload.business_brief != ''\n          data_accumulation:\n            writes: [business_brief]\n          advances_to: consume\n          emit: {event: work.consume}\n        - condition: \"true\"\n          advances_to: consume\n          emit: {event: work.consume}\n", 1)
+						contents = strings.Replace(contents, "    work.assessed:\n", "    work.assessed:\n      rules:\n        - when: payload.business_brief != ''\n          data_accumulation:\n            writes: [business_brief]\n          advances_to: consume\n          emit: {event: work.consume}\n        - else: true\n          advances_to: consume\n          emit: {event: work.consume}\n", 1)
 						contents = strings.Replace(contents, "      advances_to: consume\n      emit:\n        event: work.consume\n", "", 1)
 						if variant == "naive optional fallback" {
 							contents = strings.ReplaceAll(contents, "entity.business_brief", "entity.?business_brief.orValue('fallback')")
@@ -275,16 +275,23 @@ work.result:
 `
 			}
 			if variant == "same destination outcomes" || variant == "on_complete outcomes" {
-				nodes = strings.Replace(nodes, "      data_accumulation:\n        writes: [score]\n      advances_to: consume", `      rules:
+				replacement := `      rules:
+        - when: payload.score >= 0
+          data_accumulation:
+            writes: [score]
+          advances_to: consume
+        - else: true
+          advances_to: consume`
+				if variant == "on_complete outcomes" {
+					replacement = `      on_complete:
         - condition: payload.score >= 0
           data_accumulation:
             writes: [score]
           advances_to: consume
         - condition: else
-          advances_to: consume`, 1)
-				if variant == "on_complete outcomes" {
-					nodes = strings.Replace(nodes, "      rules:\n", "      on_complete:\n", 1)
+          advances_to: consume`
 				}
+				nodes = strings.Replace(nodes, "      data_accumulation:\n        writes: [score]\n      advances_to: consume", replacement, 1)
 			}
 			if variant == "same event different node" {
 				nodes += `other-owner:

@@ -60,11 +60,13 @@ collector:
             value: "${payload.result}"
       rules:
         enter_review:
-          condition: "payload.result == 'ready'"
+          when: "payload.result == 'ready'"
           advances_to: review
         finish:
-          condition: "payload.result in ['approved', 'rejected']"
+          when: "payload.result in ['approved', 'rejected']"
           advances_to: done
+        unmatched:
+          else: true
 `)
 	return root
 }
@@ -115,13 +117,14 @@ pins:
 `, handler, handler, handler)
 			for _, choice := range []string{"alpha", "beta"} {
 				nodes += fmt.Sprintf(`        %s:
-          condition: "payload.choice == '%s'"
+          when: "payload.choice == '%s'"
           advances_to: active
           emit:
             event: work.completed
             fields: {result: {literal: '%s%s/%s'}}
 `, choice, choice, prefix, handler, choice)
 			}
+			nodes += "        unmatched:\n          else: true\n"
 		}
 		nodes += `collector:
   execution_type: system_node
