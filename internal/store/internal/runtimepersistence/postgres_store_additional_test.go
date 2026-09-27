@@ -1696,8 +1696,8 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 	if oldStatus != "terminated" {
 		t.Fatalf("predecessor status = %q, want terminated", oldStatus)
 	}
-	if oldTerminationReason != "contaminated" {
-		t.Fatalf("predecessor termination_reason = %q, want contaminated", oldTerminationReason)
+	if oldTerminationReason != runtimesessions.TerminationReasonNormal.String() {
+		t.Fatalf("predecessor termination_reason = %q, want normal", oldTerminationReason)
 	}
 	if oldSuccessorID != rotated.SessionID {
 		t.Fatalf("predecessor successor_session_id = %q, want %q", oldSuccessorID, rotated.SessionID)
