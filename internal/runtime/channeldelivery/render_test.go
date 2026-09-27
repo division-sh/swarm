@@ -147,6 +147,47 @@ func TestChannelResponseFreezesRequestedAudienceAndContent(t *testing.T) {
 	}
 }
 
+func TestChannelViewFullPagesRetainExactFrozenUnicode(t *testing.T) {
+	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 3,
+		ExternalAccountRef: "account", ConversationRef: "shared", ConversationScope: operatorchannel.ConversationScopeShared}
+	fullText := strings.Repeat("α", 7100)
+	source, err := FreezeResponse(uuid.NewString(), fullText, audience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceRenderID := uuid.NewString()
+	var reconstructed strings.Builder
+	for index := 0; ; index++ {
+		page, err := FreezeResponsePage(uuid.NewString(), source, sourceRenderID, index, audience)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := Decode(page.Input, page.Hash)
+		if err != nil || decoded.Page == nil || decoded.Page.Index != index || decoded.Page.SourceRenderID != sourceRenderID ||
+			decoded.Page.SourceRenderHash != source.Hash {
+			t.Fatalf("frozen page %d changed on readback: %#v, %v", index, decoded, err)
+		}
+		presentation, truncated, err := PresentationText(decoded)
+		if err != nil || truncated || len([]rune(presentation)) > ChannelExcerptRunes {
+			t.Fatalf("page %d exceeds provider presentation bound: %d, truncated=%t, err=%v", index, len([]rune(presentation)), truncated, err)
+		}
+		parts := strings.SplitN(page.FullText, "\n", 2)
+		if len(parts) != 2 {
+			t.Fatalf("page %d lacks its heading", index)
+		}
+		reconstructed.WriteString(parts[1])
+		if index+1 == page.Page.Count {
+			break
+		}
+	}
+	if reconstructed.String() != fullText {
+		t.Fatal("page concatenation changed the complete frozen text")
+	}
+	if _, err := FreezeResponsePage(uuid.NewString(), source, sourceRenderID, 100, audience); err == nil {
+		t.Fatal("out-of-range page was admitted")
+	}
+}
+
 func TestChannelRenderNoticeIsRunlessAndHasNoDecisionActions(t *testing.T) {
 	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 1,
 		ExternalAccountRef: "account", ConversationRef: "direct", ConversationScope: operatorchannel.ConversationScopeDirect}
