@@ -88,8 +88,27 @@ func commitInboundPublicationSQL(
 	}
 	if command.OperatorChannelText != nil {
 		_, postgres := any(eventStore).(*EventPostgresOwner)
+		if command.OperatorChannelText.EntryReference == "" && command.OperatorChannelText.ReplyToReference == "" {
+			current, err := storechanneldelivery.HasCurrentBareInputDraftTx(ctx, tx, *command.OperatorChannelText, request.OriginalReceivedAt, postgres)
+			if err != nil {
+				return runtimeinbound.CommitResult{}, err
+			}
+			if !current {
+				return runtimeinbound.CommitResult{}, fmt.Errorf("bare channel input draft changed before publication")
+			}
+		}
 		if err := storechanneldelivery.InsertTextIntentTx(ctx, tx, *command.OperatorChannelText, request.OriginalReceivedAt, postgres); err != nil {
 			return runtimeinbound.CommitResult{}, err
+		}
+	}
+	if command.PotentialBareText != nil {
+		_, postgres := any(eventStore).(*EventPostgresOwner)
+		current, err := storechanneldelivery.HasCurrentBareInputDraftTx(ctx, tx, *command.PotentialBareText, request.OriginalReceivedAt, postgres)
+		if err != nil {
+			return runtimeinbound.CommitResult{}, err
+		}
+		if current {
+			return runtimeinbound.CommitResult{}, fmt.Errorf("bare channel text became operator input before publication")
 		}
 	}
 	committed := make([]runtimebus.CommittedPublication, len(command.Publications))

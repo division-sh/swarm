@@ -924,6 +924,10 @@ func runChannelOnboardingCLIJourney(t *testing.T, configPath, endpoint string, p
 	if !strings.Contains(secretSurface, "READY") || strings.Contains(secretSurface, "bot-token") || strings.Contains(secretSurface, signingSecret) {
 		t.Fatalf("channel %s output violated readiness/secret contract\n%s", verb, secretSurface)
 	}
+	if (chatType == "group" || chatType == "supergroup") && !strings.Contains(secretSurface, "Future notices") &&
+		!strings.Contains(secretSurface, "future notices, decision cards, and their updates") {
+		t.Fatalf("channel %s omitted shared audience disclosure\n%s", verb, secretSurface)
+	}
 	delivery := waitChannelOnboardingDelivery(t, provider, deliveryIndex)
 	wantText := "Swarm channel connected."
 	if chatType == "group" || chatType == "supergroup" {
