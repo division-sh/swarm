@@ -102,3 +102,4 @@ events:
       conversation_reference: event.conversation_reference
       conversation_scope: event.conversation_scope
       provider_message_reference.id: event.provider_message_reference
+      reply_to_message_reference.id: event.reply_to_message_reference
