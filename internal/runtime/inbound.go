@@ -463,12 +463,21 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	published, evidence, authorProjection, operatorEvent, projectionErr := projectInboundPublication(target, admitted, publicationRequest, now, g.executionPosture, g.channelPlans)
+	bareSelector := func(text operatorchannel.InboundText) (bool, error) {
+		owner, ok := g.store.(interface {
+			HasCurrentChannelInputDraft(context.Context, operatorchannel.InboundText, time.Time) (bool, error)
+		})
+		if !ok {
+			return false, fmt.Errorf("selected store lacks channel input draft classification")
+		}
+		return owner.HasCurrentChannelInputDraft(pubCtx, text, now)
+	}
+	published, evidence, authorProjection, operatorEvent, projectionErr := projectInboundPublication(target, admitted, publicationRequest, now, g.executionPosture, g.channelPlans, bareSelector)
 	if projectionErr != nil {
 		writeInboundPublicationError(w, projectionErr)
 		return
 	}
-	if operatorEvent != nil {
+	if operatorEvent != nil && operatorEvent.BareCandidate == nil {
 		commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
 			Request: publicationRequest, Finalization: runtimeinbound.Finalization{EvidenceEvent: evidence},
 			OperatorChannelClaim: operatorEvent.Claim, OperatorChannelAction: operatorEvent.Action,
@@ -531,9 +540,14 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			Authorization: plannedEvents[index].Authorization, RecipientManifest: manifest,
 		}
 	}
+	var bareCandidate *operatorchannel.InboundText
+	if operatorEvent != nil {
+		bareCandidate = operatorEvent.BareCandidate
+	}
 	commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
 		Request: publicationRequest, Finalization: finalization,
 		Publications: batchPlan.CommitCommands(), AuthorProjection: authorProjection,
+		PotentialBareText: bareCandidate,
 	})
 	commitErr := err
 	record := commitResult.Record
@@ -635,12 +649,13 @@ func writeInboundPublicationError(w http.ResponseWriter, err error) {
 }
 
 type operatorInboundProjection struct {
-	Claim  *operatorchannel.InboundClaim
-	Action *operatorchannel.InboundAction
-	Text   *operatorchannel.InboundText
+	Claim         *operatorchannel.InboundClaim
+	Action        *operatorchannel.InboundAction
+	Text          *operatorchannel.InboundText
+	BareCandidate *operatorchannel.InboundText
 }
 
-func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time, posture executionposture.Posture, channelPlans []packs.SatisfactionPlan) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, *operatorInboundProjection, error) {
+func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time, posture executionposture.Posture, channelPlans []packs.SatisfactionPlan, selectBare func(operatorchannel.InboundText) (bool, error)) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, *operatorInboundProjection, error) {
 	var noEvidence events.Event
 	delivery, err := target.AdmissionPlan.ProjectDelivery(admitted)
 	if err != nil {
@@ -684,6 +699,26 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 				}
 				challenge, challengeShaped := operatorchannel.ChallengeFromText(fact.Text)
 				if !challengeShaped && fact.EntryReference == "" && fact.ReplyToReference == "" {
+					if operatorEvent != nil {
+						return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("normalized provider output ambiguously satisfies multiple operator channel text interfaces")
+					}
+					candidate := operatorchannel.InboundText{
+						TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+						PublicationID:         request.PublicationID,
+						ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
+					}
+					selected := false
+					if selectBare != nil {
+						selected, err = selectBare(candidate)
+						if err != nil {
+							return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
+						}
+					}
+					if selected {
+						operatorEvent = &operatorInboundProjection{Text: &candidate}
+					} else {
+						operatorEvent = &operatorInboundProjection{BareCandidate: &candidate}
+					}
 					continue
 				}
 				if operatorEvent != nil {
@@ -733,7 +768,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 			}
 		}
 	}
-	if operatorEvent != nil {
+	if operatorEvent != nil && operatorEvent.BareCandidate == nil {
 		published = nil
 		eventIDs = nil
 		eventNames = nil

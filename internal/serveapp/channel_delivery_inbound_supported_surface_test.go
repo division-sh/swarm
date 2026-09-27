@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -107,6 +108,78 @@ func TestChannelDeliveryVerdictAcknowledgmentLossE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryRequiredInputE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "required_input")
+		})
+	}
+}
+
+func TestChannelDeliveryInvalidTypedInputE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "invalid_input")
+		})
+	}
+}
+
+func TestChannelDeliveryOrderedInputE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "ordered_input")
+		})
+	}
+}
+
+func TestChannelDeliveryCancelInputE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "cancel_input")
+		})
+	}
+}
+
+func TestChannelDeliverySkipFinalOptionalInputE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "skip_input")
+		})
+	}
+}
+
+func TestChannelDeliveryBareInputChooserE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "draft_chooser")
+		})
+	}
+}
+
+func TestChannelDeliveryManualResendAfterLostResponseE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "delivery_loss_resend")
+		})
+	}
+}
+
+func TestChannelDeliveryManualResendAfterLostPromptEditE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "edit_loss_resend")
+		})
+	}
+}
+
+func TestChannelDeliverySharedAudienceE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "shared_audience")
+		})
+	}
+}
+
 func TestChannelDeliveryViewFullE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -179,6 +252,41 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		t.Cleanup(releaseCommandApply)
 	}
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	if scenario == "draft_chooser" {
+		sourceRoot = writeMixedStandingTelegramServeFixture(t, telegram.URL)
+	}
+	if scenario == "required_input" || scenario == "invalid_input" || scenario == "ordered_input" || scenario == "edit_loss_resend" ||
+		scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" {
+		flowNames := []string{"telegram-ingress"}
+		if scenario == "draft_chooser" {
+			flowNames = append(flowNames, "telegram-stopped")
+		}
+		for _, flowName := range flowNames {
+			schemaPath := filepath.Join(sourceRoot, flowName, "schema.yaml")
+			raw, err := os.ReadFile(schemaPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inputType := "text"
+			if scenario == "invalid_input" {
+				inputType = "integer"
+			}
+			inputBlock := "            reason: {type: " + inputType + ", required: true}\n"
+			if scenario == "ordered_input" {
+				inputBlock = "            zeta: {type: integer, required: true}\n            alpha: {type: boolean, required: true}\n"
+			} else if scenario == "skip_input" {
+				inputBlock = "            reason: {type: text, required: false}\n"
+			}
+			modified := strings.Replace(string(raw), "        retire:\n          advances_to: done",
+				"        retire:\n          input:\n"+inputBlock+"          advances_to: done", 1)
+			if modified == string(raw) {
+				t.Fatal("standing Telegram fixture did not contain the expected gate outcome")
+			}
+			if err := os.WriteFile(schemaPath, []byte(modified), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	publicListener := reserveChannelOnboardingListener(t)
 	publicListen := publicListener.Addr().String()
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
@@ -199,7 +307,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 		StoreMode: backend, StoreModeSet: true,
 	}
-	if scenario == "notice" || scenario == "notice_ack" || scenario == "summary_open" || scenario == "summary_open_many" {
+	if scenario == "notice" || scenario == "notice_ack" || scenario == "shared_audience" || scenario == "summary_open" ||
+		scenario == "summary_open_many" || scenario == "delivery_loss_resend" {
 		opts.TestLLMRuntime = telegramNoticeLLMRuntime{}
 	} else if scenario == "view_full" {
 		opts.TestLLMRuntime = telegramLongNoticeLLMRuntime{}
@@ -263,7 +372,16 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatal(err)
 		}
 	}
-	runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", 1001, "private", 0)
+	chatID, chatType := int64(1001), "private"
+	if scenario == "shared_audience" {
+		chatID, chatType = -1001, "group"
+	}
+	runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", chatID, chatType, 0)
+	if scenario == "shared_audience" {
+		callbackURL, signing, _ := provider.Registration()
+		proveChannelSharedAudience(t, provider, callbackURL, signing)
+		return
+	}
 	if scenario == "inbox_delayed_apply" {
 		select {
 		case <-commandApplyArrived:
@@ -371,6 +489,17 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		time.Sleep(250 * time.Millisecond)
 		provider.LoseNextDeliveryAcknowledgment()
 	}
+	if scenario == "delivery_loss_resend" {
+		deadline := time.Now().Add(15 * time.Second)
+		for provider.Delivery(1) == nil {
+			if time.Now().After(deadline) {
+				t.Fatal("initial card delivery did not settle before notice loss probe")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		time.Sleep(250 * time.Millisecond)
+		provider.LoseNextDeliveryAcknowledgment()
+	}
 	callbackURL, signing, _ := provider.Registration()
 	update := map[string]any{
 		"update_id": time.Now().UnixMilli(),
@@ -379,7 +508,8 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			"chat": map[string]any{"id": 1001, "type": "private"}, "text": inputText,
 		},
 	}
-	if scenario == "verdict" || scenario == "verdict_ack_loss" {
+	if scenario == "verdict" || scenario == "verdict_ack_loss" || scenario == "required_input" || scenario == "invalid_input" || scenario == "edit_loss_resend" ||
+		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" {
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(1) == nil {
 			if time.Now().After(deadline) {
@@ -414,6 +544,9 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 		if scenario == "verdict_ack_loss" {
 			provider.LoseNextCallbackAcknowledgment()
+		}
+		if scenario == "edit_loss_resend" {
+			provider.LoseNextEditAcknowledgment()
 		}
 	}
 	requestBody, err := json.Marshal(update)
@@ -456,6 +589,55 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatal("notice source did not enter the business flow")
 		}
 		proveChannelNoticeAcknowledgment(t, provider, callbackURL, signing, endpoint+"/v1/rpc")
+		return
+	}
+	if scenario == "delivery_loss_resend" {
+		if len(admitted.EventNames) == 0 {
+			t.Fatal("lost-response notice source did not enter the business flow")
+		}
+		proveChannelManualResendAfterLostNotice(t, provider, callbackURL, signing)
+		return
+	}
+	if scenario == "edit_loss_resend" {
+		if len(admitted.EventNames) != 0 {
+			t.Fatalf("lost prompt edit callback escaped into business events: %v", admitted.EventNames)
+		}
+		proveChannelEditLossResendQuotedInput(t, provider, callbackURL, signing)
+		return
+	}
+	if scenario == "required_input" {
+		if len(admitted.EventNames) != 0 {
+			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
+		}
+		proveChannelRequiredInputText(t, provider, callbackURL, signing)
+		return
+	}
+	if scenario == "invalid_input" {
+		if len(admitted.EventNames) != 0 {
+			t.Fatalf("typed draft begin leaked business events: %v", admitted.EventNames)
+		}
+		proveChannelInvalidInputText(t, provider, callbackURL, signing)
+		return
+	}
+	if scenario == "ordered_input" {
+		if len(admitted.EventNames) != 0 {
+			t.Fatalf("ordered draft begin leaked business events: %v", admitted.EventNames)
+		}
+		proveChannelOrderedInputText(t, provider, callbackURL, signing)
+		return
+	}
+	if scenario == "cancel_input" || scenario == "skip_input" {
+		if len(admitted.EventNames) != 0 {
+			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
+		}
+		proveChannelInputControl(t, provider, callbackURL, signing, scenario)
+		return
+	}
+	if scenario == "draft_chooser" {
+		if len(admitted.EventNames) != 0 {
+			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
+		}
+		proveChannelBareInputChooser(t, provider, callbackURL, signing)
 		return
 	}
 	if (nativeInboxScenario || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {
@@ -504,6 +686,646 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%s flow did not answer %q; deliveries=%v acknowledgments=%v edits=%v", scenario, inputText, provider.Delivery(1), provider.Acknowledgments(), provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelRequiredInputText(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		prompted := false
+		for _, edit := range provider.Edits() {
+			prompted = prompted || strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required")
+		}
+		if prompted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("required-input verdict did not enter a visible draft: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	answer := "the operator's private reason"
+	admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1000,
+		"message": map[string]any{
+			"message_id": 9103, "from": map[string]any{"id": 7000},
+			"chat": map[string]any{"id": 1001, "type": "private"}, "text": answer,
+		},
+	})
+	if len(admitted) != 0 {
+		t.Fatalf("required-input answer escaped into business events: %v", admitted)
+	}
+	for {
+		decided := false
+		for _, edit := range provider.Edits() {
+			visible := fmt.Sprint(edit["text"])
+			if strings.Contains(visible, answer) {
+				t.Fatalf("private answer echoed in card edit: %v", edit)
+			}
+			decided = decided || strings.Contains(visible, "Decision: retire")
+		}
+		if decided {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("required-input answer did not decide card: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelInvalidInputText(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		prompted := false
+		for _, edit := range provider.Edits() {
+			prompted = prompted || strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (integer) required")
+		}
+		if prompted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("typed-input verdict did not enter a visible draft: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	answer := "not-a-number"
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1100,
+		"message": map[string]any{
+			"message_id": 9104, "from": map[string]any{"id": 7000},
+			"chat": map[string]any{"id": 1001, "type": "private"}, "text": answer,
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("invalid typed answer escaped into business events: %v", admitted)
+	}
+	for {
+		for index := 2; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			visible := fmt.Sprint(delivery["text"])
+			if strings.Contains(visible, answer) {
+				t.Fatalf("rejected private answer echoed in response: %v", delivery)
+			}
+			if strings.Contains(visible, "That answer does not match the requested field") {
+				for _, edit := range provider.Edits() {
+					if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
+						t.Fatalf("invalid typed answer decided the card: %v", edit)
+					}
+				}
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("invalid typed answer received no teaching response: deliveries=%v edits=%v", provider.Delivery(2), provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelOrderedInputText(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	waitForEdit := func(fragment string) {
+		t.Helper()
+		for {
+			for _, edit := range provider.Edits() {
+				visible := fmt.Sprint(edit["text"])
+				if strings.Contains(visible, "private value") {
+					t.Fatalf("ordered input echoed private answer: %v", edit)
+				}
+				if strings.Contains(visible, fragment) {
+					return
+				}
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("ordered input did not reach %q: edits=%v", fragment, provider.Edits())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	waitForEdit("Input: zeta (integer) required")
+	postAnswer := func(messageID int, answer string) {
+		t.Helper()
+		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+			"update_id": time.Now().UnixMilli() + int64(messageID),
+			"message": map[string]any{
+				"message_id": messageID, "from": map[string]any{"id": 7000},
+				"chat": map[string]any{"id": 1001, "type": "private"}, "text": answer,
+			},
+		}); len(admitted) != 0 {
+			t.Fatalf("ordered answer escaped into business events: %v", admitted)
+		}
+	}
+	postAnswer(9105, "7")
+	waitForEdit("Input: alpha (boolean) required")
+	for _, edit := range provider.Edits() {
+		if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
+			t.Fatalf("partial ordered answer decided card: %v", edit)
+		}
+	}
+	postAnswer(9106, "true")
+	waitForEdit("Decision: retire")
+}
+
+func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callbackURL, signing, scenario string) {
+	t.Helper()
+	label := "Cancel input"
+	if scenario == "skip_input" {
+		label = "Skip field"
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	var token string
+	for token == "" {
+		for _, edit := range provider.Edits() {
+			if !strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text)") {
+				continue
+			}
+			markup, _ := edit["reply_markup"].(map[string]any)
+			rows, _ := markup["inline_keyboard"].([]any)
+			for _, raw := range rows {
+				row, _ := raw.([]any)
+				for _, item := range row {
+					button, _ := item.(map[string]any)
+					if button["text"] == label {
+						token, _ = button["callback_data"].(string)
+					}
+				}
+			}
+		}
+		if token != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s control was not rendered on current prompt: edits=%v", label, provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1200,
+		"callback_query": map[string]any{
+			"id": "callback-input-control", "from": map[string]any{"id": 7000},
+			"message": map[string]any{"message_id": 2, "chat": map[string]any{"id": 1001, "type": "private"}},
+			"data":    token,
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("%s control escaped into business events: %v", label, admitted)
+	}
+	for {
+		for _, edit := range provider.Edits() {
+			visible := fmt.Sprint(edit["text"])
+			if scenario == "skip_input" && strings.Contains(visible, "Decision: retire") {
+				return
+			}
+			if scenario == "cancel_input" && strings.Contains(visible, "Decision: pending") &&
+				!strings.Contains(visible, "Input: reason") {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not converge through card mutation: edits=%v", label, provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(25 * time.Second)
+	var second map[string]any
+	for second == nil {
+		second = provider.Delivery(2)
+		if second != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("second standing card was not delivered: deliveries=%v edits=%v", provider.Delivery(1), provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(second["text"]), "Retire service") {
+		t.Fatalf("second delivery is not a canonical card: %v", second)
+	}
+	markup, _ := second["reply_markup"].(map[string]any)
+	rows, _ := markup["inline_keyboard"].([]any)
+	if len(rows) == 0 {
+		t.Fatalf("second card has no verdict action: %v", second)
+	}
+	row, _ := rows[0].([]any)
+	if len(row) == 0 {
+		t.Fatalf("second card first action is absent: %v", second)
+	}
+	button, _ := row[0].(map[string]any)
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1300,
+		"callback_query": map[string]any{
+			"id": "callback-second-draft", "from": map[string]any{"id": 7000},
+			"message": map[string]any{"message_id": 3, "chat": map[string]any{"id": 1001, "type": "private"}},
+			"data":    button["callback_data"],
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("second draft begin escaped into business events: %v", admitted)
+	}
+	for {
+		prompts := map[string]bool{}
+		for _, edit := range provider.Edits() {
+			if strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required") {
+				prompts[fmt.Sprint(edit["message_id"])] = true
+			}
+		}
+		if prompts["2"] && prompts["3"] {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("two standing drafts were not prompted: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	answer := "private chooser answer"
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1400,
+		"message": map[string]any{
+			"message_id": 9107, "from": map[string]any{"id": 7000},
+			"chat": map[string]any{"id": 1001, "type": "private"}, "text": answer,
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("ambiguous private answer escaped into business events: %v", admitted)
+	}
+	var chooserToken string
+	chooserMessageID := 0
+	for chooserToken == "" {
+		for index := 0; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			visible := fmt.Sprint(delivery["text"])
+			if strings.Contains(visible, answer) {
+				t.Fatalf("chooser echoed private answer: %v", delivery)
+			}
+			if !strings.Contains(visible, "Choose the card for your reply") {
+				continue
+			}
+			markup, _ := delivery["reply_markup"].(map[string]any)
+			rows, _ := markup["inline_keyboard"].([]any)
+			if len(rows) < 2 {
+				t.Fatalf("chooser did not include both drafts: %v", delivery)
+			}
+			choice, _ := rows[1].([]any)
+			selected, _ := choice[0].(map[string]any)
+			chooserToken, _ = selected["callback_data"].(string)
+			chooserMessageID = index + 1
+		}
+		if chooserToken != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ambiguous answer did not produce a chooser: deliveries=%v edits=%v", provider.Delivery(3), provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1500,
+		"callback_query": map[string]any{
+			"id": "callback-select-draft", "from": map[string]any{"id": 7000},
+			"message": map[string]any{"message_id": chooserMessageID, "chat": map[string]any{"id": 1001, "type": "private"}},
+			"data":    chooserToken,
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("draft selection escaped into business events: %v", admitted)
+	}
+	for {
+		decided := 0
+		for _, edit := range provider.Edits() {
+			visible := fmt.Sprint(edit["text"])
+			if strings.Contains(visible, answer) {
+				t.Fatalf("chosen private answer echoed in card edit: %v", edit)
+			}
+			if strings.Contains(visible, "Decision: retire") {
+				decided++
+			}
+		}
+		if decided == 1 {
+			return
+		}
+		if decided > 1 {
+			t.Fatalf("chooser decided multiple cards: edits=%v", provider.Edits())
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("chosen retained answer did not decide one card: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelManualResendAfterLostNotice(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(25 * time.Second)
+	countNotice := func() int {
+		count := 0
+		for index := 0; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			if strings.Contains(fmt.Sprint(delivery["text"]), "Notice: Observed ordinary business text") {
+				count++
+			}
+		}
+		return count
+	}
+	for countNotice() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("lost-response notice never reached provider: deliveries=%v", provider.Delivery(2))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(2200 * time.Millisecond)
+	if got := countNotice(); got != 1 {
+		t.Fatalf("uncertain notice was resent without consent %d times", got)
+	}
+	resendToken, resendMessageID := requestChannelRecoveryAction(t, provider, callbackURL, signing, "Resend notice")
+	update := map[string]any{
+		"update_id": time.Now().UnixMilli() + 1700,
+		"callback_query": map[string]any{
+			"id": "callback-manual-resend", "from": map[string]any{"id": 7000},
+			"message": map[string]any{"message_id": resendMessageID, "chat": map[string]any{"id": 1001, "type": "private"}},
+			"data":    resendToken,
+		},
+	}
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, update); len(admitted) != 0 {
+		t.Fatalf("manual resend escaped into business events: %v", admitted)
+	}
+	for countNotice() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("manual resend did not create one new notice delivery: count=%d", countNotice())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	postChannelTelegramUpdateStatus(t, callbackURL, signing, update, http.StatusOK)
+	time.Sleep(2200 * time.Millisecond)
+	if got := countNotice(); got != 2 {
+		t.Fatalf("duplicate manual resend created %d notice deliveries, want 2", got)
+	}
+}
+
+func requestChannelRecoveryAction(t *testing.T, provider *telegramapi.Double, callbackURL, signing, label string) (string, int) {
+	t.Helper()
+	deadline := time.Now().Add(25 * time.Second)
+	command := ""
+	for _, write := range provider.CommandWrites() {
+		scope, _ := write["scope"].(map[string]any)
+		if scope["type"] != "chat" || fmt.Sprint(scope["chat_id"]) != "1001" {
+			continue
+		}
+		commands, _ := write["commands"].([]map[string]any)
+		if len(commands) == 1 {
+			command = fmt.Sprint(commands[0]["command"])
+		}
+	}
+	if command == "" {
+		t.Fatalf("native recovery entry was not installed: %v", provider.CommandWrites())
+	}
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1600,
+		"message": map[string]any{
+			"message_id": 9110, "from": map[string]any{"id": 7000},
+			"chat": map[string]any{"id": 1001, "type": "private"}, "text": "/" + command,
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("native recovery entry escaped into business events: %v", admitted)
+	}
+	for {
+		for index := 0; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			if !strings.Contains(fmt.Sprint(delivery["text"]), "Uncertain deliveries - check the chat before resending") {
+				continue
+			}
+			markup, _ := delivery["reply_markup"].(map[string]any)
+			rows, _ := markup["inline_keyboard"].([]any)
+			for _, raw := range rows {
+				row, _ := raw.([]any)
+				for _, item := range row {
+					button, _ := item.(map[string]any)
+					if strings.HasPrefix(fmt.Sprint(button["text"]), label) {
+						token, _ := button["callback_data"].(string)
+						if token != "" {
+							return token, index + 1
+						}
+					}
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("native inbox did not expose %s: deliveries=%v", label, provider.Delivery(3))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelEditLossResendQuotedInput(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	countPromptEdits := func() int {
+		count := 0
+		for _, edit := range provider.Edits() {
+			if strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required") {
+				count++
+			}
+		}
+		return count
+	}
+	for countPromptEdits() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("lost prompt edit never reached provider: %v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(2200 * time.Millisecond)
+	if got := countPromptEdits(); got != 1 {
+		t.Fatalf("uncertain prompt edit retried without consent %d times", got)
+	}
+	token, responseMessageID := requestChannelRecoveryAction(t, provider, callbackURL, signing, "Resend card")
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1700,
+		"callback_query": map[string]any{
+			"id": "callback-resend-card", "from": map[string]any{"id": 7000},
+			"message": map[string]any{"message_id": responseMessageID, "chat": map[string]any{"id": 1001, "type": "private"}},
+			"data":    token,
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("resend-card action escaped into business events: %v", admitted)
+	}
+	resendMessageID := 0
+	for resendMessageID == 0 {
+		for index := 2; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			if strings.Contains(fmt.Sprint(delivery["text"]), "Input: reason (text) required") {
+				resendMessageID = index + 1
+				break
+			}
+		}
+		if resendMessageID != 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("manual resend did not deliver the active prompt: deliveries=%v", provider.Delivery(3))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	answer := "private answer after explicit resend"
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1800,
+		"message": map[string]any{
+			"message_id": 9120, "from": map[string]any{"id": 7000},
+			"chat": map[string]any{"id": 1001, "type": "private"}, "text": answer,
+			"reply_to_message": map[string]any{"message_id": resendMessageID},
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("quoted answer escaped into business events: %v", admitted)
+	}
+	for {
+		for _, edit := range provider.Edits() {
+			visible := fmt.Sprint(edit["text"])
+			if strings.Contains(visible, answer) {
+				t.Fatalf("private answer echoed after resend: %v", edit)
+			}
+			if strings.Contains(visible, "Decision: retire") {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("quoted answer to resent card did not finish the draft: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelSharedAudience(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	command := waitNativeInboxCommand(t, provider, "chat_member", "-1001", "7000")
+	deadline := time.Now().Add(25 * time.Second)
+	var card map[string]any
+	for card == nil {
+		card = provider.Delivery(1)
+		if time.Now().After(deadline) {
+			t.Fatal("shared destination received no initial card")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if fmt.Sprint(card["chat_id"]) != "-1001" || !strings.HasPrefix(fmt.Sprint(card["text"]), "Retire service") {
+		t.Fatalf("shared card was not disclosed to the confirmed group: %v", card)
+	}
+	markup, _ := card["reply_markup"].(map[string]any)
+	rows, _ := markup["inline_keyboard"].([]any)
+	first, _ := rows[0].([]any)
+	button, _ := first[0].(map[string]any)
+	verdictToken, _ := button["callback_data"].(string)
+	if verdictToken == "" {
+		t.Fatalf("shared card has no verdict token: %v", card)
+	}
+	postGroupCallback := func(updateID int64, callbackID string, member int64) {
+		t.Helper()
+		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+			"update_id": updateID,
+			"callback_query": map[string]any{
+				"id": callbackID, "from": map[string]any{"id": member},
+				"message": map[string]any{"message_id": 2, "chat": map[string]any{"id": -1001, "type": "group"}},
+				"data":    verdictToken,
+			},
+		}); len(admitted) != 0 {
+			t.Fatalf("shared card callback escaped into business events: %v", admitted)
+		}
+	}
+	postGroupCallback(time.Now().UnixMilli()+2000, "shared-foreign-member", 7001)
+	time.Sleep(250 * time.Millisecond)
+	for _, edit := range provider.Edits() {
+		if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
+			t.Fatalf("foreign group member decided the card: %v", edit)
+		}
+	}
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 2100,
+		"message": map[string]any{
+			"message_id": 9130, "from": map[string]any{"id": 7000},
+			"chat": map[string]any{"id": -1001, "type": "group"},
+			"text": "/" + command + "@SwarmTestBot",
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("shared native entry escaped into business events: %v", admitted)
+	}
+	for {
+		for index := 2; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			if strings.HasPrefix(fmt.Sprint(delivery["text"]), "Inbox\n") {
+				if fmt.Sprint(delivery["chat_id"]) != "-1001" {
+					t.Fatalf("shared inbox response escaped to another conversation: %v", delivery)
+				}
+				goto inboxVisible
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("shared native entry produced no visible inbox: %v", provider.Delivery(2))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+inboxVisible:
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 2200,
+		"message": map[string]any{
+			"message_id": 9131, "from": map[string]any{"id": 7000},
+			"chat": map[string]any{"id": -1001, "type": "group"},
+			"text": "@SwarmTestBot ordinary business text",
+		},
+	}); len(admitted) == 0 {
+		t.Fatal("addressed group business text did not enter the flow")
+	}
+	for {
+		for index := 2; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			if strings.Contains(fmt.Sprint(delivery["text"]), "Notice: Observed ordinary business text") {
+				if fmt.Sprint(delivery["chat_id"]) != "-1001" {
+					t.Fatalf("shared notice changed audience: %v", delivery)
+				}
+				goto noticeVisible
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("shared destination received no future notice: %v", provider.Delivery(3))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+noticeVisible:
+	postGroupCallback(time.Now().UnixMilli()+2300, "shared-authorized-member", 7000)
+	for {
+		for _, edit := range provider.Edits() {
+			if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
+				if fmt.Sprint(edit["chat_id"]) != "-1001" {
+					t.Fatalf("shared card update changed audience: %v", edit)
+				}
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("authorized group verdict did not update its card: %v", provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

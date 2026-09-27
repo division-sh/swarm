@@ -2,6 +2,7 @@ package channeldelivery
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	frozen, err := FreezeCard(card, 17, "", audience)
+	frozen, err := FreezeCard(card, 17, "", audience, DraftPrompt{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +63,15 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 		frozen.Choices[1].Fields[0].Name != "zeta" || frozen.Choices[1].Fields[1].Name != "alpha" {
 		t.Fatalf("frozen card = %#v", frozen)
 	}
-	repeated, err := FreezeCard(card, 17, "", audience)
+	repeated, err := FreezeCard(card, 17, "", audience, DraftPrompt{})
 	if err != nil || !bytes.Equal(frozen.Input, repeated.Input) || frozen.Hash != repeated.Hash {
 		t.Fatalf("repeated freeze changed: %#v, %v", repeated, err)
+	}
+	prompt := DraftPrompt{DraftID: uuid.NewString(), Verdict: "revise", NextFieldIndex: 1, ExpiresAt: now.Add(15 * time.Minute)}
+	prompted, err := FreezeCard(card, 18, "", audience, prompt)
+	if err != nil || !strings.Contains(prompted.FullText, "Input: alpha (text) required") ||
+		strings.Contains(prompted.FullText, "private-answer") || prompted.Hash == frozen.Hash {
+		t.Fatalf("private-answer-free ordered prompt = %#v, %v", prompted, err)
 	}
 	identity := operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
 		ChannelPackID: "provider.mock.hitl_channel", ChannelPackVersion: "1", ChannelManifestHash: "sha256:mock",
@@ -112,7 +119,7 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	if _, err := PrepareCardAction(pending, resolved, card); err == nil {
 		t.Fatal("terminal card prepared a new mutation")
 	}
-	decided, err := FreezeCard(card, 18, "", audience)
+	decided, err := FreezeCard(card, 18, "", audience, DraftPrompt{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +128,11 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 		strings.Contains(decided.FullText, "private-answer") || decided.Hash == frozen.Hash {
 		t.Fatalf("decided render = %#v", decided)
 	}
-	if _, err := FreezeCard(card, 18, "sent", audience); err == nil {
+	if _, err := FreezeCard(card, 18, "sent", audience, DraftPrompt{}); err == nil {
 		t.Fatal("non-effect card accepted dispatch state")
+	}
+	if _, err := FreezeCard(card, 18, "", audience, prompt); err == nil {
+		t.Fatal("terminal card accepted active input prompt")
 	}
 }
 
@@ -144,6 +154,33 @@ func TestChannelResponseFreezesRequestedAudienceAndContent(t *testing.T) {
 	}
 	if _, err := FreezeResponse(publicationID, " ", audience); err == nil {
 		t.Fatal("empty channel response was admitted")
+	}
+}
+
+func TestChannelRecoveryInboxPagesRetainExactChoices(t *testing.T) {
+	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 3,
+		ExternalAccountRef: "account", ConversationRef: "direct", ConversationScope: operatorchannel.ConversationScopeDirect}
+	choices := make([]RecoveryChoice, 16)
+	for index := range choices {
+		choices[index] = RecoveryChoice{DeliveryID: uuid.NewString(), Label: fmt.Sprintf("Resend card %d", index)}
+	}
+	for pageIndex, wantCount := range []int{7, 7, 2} {
+		frozen, err := FreezeRecoveryInbox(uuid.NewString(), "Inbox", choices, pageIndex, audience)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := Decode(frozen.Input, frozen.Hash)
+		if err != nil || decoded.Recovery == nil || decoded.Recovery.PageIndex != pageIndex ||
+			len(decoded.RecoveryChoices) != len(choices) || decoded.Audience != audience ||
+			!strings.Contains(decoded.FullText, "The first message may have arrived") {
+			t.Fatalf("recovery page %d changed on readback: %#v, %v", pageIndex, decoded, err)
+		}
+		if got := strings.Count(decoded.FullText, "- Resend card "); got != wantCount {
+			t.Fatalf("recovery page %d has %d visible choices, want %d", pageIndex, got, wantCount)
+		}
+	}
+	if _, err := FreezeRecoveryInbox(uuid.NewString(), "Inbox", choices, 3, audience); err == nil {
+		t.Fatal("out-of-range recovery page was admitted")
 	}
 }
 

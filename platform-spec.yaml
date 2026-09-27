@@ -14837,6 +14837,9 @@ platform_tables:
         preserving the selected identity as a fence. Notice admission serializes on the principal
         before reading this row; only notices committed after the first-current cut may be planned
         individually. No historical notice is inferred deliverable from a timestamp or list order.
+        Confirming a shared conversation as default explicitly discloses that future notices,
+        decision cards, and their updates will be visible to that conversation; this does not
+        grant its other members the operator principal's action authority.
         The card change cursor advances in the same selected-store transaction that verifies the
         exact change and durably plans an open card. Paginated open-card list reconciliation and
         exact readback of every retained delivery receipt remain mandatory independent repairs.
@@ -14936,8 +14939,12 @@ platform_tables:
         cursor to completion before freezing one readback. View full and Next page derive
         deterministic content only from the original immutable render, with each admitted
         tap owning its own response plan. Opening the inbox is not acknowledgment, a verdict,
-        or resend consent. Planning is
-        not evidence that a provider write was launched, accepted, or acknowledged by a human.
+        or resend consent. An uncertain notice or card delivery is never retried automatically.
+        A separate current recovery action may create one linked new delivery generation for the
+        same pending source after checking the current default; the predecessor and its uncertainty
+        remain durable. The recovery presentation states that the first message may have arrived
+        and the resend creates another message. Repeating that action cannot create another generation. Planning is not
+        evidence that a provider write was launched, accepted, or acknowledged by a human.
       ddl: |
         CREATE TABLE channel_delivery_plans (
             delivery_id UUID PRIMARY KEY,
@@ -14955,10 +14962,14 @@ platform_tables:
             state TEXT NOT NULL CHECK (state IN ('planned','rendered','sent','uncertain','retired')),
             current_render_id UUID,
             current_receipt_operation_id UUID,
+            resend_generation BIGINT NOT NULL DEFAULT 0 CHECK (resend_generation >= 0),
+            resend_of_delivery_id UUID REFERENCES channel_delivery_plans(delivery_id),
+            resend_action_publication_id UUID UNIQUE,
             created_at TIMESTAMPTZ NOT NULL,
             CHECK ((source_kind = 'summary' AND summary_count IS NOT NULL) OR (source_kind <> 'summary' AND summary_count IS NULL)),
             CHECK ((source_kind = 'response' AND request_activation_id IS NOT NULL) OR (source_kind <> 'response' AND request_activation_id IS NULL)),
-            UNIQUE (source_kind, source_id, interface_key, delivery_epoch),
+            CHECK ((resend_generation = 0 AND resend_of_delivery_id IS NULL AND resend_action_publication_id IS NULL) OR (resend_generation > 0 AND resend_of_delivery_id IS NOT NULL AND resend_action_publication_id IS NOT NULL)),
+            UNIQUE (source_kind, source_id, interface_key, delivery_epoch, resend_generation),
             INDEX idx_channel_delivery_plan_source (source_kind, source_id),
             INDEX idx_channel_delivery_plan_pending (state, created_at)
         );
@@ -14969,7 +14980,13 @@ platform_tables:
         checked together at selected-store admission and readback. A provider excerpt or page
         never replaces this full input. A new card or independent dispatch state creates a
         separate render member; previously shown input is never overwritten. This table owns
-        no verdict, provider effect attempt, or acknowledgment state. A requested response
+        no verdict, provider effect attempt, or acknowledgment state. An active principal-owned
+        card draft contributes only its verdict, next declared field, position and expiry to a
+        new frozen card render after the exact draft change; private entered values never enter
+        render input, group output, or the public change cursor. A chooser freezes the complete
+        current candidate list and retains only the inbound answer reference, never the answer
+        text. A recovery page freezes uncertain delivery identities and requires a separate
+        exact resend tap. Navigation pages derive only from those immutable lists. A requested response
         stores its immutable readback here in the same transaction that settles the exact
         verified inbound intent; later launch reads these frozen bytes rather than
         reconstructing the inbox from newer mailbox state.
@@ -15010,10 +15027,11 @@ platform_tables:
     channel_delivery_actions:
       description: >-
         Immutable opaque callbacks for one exact frozen channel render. The selected store mints
-        one stable token per ordered verdict, notice acknowledgment, or navigation control in the render transaction;
+        one stable token per ordered verdict, notice acknowledgment, draft cancel/skip,
+        chooser selection, explicit resend, or navigation control in the render transaction;
         duplicate preparation reads back the same tokens. Tokens do not grant authority alone:
         authenticated provider facts must still match current principal, binding, destination,
-        receipt, render and canonical card or notice state before any mutation. Notice
+        receipt, render and canonical card, draft, notice, or uncertain delivery state before any mutation. Notice
         acknowledgment consumes the canonical principal-scoped mailbox completion transaction,
         independently of the provider callback acknowledgment. The acknowledged notice is
         re-rendered without its mutation control and every current receipt is edited from
@@ -15024,7 +15042,7 @@ platform_tables:
             action_token UUID PRIMARY KEY,
             render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
             action_position INTEGER NOT NULL CHECK (action_position > 0),
-            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice')),
+            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice','cancel_input','skip_input','select_draft','next_draft_page','resend','next_recovery_page')),
             verdict TEXT,
             label TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL,
@@ -15281,7 +15299,13 @@ platform_tables:
         without a business event. The fact retains provider occurrence, exact message and
         reply references, but grants no entry, draft or principal authority until a current
         selected-store admission resolves it. An acknowledged webhook is replayable after
-        process death without interpreting provider text from process memory.
+        process death without interpreting provider text from process memory. Bare text is
+        operator input only when the selected store proves an active draft tied to a sent
+        card receipt in the exact current bound conversation. That selection is checked
+        again in the publication transaction; a changed selection fails without committing
+        either an operator intent or a business event. Bare text with no such draft remains
+        ordinary business publication. Quoted and native-entry text remain reserved for
+        exact operator admission and never fall back to business publication.
       ddl: |
         CREATE TABLE operator_channel_text_intents (
             publication_id UUID PRIMARY KEY,
@@ -16789,7 +16813,10 @@ platform_tables:
         or already-consumed drafts fail closed. Replacement, cancellation, consumption, expiry, stage supersession, and run
         supersession close every affected active draft and append an exact decision_card_changes cursor row in the same mutation.
         Storage, request and JSON readback use principal_id; changing a bearer credential for the same principal does not
-        change draft authority. No token-shaped draft decoder or compatibility alias is supported.'
+        change draft authority. Ordered partial input and the next field index are owned by this row;
+        progress change records contain no entered value. A quoted channel answer may select the active draft using
+        any sent receipt for its exact card at the current default destination, including a linked manual resend;
+        the original draft receipt remains its mutation anchor. No token-shaped draft decoder or compatibility alias is supported.'
       ddl: |
         CREATE TABLE decision_card_input_drafts (
             input_draft_id UUID PRIMARY KEY,
@@ -16799,6 +16826,8 @@ platform_tables:
             verdict        TEXT NOT NULL,
             delivery_receipt_id TEXT,
             status         TEXT NOT NULL CHECK (status IN ('active', 'cancelled', 'consumed', 'expired')),
+            input_fields   JSONB NOT NULL DEFAULT '{}',
+            next_field_index BIGINT NOT NULL DEFAULT 0 CHECK (next_field_index >= 0),
             expires_at     TIMESTAMPTZ NOT NULL,
             created_at     TIMESTAMPTZ NOT NULL,
             updated_at     TIMESTAMPTZ NOT NULL,
@@ -16816,7 +16845,7 @@ platform_tables:
             change_id  BIGSERIAL PRIMARY KEY,
             run_id     UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             card_id    UUID NOT NULL REFERENCES decision_cards(card_id) ON DELETE CASCADE,
-            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'expired', 'superseded', 'input_draft_started', 'input_draft_cancelled', 'input_draft_expired', 'input_draft_consumed')),
+            change_type TEXT NOT NULL CHECK (change_type IN ('created', 'decided', 'deferred', 'expired', 'superseded', 'input_draft_started', 'input_draft_progressed', 'input_draft_cancelled', 'input_draft_expired', 'input_draft_consumed')),
             payload    JSONB NOT NULL DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             INDEX idx_decision_card_changes_card (card_id, change_id),
@@ -30890,7 +30919,7 @@ api_specification:
           sequence: {type: integer, minimum: 1}
           card_id: {$ref: '#/components/schemas/OpaqueId'}
           run_id: {$ref: '#/components/schemas/OpaqueId'}
-          change_type: {type: string, enum: [created, decided, deferred, expired, superseded, input_draft_started, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
+          change_type: {type: string, enum: [created, decided, deferred, expired, superseded, input_draft_started, input_draft_progressed, input_draft_cancelled, input_draft_expired, input_draft_consumed]}
           payload: {type: object, additionalProperties: true}
           created_at: {$ref: '#/components/schemas/Timestamp'}
           effect: {$ref: '#/components/schemas/ProposedEffectState'}
@@ -38992,7 +39021,9 @@ managed_external_effect_authority:
       a stale source, retired or replaced default/binding/activation, or changed render fails before dispatch.
       An authorized attempt proven unlaunched may resume under the journal's exact prelaunch retry rule. Launched,
       response-observed, and uncertain attempts never redispatch automatically. Confirmation authority cannot
-      authorize notice or card delivery, and no agent, run, entity, or synthetic token is required.
+      authorize notice or card delivery. A manual resend is a distinct linked delivery and effect operation
+      admitted only by a current, single-use recovery action; it never reuses or settles the uncertain attempt.
+      No agent, run, entity, or synthetic token is required.
     channel_action_ack: >
       A callback acknowledgment is a separate runless managed provider effect keyed by the verified inbound action
       publication. Before launch, the selected store requires the exact pending fact, current receipt/render,

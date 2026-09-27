@@ -169,6 +169,7 @@ type CommitCommand struct {
 	OperatorChannelClaim  *operatorchannel.InboundClaim
 	OperatorChannelAction *operatorchannel.InboundAction
 	OperatorChannelText   *operatorchannel.InboundText
+	PotentialBareText     *operatorchannel.InboundText
 }
 
 func (c CommitCommand) Validate() error {
@@ -187,6 +188,18 @@ func (c CommitCommand) Validate() error {
 	}
 	if operatorKinds > 1 {
 		return fmt.Errorf("inbound publication cannot contain multiple operator channel facts")
+	}
+	if c.PotentialBareText != nil {
+		text := c.PotentialBareText
+		if operatorKinds != 0 || len(c.Finalization.Events) == 0 || text.EntryReference != "" || text.ReplyToReference != "" {
+			return fmt.Errorf("potential bare channel text requires only business events")
+		}
+		if err := text.Validate(); err != nil {
+			return err
+		}
+		if text.PublicationID != request.PublicationID || text.Provider != request.Provider || text.ProviderEventID != request.ProviderEventID {
+			return fmt.Errorf("potential bare channel text provenance does not match inbound request")
+		}
 	}
 	if len(c.Finalization.Events) == 0 {
 		switch {
