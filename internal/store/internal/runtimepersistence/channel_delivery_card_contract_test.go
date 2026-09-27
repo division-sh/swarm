@@ -281,6 +281,44 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			if rebound.Revision <= reconnected.Revision {
 				t.Fatalf("rebind did not advance binding revision: %#v", rebound)
 			}
+			var recoveredCursor int64
+			var recoveredCurrent bool
+			switch store := cards.(type) {
+			case *SQLiteRuntimeStore:
+				path := store.Path()
+				if err := store.Close(); err != nil {
+					t.Fatal(err)
+				}
+				fresh, err := NewSQLiteRuntimeStore(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = fresh.Close() })
+				if err := fresh.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
+					t.Fatal(err)
+				}
+				recoveredCursor, recoveredCurrent, err = fresh.CurrentChannelCardChangeCursor(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case *PostgresStore:
+				fresh, err := store.backend.Conn(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer fresh.Close()
+				err = fresh.QueryRowContext(ctx, `SELECT card_change_cursor FROM channel_delivery_defaults WHERE singleton_id=1 AND state='current'`).Scan(&recoveredCursor)
+				if err != nil {
+					t.Fatal(err)
+				}
+				recoveredCurrent = true
+			default:
+				t.Fatalf("unsupported card store %T", cards)
+			}
+			if !recoveredCurrent || recoveredCursor != terminalSequence {
+				t.Fatalf("card change cursor after fresh selected-store connection = %d, current=%t, want=%d",
+					recoveredCursor, recoveredCurrent, terminalSequence)
+			}
 		})
 	}
 }
