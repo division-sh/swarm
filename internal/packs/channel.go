@@ -1079,6 +1079,10 @@ func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (stri
 	return p.RuntimeToolID(operation), prepared, nil
 }
 
+func (p OutboundBindingPlan) ProjectOperationOutput(operation string, result any) (map[string]any, error) {
+	return p.structural.ProjectOperationOutput(operation, result)
+}
+
 func (p SatisfactionPlan) CapabilitySubject() (Subject, error) {
 	subject := Subject{
 		ID: p.channel.ID(), Kind: SubjectChannelPack, Provider: p.provider.String(),
@@ -1223,8 +1227,37 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 		return nil, fmt.Errorf("channel operation %q context: %w", name, err)
 	}
 	environment := map[string]any{"input": input, "context": context}
+	out, err := projectChannelOperationMappings(name, operation.input, environment)
+	if err != nil {
+		return nil, err
+	}
+	if err := operation.toolSchema.InputSchema().Validate(out); err != nil {
+		return nil, fmt.Errorf("channel operation %q projected connector input: %w", name, err)
+	}
+	return out, nil
+}
+
+func (p SatisfactionPlan) ProjectOperationOutput(name string, result any) (map[string]any, error) {
+	operation, ok := p.operations[strings.TrimSpace(name)]
+	if !ok {
+		return nil, fmt.Errorf("channel operation %q is not compiled", name)
+	}
+	if err := operation.toolSchema.OutputSchema().Validate(result); err != nil {
+		return nil, fmt.Errorf("channel operation %q connector output: %w", name, err)
+	}
+	out, err := projectChannelOperationMappings(name, operation.output, map[string]any{"result": result})
+	if err != nil {
+		return nil, err
+	}
+	if err := operation.outputSchema.Validate(out); err != nil {
+		return nil, fmt.Errorf("channel operation %q projected output: %w", name, err)
+	}
+	return out, nil
+}
+
+func projectChannelOperationMappings(name string, mappings []compiledChannelMapping, environment map[string]any) (map[string]any, error) {
 	out := map[string]any{}
-	for _, mapping := range operation.input {
+	for _, mapping := range mappings {
 		if mapping.usesEach {
 			itemsValue, ok := mapping.each.lookup(environment)
 			if !ok {
@@ -1264,9 +1297,6 @@ func (p SatisfactionPlan) PrepareOperationInput(name string, input, context any)
 		if err := mapping.target.set(out, value); err != nil {
 			return nil, err
 		}
-	}
-	if err := operation.toolSchema.InputSchema().Validate(out); err != nil {
-		return nil, fmt.Errorf("channel operation %q projected connector input: %w", name, err)
 	}
 	return out, nil
 }
