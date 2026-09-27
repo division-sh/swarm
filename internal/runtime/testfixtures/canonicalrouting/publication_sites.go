@@ -45,8 +45,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		scope = "."
 	}
 	connects, inputPins, outputPins, eventSchemas, requestSchemas, handlers := "", "", "", "", "", ""
+	siblingInputPins, siblingRequestSchemas, siblingProducers := "", "", ""
 	for _, family := range families {
 		request, result := family+".requested", "result."+family
+		siblingRequest := "sibling." + family + ".requested"
+		siblingInputPins += "      - " + siblingRequest + "\n"
+		siblingRequestSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", siblingRequest, valueType)
+		siblingProducers += fmt.Sprintf("sibling-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: payload.case_id, value: payload.value}}\n", family, siblingRequest, siblingRequest, result)
+		connects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", siblingRequest)
 		if mode == "template" {
 			inputPins += fmt.Sprintf("      - {event: %s, resolution: {mode: select-or-create}}\n", request)
 		} else {
@@ -111,8 +117,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	wildcard := "wildcard:\n  execution_type: system_node\n  subscribes_to: [result.*]\n  event_handlers:\n    result.*:\n      guard: {id: observed, check: 'int(payload.value) >= 0'}\n"
 	sourceSchema := "name: publication-source\npins:\n  inputs:\n    events:\n" + inputPins + "  outputs:\n    events:\n" + outputPins
 	if mode == "root" {
+		sourceSchema = strings.Replace(sourceSchema, "  outputs:\n    events:\n", siblingInputPins+"  outputs:\n    events:\n"+siblingInputPins, 1)
 		writeClosedVariantFile(t, root, "schema.yaml", sourceSchema+"connect:\n"+connects)
-		writeClosedVariantFile(t, root, "events.yaml", requestSchemas+eventSchemas)
+		writeClosedVariantFile(t, root, "events.yaml", requestSchemas+eventSchemas+siblingRequestSchemas)
 		writeClosedVariantFile(t, root, "nodes.yaml", handlers+local+wildcard)
 	} else {
 		rootSchema := "name: publication-driver\npins:\n  inputs:\n    events:\n"
@@ -129,15 +136,16 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				driver += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", choice: \"${payload.choice}\", items: \"${payload.items}\"}}\n", family, request, request, dispatch)
 			}
 			writeClosedVariantFile(t, root, "nodes.yaml", driver)
-			writeClosedVariantFile(t, root, "events.yaml", driverSchemas)
+			writeClosedVariantFile(t, root, "events.yaml", driverSchemas+siblingRequestSchemas)
 		} else {
 			rootSchema += inputPins + "  outputs:\n    events:\n" + requestSchemasToPins(families)
 			for _, family := range families {
 				request := family + ".requested"
 				connects += fmt.Sprintf("  - {event: %s, from: ., to: source}\n", request)
 			}
-			writeClosedVariantFile(t, root, "events.yaml", requestSchemas)
+			writeClosedVariantFile(t, root, "events.yaml", requestSchemas+siblingRequestSchemas)
 		}
+		rootSchema = strings.Replace(rootSchema, "  outputs:\n    events:\n", siblingInputPins+"  outputs:\n    events:\n"+siblingInputPins, 1)
 		writeClosedVariantFile(t, root, "schema.yaml", rootSchema+"connect:\n"+connects)
 		writeClosedVariantFile(t, root, "source/schema.yaml", sourceSchema)
 		writeClosedVariantFile(t, root, "source/events.yaml", eventSchemas)
@@ -153,9 +161,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	for _, result := range results {
 		siblingEvents += result + ":\n  case_id: text\n  value: " + valueType + "\n"
 	}
-	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\n")
+	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n    events:\n"+siblingInputPins)
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingEvents)
-	writeClosedVariantFile(t, root, "sibling/nodes.yaml", local)
+	writeClosedVariantFile(t, root, "sibling/nodes.yaml", siblingProducers+local)
 	return root
 }
 

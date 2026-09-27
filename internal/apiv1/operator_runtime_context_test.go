@@ -140,7 +140,7 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 		t.Fatalf("event.publish existing run deliveries = %#v, want typed agent and node rows", deliveries)
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
-	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.FlowNode(t, ".", "scan-orchestrator").Key(), "pending", 1)
+	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.FlowNode(t, "discovery", "scan-orchestrator").Key(), "pending", 1)
 	if got := countEventRowsByRunID(t, fixture.db, runID); got != 1 {
 		t.Fatalf("event rows for existing run = %d, want 1", got)
 	}

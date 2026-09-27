@@ -25,7 +25,7 @@ func TestServedStateResultPublicationBothStores(t *testing.T) {
 					name, local, document := "document.requested", "result."+outcome, "name: exact-content\n"
 					flow := "."
 					if mode == "static" {
-						name, flow = "source/"+name, "source"
+						flow = "source"
 					}
 					requestID := uuid.NewString()
 					params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash, "idempotency_key": "state-result-seed",

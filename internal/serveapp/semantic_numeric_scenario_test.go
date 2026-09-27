@@ -22,11 +22,13 @@ func TestServedSemanticNumericScenarioModes(t *testing.T) {
 		for _, mode := range []string{"authored", "generated", "authored_derive", "automatic_derived"} {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
-				root := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+				root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
 				files := map[string]string{
-					"fulfillment/events.yaml": `fulfillment.requested:
+					"events.yaml": `fulfillment.requested:
   value: integer
   fraction: numeric
+`,
+					"fulfillment/events.yaml": `
 fulfillment.completed:
   value: integer
   fraction: numeric
@@ -58,10 +60,10 @@ collector:
 				case "generated":
 					scenario += "steps:\n  - publish: fulfillment.requested\n    payload: generate\n"
 				case "authored_derive":
-					scenario += "derive:\n  flow: fulfillment\n  input: fulfillment.requested\n  payload:\n    generate: true\n"
+					scenario += "derive:\n  flow: .\n  input: fulfillment.requested\n  payload:\n    generate: true\n"
 				}
 				if mode != "automatic_derived" {
-					files["fulfillment/tests/numeric.yaml"] = scenario + "expect:\n  events:\n    include: [fulfillment/fulfillment.completed]\n  no_dead_letters: true\n"
+					files["tests/numeric.yaml"] = scenario + "expect:\n  events:\n    include: [fulfillment/fulfillment.completed]\n  no_dead_letters: true\n"
 				}
 				for relative, raw := range files {
 					path := filepath.Join(root, relative)
@@ -75,7 +77,7 @@ collector:
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 				args := []string{"test", root, "--config", writeServeRuntimeTestConfig(t), "--timeout", "10s", "--poll-interval", "10ms"}
 				if mode == "automatic_derived" {
-					args = append(args, "--derive", "fulfillment", "--input", "fulfillment.requested")
+					args = append(args, "--derive", ".", "--input", "fulfillment.requested")
 				}
 				var stdout, stderr bytes.Buffer
 				if code := executeScenarioInOwnedLifecycle(t, repoRootForTest(), args, rt.Endpoint, &stdout, &stderr); code != 0 {
@@ -112,7 +114,7 @@ collector:
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.list", map[string]any{"bundle_hash": rt.BundleHash}, &listed)
 				var matched []operatorread.RunHeader
 				for _, run := range listed.Runs {
-					if run.Origin.EventType() == "fulfillment/fulfillment.requested" {
+					if run.Origin.EventType() == "fulfillment.requested" {
 						matched = append(matched, run)
 					}
 				}
@@ -136,7 +138,7 @@ collector:
 					}
 					return projected.(map[string]any)
 				}
-				in, out := read("fulfillment/fulfillment.requested"), read("fulfillment/fulfillment.completed")
+				in, out := read("fulfillment.requested"), read("fulfillment/fulfillment.completed")
 				integer, ok := in["value"].(int64)
 				if !ok || out["value"] != integer+1 || out["explicit_double"] != float64(integer)+1 {
 					t.Fatalf("numeric execution input=%#v output=%#v", in, out)

@@ -61,7 +61,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				} else {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "fork.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": "empty-fork-seed"})
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
-					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "empty-fork-pause"})
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
 				}
 				request := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -105,6 +104,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 					waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, request.RunID)
 					requireLifecycleEventCount(t, rt, request.RunID, "work.completed", 1)
+					requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": request.RunID, "idempotency_key": "empty-fork-pause"})
 					if surface == "empty_snapshot_refusal" {
 						forkPoint = outputID
 					}

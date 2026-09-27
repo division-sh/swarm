@@ -84,7 +84,7 @@ func TestCurrentProofPlansBindActiveRequiredRoots(t *testing.T) {
 				}
 				for id, proof := range map[string]string{
 					"local-api-routing-canaries": "TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores",
-					"local-routing-reporter":     "TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends",
+					"local-routing-reporter":     "TestIssue2394ServedFanOutSupportedSurfacesBothStores",
 				} {
 					unit, _ := plan.Unit(id)
 					if !unitRequires(unit, proof) {

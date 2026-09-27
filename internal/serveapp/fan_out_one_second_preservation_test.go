@@ -221,9 +221,10 @@ func assertIssue2394OneSecondPayloads(t *testing.T, rt servedControlProofRuntime
 		event, ok := byID[id]
 		row := wanted[ordinal]
 		expected := map[string]any{"account_id": row["account_id"], "portfolio_id": portfolio, "eng_roles": float64(ordinal), "gem_score": row["gem_score"], "external_id": row["external_id"], "eligible": true}
-		if !ok || event.RunID != runID || event.EventName != "portfolio/account.registered" || !reflect.DeepEqual(event.Payload, expected) || len(event.Deliveries) != 0 || event.NoDelivery == nil {
+		if !ok || event.RunID != runID || event.EventName != "portfolio/account.registered" || !reflect.DeepEqual(event.Payload, expected) {
 			t.Fatalf("ordinal%d exact delayed payload/settlement changed: %+v want=%v", ordinal, event, expected)
 		}
+		assertIssue2394RegistrationDelivery(t, event)
 		delete(byID, id)
 		count++
 	}

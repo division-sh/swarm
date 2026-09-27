@@ -30,7 +30,16 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 				_, db, _ = testutil.StartPostgres(t)
 				selected = storetest.AdmitPostgresRuntimeStore(t, db)
 			}
-			source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+			bundle := runStartTestBundle("scan.requested")
+			event := bundle.Events["scan.requested"]
+			event.Payload.Properties["value"] = runtimecontracts.EventFieldSpec{Type: "json"}
+			event.Payload.Properties["nested"] = runtimecontracts.EventFieldSpec{Type: "json"}
+			bundle.Events["scan.requested"] = event
+			bundle.FlowTree.Root.Events["scan.requested"] = event
+			if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+				t.Fatal(err)
+			}
+			source := semanticview.Wrap(bundle)
 			bus, err := newScopedAPITestEventBus(t, selected, runStartTestEventBusOptions(source))
 			if err != nil {
 				t.Fatal(err)

@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[string]string, targetFlow string) string {
@@ -29,7 +27,7 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 	paths := make([]string, 0, len(modes))
 	for path, mode := range modes {
 		switch mode {
-		case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton, runtimecontracts.FlowModeTemplate:
+		case "static", "singleton", "template":
 		default:
 			t.Fatalf("state-only acquisition fixture has unsupported mode %q", mode)
 		}
@@ -43,11 +41,11 @@ func CopyStateOnlyAcquisition(t testing.TB, workflowName string, modes map[strin
 			schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "name: "+workflowName+"\n")
 		} else {
 			schema += "mode: " + mode + "\n"
-			if mode == runtimecontracts.FlowModeTemplate {
+			if mode == "template" {
 				schema += "instance: instance_key\n"
 			}
 			if path == targetFlow {
-				if mode == runtimecontracts.FlowModeTemplate {
+				if mode == "template" {
 					schema += "pins:\n  inputs:\n    events:\n      - {event: test.node_emitted.selector, resolution: {mode: select}}\n      - {event: test.node_emitted.upserter, resolution: {mode: select-or-create}}\n"
 				} else {
 					schema += "pins:\n  inputs:\n    events: [test.node_emitted.selector, test.node_emitted.upserter]\n"

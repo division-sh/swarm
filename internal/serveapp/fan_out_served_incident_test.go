@@ -40,7 +40,7 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 			})
 			waitPublicationSiteCompletion(t, rt, opened.RunID)
 			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"run_id": opened.RunID, "event_name": "portfolio/portfolio.accounts.register.requested", "idempotency_key": uuid.NewString(),
+				"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested", "idempotency_key": uuid.NewString(),
 				"payload": map[string]any{"portfolio_id": "incident", "account_ids": []map[string]any{
 					{"account_id": "valid-first", "eng_roles": 7, "gem_score": 7, "external_id": uuid.NewString()},
 					{"account_id": "evaluation-fails", "eng_roles": 8, "gem_score": "not-a-number", "external_id": uuid.NewString()},

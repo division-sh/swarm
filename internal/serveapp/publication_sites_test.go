@@ -110,9 +110,6 @@ func proveServedPublicationSites(t *testing.T, textValues bool, selectedFamilies
 						}
 						for _, choice := range choices {
 							name := family + ".requested"
-							if mode == "static" {
-								name = "source/" + name
-							}
 							items := []int{}
 							values := []int{choice}
 							if strings.Contains(family, "fanout") {

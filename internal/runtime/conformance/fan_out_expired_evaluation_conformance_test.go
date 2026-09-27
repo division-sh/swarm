@@ -34,7 +34,7 @@ type m35PublicationLogger struct {
 
 func (l *m35PublicationLogger) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlated map[string]string, detail any, failure *failures.Envelope, durationUS int) error {
 	err := l.conformanceRuntimeLoggerHook.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlated, detail, failure, durationUS)
-	if component == "eventbus" && action == "published" && (eventType == "portfolio/portfolio.opened" || eventType == "portfolio/portfolio.accounts.register.requested") {
+	if component == "eventbus" && action == "published" && (eventType == "portfolio.opened" || eventType == "portfolio.accounts.register.requested") {
 		l.receipts <- m35PublicationReceipt{eventID: eventID, err: err}
 	}
 	return err

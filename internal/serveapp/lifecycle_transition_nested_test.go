@@ -19,7 +19,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			var gateEntities []string
 			for _, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
-				seedParams := map[string]any{"event_name": prefix + "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": side + "-seed"}
+				seedParams := map[string]any{"event_name": side + ".work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": side + "-seed"}
 				if runID != "" {
 					seedParams["run_id"] = runID
 					delete(seedParams, "bundle_hash")
@@ -31,7 +31,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				runID = seed.RunID
 				entityID := requireLifecycleFlowEntity(t, rt, runID, prefix, "waiting")
 				publish := func(event, key string, payload map[string]any) {
-					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": prefix + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})
+					requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": side + "." + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})
 				}
 				publish("loop.start", "start", map[string]any{"seed": true})
 				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")

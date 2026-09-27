@@ -656,9 +656,7 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 		if err != nil {
 			return params, rootInputApplicationError(err)
 		}
-		return params, nil
-	}
-	if !eventDeclared(opts.Source, params.EventName) {
+	} else if !eventDeclared(opts.Source, params.EventName) {
 		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":      params.EventName,
 			"declared_events": declaredEventNames(opts.Source),
@@ -671,7 +669,7 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 			"violations": []map[string]any{{
 				"field_path": "$.entity_id",
 				"rule":       "create_entity_mints_entity_id",
-				"message":    "caller-supplied entity_id is not allowed for create-entity event.publish",
+				"message":    "caller-supplied entity_id is not allowed for a create-entity event",
 			}},
 			"event_name": params.EventName,
 		})
@@ -685,6 +683,9 @@ func validateEventPublication(ctx context.Context, opts EventPublicationOptions,
 			}},
 			"event_name": params.EventName,
 		})
+	}
+	if cfg.rootInputOnly {
+		return params, nil
 	}
 	if cfg.requireExistingExplicitRun && !params.NewRunCreated {
 		runs, err := requireRunReadStore(opts.Runs)

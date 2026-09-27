@@ -1682,23 +1682,34 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 				t.Fatal(err)
 			}
 			handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
-			response := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "thing.requested", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`, "", "renamed-create-entity"))
-			if response.Error == nil {
-				t.Fatal("renamed create-entity receiver accepted caller-supplied entity_id")
-			}
-			data := asMap(t, response.Error.Data)
-			if data["code"] != PayloadValidationFailedCode {
-				t.Fatalf("renamed create-entity rejection = %#v", response.Error)
-			}
-			violations := asSlice(t, asMap(t, data["details"])["violations"])
-			if len(violations) != 1 || asMap(t, violations[0])["rule"] != "create_entity_mints_entity_id" {
-				t.Fatalf("renamed create-entity violations = %#v", violations)
-			}
-			for _, table := range []string{"runs", "events", "event_deliveries", "api_idempotency"} {
-				var count int
-				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
-					t.Fatalf("%s rows after rejection = %d, err=%v", table, count, err)
-				}
+			payload := `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":50}`
+			for _, method := range []struct {
+				name string
+				body string
+			}{
+				{"event.publish", eventPublishBody("", runStartTestBundleHash, "thing.requested", payload, "", "renamed-create-publish")},
+				{"run.start", runStartBody("", runStartTestBundleHash, "thing.requested", payload, "renamed-create-start")},
+			} {
+				t.Run(method.name, func(t *testing.T) {
+					response := rpcCall(t, handler, method.body)
+					if response.Error == nil {
+						t.Fatal("renamed create-entity receiver accepted caller-supplied entity_id")
+					}
+					data := asMap(t, response.Error.Data)
+					if data["code"] != PayloadValidationFailedCode {
+						t.Fatalf("renamed create-entity rejection = %#v", response.Error)
+					}
+					violations := asSlice(t, asMap(t, data["details"])["violations"])
+					if len(violations) != 1 || asMap(t, violations[0])["rule"] != "create_entity_mints_entity_id" {
+						t.Fatalf("renamed create-entity violations = %#v", violations)
+					}
+					for _, table := range []string{"runs", "events", "event_deliveries", "api_idempotency"} {
+						var count int
+						if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+							t.Fatalf("%s rows after rejection = %d, err=%v", table, count, err)
+						}
+					}
+				})
 			}
 		})
 	}
@@ -2625,13 +2636,17 @@ func eventPublishRenamedConnectedCreateEntityTestBundle() *runtimecontracts.Work
 			},
 			Connect: []runtimecontracts.FlowConnect{{Event: rootEvent, From: ".", To: "factory", Rename: receiverEvent, SourceFile: "schema.yaml", SourceLine: 1}},
 		},
-		Events:   map[string]runtimecontracts.EventCatalogEntry{rootEvent: {Payload: payload}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{rootEvent: {Payload: payload}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"observer": {
+			ExecutionType: "system_node", SubscribesTo: []string{rootEvent},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{rootEvent: {}},
+		}},
 		Children: []runtimecontracts.FlowContractView{child},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: authorActivityTestSourceArtifact,
 		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "factory", Version: "1.0.0"},
-		Events:         root.Events, RootSchema: &root.Schema,
+		Events:         root.Events, Nodes: root.Nodes, RootSchema: &root.Schema,
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"factory": child.Schema},
 		FlowSources: map[string]runtimecontracts.FlowSource{
 			".":       {FlowPath: ".", Schema: "schema.yaml", Events: "events.yaml"},
