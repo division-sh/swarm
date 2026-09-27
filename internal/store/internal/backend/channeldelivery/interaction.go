@@ -45,6 +45,35 @@ func InsertActionIntentTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 	return nil
 }
 
+func InsertTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, receivedAt time.Time, postgres bool) error {
+	if tx == nil {
+		return fmt.Errorf("channel text intent requires a selected transaction")
+	}
+	if err := text.Validate(); err != nil {
+		return err
+	}
+	if receivedAt.IsZero() {
+		return fmt.Errorf("channel text intent requires received_at")
+	}
+	fact, err := canonicaljson.Bytes(text.TextFact)
+	if err != nil {
+		return err
+	}
+	query := `INSERT INTO operator_channel_text_intents
+		(publication_id, provider, provider_event_id, interface_key, fact, provider_authorization, state, recorded_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`
+	if postgres {
+		query = `INSERT INTO operator_channel_text_intents
+			(publication_id, provider, provider_event_id, interface_key, fact, provider_authorization, state, recorded_at)
+			VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, 'pending', $7)`
+	}
+	if _, err := tx.ExecContext(ctx, query, text.PublicationID, text.Provider, text.ProviderEventID,
+		text.Interface.Key(), string(fact), text.ProviderAuthorization, receivedAt.UTC()); err != nil {
+		return fmt.Errorf("insert verified channel text intent: %w", err)
+	}
+	return nil
+}
+
 func ListPendingActionIntents(ctx context.Context, tx *sql.Tx, afterPublicationID string, limit int, postgres bool) ([]render.PendingAction, error) {
 	if tx == nil || limit < 1 || limit > 500 || (afterPublicationID != "" && uuid.Validate(afterPublicationID) != nil) {
 		return nil, fmt.Errorf("channel action scan requires a store, valid cursor and bounded limit")
@@ -94,6 +123,60 @@ func ListPendingActionIntents(ctx context.Context, tx *sql.Tx, afterPublicationI
 		}
 		if item.Fact.Interface.Key() != interfaceKey {
 			return nil, fmt.Errorf("pending channel action interface contradicts fact")
+		}
+		pending = append(pending, item)
+	}
+	return pending, rows.Err()
+}
+
+func ListPendingTextIntents(ctx context.Context, tx *sql.Tx, afterPublicationID string, limit int, postgres bool) ([]render.PendingText, error) {
+	if tx == nil || limit < 1 || limit > 500 || (afterPublicationID != "" && uuid.Validate(afterPublicationID) != nil) {
+		return nil, fmt.Errorf("channel text scan requires a store, valid cursor and bounded limit")
+	}
+	cursor := afterPublicationID
+	if cursor == "" {
+		cursor = "00000000-0000-0000-0000-000000000000"
+	}
+	query := `SELECT intent.publication_id, intent.provider, intent.provider_event_id,
+		intent.interface_key, intent.fact, intent.provider_authorization, intent.recorded_at
+		FROM operator_channel_text_intents intent
+		WHERE intent.state='pending' AND intent.publication_id>?
+		ORDER BY intent.publication_id LIMIT ?`
+	if postgres {
+		query = `SELECT intent.publication_id::text, intent.provider, intent.provider_event_id,
+			intent.interface_key, intent.fact, intent.provider_authorization, intent.recorded_at
+			FROM operator_channel_text_intents intent
+			WHERE intent.state='pending' AND intent.publication_id>$1::uuid
+			ORDER BY intent.publication_id LIMIT $2`
+	}
+	rows, err := tx.QueryContext(ctx, query, cursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pending := make([]render.PendingText, 0, limit)
+	for rows.Next() {
+		var item render.PendingText
+		var interfaceKey string
+		var raw []byte
+		var recorded any
+		if err := rows.Scan(&item.PublicationID, &item.Fact.Provider, &item.Fact.ProviderEventID,
+			&interfaceKey, &raw, &item.Fact.ProviderAuthorization, &recorded); err != nil {
+			return nil, err
+		}
+		item.ReceivedAt, err = decodeActionTime(recorded)
+		if err != nil {
+			return nil, err
+		}
+		item.Fact.PublicationID = item.PublicationID
+		if err := json.Unmarshal(raw, &item.Fact.TextFact); err != nil {
+			return nil, fmt.Errorf("decode pending channel text fact: %w", err)
+		}
+		if err := item.Fact.Validate(); err != nil {
+			return nil, err
+		}
+		if item.Fact.Interface.Key() != interfaceKey {
+			return nil, fmt.Errorf("pending channel text interface contradicts fact")
 		}
 		pending = append(pending, item)
 	}

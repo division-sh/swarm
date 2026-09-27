@@ -258,6 +258,27 @@ type InboundAction struct {
 	ProviderAuthorization string `json:"provider_authorization"`
 }
 
+// InboundText records a verified non-challenge text occurrence. Its contents
+// are not principal, entry, or draft authority until currentness is checked.
+type InboundText struct {
+	TextFact
+	Provider              string `json:"provider"`
+	ProviderEventID       string `json:"provider_event_id"`
+	PublicationID         string `json:"publication_id"`
+	ProviderAuthorization string `json:"provider_authorization"`
+}
+
+func (t InboundText) Validate() error {
+	if err := t.TextFact.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(t.Provider) == "" || strings.TrimSpace(t.ProviderEventID) == "" ||
+		strings.TrimSpace(t.ProviderAuthorization) == "" || uuid.Validate(t.PublicationID) != nil {
+		return fmt.Errorf("%w: inbound text provenance is required", ErrInvalidRequest)
+	}
+	return nil
+}
+
 func (a InboundAction) Validate() error {
 	if err := a.ActionFact.Validate(); err != nil {
 		return err
