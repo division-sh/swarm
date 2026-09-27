@@ -64,6 +64,18 @@ type PendingAction struct {
 	ReceivedAt    time.Time
 }
 
+type PendingText struct {
+	PublicationID string
+	Fact          operatorchannel.InboundText
+	ReceivedAt    time.Time
+}
+
+type ResolvedText struct {
+	PrincipalID     string
+	InterfaceKey    string
+	BindingRevision int64
+}
+
 type ActionDisposition string
 
 const (
@@ -91,4 +103,6 @@ type Store interface {
 	FreezeAndPersistChannelRender(context.Context, string) (PreparedRender, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
+	ListPendingChannelTexts(context.Context, string, int) ([]PendingText, error)
+	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (ResolvedText, bool, error)
 }
