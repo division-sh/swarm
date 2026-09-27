@@ -30,13 +30,15 @@ type preparedFlowTopologyRetirement struct {
 	publication runtimebus.FlowRoutePublicationHandle
 	attempt     runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	transferred bool
+	aborted     bool
 	set         *terminalFlowRetirement
 }
 
 func (p *preparedFlowTopologyRetirement) abort() error {
-	if p.transferred {
+	if p.transferred || p.aborted {
 		return nil
 	}
+	p.aborted = true
 	return p.lease.Done()
 }
 
@@ -272,7 +274,6 @@ func (am *AgentManager) launchProcessFlowRetirement(lease *worklifetime.Lease, s
 			if recovered := recover(); recovered != nil {
 				result = errors.Join(result, fmt.Errorf("flow activation retirement panic: %v", recovered))
 			}
-			am.lifecycle.recordTerminalCompletion(result)
 			leaseErr := lease.Done()
 			am.lifecycle.recordTerminalCompletion(leaseErr)
 			set.result = errors.Join(result, leaseErr)
@@ -293,6 +294,56 @@ func (am *AgentManager) launchProcessFlowRetirement(lease *worklifetime.Lease, s
 			am.lifecycle.mu.Unlock()
 		}
 	}()
+}
+
+func (c *agentLifecycleCoordinator) retryProcessFlowRetirement(set *terminalFlowRetirement) error {
+	if set == nil || set.done == nil || len(set.members) != len(set.retirements) {
+		return errors.New("flow activation predecessor has incomplete exact retirement membership")
+	}
+	<-set.done
+	var result error
+	for _, member := range set.members {
+		var retirement *agentRetirement
+		for _, candidate := range set.retirements {
+			if candidate != nil && candidate.cell == member.cell && candidate.execution != nil && candidate.execution.token == member.token {
+				retirement = candidate
+				break
+			}
+		}
+		if retirement == nil {
+			result = errors.Join(result, fmt.Errorf("flow activation predecessor lost exact retirement for %s", member.cell.identity.Description()))
+			continue
+		}
+		c.mu.Lock()
+		settled := member.cell.terminalSet == nil && member.cell.retirement == nil
+		current := member.cell.terminalSet == set && member.cell.retirement == retirement &&
+			member.cell.execution == retirement.execution
+		c.mu.Unlock()
+		if settled {
+			continue
+		}
+		if !current {
+			result = errors.Join(result, fmt.Errorf("flow activation predecessor changed during retirement for %s", member.cell.identity.Description()))
+			continue
+		}
+		if err := c.fenceRetiredAgentRoute(member.token); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		if err := c.joinAgentRetirement(retirement); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		c.mu.Lock()
+		if member.cell.terminalSet == set && member.cell.retirement == retirement && member.cell.execution == retirement.execution {
+			member.cell.retirement = nil
+			member.cell.terminalSet = nil
+		} else {
+			result = errors.Join(result, fmt.Errorf("flow activation predecessor changed after join for %s", member.cell.identity.Description()))
+		}
+		c.mu.Unlock()
+	}
+	return result
 }
 
 func (c *agentLifecycleCoordinator) commitTerminalFlowMember(ctx context.Context, set *terminalFlowRetirement, member terminalFlowMember) (committed agentTerminalCommit, result error) {

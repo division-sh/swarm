@@ -93,7 +93,7 @@ func (am *AgentManager) beginDynamicFlowActiveAttempt(
 			am.dynamicFlowReadinessMu.Unlock()
 			return nil, false, errors.New("dynamic flow activation predecessor retirement is incomplete")
 		}
-		if previous.receipt.PlanRevision() == revision && previous.receipt.ProcessBinding().Equal(binding) {
+		if previous.retirementKind == 0 && previous.receipt.PlanRevision() == revision && previous.receipt.ProcessBinding().Equal(binding) {
 			am.dynamicFlowReadinessMu.Unlock()
 			return previous, false, nil
 		}
@@ -139,7 +139,7 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 	active *dynamicFlowActiveAttempt,
 	retirement *preparedFlowTopologyRetirement,
 	disposition flowActivationRetirementDisposition,
-) error {
+) (result error) {
 	if active == nil || retirement == nil {
 		return errors.New("flow activation settlement requires exact local owner")
 	}
@@ -148,32 +148,78 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 		am.dynamicFlowReadinessMu.Unlock()
 		return errors.New("flow activation settlement lost its exact local owner")
 	}
+	if active.retirementKind != 0 && active.retirementKind != disposition {
+		am.dynamicFlowReadinessMu.Unlock()
+		return errors.New("flow activation retirement disposition changed before settlement")
+	}
 	active.retiring = true
+	active.retirementKind = disposition
 	retirement.publication = active.publication
 	retirement.attempt = active.receipt
+	previousSet := active.retirementSet
+	locallyRetired := active.locallyRetired
+	timersRetired := active.timersRetired
 	timersProjected := active.timersProjected
 	am.dynamicFlowReadinessMu.Unlock()
+	defer func() {
+		result = errors.Join(result, retirement.abort())
+		am.dynamicFlowReadinessMu.Lock()
+		if am.dynamicFlowActiveAttempts[key] == active {
+			active.retiring = false
+		}
+		am.dynamicFlowReadinessMu.Unlock()
+	}()
 	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 	if err != nil {
-		return errors.Join(err, retirement.abort())
+		return err
 	}
-	var retireErr error
-	switch disposition {
-	case flowActivationProcessRetirement:
-		retireErr = retirement.retire(identity)
-	case flowActivationTerminalRetirement:
-		retireErr = retirement.retireTerminal(identity)
-	default:
-		retireErr = errors.New("flow activation retirement requires an exact disposition")
-	}
-	retireErr = errors.Join(retireErr, retirement.wait(), retirement.abort())
-	if retireErr != nil {
-		return retireErr
-	}
-	if timersProjected {
-		if err := am.workflowInstances.RetireInitialEntryTimerWakeups(ctx, identity); err != nil {
-			return fmt.Errorf("retire flow activation timer projections: %w", err)
+	if !locallyRetired {
+		if previousSet == nil {
+			var retireErr error
+			switch disposition {
+			case flowActivationProcessRetirement:
+				retireErr = retirement.retire(identity)
+			case flowActivationTerminalRetirement:
+				retireErr = retirement.retireTerminal(identity)
+			default:
+				return errors.New("flow activation retirement requires an exact disposition")
+			}
+			retireErr = errors.Join(retireErr, retirement.wait(), retirement.abort())
+			am.dynamicFlowReadinessMu.Lock()
+			if retirement.set != nil {
+				active.retirementSet = retirement.set
+			}
+			am.dynamicFlowReadinessMu.Unlock()
+			if retireErr != nil {
+				return retireErr
+			}
+		} else {
+			if disposition != flowActivationProcessRetirement {
+				return errors.New("failed terminal flow retirement requires process replacement")
+			}
+			if err := am.retireFlowRouteAttempt(active.receipt, active.publication); err != nil {
+				return fmt.Errorf("retry exact flow route retirement: %w", err)
+			}
+			if err := am.lifecycle.retryProcessFlowRetirement(previousSet); err != nil {
+				return fmt.Errorf("retry exact flow agent retirement: %w", err)
+			}
 		}
+		if err := retirement.abort(); err != nil {
+			return err
+		}
+		am.dynamicFlowReadinessMu.Lock()
+		active.locallyRetired = true
+		am.dynamicFlowReadinessMu.Unlock()
+	}
+	if !timersRetired {
+		if timersProjected {
+			if err := am.workflowInstances.RetireInitialEntryTimerWakeups(ctx, identity); err != nil {
+				return fmt.Errorf("retire flow activation timer projections: %w", err)
+			}
+		}
+		am.dynamicFlowReadinessMu.Lock()
+		active.timersRetired = true
+		am.dynamicFlowReadinessMu.Unlock()
 	}
 	if err := am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempt(ctx, active.receipt); err != nil {
 		return fmt.Errorf("retire durable flow activation attempt: %w", err)
@@ -198,6 +244,13 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 	am.dynamicFlowReadinessMu.Unlock()
 	var result error
 	for key, active := range attempts {
+		am.dynamicFlowReadinessMu.Lock()
+		incomplete := active.retiring || (active.retirementKind != 0 && !active.locallyRetired)
+		am.dynamicFlowReadinessMu.Unlock()
+		if incomplete {
+			result = errors.Join(result, fmt.Errorf("flow activation attempt %s retains unsettled local retirement", key.instancePath))
+			continue
+		}
 		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 		if err != nil {
 			result = errors.Join(result, err)
