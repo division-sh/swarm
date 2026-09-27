@@ -158,6 +158,59 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 	}
 }
 
+func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context.Context) error {
+	if d == nil || d.store == nil || d.cards == nil || d.mailbox == nil {
+		return fmt.Errorf("channel inbox response owners are unavailable")
+	}
+	cursor := ""
+	var failures error
+	for {
+		pending, err := d.store.ListPendingChannelTexts(ctx, cursor, 200)
+		if err != nil {
+			return errors.Join(failures, err)
+		}
+		for _, intent := range pending {
+			if intent.Fact.EntryReference == "" {
+				continue
+			}
+			entry, found, err := d.resolveNativeInboxEntry(ctx, intent.Fact)
+			if err != nil {
+				failures = errors.Join(failures, fmt.Errorf("resolve native inbox entry %s: %w", intent.PublicationID, err))
+				continue
+			}
+			if !found {
+				continue
+			}
+			unread, err := d.mailbox.CountUnreadInformationalNotices(ctx)
+			if err != nil {
+				failures = errors.Join(failures, err)
+				continue
+			}
+			cards, next, err := d.cards.ListDecisionCards(ctx, decisioncard.ListOptions{Status: decisioncard.StatusPending, Limit: 5})
+			if err != nil {
+				failures = errors.Join(failures, err)
+				continue
+			}
+			content, err := runtimechanneldelivery.InboxText(unread, cards, next != "")
+			if err != nil {
+				failures = errors.Join(failures, err)
+				continue
+			}
+			if _, err := d.store.PlanNativeInboxResponse(ctx, intent.Fact, entry, content); err != nil {
+				failures = errors.Join(failures, fmt.Errorf("plan native inbox response %s: %w", intent.PublicationID, err))
+			}
+		}
+		if len(pending) < 200 {
+			return failures
+		}
+		last := pending[len(pending)-1].PublicationID
+		if last == cursor {
+			return errors.Join(failures, fmt.Errorf("channel text pagination did not advance"))
+		}
+		cursor = last
+	}
+}
+
 func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process, dispatcher *serveChannelDeliveryDispatcher) error {
 	if owner == nil || dispatcher == nil {
 		return fmt.Errorf("channel delivery worker requires process and dispatcher")
@@ -177,6 +230,9 @@ func startServeChannelDelivery(ctx context.Context, owner *worklifetime.Process,
 			log.Printf("native inbox setting reconciliation: %v", err)
 		}
 		for {
+			if err := dispatcher.reconcileNativeInboxEntries(workCtx); err != nil && workCtx.Err() == nil {
+				log.Printf("channel inbox entry reconciliation: %v", err)
+			}
 			if err := dispatcher.reconcileDeliveries(workCtx); err != nil && workCtx.Err() == nil {
 				log.Printf("channel delivery reconciliation: %v", err)
 			}
