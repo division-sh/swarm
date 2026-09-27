@@ -848,6 +848,18 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has invalid reply_to_message_reference: %v", eventName, err)
 		}
 	}
+	var entryReference, entryAddress string
+	if value, exists := projected["entry_invocation"]; exists {
+		invocation, ok := value.(map[string]any)
+		if !ok {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has invalid entry_invocation", eventName)
+		}
+		entryReference, _ = invocation["reference"].(string)
+		entryAddress, _ = invocation["address"].(string)
+		if entryReference == "" {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has incomplete entry_invocation", eventName)
+		}
+	}
 	identity, err := p.InterfaceIdentity()
 	if err != nil {
 		return operatorchannel.TextFact{}, false, err
@@ -856,6 +868,7 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 		Interface: identity, ExternalAccountRef: account, ConversationRef: conversation,
 		ConversationScope: operatorchannel.ConversationScope(scope), Text: text,
 		MessageReference: message, ReplyToReference: replyTo,
+		EntryReference: entryReference, EntryAddress: entryAddress,
 	}
 	if err := fact.Validate(); err != nil {
 		return operatorchannel.TextFact{}, false, err
