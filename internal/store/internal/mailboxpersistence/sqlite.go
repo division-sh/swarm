@@ -174,21 +174,6 @@ func (s *MailboxSQLiteOwner) ExpireMailboxItems(ctx context.Context, limit int) 
 	return items, nil
 }
 
-func (s *MailboxSQLiteOwner) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return nil, err
-	}
-	rows, err := s.backend.QueryContext(ctx, sqliteMailboxSelectSQL(`status = 'pending' AND severity = 'critical' AND COALESCE(notified, false) = false`)+` ORDER BY created_at ASC LIMIT ?`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query sqlite unnotified critical mailbox items: %w", err)
-	}
-	defer rows.Close()
-	return scanSpecMailboxItems(rows)
-}
-
 func sqliteMailboxSelectSQL(where string) string {
 	return `
 		SELECT item_id, COALESCE(source_event_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(from_agent, ''),
