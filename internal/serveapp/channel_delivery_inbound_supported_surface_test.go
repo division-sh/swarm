@@ -156,6 +156,14 @@ func TestChannelDeliveryBareInputChooserE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryQuotedTwoDraftsE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "quoted_two")
+		})
+	}
+}
+
 func TestChannelDeliveryManualResendAfterLostResponseE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -252,13 +260,13 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		t.Cleanup(releaseCommandApply)
 	}
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
-	if scenario == "draft_chooser" {
+	if scenario == "draft_chooser" || scenario == "quoted_two" {
 		sourceRoot = writeMixedStandingTelegramServeFixture(t, telegram.URL)
 	}
 	if scenario == "required_input" || scenario == "invalid_input" || scenario == "ordered_input" || scenario == "edit_loss_resend" ||
-		scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" {
+		scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		flowNames := []string{"telegram-ingress"}
-		if scenario == "draft_chooser" {
+		if scenario == "draft_chooser" || scenario == "quoted_two" {
 			flowNames = append(flowNames, "telegram-stopped")
 		}
 		for _, flowName := range flowNames {
@@ -509,7 +517,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		},
 	}
 	if scenario == "verdict" || scenario == "verdict_ack_loss" || scenario == "required_input" || scenario == "invalid_input" || scenario == "edit_loss_resend" ||
-		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" {
+		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
 		deadline := time.Now().Add(15 * time.Second)
 		for provider.Delivery(1) == nil {
 			if time.Now().After(deadline) {
@@ -638,6 +646,13 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			t.Fatalf("draft begin leaked business events: %v", admitted.EventNames)
 		}
 		proveChannelBareInputChooser(t, provider, callbackURL, signing)
+		return
+	}
+	if scenario == "quoted_two" {
+		if len(admitted.EventNames) != 0 {
+			t.Fatalf("quoted-draft begin leaked business events: %v", admitted.EventNames)
+		}
+		proveChannelQuotedTwoDrafts(t, provider, callbackURL, signing)
 		return
 	}
 	if (nativeInboxScenario || scenario == "verdict" || scenario == "verdict_ack_loss") && len(admitted.EventNames) != 0 {
@@ -897,56 +912,8 @@ func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callba
 
 func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
 	t.Helper()
+	beginSecondChannelDraft(t, provider, callbackURL, signing)
 	deadline := time.Now().Add(25 * time.Second)
-	var second map[string]any
-	for second == nil {
-		second = provider.Delivery(2)
-		if second != nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("second standing card was not delivered: deliveries=%v edits=%v", provider.Delivery(1), provider.Edits())
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !strings.Contains(fmt.Sprint(second["text"]), "Retire service") {
-		t.Fatalf("second delivery is not a canonical card: %v", second)
-	}
-	markup, _ := second["reply_markup"].(map[string]any)
-	rows, _ := markup["inline_keyboard"].([]any)
-	if len(rows) == 0 {
-		t.Fatalf("second card has no verdict action: %v", second)
-	}
-	row, _ := rows[0].([]any)
-	if len(row) == 0 {
-		t.Fatalf("second card first action is absent: %v", second)
-	}
-	button, _ := row[0].(map[string]any)
-	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
-		"update_id": time.Now().UnixMilli() + 1300,
-		"callback_query": map[string]any{
-			"id": "callback-second-draft", "from": map[string]any{"id": 7000},
-			"message": map[string]any{"message_id": 3, "chat": map[string]any{"id": 1001, "type": "private"}},
-			"data":    button["callback_data"],
-		},
-	}); len(admitted) != 0 {
-		t.Fatalf("second draft begin escaped into business events: %v", admitted)
-	}
-	for {
-		prompts := map[string]bool{}
-		for _, edit := range provider.Edits() {
-			if strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required") {
-				prompts[fmt.Sprint(edit["message_id"])] = true
-			}
-		}
-		if prompts["2"] && prompts["3"] {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("two standing drafts were not prompted: edits=%v", provider.Edits())
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 	answer := "private chooser answer"
 	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
 		"update_id": time.Now().UnixMilli() + 1400,
@@ -1021,6 +988,101 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 			t.Fatalf("chosen retained answer did not decide one card: edits=%v", provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func beginSecondChannelDraft(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(25 * time.Second)
+	var second map[string]any
+	for second == nil {
+		second = provider.Delivery(2)
+		if second != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("second standing card was not delivered: deliveries=%v edits=%v", provider.Delivery(1), provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !strings.Contains(fmt.Sprint(second["text"]), "Retire service") {
+		t.Fatalf("second delivery is not a canonical card: %v", second)
+	}
+	markup, _ := second["reply_markup"].(map[string]any)
+	rows, _ := markup["inline_keyboard"].([]any)
+	if len(rows) == 0 {
+		t.Fatalf("second card has no verdict action: %v", second)
+	}
+	row, _ := rows[0].([]any)
+	if len(row) == 0 {
+		t.Fatalf("second card first action is absent: %v", second)
+	}
+	button, _ := row[0].(map[string]any)
+	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+		"update_id": time.Now().UnixMilli() + 1300,
+		"callback_query": map[string]any{
+			"id": "callback-second-draft", "from": map[string]any{"id": 7000},
+			"message": map[string]any{"message_id": 3, "chat": map[string]any{"id": 1001, "type": "private"}},
+			"data":    button["callback_data"],
+		},
+	}); len(admitted) != 0 {
+		t.Fatalf("second draft begin escaped into business events: %v", admitted)
+	}
+	for {
+		prompts := map[string]bool{}
+		for _, edit := range provider.Edits() {
+			if strings.Contains(fmt.Sprint(edit["text"]), "Input: reason (text) required") {
+				prompts[fmt.Sprint(edit["message_id"])] = true
+			}
+		}
+		if prompts["2"] && prompts["3"] {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("two standing drafts were not prompted: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelQuotedTwoDrafts(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	beginSecondChannelDraft(t, provider, callbackURL, signing)
+	deadline := time.Now().Add(25 * time.Second)
+	for index, cardMessageID := range []int{3, 2} {
+		answer := fmt.Sprintf("private quoted answer %d", cardMessageID)
+		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+			"update_id": time.Now().UnixMilli() + int64(1400+index*100),
+			"message": map[string]any{
+				"message_id": 9107 + index, "from": map[string]any{"id": 7000},
+				"chat": map[string]any{"id": 1001, "type": "private"}, "text": answer,
+				"reply_to_message": map[string]any{"message_id": cardMessageID},
+			},
+		}); len(admitted) != 0 {
+			t.Fatalf("quoted answer to card %d escaped into business events: %v", cardMessageID, admitted)
+		}
+		for {
+			decided := map[string]bool{}
+			for _, edit := range provider.Edits() {
+				visible := fmt.Sprint(edit["text"])
+				if strings.Contains(visible, "private quoted answer") {
+					t.Fatalf("quoted private answer echoed in card edit: %v", edit)
+				}
+				if strings.Contains(visible, "Decision: retire") {
+					decided[fmt.Sprint(edit["message_id"])] = true
+				}
+			}
+			if decided[fmt.Sprint(cardMessageID)] {
+				if index == 0 && decided["2"] {
+					t.Fatalf("quoted second-card answer decided the first card: %v", provider.Edits())
+				}
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("quoted answer for card %d did not decide that card: %v", cardMessageID, provider.Edits())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	}
 }
 
