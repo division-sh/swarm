@@ -518,14 +518,18 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	if scenario == "verdict" || scenario == "verdict_ack_loss" || scenario == "required_input" || scenario == "invalid_input" || scenario == "edit_loss_resend" ||
 		scenario == "ordered_input" || scenario == "cancel_input" || scenario == "skip_input" || scenario == "draft_chooser" || scenario == "quoted_two" {
+		cardMessageID := 2
+		if scenario == "quoted_two" {
+			cardMessageID = waitChannelCardMessageID(t, provider, "telegram-ingress")
+		}
 		deadline := time.Now().Add(15 * time.Second)
-		for provider.Delivery(1) == nil {
+		for provider.Delivery(cardMessageID-1) == nil {
 			if time.Now().After(deadline) {
 				t.Fatal("card was not delivered before callback")
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		cardMessage := provider.Delivery(1)
+		cardMessage := provider.Delivery(cardMessageID - 1)
 		markup, ok := cardMessage["reply_markup"].(map[string]any)
 		if !ok {
 			t.Fatalf("card has no callback controls: %v", cardMessage)
@@ -546,7 +550,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			"update_id": time.Now().UnixMilli(),
 			"callback_query": map[string]any{
 				"id": "callback-9102", "from": map[string]any{"id": 7000},
-				"message": map[string]any{"message_id": 2, "chat": map[string]any{"id": 1001, "type": "private"}},
+				"message": map[string]any{"message_id": cardMessageID, "chat": map[string]any{"id": 1001, "type": "private"}},
 				"data":    control["callback_data"],
 			},
 		}
@@ -912,7 +916,7 @@ func proveChannelInputControl(t *testing.T, provider *telegramapi.Double, callba
 
 func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
 	t.Helper()
-	beginSecondChannelDraft(t, provider, callbackURL, signing)
+	beginOtherChannelDraft(t, provider, callbackURL, signing, 3)
 	deadline := time.Now().Add(25 * time.Second)
 	answer := "private chooser answer"
 	if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
@@ -991,12 +995,29 @@ func proveChannelBareInputChooser(t *testing.T, provider *telegramapi.Double, ca
 	}
 }
 
-func beginSecondChannelDraft(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+func waitChannelCardMessageID(t *testing.T, provider *telegramapi.Double, flowName string) int {
+	t.Helper()
+	deadline := time.Now().Add(25 * time.Second)
+	for {
+		for index := 1; index <= 2; index++ {
+			card := provider.Delivery(index)
+			if card != nil && strings.Contains(fmt.Sprint(card["text"]), "Gate: "+flowName+" / active") {
+				return index + 1
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s card was not delivered: first=%v second=%v", flowName, provider.Delivery(1), provider.Delivery(2))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func beginOtherChannelDraft(t *testing.T, provider *telegramapi.Double, callbackURL, signing string, cardMessageID int) {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
 	var second map[string]any
 	for second == nil {
-		second = provider.Delivery(2)
+		second = provider.Delivery(cardMessageID - 1)
 		if second != nil {
 			break
 		}
@@ -1022,7 +1043,7 @@ func beginSecondChannelDraft(t *testing.T, provider *telegramapi.Double, callbac
 		"update_id": time.Now().UnixMilli() + 1300,
 		"callback_query": map[string]any{
 			"id": "callback-second-draft", "from": map[string]any{"id": 7000},
-			"message": map[string]any{"message_id": 3, "chat": map[string]any{"id": 1001, "type": "private"}},
+			"message": map[string]any{"message_id": cardMessageID, "chat": map[string]any{"id": 1001, "type": "private"}},
 			"data":    button["callback_data"],
 		},
 	}); len(admitted) != 0 {
@@ -1047,9 +1068,11 @@ func beginSecondChannelDraft(t *testing.T, provider *telegramapi.Double, callbac
 
 func proveChannelQuotedTwoDrafts(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
 	t.Helper()
-	beginSecondChannelDraft(t, provider, callbackURL, signing)
+	stoppedMessageID := waitChannelCardMessageID(t, provider, "telegram-stopped")
+	ingressMessageID := waitChannelCardMessageID(t, provider, "telegram-ingress")
+	beginOtherChannelDraft(t, provider, callbackURL, signing, stoppedMessageID)
 	deadline := time.Now().Add(25 * time.Second)
-	for index, cardMessageID := range []int{3, 2} {
+	for index, cardMessageID := range []int{stoppedMessageID, ingressMessageID} {
 		answer := fmt.Sprintf("private quoted answer %d", cardMessageID)
 		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
 			"update_id": time.Now().UnixMilli() + int64(1400+index*100),
@@ -1073,7 +1096,7 @@ func proveChannelQuotedTwoDrafts(t *testing.T, provider *telegramapi.Double, cal
 				}
 			}
 			if decided[fmt.Sprint(cardMessageID)] {
-				if index == 0 && decided["2"] {
+				if index == 0 && decided[fmt.Sprint(ingressMessageID)] {
 					t.Fatalf("quoted second-card answer decided the first card: %v", provider.Edits())
 				}
 				break
