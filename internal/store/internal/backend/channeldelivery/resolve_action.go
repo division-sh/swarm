@@ -19,6 +19,15 @@ func ResolveActionFactTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 	return resolveActionFactTx(ctx, tx, fact, postgres, false)
 }
 
+// ResolveActionFact reads the same admission projection outside a write
+// transaction for effect-currentness checks. Prelaunch still uses the locked
+// transaction form.
+func ResolveActionFact(ctx context.Context, q interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
+	return resolveActionFactTx(ctx, q, fact, postgres, false)
+}
+
 func ResolveActionFactForMutationTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
 	return resolveActionFactTx(ctx, tx, fact, postgres, true)
 }
@@ -53,7 +62,9 @@ func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 	return nil
 }
 
-func resolveActionFactTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, postgres, mutation bool) (render.ResolvedAction, bool, error) {
+func resolveActionFactTx(ctx context.Context, tx interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, fact operatorchannel.ActionFact, postgres, mutation bool) (render.ResolvedAction, bool, error) {
 	if tx == nil {
 		return render.ResolvedAction{}, false, fmt.Errorf("channel action requires a selected transaction")
 	}
