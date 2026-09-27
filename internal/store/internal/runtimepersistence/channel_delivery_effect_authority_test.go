@@ -180,7 +180,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					actions, persistErr = channeldelivery.EnsureRenderActionsTx(txctx, tx, renderID, frozen, postgres)
 					return persistErr
 				})
-				if err != nil || len(actions) != 1 || actions[0].Kind != "view_full" {
+				if err != nil || len(actions) != 2 || actions[0].Kind != "acknowledge_notice" || actions[1].Kind != "view_full" {
 					t.Fatalf("notice actions = %#v, err=%v", actions, err)
 				}
 				effectOperationID, err := runtimeeffects.ChannelDeliveryOperationID(deliveryID, renderID)
@@ -649,7 +649,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				fact := operatorchannel.ActionFact{
 					Interface: binding.Interface, ExternalAccountRef: plan.ExternalAccountRef,
 					ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope,
-					MessageReference: `{"id":91}`, InteractionRef: "interaction-1", Token: actions[0].Token,
+					MessageReference: `{"id":91}`, InteractionRef: "interaction-1", Token: actions[1].Token,
 				}
 				if !late {
 					resolved, found, err := selected.ResolveChannelActionFact(ctx, fact)

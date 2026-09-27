@@ -47,22 +47,38 @@ type Field struct {
 }
 
 type Frozen struct {
-	SourceKind string
-	SourceID   string
-	Revision   int64
-	Audience   Audience
-	Input      json.RawMessage
-	Hash       string
-	FullText   string
-	Choices    []Choice
+	SourceKind         string
+	SourceID           string
+	Revision           int64
+	NoticeAcknowledged bool
+	Audience           Audience
+	Input              json.RawMessage
+	Hash               string
+	FullText           string
+	Choices            []Choice
+	Page               *ResponsePage
+}
+
+type ResponsePage struct {
+	SourceRenderID   string `json:"source_render_id"`
+	SourceRenderHash string `json:"source_render_hash"`
+	Index            int    `json:"index"`
+	Count            int    `json:"count"`
+}
+
+func (p ResponsePage) Valid() bool {
+	return uuid.Validate(p.SourceRenderID) == nil && p.SourceRenderHash != "" &&
+		p.Index >= 0 && p.Count > 0 && p.Count <= 1000 && p.Index < p.Count
 }
 
 func Decode(raw []byte, hash string) (Frozen, error) {
 	var wire struct {
-		SourceKind     string `json:"source_kind"`
-		SourceID       string `json:"source_id"`
-		SourceRevision int64  `json:"source_revision"`
-		FullText       string `json:"full_text"`
+		SourceKind     string        `json:"source_kind"`
+		SourceID       string        `json:"source_id"`
+		SourceRevision int64         `json:"source_revision"`
+		Acknowledged   bool          `json:"acknowledged"`
+		FullText       string        `json:"full_text"`
+		Page           *ResponsePage `json:"page"`
 		Choices        []struct {
 			Verdict string  `json:"verdict"`
 			Label   string  `json:"label"`
@@ -86,10 +102,12 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 	}
 	frozen := Frozen{
 		SourceKind: wire.SourceKind, SourceID: wire.SourceID, Revision: wire.SourceRevision,
+		NoticeAcknowledged: wire.Acknowledged,
 		Audience: Audience{PrincipalID: wire.Audience.PrincipalID, InterfaceKey: wire.Audience.InterfaceKey,
 			DeliveryEpoch: wire.Audience.DeliveryEpoch, ExternalAccountRef: wire.Audience.ExternalAccountRef,
 			ConversationRef: wire.Audience.ConversationRef, ConversationScope: wire.Audience.ConversationScope},
 		Input: append(json.RawMessage(nil), raw...), Hash: hash, FullText: wire.FullText, Choices: choices,
+		Page: wire.Page,
 	}
 	if err := frozen.Validate(); err != nil {
 		return Frozen{}, err
@@ -114,6 +132,7 @@ func (f Frozen) Validate() error {
 		SourceKind        string `json:"source_kind"`
 		SourceID          string `json:"source_id"`
 		SourceRevision    int64  `json:"source_revision"`
+		Acknowledged      bool   `json:"acknowledged"`
 		Audience          struct {
 			PrincipalID        string `json:"principal_id"`
 			InterfaceKey       string `json:"interface_key"`
@@ -122,18 +141,26 @@ func (f Frozen) Validate() error {
 			ConversationRef    string `json:"conversation_reference"`
 			ConversationScope  string `json:"conversation_scope"`
 		} `json:"audience"`
-		FullText string `json:"full_text"`
+		FullText string        `json:"full_text"`
+		Page     *ResponsePage `json:"page"`
 	}
 	if err := json.Unmarshal(f.Input, &index); err != nil {
 		return err
 	}
 	if index.ProjectionVersion != ProjectionVersion || index.SourceKind != f.SourceKind ||
 		index.SourceID != f.SourceID || index.SourceRevision != f.Revision || index.FullText != f.FullText ||
+		index.Acknowledged != f.NoticeAcknowledged || (f.NoticeAcknowledged && f.SourceKind != "notice") ||
 		index.Audience.PrincipalID != f.Audience.PrincipalID || index.Audience.InterfaceKey != f.Audience.InterfaceKey ||
 		index.Audience.DeliveryEpoch != f.Audience.DeliveryEpoch || index.Audience.ExternalAccountRef != f.Audience.ExternalAccountRef ||
 		index.Audience.ConversationRef != f.Audience.ConversationRef ||
 		index.Audience.ConversationScope != string(f.Audience.ConversationScope) {
 		return fmt.Errorf("channel render projection index contradicts frozen input")
+	}
+	if (f.Page == nil) != (index.Page == nil) {
+		return fmt.Errorf("channel response page contradicts frozen input")
+	}
+	if f.Page != nil && (f.SourceKind != "response" || !f.Page.Valid() || *f.Page != *index.Page) {
+		return fmt.Errorf("channel response page is invalid")
 	}
 	return nil
 }
@@ -142,6 +169,7 @@ func (f Frozen) Validate() error {
 // remains the notice owner; this value contains no acknowledgment authority.
 type Notice struct {
 	ID           string
+	Acknowledged bool
 	Type         string
 	Summary      string
 	Context      json.RawMessage
@@ -291,13 +319,20 @@ func FreezeNotice(notice Notice, audience Audience) (Frozen, error) {
 		lines = append(lines, "From: "+notice.FromAgent)
 	}
 	lines = append(lines, "Priority: "+notice.Priority, "Context: "+string(canonicalContext))
+	if notice.Acknowledged {
+		lines = append(lines, "Acknowledged")
+	}
 	fullText := strings.Join(lines, "\n")
+	revision := int64(1)
+	if notice.Acknowledged {
+		revision = 2
+	}
 	input := map[string]any{
 		"projection_version": ProjectionVersion, "source_kind": "notice", "source_id": notice.ID,
-		"source_revision": 1, "audience": audienceProjection(audience), "item_type": notice.Type,
-		"scope": scope, "full_text": fullText,
+		"source_revision": revision, "audience": audienceProjection(audience), "item_type": notice.Type,
+		"scope": scope, "acknowledged": notice.Acknowledged, "full_text": fullText,
 	}
-	return freeze(input, "notice", notice.ID, 1, audience, fullText, nil)
+	return freeze(input, "notice", notice.ID, revision, audience, fullText, nil)
 }
 
 func FreezeSummary(firstOperationID string, count int64, audience Audience) (Frozen, error) {
@@ -334,6 +369,52 @@ func FreezeResponse(publicationID, fullText string, audience Audience) (Frozen, 
 		"source_revision": 1, "audience": audienceProjection(audience), "full_text": fullText,
 	}
 	return freeze(input, "response", publicationID, 1, audience, fullText, nil)
+}
+
+// FreezeResponsePage projects one deterministic chunk of an immutable render.
+// A callback requests each successor page; a page is never inferred from live
+// card or notice state.
+func FreezeResponsePage(publicationID string, source Frozen, sourceRenderID string, index int, audience Audience) (Frozen, error) {
+	if err := source.Validate(); err != nil {
+		return Frozen{}, err
+	}
+	if uuid.Validate(publicationID) != nil || uuid.Validate(sourceRenderID) != nil || source.Page != nil {
+		return Frozen{}, fmt.Errorf("view-full response requires an immutable original render")
+	}
+	pageText, count, err := FullTextPage(source.FullText, index)
+	if err != nil {
+		return Frozen{}, err
+	}
+	page := &ResponsePage{SourceRenderID: sourceRenderID, SourceRenderHash: source.Hash, Index: index, Count: count}
+	input := map[string]any{
+		"projection_version": ProjectionVersion, "source_kind": "response", "source_id": publicationID,
+		"source_revision": 1, "audience": audienceProjection(audience), "full_text": pageText, "page": page,
+	}
+	raw, err := canonicaljson.Bytes(input)
+	if err != nil {
+		return Frozen{}, err
+	}
+	frozen := Frozen{SourceKind: "response", SourceID: publicationID, Revision: 1, Audience: audience,
+		Input: raw, Hash: canonicaljson.HashBytes(raw), FullText: pageText, Page: page}
+	return frozen, frozen.Validate()
+}
+
+func FullTextPage(fullText string, index int) (string, int, error) {
+	runes := []rune(fullText)
+	if len(runes) == 0 {
+		return "", 0, fmt.Errorf("view-full source is empty")
+	}
+	const pageRunes = ChannelExcerptRunes - 100
+	count := (len(runes) + pageRunes - 1) / pageRunes
+	if count > 1000 || index < 0 || index >= count {
+		return "", 0, fmt.Errorf("view-full page is outside the bounded immutable source")
+	}
+	start := index * pageRunes
+	end := start + pageRunes
+	if end > len(runes) {
+		end = len(runes)
+	}
+	return fmt.Sprintf("Page %d/%d\n%s", index+1, count, string(runes[start:end])), count, nil
 }
 
 // InboxText presents only canonical list metadata; draft answers and card
@@ -391,7 +472,8 @@ func freeze(input map[string]any, kind, id string, revision int64, audience Audi
 	if err != nil {
 		return Frozen{}, err
 	}
-	frozen := Frozen{SourceKind: kind, SourceID: id, Revision: revision, Audience: audience,
+	acknowledged, _ := input["acknowledged"].(bool)
+	frozen := Frozen{SourceKind: kind, SourceID: id, Revision: revision, NoticeAcknowledged: acknowledged, Audience: audience,
 		Input: raw, Hash: canonicaljson.HashBytes(raw), FullText: fullText, Choices: choices}
 	if err := frozen.Validate(); err != nil {
 		return Frozen{}, err
