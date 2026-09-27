@@ -82,11 +82,29 @@ func (d *serveChannelDeliveryDispatcher) processCardAction(ctx context.Context, 
 }
 
 func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender) error {
+	if candidate.CurrentReceiptID != "" {
+		return fmt.Errorf("initial channel delivery already has a receipt")
+	}
+	return d.dispatchChannel(ctx, candidate, prepared, "deliver", nil)
+}
+
+func (d *serveChannelDeliveryDispatcher) dispatchEdit(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, previous runtimechanneldelivery.SentReceipt) error {
+	if candidate.CurrentReceiptID == "" || previous.OperationID != candidate.CurrentReceiptID ||
+		previous.DeliveryID != candidate.DeliveryID || previous.RenderID == prepared.RenderID || previous.DeliveryReference == nil {
+		return fmt.Errorf("channel edit lacks an exact predecessor receipt")
+	}
+	return d.dispatchChannel(ctx, candidate, prepared, "edit", previous.DeliveryReference)
+}
+
+func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
 	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil ||
 		!d.posture.Valid() || strings.TrimSpace(d.runtimeInstanceID) == "" || d.now == nil {
 		return fmt.Errorf("channel delivery dispatcher is incomplete")
 	}
-	if candidate.State != "rendered" || candidate.CurrentReceiptID != "" ||
+	if (operation != "deliver" && operation != "edit") ||
+		(operation == "deliver" && (candidate.CurrentReceiptID != "" || previousReference != nil)) ||
+		(operation == "edit" && (candidate.CurrentReceiptID == "" || previousReference == nil)) ||
+		candidate.State != "rendered" ||
 		candidate.DeliveryID != prepared.DeliveryID || candidate.CurrentRenderID != prepared.RenderID ||
 		candidate.SourceID != prepared.Frozen.SourceID || candidate.SourceKind != prepared.Frozen.SourceKind ||
 		candidate.Audience != prepared.Frozen.Audience {
@@ -165,13 +183,17 @@ func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, ca
 	if viewFull != truncated || (candidate.SourceKind == "card" && verdicts != len(prepared.Frozen.Choices)) {
 		return fmt.Errorf("channel delivery actions contradict frozen presentation")
 	}
-	_, input, err := compiled.Plan.PrepareOperation("deliver", map[string]any{
+	semanticInput := map[string]any{
 		"presentation": map[string]any{"text": presentation}, "actions": actions,
-	})
+	}
+	if operation == "edit" {
+		semanticInput["delivery_reference"] = previousReference
+	}
+	_, input, err := compiled.Plan.PrepareOperation(operation, semanticInput)
 	if err != nil {
 		return err
 	}
-	toolID, tool, err := compiled.Plan.ConnectorOperation("deliver")
+	toolID, tool, err := compiled.Plan.ConnectorOperation(operation)
 	if err != nil {
 		return err
 	}
@@ -195,7 +217,8 @@ func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, ca
 		ExecutionMode: runtimeeffects.ExecutionMode(d.posture.RootMode()),
 		ChannelDelivery: runtimeeffects.ChannelDeliveryAuthority{
 			EffectOperationID: operationID, DeliveryID: candidate.DeliveryID, RenderID: prepared.RenderID,
-			RenderHash: prepared.Frozen.Hash, PrincipalID: candidate.Audience.PrincipalID,
+			RenderHash: prepared.Frozen.Hash, PreviousReceiptOperationID: candidate.CurrentReceiptID,
+			PrincipalID:  candidate.Audience.PrincipalID,
 			InterfaceKey: candidate.Audience.InterfaceKey, DeliveryEpoch: candidate.Audience.DeliveryEpoch,
 			BindingRevision: candidate.BindingRevision, ExternalAccountRef: candidate.Audience.ExternalAccountRef,
 			ConversationRef: candidate.Audience.ConversationRef,

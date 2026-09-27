@@ -46,6 +46,23 @@ func (s *PostgresStore) GetCurrentChannelDeliveryPlan(ctx context.Context, deliv
 	return projectDeliveryCandidates([]channeldelivery.Plan{plan})[0], true, nil
 }
 
+func (s *PostgresStore) GetCurrentChannelSentReceipt(ctx context.Context, deliveryID, operationID string) (render.SentReceipt, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.SentReceipt{}, false, fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.SentReceipt{}, false, err
+	}
+	var receipt render.SentReceipt
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		receipt, found, err = channeldelivery.ReadCurrentSentReceiptTx(txctx, tx, deliveryID, operationID, true)
+		return err
+	})
+	return receipt, found, err
+}
+
 func (s *PostgresStore) CurrentChannelDeliveryActivationID(ctx context.Context) (string, bool, error) {
 	if s == nil || s.backend == nil {
 		return "", false, fmt.Errorf("postgres channel delivery store is unavailable")
@@ -196,6 +213,23 @@ func (s *SQLiteRuntimeStore) GetCurrentChannelDeliveryPlan(ctx context.Context, 
 		return render.Candidate{}, found, err
 	}
 	return projectDeliveryCandidates([]channeldelivery.Plan{plan})[0], true, nil
+}
+
+func (s *SQLiteRuntimeStore) GetCurrentChannelSentReceipt(ctx context.Context, deliveryID, operationID string) (render.SentReceipt, bool, error) {
+	if s == nil || s.backend == nil {
+		return render.SentReceipt{}, false, fmt.Errorf("sqlite channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return render.SentReceipt{}, false, err
+	}
+	var receipt render.SentReceipt
+	var found bool
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		receipt, found, err = channeldelivery.ReadCurrentSentReceiptTx(txctx, tx, deliveryID, operationID, false)
+		return err
+	})
+	return receipt, found, err
 }
 
 func projectDeliveryCandidates(plans []channeldelivery.Plan) []render.Candidate {
