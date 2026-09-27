@@ -141,16 +141,19 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 	disposition flowActivationRetirementDisposition,
 ) (result error) {
 	if active == nil || retirement == nil {
+		if retirement != nil {
+			return errors.Join(errors.New("flow activation settlement requires exact local owner"), retirement.abort())
+		}
 		return errors.New("flow activation settlement requires exact local owner")
 	}
 	am.dynamicFlowReadinessMu.Lock()
 	if am.dynamicFlowActiveAttempts[key] != active || active.retiring {
 		am.dynamicFlowReadinessMu.Unlock()
-		return errors.New("flow activation settlement lost its exact local owner")
+		return errors.Join(errors.New("flow activation settlement lost its exact local owner"), retirement.abort())
 	}
 	if active.retirementKind != 0 && active.retirementKind != disposition {
 		am.dynamicFlowReadinessMu.Unlock()
-		return errors.New("flow activation retirement disposition changed before settlement")
+		return errors.Join(errors.New("flow activation retirement disposition changed before settlement"), retirement.abort())
 	}
 	active.retiring = true
 	active.retirementKind = disposition
