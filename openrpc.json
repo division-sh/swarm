@@ -21153,8 +21153,13 @@
             "minimum": 0,
             "type": "integer"
           },
+          "fan_out_unsettled": {
+            "description": "Committed fan-out publications whose exact delivery disposition has not settled. The final run.diagnose projection reconciles owed, unsettled, and barrier counts with its displayed fan-out summary before computing readiness.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "ready": {
-            "description": "True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, fan_out_barriers, due_timers, and active_session_leases are all zero.",
+            "description": "True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, fan_out_unsettled, fan_out_barriers, due_timers, and active_session_leases are all zero. API projection preserves the store-owned result rather than recomputing readiness.",
             "type": "boolean"
           },
           "unsettled_pipeline_events": {
@@ -21168,6 +21173,7 @@
           "active_deliveries",
           "unsettled_pipeline_events",
           "fan_out_owed",
+          "fan_out_unsettled",
           "fan_out_barriers",
           "due_timers",
           "active_session_leases"

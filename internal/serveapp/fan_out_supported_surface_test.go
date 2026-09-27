@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
@@ -100,6 +103,76 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 	}
 }
 
+func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, method := range []string{"run.start", "event.publish"} {
+			t.Run(backend+"/"+method, func(t *testing.T) {
+				root := issue2394ServedReporterSource(t)
+				opts, start := lifecycleRestartHarness(t, backend, root)
+				opts.TestLLMRuntime = servedNoopLLMRuntime{}
+				reporter := identitytest.RootNode(t, "numeric-registration-reporter").Key()
+				reached := make(chan struct{}, 1)
+				released := make(chan struct{})
+				var releaseOnce sync.Once
+				release := func() { releaseOnce.Do(func() { close(released) }) }
+				defer release()
+				opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, nodeID string, _ events.Event) error {
+					if nodeID != reporter {
+						return nil
+					}
+					select {
+					case reached <- struct{}{}:
+					default:
+					}
+					select {
+					case <-released:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				_, rt := start()
+				portfolio := "held-" + uuid.NewString()
+				params := map[string]any{
+					"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
+					"payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString(),
+				}
+				if method == "run.start" {
+					params["run_id"] = uuid.NewString()
+				}
+				var opened struct {
+					RunID string `json:"run_id"`
+				}
+				requireServedJSONRPCResult(t, rt.Endpoint, method, params, &opened)
+				waitPublicationSiteCompletion(t, rt, opened.RunID)
+				publishIssue2394ReporterBatch(t, rt, opened.RunID, portfolio, []map[string]any{{
+					"account_id": "held-1", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString(),
+				}})
+				select {
+				case <-reached:
+				case <-time.After(servedProofPollDeadline):
+					t.Fatal("reporter consumer did not reach the held handler")
+				}
+				var held cliapp.DiagnosticRunDiagnosisResult
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &held)
+				if held.TestQuiescence == nil || cliapp.BoolPointerValue(held.TestQuiescence.Ready) || cliapp.IntPointerValue(held.TestQuiescence.ActiveDeliveries) == 0 || cliapp.IntPointerValue(held.TestQuiescence.FanOutUnsettled) != 1 || held.FanOut.Cursor != 1 || held.FanOut.Unsettled != 1 {
+					t.Fatalf("held reporter must remain unready with one unsettled delivery: %+v", held)
+				}
+				release()
+				for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+					var settled cliapp.DiagnosticRunDiagnosisResult
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &settled)
+					if settled.TestQuiescence != nil && cliapp.BoolPointerValue(settled.TestQuiescence.Ready) && cliapp.IntPointerValue(settled.TestQuiescence.FanOutUnsettled) == 0 && settled.FanOut.Cursor == 1 && settled.FanOut.Settled == 1 && settled.FanOut.Unsettled == 0 {
+						return
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				t.Fatal("reporter did not become ready after releasing the held consumer")
+			})
+		}
+	}
+}
+
 func issue2394ServedReporterSource(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyServedFanOutReporter(t)
@@ -148,13 +221,18 @@ func awaitIssue2394SurfaceDiagnosis(t *testing.T, rt servedControlProofRuntime, 
 	var result cliapp.DiagnosticRunDiagnosisResult
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
 		requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
-		if result.FanOut.Cursor == 6 && result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) {
+		f := result.FanOut
+		if result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) &&
+			(f.Unsettled != 0 || cliapp.IntPointerValue(result.TestQuiescence.FanOutUnsettled) != 0) {
+			t.Fatalf("run.diagnose claimed readiness with unsettled fan-out delivery: %+v", result)
+		}
+		if result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) &&
+			f.Cursor == 6 && f.Intents == 2 && f.Cardinality == 6 && f.Committed == 4 && f.SemanticRejected == 2 &&
+			f.Owed == 0 && f.Open == 0 && f.Blocked == 0 && f.Unsettled == 0 && f.Settled == 4 && f.SemanticRejectionSample != nil {
 			if err := result.FanOut.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			f := result.FanOut
-			if f.RunID != runID || f.Intents != 2 || f.Cardinality != 6 || f.Committed != 4 || f.SemanticRejected != 2 ||
-				f.Owed != 0 || f.Open != 0 || f.Blocked != 0 || f.Unsettled != 0 || f.SemanticRejectionSample == nil {
+			if f.RunID != runID || f.BarrierArmed != 0 || f.BarrierPending != 0 {
 				t.Fatalf("served diagnosis lost exact mixed outcomes: %+v", f)
 			}
 			return result
@@ -267,6 +345,9 @@ func proveIssue2394SurfaceDiagnostics(t *testing.T, rt servedControlProofRuntime
 	}
 	if !reflect.DeepEqual(cliDiagnosis.FanOut, diagnosis.FanOut) {
 		t.Fatalf("CLI diagnosis changed fan-out evidence: %+v / %+v", cliDiagnosis.FanOut, diagnosis.FanOut)
+	}
+	if !reflect.DeepEqual(cliDiagnosis.TestQuiescence, diagnosis.TestQuiescence) {
+		t.Fatalf("CLI diagnosis changed quiescence evidence: %+v / %+v", cliDiagnosis.TestQuiescence, diagnosis.TestQuiescence)
 	}
 	human := issue2394SurfaceCLI(t, rt, "run", "status", runID)
 	for _, want := range []string{"4 committed items", "2 semantic rejections", "0 unsettled items"} {

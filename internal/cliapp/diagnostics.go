@@ -94,6 +94,9 @@ type diagnosticRunTestQuiescence struct {
 	Ready                   *bool `json:"ready"`
 	ActiveDeliveries        *int  `json:"active_deliveries"`
 	UnsettledPipelineEvents *int  `json:"unsettled_pipeline_events"`
+	FanOutOwed              *int  `json:"fan_out_owed"`
+	FanOutUnsettled         *int  `json:"fan_out_unsettled"`
+	FanOutBarriers          *int  `json:"fan_out_barriers"`
 	DueTimers               *int  `json:"due_timers"`
 	ActiveSessionLeases     *int  `json:"active_session_leases"`
 }
@@ -1205,6 +1208,9 @@ func validateDiagnosticRunTestQuiescence(result diagnosticRunTestQuiescence) err
 	}{
 		{name: "active_deliveries", value: result.ActiveDeliveries},
 		{name: "unsettled_pipeline_events", value: result.UnsettledPipelineEvents},
+		{name: "fan_out_owed", value: result.FanOutOwed},
+		{name: "fan_out_unsettled", value: result.FanOutUnsettled},
+		{name: "fan_out_barriers", value: result.FanOutBarriers},
 		{name: "due_timers", value: result.DueTimers},
 		{name: "active_session_leases", value: result.ActiveSessionLeases},
 	}

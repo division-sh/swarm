@@ -1711,6 +1711,60 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 					}
 				})
 			}
+			created := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "thing.requested", `{"amount":50}`, "", "renamed-create-valid"))
+			if created.Error != nil {
+				t.Fatalf("connected create without caller identity was rejected: %#v", created.Error)
+			}
+			createdResult := asMap(t, created.Result)
+			runID := stringValue(t, createdResult["run_id"], "run_id")
+			createdDeliveries := asSlice(t, createdResult["deliveries"])
+			if len(createdDeliveries) != 2 {
+				t.Fatalf("valid connected creation did not persist both root and creator deliveries: %#v", createdResult)
+			}
+			assertEventPublishDeliveriesContain(t, createdDeliveries, "node", identitytest.RootNode(t, "observer").Key(), "pending", 1)
+			assertEventPublishDeliveriesContain(t, createdDeliveries, "node", identitytest.FlowNode(t, "factory", "thing-writer").Key(), "pending", 1)
+			for _, table := range []string{"runs", "events", "api_idempotency"} {
+				var count int
+				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("%s rows after valid creation = %d, err=%v", table, count, err)
+				}
+			}
+			targeted := rpcCall(t, handler, eventPublishBodyWithTarget(runID, "", runStartTestBundleHash, "thing.requested", `{"amount":51}`, "", "renamed-create-target", "factory", "11111111-1111-4111-8111-111111111111"))
+			if targeted.Error == nil {
+				t.Fatal("selected create-entity receiver accepted a caller target")
+			}
+			targetData := asMap(t, targeted.Error.Data)
+			if targetData["code"] != PayloadValidationFailedCode {
+				t.Fatalf("selected creator target rejection = %#v", targeted.Error)
+			}
+			targetViolations := asSlice(t, asMap(t, targetData["details"])["violations"])
+			if len(targetViolations) != 1 || asMap(t, targetViolations[0])["field_path"] != "$.target.entity_id" || asMap(t, targetViolations[0])["rule"] != "create_entity_mints_entity_id" {
+				t.Fatalf("selected creator target violations = %#v", targetViolations)
+			}
+			for _, table := range []string{"runs", "events", "api_idempotency"} {
+				var count int
+				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("%s rows after forbidden target = %d, err=%v", table, count, err)
+				}
+			}
+			plain := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "note.requested", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":52}`, "", "noncreating-identity-valid"))
+			if plain.Error != nil {
+				t.Fatalf("non-creation event rejected valid caller identity: %#v", plain.Error)
+			}
+			if stringValue(t, asMap(t, plain.Result)["run_id"], "run_id") == runID {
+				t.Fatal("separate non-creation publication reused the creation run")
+			}
+			plainDeliveries := asSlice(t, asMap(t, plain.Result)["deliveries"])
+			if len(plainDeliveries) != 1 {
+				t.Fatalf("unconnected same-name creator received non-creation publication: %#v", plainDeliveries)
+			}
+			assertEventPublishDeliveriesContain(t, plainDeliveries, "node", identitytest.RootNode(t, "observer").Key(), "pending", 1)
+			for _, table := range []string{"runs", "events", "api_idempotency"} {
+				var count int
+				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 2 {
+					t.Fatalf("%s rows after valid non-creation = %d, err=%v", table, count, err)
+				}
+			}
 		})
 	}
 }
@@ -2612,7 +2666,7 @@ func eventPublishCreateEntityTestBundle() *runtimecontracts.WorkflowContractBund
 }
 
 func eventPublishRenamedConnectedCreateEntityTestBundle() *runtimecontracts.WorkflowContractBundle {
-	const rootEvent, receiverEvent = "thing.requested", "thing.created"
+	const rootEvent, receiverEvent, plainEvent = "thing.requested", "thing.created", "note.requested"
 	payload := runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 		"entity_id": {Type: "uuid"}, "amount": {Type: "integer"},
 	}}
@@ -2627,33 +2681,45 @@ func eventPublishRenamedConnectedCreateEntityTestBundle() *runtimecontracts.Work
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{receiverEvent: {CreateEntity: true}},
 		}},
 	}
+	shadow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{FlowPath: "shadow"}, Path: "shadow",
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: plainEvent}}},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{plainEvent: {Payload: payload}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"shadow-writer": {
+			ExecutionType: "system_node", SubscribesTo: []string{plainEvent},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{plainEvent: {CreateEntity: true}},
+		}},
+	}
 	root := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: rootEvent}}},
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: rootEvent}, {Event: plainEvent}}},
 				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: rootEvent}}},
 			},
 			Connect: []runtimecontracts.FlowConnect{{Event: rootEvent, From: ".", To: "factory", Rename: receiverEvent, SourceFile: "schema.yaml", SourceLine: 1}},
 		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{rootEvent: {Payload: payload}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{rootEvent: {Payload: payload}, plainEvent: {Payload: payload}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"observer": {
-			ExecutionType: "system_node", SubscribesTo: []string{rootEvent},
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{rootEvent: {}},
+			ExecutionType: "system_node", SubscribesTo: []string{rootEvent, plainEvent},
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{rootEvent: {}, plainEvent: {}},
 		}},
-		Children: []runtimecontracts.FlowContractView{child},
+		Children: []runtimecontracts.FlowContractView{child, shadow},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		SourceArtifact: authorActivityTestSourceArtifact,
 		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "factory", Version: "1.0.0"},
 		Events:         root.Events, Nodes: root.Nodes, RootSchema: &root.Schema,
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"factory": child.Schema},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"factory": child.Schema, "shadow": shadow.Schema},
 		FlowSources: map[string]runtimecontracts.FlowSource{
 			".":       {FlowPath: ".", Schema: "schema.yaml", Events: "events.yaml"},
 			"factory": {FlowPath: "factory", Schema: "factory/schema.yaml", Events: "factory/events.yaml", Nodes: "factory/nodes.yaml"},
+			"shadow":  {FlowPath: "shadow", Schema: "shadow/schema.yaml", Events: "shadow/events.yaml", Nodes: "shadow/nodes.yaml"},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "factory": &root.Children[0]},
+			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "factory": &root.Children[0], "shadow": &root.Children[1]},
 		},
 	}
 	return mustCompileEventPublishTestBundle(bundle)

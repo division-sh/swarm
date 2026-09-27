@@ -177,6 +177,10 @@ func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts o
 	if err != nil {
 		return operatorread.RunDebugReport{}, fmt.Errorf("load sqlite run fan-out diagnostics: %w", err)
 	}
+	report.TestQuiescence.FanOutOwed = report.FanOut.Owed
+	report.TestQuiescence.FanOutUnsettled = report.FanOut.Unsettled
+	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
+	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
 	return report, nil
 }
 
@@ -200,6 +204,7 @@ func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, obs
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence fan-out obligations: %w", err)
 	}
 	out.FanOutOwed = fanOut.Owed
+	out.FanOutUnsettled = fanOut.Unsettled
 	out.FanOutBarriers = fanOut.BarrierArmed + fanOut.BarrierPending
 	scope, err := runtimetimerobligation.Run(runID)
 	if err != nil {

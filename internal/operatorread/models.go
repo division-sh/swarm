@@ -895,6 +895,7 @@ type RunTestQuiescence struct {
 	ActiveDeliveries        int  `json:"active_deliveries"`
 	UnsettledPipelineEvents int  `json:"unsettled_pipeline_events"`
 	FanOutOwed              int  `json:"fan_out_owed"`
+	FanOutUnsettled         int  `json:"fan_out_unsettled"`
 	FanOutBarriers          int  `json:"fan_out_barriers"`
 	DueTimers               int  `json:"due_timers"`
 	ActiveSessionLeases     int  `json:"active_session_leases"`
