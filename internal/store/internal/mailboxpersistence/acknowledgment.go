@@ -8,10 +8,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/mailbox"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	channelrender "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
+	storechannel "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	storeoperator "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 	storesource "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 )
@@ -31,6 +34,14 @@ func noticeRequestSource(ctx context.Context, req apiidempotency.Request) (corre
 }
 
 func (s *MailboxPostgresOwner) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (completion apiidempotency.Completion, replayed bool, err error) {
+	return s.acknowledgeMailboxNotice(ctx, req, nil)
+}
+
+func (s *MailboxPostgresOwner) AcknowledgeChannelNotice(ctx context.Context, req apiidempotency.Request, action operatorchannel.InboundAction) (apiidempotency.Completion, bool, error) {
+	return s.acknowledgeMailboxNotice(ctx, req, &action)
+}
+
+func (s *MailboxPostgresOwner) acknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request, action *operatorchannel.InboundAction) (completion apiidempotency.Completion, replayed bool, err error) {
 	fact, err := noticeRequestSource(ctx, req)
 	if err != nil {
 		return completion, false, err
@@ -47,13 +58,31 @@ func (s *MailboxPostgresOwner) AcknowledgeMailboxNotice(ctx context.Context, req
 		if err := storeoperator.RequirePrincipalTx(txctx, tx, req.Actor.ID, true); err != nil {
 			return err
 		}
+		state := ""
+		if action != nil {
+			state, err = storechannel.RequireNoticeActionTx(txctx, tx, *action, req.Actor.ID, req.ResourceID, true)
+			if err != nil {
+				return err
+			}
+		}
 		if completion, replayed = lease.Replay(); replayed {
+			if action != nil && state != "settled" {
+				return fmt.Errorf("channel notice replay lacks its committed action")
+			}
 			return nil
+		}
+		if action != nil && state != "pending" {
+			return fmt.Errorf("channel notice action already settled without completion")
 		}
 		var err error
 		completion, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, true)
 		if err != nil {
 			return err
+		}
+		if action != nil {
+			if err := storechannel.SettleAppliedActionIntentTx(txctx, tx, *action, channelrender.ActionApplied, true); err != nil {
+				return err
+			}
 		}
 		return storeapiidempotency.StorePostgresCompletionTx(txctx, lease, tx, completion)
 	})
@@ -64,6 +93,14 @@ func (s *MailboxPostgresOwner) AcknowledgeMailboxNotice(ctx context.Context, req
 }
 
 func (s *MailboxSQLiteOwner) AcknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return s.acknowledgeMailboxNotice(ctx, req, nil)
+}
+
+func (s *MailboxSQLiteOwner) AcknowledgeChannelNotice(ctx context.Context, req apiidempotency.Request, action operatorchannel.InboundAction) (apiidempotency.Completion, bool, error) {
+	return s.acknowledgeMailboxNotice(ctx, req, &action)
+}
+
+func (s *MailboxSQLiteOwner) acknowledgeMailboxNotice(ctx context.Context, req apiidempotency.Request, action *operatorchannel.InboundAction) (apiidempotency.Completion, bool, error) {
 	fact, err := noticeRequestSource(ctx, req)
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
@@ -82,13 +119,31 @@ func (s *MailboxSQLiteOwner) AcknowledgeMailboxNotice(ctx context.Context, req a
 		if err := storeoperator.RequirePrincipalTx(txctx, tx, req.Actor.ID, false); err != nil {
 			return err
 		}
+		state := ""
+		if action != nil {
+			state, err = storechannel.RequireNoticeActionTx(txctx, tx, *action, req.Actor.ID, req.ResourceID, false)
+			if err != nil {
+				return err
+			}
+		}
 		if completion, replayed = lease.Replay(); replayed {
+			if action != nil && state != "settled" {
+				return fmt.Errorf("channel notice replay lacks its committed action")
+			}
 			return nil
+		}
+		if action != nil && state != "pending" {
+			return fmt.Errorf("channel notice action already settled without completion")
 		}
 		var err error
 		completion, err = acknowledgeNoticeTx(txctx, tx, req.ResourceID, false)
 		if err != nil {
 			return err
+		}
+		if action != nil {
+			if err := storechannel.SettleAppliedActionIntentTx(txctx, tx, *action, channelrender.ActionApplied, false); err != nil {
+				return err
+			}
 		}
 		return storeapiidempotency.StoreSQLiteCompletionTx(txctx, lease, tx, completion)
 	})
