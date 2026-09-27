@@ -55,3 +55,18 @@ func TestDoubleRetainsEditAndCallbackEffectsAfterResponseLoss(t *testing.T) {
 		t.Fatalf("edit response = %#v, err=%v", result, err)
 	}
 }
+
+func TestDoubleRetainsDeliveryAfterResponseLoss(t *testing.T) {
+	provider := &Double{}
+	server := httptest.NewServer(provider)
+	defer server.Close()
+	provider.LoseNextDeliveryAcknowledgment()
+	response, err := http.Post(server.URL+"/botcredential/sendMessage", "application/json", bytes.NewBufferString(`{"chat_id":"42","text":"first"}`))
+	if err == nil {
+		_ = response.Body.Close()
+		t.Fatal("accepted delivery retained its response")
+	}
+	if got := provider.Delivery(0); got == nil || got["text"] != "first" || provider.Delivery(1) != nil {
+		t.Fatalf("accepted delivery effects = %#v", got)
+	}
+}
