@@ -9,10 +9,7 @@ import (
 // WithoutStandingIngressPins removes both sides of the provider interface.
 func WithoutStandingIngressPins(t testing.TB, schema string) string {
 	t.Helper()
-	var document yaml.Node
-	if err := yaml.Unmarshal([]byte(schema), &document); err != nil {
-		t.Fatal(err)
-	}
+	document := NewParserSnippet(t, schema).document
 	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
 		t.Fatal("standing ingress schema must be a mapping")
 	}
