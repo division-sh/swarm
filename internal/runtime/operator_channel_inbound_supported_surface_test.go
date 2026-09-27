@@ -233,6 +233,19 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 			t.Fatalf("%s confirmation = operation:%#v binding:%#v err:%v", claim.chatKind, confirmed, binding, err)
 		}
 	}
+	textBody := []byte(`{"update_id":7320,"message":{"message_id":20,"from":{"id":41},"chat":{"id":-43,"type":"supergroup"},"text":"reason text","reply_to_message":{"message_id":19}}}`)
+	textResponse := publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx, textBody)
+	if textResponse.TextDisposition != "pending" || len(textResponse.EventNames) != 0 {
+		t.Fatalf("verified operator text disposition = %#v", textResponse)
+	}
+	var textFact []byte
+	if err := db.QueryRowContext(ctx, `SELECT fact FROM operator_channel_text_intents WHERE provider_event_id='7320'`).Scan(&textFact); err != nil {
+		t.Fatal(err)
+	}
+	var projected operatorchannel.TextFact
+	if err := json.Unmarshal(textFact, &projected); err != nil || projected.MessageReference != `{"id":20}` || projected.ReplyToReference != `{"id":19}` || projected.Text != "reason text" {
+		t.Fatalf("durable verified operator text = %#v, err=%v", projected, err)
+	}
 }
 
 type operatorChannelInboundResponse struct {
@@ -240,6 +253,7 @@ type operatorChannelInboundResponse struct {
 	EventNames        []string `json:"event_names"`
 	ClaimDisposition  string   `json:"operator_channel_claim_disposition"`
 	ActionDisposition string   `json:"operator_channel_action_disposition"`
+	TextDisposition   string   `json:"operator_channel_text_disposition"`
 	OperationID       string   `json:"operator_channel_operation_id"`
 }
 

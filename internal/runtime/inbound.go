@@ -472,6 +472,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
 			Request: publicationRequest, Finalization: runtimeinbound.Finalization{EvidenceEvent: evidence},
 			OperatorChannelClaim: operatorEvent.Claim, OperatorChannelAction: operatorEvent.Action,
+			OperatorChannelText: operatorEvent.Text,
 		})
 		if !commitResult.Acknowledged {
 			if err == nil {
@@ -495,6 +496,9 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		}
 		if operatorEvent.Action != nil {
 			response["operator_channel_action_disposition"] = "pending"
+		}
+		if operatorEvent.Text != nil {
+			response["operator_channel_text_disposition"] = "pending"
 		}
 		if err != nil {
 			reportInboundCommittedCleanup(g.logger, requestCtx, provider, entityID, providerEventID, err)
@@ -633,6 +637,7 @@ func writeInboundPublicationError(w http.ResponseWriter, err error) {
 type operatorInboundProjection struct {
 	Claim  *operatorchannel.InboundClaim
 	Action *operatorchannel.InboundAction
+	Text   *operatorchannel.InboundText
 }
 
 func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time, posture executionposture.Posture, channelPlans []packs.SatisfactionPlan) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, *operatorInboundProjection, error) {
@@ -688,6 +693,12 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 						ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
 					}
 					operatorEvent = &operatorInboundProjection{Claim: &claim}
+				} else {
+					operatorEvent = &operatorInboundProjection{Text: &operatorchannel.InboundText{
+						TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+						PublicationID:         request.PublicationID,
+						ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
+					}}
 				}
 			}
 		}

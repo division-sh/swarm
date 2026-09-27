@@ -14370,6 +14370,7 @@ platform_tables:
         - operator_channel_bindings
         - operator_channel_claim_receipts
         - operator_channel_action_intents
+        - operator_channel_text_intents
         - channel_delivery_defaults
         - channel_native_settings
         - channel_native_setting_consumers
@@ -15464,6 +15465,28 @@ platform_tables:
             settled_at TIMESTAMPTZ,
             CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
             INDEX idx_operator_channel_action_pending (state, recorded_at)
+        );
+    operator_channel_text_intents:
+      description: >-
+        Verified non-challenge channel text commits in the inbound-publication transaction
+        without a business event. The fact retains provider occurrence, exact message and
+        reply references, but grants no entry, draft or principal authority until a current
+        selected-store admission resolves it. An acknowledged webhook is replayable after
+        process death without interpreting provider text from process memory.
+      ddl: |
+        CREATE TABLE operator_channel_text_intents (
+            publication_id UUID PRIMARY KEY,
+            provider TEXT NOT NULL,
+            provider_event_id TEXT NOT NULL,
+            interface_key TEXT NOT NULL,
+            fact JSONB NOT NULL,
+            provider_authorization TEXT NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('pending','settled')),
+            disposition TEXT,
+            recorded_at TIMESTAMPTZ NOT NULL,
+            settled_at TIMESTAMPTZ,
+            CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
+            INDEX idx_operator_channel_text_pending (state, recorded_at)
         );
     runtime_reset_operations:
       description: >-
