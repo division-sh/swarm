@@ -239,10 +239,13 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		if code != 0 || strings.TrimSpace(stderr) != "" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 		}
-		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by @m***o in a shared conversation", "Connected telegram channel READY"} {
+		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by @m***o in a shared conversation", "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.", "Connected telegram channel READY"} {
 			if !strings.Contains(stdout, want) {
 				t.Fatalf("connect output missing %q:\n%s", want, stdout)
 			}
+		}
+		if strings.Count(stdout, "This conversation will receive future notices") != 1 {
+			t.Fatalf("shared audience disclosure was not presented exactly once: %q", stdout)
 		}
 		wantMethods := []string{"channel.onboarding_start", "channel.onboarding_get", "channel.confirm", "channel.onboarding_retry"}
 		if strings.Join(methods, ",") != strings.Join(wantMethods, ",") {

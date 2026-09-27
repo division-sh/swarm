@@ -217,6 +217,74 @@ func RequireTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.I
 	return nil
 }
 
+func LoadChooserTextIntentTx(ctx context.Context, tx *sql.Tx, publicationID string, postgres, lock bool) (render.PendingText, error) {
+	if tx == nil || uuid.Validate(publicationID) != nil {
+		return render.PendingText{}, fmt.Errorf("draft choice requires exact retained text intent")
+	}
+	query := `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, recorded_at, state, disposition
+		FROM operator_channel_text_intents WHERE publication_id=?`
+	if postgres {
+		query = `SELECT provider, provider_event_id, interface_key, fact, provider_authorization, recorded_at, state, disposition
+			FROM operator_channel_text_intents WHERE publication_id=$1::uuid`
+		if lock {
+			query += ` FOR UPDATE`
+		}
+	}
+	var pending render.PendingText
+	var interfaceKey, state string
+	var disposition sql.NullString
+	var raw []byte
+	var recorded any
+	if err := tx.QueryRowContext(ctx, query, publicationID).Scan(&pending.Fact.Provider, &pending.Fact.ProviderEventID,
+		&interfaceKey, &raw, &pending.Fact.ProviderAuthorization, &recorded, &state, &disposition); err != nil {
+		return render.PendingText{}, err
+	}
+	if state != "settled" || !disposition.Valid || disposition.String != "chooser" {
+		return render.PendingText{}, fmt.Errorf("draft choice has no retained chooser text")
+	}
+	pending.PublicationID = publicationID
+	pending.Fact.PublicationID = publicationID
+	var err error
+	pending.ReceivedAt, err = decodeActionTime(recorded)
+	if err != nil {
+		return render.PendingText{}, err
+	}
+	if err := json.Unmarshal(raw, &pending.Fact.TextFact); err != nil {
+		return render.PendingText{}, err
+	}
+	if err := pending.Fact.Validate(); err != nil || pending.Fact.Interface.Key() != interfaceKey {
+		return render.PendingText{}, fmt.Errorf("draft choice retained text contradicts its verified fact: %w", err)
+	}
+	return pending, nil
+}
+
+func SettleTextIntentTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, disposition string, postgres bool) error {
+	if disposition != "input_progressed" && disposition != "input_complete" && disposition != "teaching" && disposition != "chooser" {
+		return fmt.Errorf("unsupported channel text disposition %q", disposition)
+	}
+	if err := RequireTextIntentTx(ctx, tx, text, postgres); err != nil {
+		return err
+	}
+	query := `UPDATE operator_channel_text_intents SET state='settled', disposition=?, settled_at=?
+		WHERE publication_id=? AND state='pending'`
+	if postgres {
+		query = `UPDATE operator_channel_text_intents SET state='settled', disposition=$1, settled_at=$2
+			WHERE publication_id=$3::uuid AND state='pending'`
+	}
+	result, err := tx.ExecContext(ctx, query, disposition, time.Now().UTC(), text.PublicationID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("verified channel text intent lost its pending state")
+	}
+	return nil
+}
+
 func decodeActionTime(value any) (time.Time, error) {
 	switch value := value.(type) {
 	case time.Time:
