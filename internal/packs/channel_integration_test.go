@@ -634,6 +634,61 @@ func TestChannelDeliveryReplyProjectionTelegram(t *testing.T) {
 	}
 }
 
+func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
+	registry := loadChannelInterfaceRegistry(t)
+	mockChannel, mockTrigger, mockConnector := mockChannelSatisfier()
+	mockPlan, err := packs.CompileChannel(registry, mockChannel, []packs.TriggerPackDescriptor{mockTrigger}, []packs.ConnectorPackDescriptor{mockConnector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name        string
+		plan        packs.SatisfactionPlan
+		destination any
+		wantInput   map[string]any
+	}{
+		{"telegram", loadTelegramChannelPlan(t), "-100123", map[string]any{"chat_id": "-100123"}},
+		{"mock", mockPlan, map[string]any{"queue": "queue-a"}, map[string]any{"destination": map[string]any{"queue": "queue-a"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			binding, err := packs.NewOutboundBindingPlan("inbox", tc.plan, tc.destination, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			commands := []any{map[string]any{"command": "inbox", "description": "Open inbox"}}
+			_, install, err := binding.PrepareOperation("install_inbox_entry", map[string]any{"commands": commands})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for field, want := range tc.wantInput {
+				if !reflect.DeepEqual(install[field], want) {
+					t.Fatalf("install %s = %#v, want %#v", field, install[field], want)
+				}
+			}
+			if _, ok := install["commands"]; !ok {
+				t.Fatalf("install dropped exact commands: %#v", install)
+			}
+			_, read, err := binding.PrepareOperation("read_inbox_entry", map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for field, want := range tc.wantInput {
+				if !reflect.DeepEqual(read[field], want) {
+					t.Fatalf("read %s = %#v, want %#v", field, read[field], want)
+				}
+			}
+			if _, ok := read["commands"]; ok {
+				t.Fatalf("readback gained install input: %#v", read)
+			}
+			_, tool, err := binding.ConnectorOperation("read_inbox_entry")
+			if err != nil || tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+				t.Fatalf("native readback effect = %q, %v", tool.Effect(), err)
+			}
+		})
+	}
+}
+
 func TestChannelDeliveryOptionalEventBindingAdmission(t *testing.T) {
 	registry := loadChannelInterfaceRegistry(t)
 	tests := []struct {
@@ -1688,6 +1743,11 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	interaction := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"cursor": mockStringSchema(1, 16, "")}, "cursor")
 	externalAccount := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"principal": mockStringSchema(1, 20, "")}, "principal")
 	conversation := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"room": mockStringSchema(1, 20, "")}, "room")
+	inboxCommand := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+		"command": mockStringSchema(1, 32, ""), "description": mockStringSchema(1, 256, ""),
+	}, "command", "description")
+	inboxInstall := mockArraySchema(1, 1, inboxCommand)
+	inboxReadback := mockArraySchema(0, 100, inboxCommand)
 	connectorTools := map[string]runtimecontracts.ToolSchemaEntry{
 		"mock.deliver": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 			"destination": destination, "body": text128, "controls": actions,
@@ -1698,6 +1758,16 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		"mock.ack": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 			"cursor": mockStringSchema(1, 16, ""),
 		}, "cursor"), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))),
+		"mock.install_inbox": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+			"destination": destination, "commands": inboxInstall,
+		}, "destination", "commands"), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))),
+		"mock.read_inbox": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+			runtimecontracts.WithToolSchemas(
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination}, "destination"),
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
+			),
+		),
 		"mock.identify_workspace": mockRegistrationTool(
 			runtimecontracts.ActivityEffectClassReadOnly,
 			[]string{"mock_api_key"},
@@ -1768,6 +1838,12 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				Output: map[string]packs.ChannelMapping{"delivery_receipt.revision": {From: "result.revision"}},
 			},
 			"acknowledge_interaction": {Tool: "mock.ack", Input: map[string]packs.ChannelMapping{"cursor": {From: "input.interaction_reference.cursor"}}},
+			"install_inbox_entry": {Tool: "mock.install_inbox", Input: map[string]packs.ChannelMapping{
+				"destination.queue": {From: "context.destination.queue"}, "commands": {From: "input.commands"},
+			}},
+			"read_inbox_entry": {Tool: "mock.read_inbox", Input: map[string]packs.ChannelMapping{
+				"destination.queue": {From: "context.destination.queue"},
+			}, Output: map[string]packs.ChannelMapping{"commands": {From: "result.commands"}}},
 		},
 		Events: map[string]packs.ChannelEventBinding{
 			"action": {Event: "mock.action", Fields: map[string]string{

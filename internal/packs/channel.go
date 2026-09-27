@@ -225,8 +225,8 @@ func validateInterfaceDefinition(identity string, definition runtimecontracts.Pa
 		}
 	}
 	for name, operation := range definition.Operations {
-		if runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass) != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-			return fmt.Errorf("platform interface %q operation %q must use non_idempotent_write", identity, name)
+		if runtimecontracts.NormalizeActivityEffectClass(operation.EffectClass) == "" {
+			return fmt.Errorf("platform interface %q operation %q has unsupported effect class %q", identity, name, operation.EffectClass)
 		}
 		for group, fields := range map[string]map[string]runtimecontracts.PackInterfaceField{
 			"input": operation.Input, "context": operation.Context, "output": operation.Output,
