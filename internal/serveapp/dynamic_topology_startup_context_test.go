@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,18 +30,39 @@ import (
 )
 
 func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomically(t *testing.T) {
+	testDynamicTopologyStartupPreflightTwoContexts(t, "postgres")
+}
+
+func TestDynamicTopologyStartupPreflightSQLiteScopesTwoContextsAndRefusesAtomically(t *testing.T) {
+	testDynamicTopologyStartupPreflightTwoContexts(t, "sqlite")
+}
+
+func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string) {
 	for _, foreign := range []struct {
-		name      string
-		malformed bool
+		name             string
+		malformed        bool
+		sourceTransition bool
 	}{
 		{name: "pending"},
 		{name: "malformed", malformed: true},
+		{name: "source_transition", sourceTransition: true},
 	} {
 		t.Run(foreign.name, func(t *testing.T) {
-			dsn, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
 			cfg := &config.Config{}
-			selected := openSelectedPostgresOwner(t, dsn, db, cfg)
+			var db *sql.DB
+			var selected *selectedStoreOwner
+			if backend == "sqlite" {
+				selected = openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "dynamic-topology.db"), cfg)
+				db = selectedStoreDatabaseForTest(t, selected)
+				if _, err := initializeServePlatformStateStores(context.Background(), selected.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
+					t.Fatalf("admit SQLite selected store: %v", err)
+				}
+			} else {
+				dsn, postgresDB, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				db = postgresDB
+				selected = openSelectedPostgresOwner(t, dsn, db, cfg)
+			}
 			t.Cleanup(func() { closeUnactivatedSelectedStore(t, selected) })
 
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier11-flow-composition/test-dynamic-flow-instance")
@@ -59,10 +81,18 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 			paths := []string{"worker/context-a", "worker/context-b"}
 			runIDs := []string{uuid.NewString(), uuid.NewString()}
 			for index, fact := range facts {
-				seedServeDynamicTopologyReadiness(t, db, fact, artifacts[index], runIDs[index], paths[index], index == 0)
+				planSource := fact
+				if foreign.sourceTransition && index == 1 {
+					planSource = facts[0]
+				}
+				seedServeDynamicTopologyReadiness(t, db, backend, fact, planSource, artifacts[index], runIDs[index], paths[index], index == 0)
 			}
 			if foreign.malformed {
-				if _, err := db.Exec(`UPDATE flow_instance_runtime_readiness SET plan = '{}'::jsonb WHERE run_id = $1::uuid AND instance_path = $2`, runIDs[1], paths[1]); err != nil {
+				query := `UPDATE flow_instance_runtime_readiness SET plan = '{}'::jsonb WHERE run_id = $1::uuid AND instance_path = $2`
+				if backend == "sqlite" {
+					query = `UPDATE flow_instance_runtime_readiness SET plan = '{}' WHERE run_id = $1 AND instance_path = $2`
+				}
+				if _, err := db.Exec(query, runIDs[1], paths[1]); err != nil {
 					t.Fatalf("corrupt foreign readiness: %v", err)
 				}
 			}
@@ -136,6 +166,13 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 				len(local.CurrentPending) != 0 || len(local.SourceTransitionRequired) != 0 {
 				t.Fatalf("first context projection = %#v err=%v", local, err)
 			}
+			if foreign.sourceTransition {
+				transition, inspectErr := runtimes[1].Manager.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), facts[1])
+				if inspectErr != nil || len(transition.SourceTransitionRequired) != 1 || transition.SourceTransitionRequired[0].InstancePath != paths[1] ||
+					len(transition.CurrentCompleted) != 0 || len(transition.CurrentPending) != 0 {
+					t.Fatalf("foreign transition projection = %#v err=%v", transition, inspectErr)
+				}
+			}
 			before := snapshotServeDynamicTopologyReadiness(t, db)
 			contexts := []serveRuntimeBundleContext{
 				{runtime: runtimes[0], sourceArtifactFact: facts[0]},
@@ -148,6 +185,10 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 			if foreign.malformed {
 				if !strings.Contains(err.Error(), "decode") && !strings.Contains(err.Error(), "readiness") {
 					t.Fatalf("malformed foreign context error = %v", err)
+				}
+			} else if foreign.sourceTransition {
+				if !strings.Contains(err.Error(), "predecessor_pending_transitions=1") || !strings.Contains(err.Error(), "requires recovery") {
+					t.Fatalf("source-transition foreign context error = %v", err)
 				}
 			} else if !strings.Contains(err.Error(), "requires recovery") {
 				t.Fatalf("pending foreign context error = %v", err)
@@ -168,7 +209,9 @@ func TestDynamicTopologyStartupPreflightPostgresScopesTwoContextsAndRefusesAtomi
 func seedServeDynamicTopologyReadiness(
 	t *testing.T,
 	db *sql.DB,
+	backend string,
 	source runtimecorrelation.SourceArtifactFact,
+	planSource runtimecorrelation.SourceArtifactFact,
 	artifact *sourceartifact.AdmittedSourceArtifact,
 	runID string,
 	instancePath string,
@@ -179,12 +222,16 @@ func seedServeDynamicTopologyReadiness(
 	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeInstanceID, source.BundleHash()))
-	bundleHash := source.BundleHash()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{
+	fixture := runlifecyclefixture.Fixture{
 		Origin:   runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID:    runID,
 		Artifact: artifact,
-	})
+	}
+	if backend == "sqlite" {
+		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
+	} else {
+		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+	}
 	parts := strings.SplitN(instancePath, "/", 2)
 	if len(parts) != 2 {
 		t.Fatalf("invalid readiness instance path %q", instancePath)
@@ -195,7 +242,7 @@ func seedServeDynamicTopologyReadiness(
 			TemplateID: parts[0], ScopeKey: parts[0], InstanceID: parts[1], InstancePath: instancePath,
 			EntityID: entityID, HasStoredPath: true,
 		},
-		RunID: runID, BundleHash: bundleHash,
+		RunID: runID, BundleHash: planSource.BundleHash(),
 		WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 	}).Normalized()
 	if err != nil {
@@ -205,23 +252,41 @@ func seedServeDynamicTopologyReadiness(
 	if err != nil {
 		t.Fatalf("marshal readiness plan: %v", err)
 	}
-	if _, err := db.Exec(`
+	flowInsert := `
 		INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
 		VALUES ($1::uuid, $2, $3, 'template', '{}'::jsonb, 'active', NOW())
-	`, runID, instancePath, parts[0]); err != nil {
-		t.Fatalf("seed flow instance %s: %v", instancePath, err)
-	}
-	if _, err := db.Exec(`
+	`
+	entityInsert := `
 		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
 		VALUES ($1::uuid, $2::uuid, $3, 'worker', 'idle', '{}'::jsonb, NOW(), NOW())
-	`, entityID, runID, instancePath); err != nil {
-		t.Fatalf("seed entity state %s: %v", instancePath, err)
-	}
-	if _, err := db.Exec(`
+	`
+	readinessInsert := `
 		INSERT INTO flow_instance_runtime_readiness (
 			run_id, instance_path, plan, topology_ready_at, created_at, updated_at
 		) VALUES ($1::uuid, $2, $3::jsonb, $4, NOW(), NOW())
-	`, runID, instancePath, raw, nullableServeReadinessTime(complete)); err != nil {
+	`
+	if backend == "sqlite" {
+		flowInsert = `
+			INSERT INTO flow_instances (run_id, instance_path, flow_template, mode, config, status, created_at)
+			VALUES ($1, $2, $3, 'template', '{}', 'active', CURRENT_TIMESTAMP)
+		`
+		entityInsert = `
+			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+			VALUES ($1, $2, $3, 'worker', 'idle', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`
+		readinessInsert = `
+			INSERT INTO flow_instance_runtime_readiness (
+				run_id, instance_path, plan, topology_ready_at, created_at, updated_at
+			) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`
+	}
+	if _, err := db.Exec(flowInsert, runID, instancePath, parts[0]); err != nil {
+		t.Fatalf("seed flow instance %s: %v", instancePath, err)
+	}
+	if _, err := db.Exec(entityInsert, entityID, runID, instancePath); err != nil {
+		t.Fatalf("seed entity state %s: %v", instancePath, err)
+	}
+	if _, err := db.Exec(readinessInsert, runID, instancePath, raw, nullableServeReadinessTime(complete)); err != nil {
 		t.Fatalf("seed readiness %s: %v", instancePath, err)
 	}
 }
@@ -236,8 +301,8 @@ func nullableServeReadinessTime(complete bool) any {
 func snapshotServeDynamicTopologyReadiness(t *testing.T, db *sql.DB) []string {
 	t.Helper()
 	rows, err := db.Query(`
-		SELECT readiness.run_id::text, readiness.instance_path, readiness.plan::text,
-		       COALESCE(readiness.topology_ready_at::text, ''), readiness.updated_at::text,
+		SELECT CAST(readiness.run_id AS TEXT), readiness.instance_path, CAST(readiness.plan AS TEXT),
+		       COALESCE(CAST(readiness.topology_ready_at AS TEXT), ''), CAST(readiness.updated_at AS TEXT),
 		       run.bundle_hash, run.status
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN runs AS run ON run.run_id = readiness.run_id
