@@ -4899,6 +4899,136 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	}
 }
 
+func TestConnectRecipientIndexedCandidatesMatchFullGraphEvaluation(t *testing.T) {
+	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
+	table, err := DeriveRouteTable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	if len(graph.Plans()) != 1 {
+		t.Fatalf("compiled plans = %d, want one", len(graph.Plans()))
+	}
+	plan := graph.Plans()[0]
+	for _, id := range []string{"first", "second"} {
+		if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+			Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", id)),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	foreign, err := runtimeflowidentity.NewRunScopedFlowInstance(eventtest.UUID("foreign-run"), runtimeflowidentity.DeriveRoute("consumer", "foreign"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: foreign}); err != nil {
+		t.Fatal(err)
+	}
+	compare := func(label string, targets []events.RouteIdentity, wantRecipients int) {
+		t.Helper()
+		full := graph.EvaluateMaterializedRecipients(plan, targets, table.connectRecipientAdmissionsForRun(busInternalTestRunID))
+		indexed := graph.EvaluateMaterializedRecipients(plan, targets, table.connectRecipientAdmissionsForTargets(busInternalTestRunID, plan, targets))
+		fullLedger, fullErr := full.Ledger()
+		indexedLedger, indexedErr := indexed.Ledger()
+		if got := len(full.Recipients()); got != wantRecipients {
+			t.Fatalf("%s: full graph recipients = %d, want %d", label, got, wantRecipients)
+		}
+		if !reflect.DeepEqual(fullErr, indexedErr) || !reflect.DeepEqual(fullLedger, indexedLedger) || !reflect.DeepEqual(full.Recipients(), indexed.Recipients()) {
+			t.Fatalf("%s: indexed graph evaluation differs from full: full=%#v err=%v indexed=%#v err=%v", label, fullLedger, fullErr, indexedLedger, indexedErr)
+		}
+	}
+	first := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/first", EntityID: eventtest.UUID("first-owner")}
+	second := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/second", EntityID: eventtest.UUID("second-owner")}
+	compare("first", []events.RouteIdentity{first}, 1)
+	compare("second", []events.RouteIdentity{second}, 1)
+	compare("both", []events.RouteIdentity{first, second}, 2)
+	compare("both reversed", []events.RouteIdentity{second, first}, 2)
+	compare("foreign run owner", []events.RouteIdentity{{FlowID: "consumer", FlowInstance: "consumer/foreign", EntityID: eventtest.UUID("foreign-owner")}}, 0)
+	compare("missing", []events.RouteIdentity{{FlowID: "consumer", FlowInstance: "consumer/missing", EntityID: eventtest.UUID("missing-owner")}}, 0)
+	compare("targetless", nil, 0)
+	if err := table.RemoveFlowInstanceRoute(testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "first"))); err != nil {
+		t.Fatal(err)
+	}
+	compare("removed", []events.RouteIdentity{first}, 0)
+	if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+		Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", "first")),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	compare("re-added", []events.RouteIdentity{first}, 1)
+}
+
+func BenchmarkConnectRecipientSelectedCandidatePopulation(b *testing.B) {
+	for _, population := range []int{128, 512, 1362} {
+		b.Run(fmt.Sprintf("receivers=%d", population), func(b *testing.B) {
+			source := connectRoutePlanTemplateInstanceSource(b, canonicalrouting.TemplateInstanceRouteSelect, false)
+			table, err := DeriveRouteTable(source)
+			if err != nil {
+				b.Fatal(err)
+			}
+			graph := runtimepinrouting.CompileConnectGraph(source)
+			if len(graph.Plans()) != 1 {
+				b.Fatalf("compiled plans = %d, want one", len(graph.Plans()))
+			}
+			for ordinal := 0; ordinal < population; ordinal++ {
+				id := fmt.Sprintf("receiver-%04d", ordinal)
+				if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+					Identity: testRunScopedFlowRoute(runtimeflowidentity.DeriveRoute("consumer", id)),
+				}); err != nil {
+					b.Fatal(err)
+				}
+			}
+			target := events.RouteIdentity{
+				FlowID: "consumer", FlowInstance: fmt.Sprintf("consumer/receiver-%04d", population-1),
+				EntityID: eventtest.UUID("selected-candidate-owner"),
+			}
+			plan := graph.Plans()[0]
+			full := table.connectRecipientAdmissionsForRun(busInternalTestRunID)
+			selected := table.connectRecipientAdmissionsForTargets(busInternalTestRunID, plan, []events.RouteIdentity{target})
+			if len(full) != population || len(selected) != 1 {
+				b.Fatalf("candidate rows: full=%d selected=%d, want %d/1", len(full), len(selected), population)
+			}
+			for _, tc := range []struct {
+				name string
+				rows []runtimepinrouting.ConnectRecipientRegistration
+			}{
+				{name: "full_run", rows: full},
+				{name: "selected_target", rows: selected},
+			} {
+				b.Run(tc.name, func(b *testing.B) {
+					evaluation := graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{target}, tc.rows)
+					ledger, err := evaluation.Ledger()
+					if err != nil || len(evaluation.Recipients()) != 1 {
+						b.Fatalf("graph evaluation: recipients=%d err=%v", len(evaluation.Recipients()), err)
+					}
+					settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+					if err != nil {
+						b.Fatal(err)
+					}
+					wire, err := json.Marshal(settlement)
+					if err != nil {
+						b.Fatal(err)
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						rows := tc.rows
+						if tc.name == "selected_target" {
+							rows = table.connectRecipientAdmissionsForTargets(busInternalTestRunID, plan, []events.RouteIdentity{target})
+						}
+						if got := len(graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{target}, rows).Recipients()); got != 1 {
+							b.Fatalf("recipients = %d, want one", got)
+						}
+					}
+					b.ReportMetric(float64(len(tc.rows)), "candidate_rows")
+					b.ReportMetric(float64(len(ledger.Plans()[0].Candidates())), "ledger_candidates")
+					b.ReportMetric(float64(len(wire)), "settlement_bytes")
+				})
+			}
+		})
+	}
+}
+
 func connectRoutePlanTemplateInstanceSource(t testing.TB, mode canonicalrouting.TemplateInstanceRouteMode, renamedSource bool) semanticview.Source {
 	t.Helper()
 	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{

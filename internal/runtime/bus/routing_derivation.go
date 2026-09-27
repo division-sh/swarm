@@ -95,28 +95,36 @@ func (s subscriberRouteSource) code() string {
 }
 
 type RouteTable struct {
-	mu                sync.RWMutex
-	generationMu      sync.RWMutex
-	generation        uint64
-	source            semanticview.Source
-	routes            map[routeResolutionKey][]Subscriber
-	rootInputRoutes   map[string][]Subscriber
-	patterns          []routePattern
-	eventPath         map[string]struct{}
-	authoredEventPath map[string]struct{}
-	authoredScopes    map[string]struct{}
-	templates         map[string]routeFlowTemplate
-	instanceOwners    map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance
-	instanceEventPath map[runtimeflowidentity.RunScopedFlowInstance][]string
-	templateObservers map[string][]routeTemplateSourceObserver
-	connectGraph      runtimepinrouting.CompiledConnectGraph
-	connectRecipients []routeConnectRecipientRegistration
+	mu                          sync.RWMutex
+	generationMu                sync.RWMutex
+	generation                  uint64
+	source                      semanticview.Source
+	routes                      map[routeResolutionKey][]Subscriber
+	rootInputRoutes             map[string][]Subscriber
+	patterns                    []routePattern
+	eventPath                   map[string]struct{}
+	authoredEventPath           map[string]struct{}
+	authoredScopes              map[string]struct{}
+	templates                   map[string]routeFlowTemplate
+	instanceOwners              map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance
+	instanceEventPath           map[runtimeflowidentity.RunScopedFlowInstance][]string
+	templateObservers           map[string][]routeTemplateSourceObserver
+	connectGraph                runtimepinrouting.CompiledConnectGraph
+	connectRecipients           []routeConnectRecipientRegistration
+	connectRecipientsByInstance map[routeConnectRecipientKey][]routeConnectRecipientRegistration
+	nextConnectRecipientOrdinal uint64
+}
+
+type routeConnectRecipientKey struct {
+	runID        string
+	instancePath string
 }
 
 type routeConnectRecipientRegistration struct {
 	registration runtimepinrouting.ConnectRecipientRegistration
 	runID        string
 	instancePath string
+	ordinal      uint64
 }
 
 type routeResolutionKey struct {
@@ -171,7 +179,7 @@ func (rt *RouteTable) compiledRouteOwnerDependencies(inputProducers runtimepinro
 				continue
 			}
 			dependencies = append(dependencies, runtimepinrouting.RouteOwnerDependency{
-				SourceFlowPath: sourcePath,
+				SourceFlowPath:   sourcePath,
 				ReceiverFlowPath: runtimeflowidentity.SemanticScopeFromInstancePath(observer.SubscriberInstancePath),
 			})
 		}
@@ -431,6 +439,46 @@ func (rt *RouteTable) connectRecipientAdmissionsForRun(runID string) []runtimepi
 	return rt.connectRecipientAdmissionsForRunLocked(runID)
 }
 
+func (rt *RouteTable) connectRecipientAdmissionsForTargets(runID string, plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) []runtimepinrouting.ConnectRecipientRegistration {
+	if rt == nil || plan.FanIn() != nil || len(targets) == 0 {
+		return rt.connectRecipientAdmissionsForRun(runID)
+	}
+	paths := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		target = target.Normalized()
+		if target.Empty() || target.FlowInstance == "" {
+			return rt.connectRecipientAdmissionsForRun(runID)
+		}
+		path := target.FlowInstance
+		if target.FlowID == "." {
+			path = "."
+		}
+		paths[path] = struct{}{}
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	var selected []routeConnectRecipientRegistration
+	selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{}]...)
+	if runID != "" {
+		selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{runID: runID}]...)
+	}
+	for path := range paths {
+		if path == "" {
+			continue
+		}
+		selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{instancePath: path}]...)
+		if runID != "" {
+			selected = append(selected, rt.connectRecipientsByInstance[routeConnectRecipientKey{runID: runID, instancePath: path}]...)
+		}
+	}
+	sort.Slice(selected, func(i, j int) bool { return selected[i].ordinal < selected[j].ordinal })
+	out := make([]runtimepinrouting.ConnectRecipientRegistration, 0, len(selected))
+	for _, item := range selected {
+		out = append(out, item.registration)
+	}
+	return out
+}
+
 func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEvaluation) []Subscriber {
 	recipients := evaluation.Recipients()
 	out := make([]Subscriber, 0, len(recipients))
@@ -648,6 +696,7 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.RunSc
 		filteredConnect = append(filteredConnect, registration)
 	}
 	rt.connectRecipients = filteredConnect
+	delete(rt.connectRecipientsByInstance, routeConnectRecipientKey{runID: owner.RunID, instancePath: instancePath})
 	for sourceTemplatePath, observers := range rt.templateObservers {
 		filteredObservers := observers[:0]
 		for _, observer := range observers {
@@ -769,18 +818,19 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 
 func newRouteTableWithGraph(source semanticview.Source, graph runtimepinrouting.CompiledConnectGraph) *RouteTable {
 	return &RouteTable{
-		generation:        1,
-		source:            source,
-		routes:            make(map[routeResolutionKey][]Subscriber),
-		rootInputRoutes:   make(map[string][]Subscriber),
-		eventPath:         make(map[string]struct{}),
-		authoredEventPath: make(map[string]struct{}),
-		authoredScopes:    make(map[string]struct{}),
-		templates:         make(map[string]routeFlowTemplate),
-		instanceOwners:    make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance),
-		instanceEventPath: make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
-		templateObservers: make(map[string][]routeTemplateSourceObserver),
-		connectGraph:      graph,
+		generation:                  1,
+		source:                      source,
+		routes:                      make(map[routeResolutionKey][]Subscriber),
+		rootInputRoutes:             make(map[string][]Subscriber),
+		eventPath:                   make(map[string]struct{}),
+		authoredEventPath:           make(map[string]struct{}),
+		authoredScopes:              make(map[string]struct{}),
+		templates:                   make(map[string]routeFlowTemplate),
+		instanceOwners:              make(map[runtimeflowidentity.RunScopedFlowInstance]runtimeflowidentity.RunScopedFlowInstance),
+		instanceEventPath:           make(map[runtimeflowidentity.RunScopedFlowInstance][]string),
+		templateObservers:           make(map[string][]routeTemplateSourceObserver),
+		connectGraph:                graph,
+		connectRecipientsByInstance: make(map[routeConnectRecipientKey][]routeConnectRecipientRegistration),
 	}
 }
 
@@ -1233,11 +1283,16 @@ func (rt *RouteTable) addConnectRecipientLocked(flowID string, inputEvents []str
 	}
 	for _, eventType := range eventTypes {
 		for _, registration := range rt.connectGraph.AdmitReceiverRecipient(strings.TrimSpace(flowID), events.EventType(eventType), recipient) {
-			rt.connectRecipients = append(rt.connectRecipients, routeConnectRecipientRegistration{
+			rt.nextConnectRecipientOrdinal++
+			item := routeConnectRecipientRegistration{
 				registration: registration,
 				runID:        strings.TrimSpace(runID),
 				instancePath: strings.Trim(strings.TrimSpace(instancePath), "/"),
-			})
+				ordinal:      rt.nextConnectRecipientOrdinal,
+			}
+			rt.connectRecipients = append(rt.connectRecipients, item)
+			key := routeConnectRecipientKey{runID: item.runID, instancePath: item.instancePath}
+			rt.connectRecipientsByInstance[key] = append(rt.connectRecipientsByInstance[key], item)
 		}
 	}
 	return nil

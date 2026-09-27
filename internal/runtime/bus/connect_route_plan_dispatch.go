@@ -915,7 +915,7 @@ func (r connectRoutePlanResolver) evaluateSelectedReceiverCarriers(ctx context.C
 		if routeTable == nil {
 			continue
 		}
-		registrations = append(registrations, routeTable.connectRecipientAdmissionsForRun(runID)...)
+		registrations = append(registrations, routeTable.connectRecipientAdmissionsForTargets(runID, plan, targets)...)
 	}
 	return r.graph.EvaluateMaterializedRecipients(plan, targets, registrations)
 }

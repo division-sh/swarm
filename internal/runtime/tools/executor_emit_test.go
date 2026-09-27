@@ -264,6 +264,20 @@ func (s *emitRoutePlanStore) ListSelectedRunTargetOwners(context.Context, string
 	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
+func (s *emitRoutePlanStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, instancePaths []string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	selected := make(map[string]struct{}, len(instancePaths))
+	for _, path := range instancePaths {
+		selected[path] = struct{}{}
+	}
+	var owners []runtimebus.ActiveTargetDescriptor
+	for _, owner := range s.targetOwners {
+		if _, ok := selected[owner.FlowInstance]; ok {
+			owners = append(owners, owner)
+		}
+	}
+	return owners, nil
+}
+
 func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
