@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
@@ -40,11 +41,32 @@ type routeTopologySnapshot struct {
 
 const sqliteRouteTopologySnapshotSQL = `SELECT flow_instance, event_pattern, subscriber_type, subscriber_id,
 		COALESCE(source_flow, ''), COALESCE(CAST(materialized_from AS TEXT), ''), status, is_wildcard
-		FROM routing_rules WHERE run_id = ? AND is_materialized = TRUE`
+		FROM routing_rules WHERE run_id = ? AND is_materialized = TRUE AND flow_instance IN (`
 
 const postgresRouteTopologySnapshotSQL = `SELECT flow_instance, event_pattern, subscriber_type, subscriber_id,
 			COALESCE(source_flow, ''), COALESCE(CAST(materialized_from AS TEXT), ''), status, is_wildcard
-			FROM routing_rules WHERE run_id = $1::uuid AND is_materialized = TRUE`
+			FROM routing_rules WHERE run_id = $1::uuid AND is_materialized = TRUE AND flow_instance IN (`
+
+const routeTopologySnapshotBatchSize = 400
+
+func routeTopologySnapshotQuery(postgres bool, count int) string {
+	query := sqliteRouteTopologySnapshotSQL
+	if postgres {
+		query = postgresRouteTopologySnapshotSQL
+	}
+	var placeholders strings.Builder
+	for i := range count {
+		if i > 0 {
+			placeholders.WriteByte(',')
+		}
+		if postgres {
+			fmt.Fprintf(&placeholders, "$%d", i+2)
+		} else {
+			placeholders.WriteByte('?')
+		}
+	}
+	return query + placeholders.String() + `)`
+}
 
 const routeTopologySourcesSQL = `SELECT event_pattern, subscriber_type, subscriber_id,
 		COALESCE(source_flow, ''), CAST(rule_id AS TEXT), CAST(created_at AS TEXT)
@@ -52,39 +74,50 @@ const routeTopologySourcesSQL = `SELECT event_pattern, subscriber_type, subscrib
 		WHERE run_id IS NULL AND is_wildcard = TRUE AND is_materialized = FALSE AND status = 'active'
 		ORDER BY event_pattern, subscriber_type, subscriber_id, COALESCE(source_flow, ''), created_at ASC`
 
-func loadRouteTopologySnapshot(ctx context.Context, tx *sql.Tx, postgres bool, runID string) (routeTopologySnapshot, error) {
+func loadRouteTopologySnapshot(ctx context.Context, tx *sql.Tx, postgres bool, runID string, instancePaths []string) (routeTopologySnapshot, error) {
+	if len(instancePaths) == 0 {
+		return routeTopologySnapshot{}, fmt.Errorf("route topology snapshot requires exact instance paths")
+	}
 	snapshot := routeTopologySnapshot{
 		byInstance: make(map[string][]storedMaterializedRoute),
 		sources:    make(map[routeSourceKey]routeSourceWinner),
 	}
-	routeQuery := sqliteRouteTopologySnapshotSQL
-	if postgres {
-		routeQuery = postgresRouteTopologySnapshotSQL
-	}
-	rows, err := tx.QueryContext(ctx, routeQuery, runID)
-	if err != nil {
-		return routeTopologySnapshot{}, fmt.Errorf("read selected flow-instance route truth: %w", err)
-	}
-	for rows.Next() {
-		var instance sql.NullString
-		var row storedMaterializedRoute
-		if err := rows.Scan(&instance, &row.key.eventPattern, &row.key.subscriberType, &row.key.subscriberID,
-			&row.sourceFlow, &row.materializedFrom, &row.status, &row.wildcard); err != nil {
-			_ = rows.Close()
-			return routeTopologySnapshot{}, fmt.Errorf("scan selected flow-instance route truth: %w", err)
+	for start := 0; start < len(instancePaths); start += routeTopologySnapshotBatchSize {
+		end := min(start+routeTopologySnapshotBatchSize, len(instancePaths))
+		paths := instancePaths[start:end]
+		args := make([]any, 0, len(paths)+1)
+		args = append(args, runID)
+		for _, path := range paths {
+			if path == "" {
+				return routeTopologySnapshot{}, fmt.Errorf("route topology snapshot requires nonempty instance paths")
+			}
+			args = append(args, path)
 		}
-		if !instance.Valid {
-			_ = rows.Close()
-			return routeTopologySnapshot{}, fmt.Errorf("materialized route has no exact flow instance")
+		rows, err := tx.QueryContext(ctx, routeTopologySnapshotQuery(postgres, len(paths)), args...)
+		if err != nil {
+			return routeTopologySnapshot{}, fmt.Errorf("read selected flow-instance route truth: %w", err)
 		}
-		snapshot.byInstance[instance.String] = append(snapshot.byInstance[instance.String], row)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return routeTopologySnapshot{}, fmt.Errorf("iterate selected flow-instance route truth: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return routeTopologySnapshot{}, fmt.Errorf("close selected flow-instance route truth: %w", err)
+		for rows.Next() {
+			var instance sql.NullString
+			var row storedMaterializedRoute
+			if err := rows.Scan(&instance, &row.key.eventPattern, &row.key.subscriberType, &row.key.subscriberID,
+				&row.sourceFlow, &row.materializedFrom, &row.status, &row.wildcard); err != nil {
+				_ = rows.Close()
+				return routeTopologySnapshot{}, fmt.Errorf("scan selected flow-instance route truth: %w", err)
+			}
+			if !instance.Valid {
+				_ = rows.Close()
+				return routeTopologySnapshot{}, fmt.Errorf("materialized route has no exact flow instance")
+			}
+			snapshot.byInstance[instance.String] = append(snapshot.byInstance[instance.String], row)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return routeTopologySnapshot{}, fmt.Errorf("iterate selected flow-instance route truth: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return routeTopologySnapshot{}, fmt.Errorf("close selected flow-instance route truth: %w", err)
+		}
 	}
 
 	sourceRows, err := tx.QueryContext(ctx, routeTopologySourcesSQL)

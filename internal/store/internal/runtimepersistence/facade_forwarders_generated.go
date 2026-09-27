@@ -486,6 +486,14 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context, r
 	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
+func (s *PostgresStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID string, templateID string, keyField string, keyValue string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, templateID, keyField, keyValue)
+}
+
+func (s *PostgresStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs []string, instancePaths []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, instancePaths)
+}
+
 func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
 	return s.operatorAgentPostgres.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
@@ -624,6 +632,10 @@ func (s *PostgresStore) ListSelectedForkRecoveryEntries(ctx context.Context) ([]
 
 func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]bus.ActiveTargetDescriptor, error) {
 	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx, runID)
+}
+
+func (s *PostgresStore) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelinePostgresOwner.ListSelectedRunTargetOwnersForInstancePaths(ctx, runID, instancePaths)
 }
 
 func (s *PostgresStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
@@ -1694,6 +1706,14 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx, runID)
 }
 
+func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID string, templateID string, keyField string, keyValue string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, templateID, keyField, keyValue)
+}
+
+func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs []string, instancePaths []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, templateIDs, instancePaths)
+}
+
 func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
 	return s.operatorAgentSQLite.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
@@ -1812,6 +1832,10 @@ func (s *SQLiteRuntimeStore) ListSelectedForkRecoveryEntries(ctx context.Context
 
 func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]bus.ActiveTargetDescriptor, error) {
 	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx, runID)
+}
+
+func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwnersForInstancePaths(ctx, runID, instancePaths)
 }
 
 func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {

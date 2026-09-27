@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"reflect"
@@ -44,8 +45,12 @@ func expectPostgresRouteAdmission(mock sqlmock.Sqlmock, active, source bool) {
 	}
 }
 
-func expectEmptyPostgresRouteTopologySnapshot(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery(postgresRouteTopologySnapshotSQL).WithArgs(postgresStatementRunID).
+func expectEmptyPostgresRouteTopologySnapshot(mock sqlmock.Sqlmock, sets []runtimebus.FlowInstanceRouteRecordSet) {
+	args := []driver.Value{postgresStatementRunID}
+	for _, set := range sets {
+		args = append(args, set.Identity.Route.InstancePath)
+	}
+	mock.ExpectQuery(routeTopologySnapshotQuery(true, len(sets))).WithArgs(args...).
 		WillReturnRows(sqlmock.NewRows([]string{"flow_instance", "event_pattern", "subscriber_type", "subscriber_id", "source_flow", "materialized_from", "status", "is_wildcard"}))
 	mock.ExpectQuery(routeTopologySourcesSQL).
 		WillReturnRows(sqlmock.NewRows([]string{"event_pattern", "subscriber_type", "subscriber_id", "source_flow", "rule_id", "created_at"}))
@@ -67,7 +72,7 @@ func TestPostgresRouteTopologyStatementsCountOrderAndLifetime(t *testing.T) {
 	// Two invocations in the same transaction must prepare and close anew.
 	for pass := 0; pass < 2; pass++ {
 		expectPostgresRouteAdmission(mock, true, true)
-		expectEmptyPostgresRouteTopologySnapshot(mock)
+		expectEmptyPostgresRouteTopologySnapshot(mock, sets)
 		for i, set := range sets {
 			if i == 0 {
 				mock.ExpectPrepare(postgresFlowInstanceRouteInactivateSQL).WillBeClosed()
@@ -115,7 +120,7 @@ func TestPostgresRouteTopologyStatementsAdmissionAndErrors(t *testing.T) {
 			fault, closeFault := errors.New("route statement refused"), errors.New("route statement close refused")
 			want, label := error(nil), ""
 			if stage != "inactive_run" && stage != "missing_source" {
-				expectEmptyPostgresRouteTopologySnapshot(mock)
+				expectEmptyPostgresRouteTopologySnapshot(mock, postgresStatementRouteSets(1))
 				inactive := mock.ExpectPrepare(postgresFlowInstanceRouteInactivateSQL)
 				if stage == "prepare_inactivate" {
 					inactive.WillReturnError(fault)

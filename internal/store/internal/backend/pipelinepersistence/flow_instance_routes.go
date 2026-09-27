@@ -490,6 +490,19 @@ func replaceFlowInstanceRouteTopologyTx(
 	if len(normalized) == 0 {
 		return nil, nil
 	}
+	pathsByRun := make(map[string][]string)
+	seenPathsByRun := make(map[string]map[string]bool)
+	for _, set := range normalized {
+		runID := set.Identity.RunID
+		path := set.Identity.Route.InstancePath
+		if seenPathsByRun[runID] == nil {
+			seenPathsByRun[runID] = make(map[string]bool)
+		}
+		if !seenPathsByRun[runID][path] {
+			pathsByRun[runID] = append(pathsByRun[runID], path)
+			seenPathsByRun[runID][path] = true
+		}
+	}
 	var sqliteExec *sqliteFlowInstanceRouteExecutor
 	var postgresExec *postgresFlowInstanceRouteExecutor
 	if postgres {
@@ -509,8 +522,9 @@ func replaceFlowInstanceRouteTopologyTx(
 			}
 		}()
 	}
-	// This transaction changes only routes. The active-run lock (or SQLite
-	// writer snapshot) remains held while all of that run's owners are replaced.
+	// The graph-owned sets define the exact replacement scope. The caller must
+	// fence that membership against concurrent changes at this transaction;
+	// SQL only reads and replaces the supplied owners.
 	admittedRuns := make(map[string]bool)
 	type observedRoutes struct {
 		generation int
@@ -533,7 +547,7 @@ func replaceFlowInstanceRouteTopologyTx(
 		}
 		observed, loaded := snapshots[set.Identity.RunID]
 		if !loaded {
-			observed.snapshot, err = loadRouteTopologySnapshot(ctx, tx, postgres, set.Identity.RunID)
+			observed.snapshot, err = loadRouteTopologySnapshot(ctx, tx, postgres, set.Identity.RunID, pathsByRun[set.Identity.RunID])
 			if err != nil {
 				return nil, err
 			}
@@ -545,7 +559,7 @@ func replaceFlowInstanceRouteTopologyTx(
 			// A preceding write can change wildcard provenance or another
 			// owner's rows through a trigger. Stale evidence may cause a
 			// redundant write, but must never authorize skipping one.
-			observed.snapshot, err = loadRouteTopologySnapshot(ctx, tx, postgres, set.Identity.RunID)
+			observed.snapshot, err = loadRouteTopologySnapshot(ctx, tx, postgres, set.Identity.RunID, pathsByRun[set.Identity.RunID])
 			if err != nil {
 				return nil, err
 			}
@@ -902,15 +916,7 @@ func listFlowInstanceRouteRecords(
 	return out, nil
 }
 
-func (s *PipelinePostgresOwner) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil, fmt.Errorf("active flow instance descriptors require exact run_id")
-	}
-	rows, err := s.backend.QueryContext(ctx, `
+const postgresActiveFlowInstanceDescriptorsSQL = `
 		SELECT fi.run_id::text, fi.instance_path, fi.flow_template, readiness.plan,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
@@ -930,23 +936,9 @@ func (s *PipelinePostgresOwner) ListActiveFlowInstanceDescriptors(ctx context.Co
 			  WHERE owned.run_id = fi.run_id
 			    AND owned.flow_instance = fi.instance_path
 		  )
-		ORDER BY fi.run_id, fi.instance_path ASC
-	`, runID)
-	if err != nil {
-		return nil, fmt.Errorf("list active flow instance descriptors: %w", err)
-	}
-	return scanExactActiveFlowInstanceDescriptors(rows, "active flow instance descriptor")
-}
+	`
 
-func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
-	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil, fmt.Errorf("active flow instance descriptors require exact run_id")
-	}
-	rows, err := s.activeFlowDescriptors.QueryContext(ctx, s.backend, `
+const sqliteActiveFlowInstanceDescriptorsSQL = `
 		SELECT fi.run_id, fi.instance_path, fi.flow_template, readiness.plan,
 		       run.bundle_hash, es.fields
 		FROM flow_instances fi
@@ -966,13 +958,254 @@ func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptors(ctx context.Cont
 			  WHERE owned.run_id = fi.run_id
 			    AND owned.flow_instance = fi.instance_path
 		  )
-		ORDER BY fi.run_id, fi.instance_path ASC
-	`, runID)
+	`
+
+const activeFlowInstanceDescriptorOrderSQL = ` ORDER BY fi.run_id, fi.instance_path ASC`
+
+func (s *PipelinePostgresOwner) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("active flow instance descriptors require exact run_id")
+	}
+	rows, err := s.backend.QueryContext(ctx, postgresActiveFlowInstanceDescriptorsSQL+activeFlowInstanceDescriptorOrderSQL, runID)
+	if err != nil {
+		return nil, fmt.Errorf("list active flow instance descriptors: %w", err)
+	}
+	return scanExactActiveFlowInstanceDescriptors(rows, "active flow instance descriptor")
+}
+
+func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("active flow instance descriptors require exact run_id")
+	}
+	rows, err := s.activeFlowDescriptors.QueryContext(ctx, s.backend, sqliteActiveFlowInstanceDescriptorsSQL+activeFlowInstanceDescriptorOrderSQL, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite active flow instance descriptors: %w", err)
 	}
 	return scanExactActiveFlowInstanceDescriptors(rows, "sqlite active flow instance descriptor")
 }
+
+func exactScopeValues(label string, values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value == "" || value != strings.TrimSpace(value) || label == "instance path" && value != strings.Trim(value, "/") {
+			return nil, fmt.Errorf("scoped route lookup requires canonical %s", label)
+		}
+		if !seen[value] {
+			out = append(out, value)
+			seen[value] = true
+		}
+	}
+	return out, nil
+}
+
+func exactScopePredicate(column string, postgres bool, first, count int) string {
+	var query strings.Builder
+	query.WriteString(column)
+	query.WriteString(" IN (")
+	for i := range count {
+		if i > 0 {
+			query.WriteByte(',')
+		}
+		if postgres {
+			fmt.Fprintf(&query, "$%d", first+i)
+		} else {
+			query.WriteByte('?')
+		}
+	}
+	query.WriteByte(')')
+	return query.String()
+}
+
+func activeFlowInstanceDescriptorScope(postgres bool, templateIDs, instancePaths []string) string {
+	clauses := make([]string, 0, 2)
+	if len(templateIDs) > 0 {
+		clauses = append(clauses, exactScopePredicate("fi.flow_template", postgres, 2, len(templateIDs)))
+	}
+	if len(instancePaths) > 0 {
+		clauses = append(clauses, exactScopePredicate("fi.instance_path", postgres, 2+len(templateIDs), len(instancePaths)))
+	}
+	return " AND (" + strings.Join(clauses, " OR ") + ")" + activeFlowInstanceDescriptorOrderSQL
+}
+
+func (s *PipelinePostgresOwner) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("active flow instance descriptors require exact run_id")
+	}
+	var err error
+	if templateIDs, err = exactScopeValues("flow template", templateIDs); err != nil {
+		return nil, err
+	}
+	if instancePaths, err = exactScopeValues("instance path", instancePaths); err != nil {
+		return nil, err
+	}
+	if len(templateIDs)+len(instancePaths) == 0 {
+		return nil, fmt.Errorf("active flow instance descriptor lookup requires graph-owned scope")
+	}
+	args := make([]any, 0, 1+len(templateIDs)+len(instancePaths))
+	args = append(args, runID)
+	for _, value := range templateIDs {
+		args = append(args, value)
+	}
+	for _, value := range instancePaths {
+		args = append(args, value)
+	}
+	rows, err := s.backend.QueryContext(ctx, postgresActiveFlowInstanceDescriptorsSQL+activeFlowInstanceDescriptorScope(true, templateIDs, instancePaths), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list scoped active flow instance descriptors: %w", err)
+	}
+	return scanExactActiveFlowInstanceDescriptors(rows, "scoped active flow instance descriptor")
+}
+
+func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("active flow instance descriptors require exact run_id")
+	}
+	var err error
+	if templateIDs, err = exactScopeValues("flow template", templateIDs); err != nil {
+		return nil, err
+	}
+	if instancePaths, err = exactScopeValues("instance path", instancePaths); err != nil {
+		return nil, err
+	}
+	if len(templateIDs)+len(instancePaths) == 0 {
+		return nil, fmt.Errorf("active flow instance descriptor lookup requires graph-owned scope")
+	}
+	args := make([]any, 0, 1+len(templateIDs)+len(instancePaths))
+	args = append(args, runID)
+	for _, value := range templateIDs {
+		args = append(args, value)
+	}
+	for _, value := range instancePaths {
+		args = append(args, value)
+	}
+	rows, err := s.backend.QueryContext(ctx, sqliteActiveFlowInstanceDescriptorsSQL+activeFlowInstanceDescriptorScope(false, templateIDs, instancePaths), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list sqlite scoped active flow instance descriptors: %w", err)
+	}
+	return scanExactActiveFlowInstanceDescriptors(rows, "sqlite scoped active flow instance descriptor")
+}
+
+// The SQL predicate is a conservative prefilter. DescriptorAddressFields and
+// ConnectInstanceKeyDescriptorMatches own scalar normalization and final identity.
+// Numeric/boolean candidates remain broad because JSON number lexemes differ
+// between stores; excluding a canonical match here would hide a duplicate owner.
+const postgresActiveFlowInstanceDescriptorKeySQL = `
+	AND fi.flow_template = $2
+	AND CASE
+		WHEN es.entity_id IS NULL OR es.fields IS NULL THEN TRUE
+		WHEN jsonb_typeof(es.fields) <> 'object' THEN TRUE
+		ELSE EXISTS (
+			SELECT 1 FROM jsonb_each(es.fields) AS field(key, value)
+			WHERE strpos(field.key, $3) > 0
+			  AND (jsonb_typeof(field.value) IN ('number', 'boolean')
+			       OR (jsonb_typeof(field.value) = 'string' AND strpos(field.value #>> '{}', $4) > 0))
+		)
+	END`
+
+const sqliteActiveFlowInstanceDescriptorKeySQL = `
+	AND fi.flow_template = ?
+	AND CASE
+		WHEN es.entity_id IS NULL OR es.fields IS NULL THEN TRUE
+		WHEN json_valid(es.fields) = 0 THEN TRUE
+		WHEN json_type(es.fields) <> 'object' THEN TRUE
+		ELSE EXISTS (
+			SELECT 1 FROM json_each(es.fields) AS field
+			WHERE instr(field.key, ?) > 0
+			  AND (field.type IN ('integer', 'real', 'true', 'false')
+			       OR (field.type = 'text' AND instr(field.value, ?) > 0))
+		)
+	END`
+
+func exactDescriptorKeyLookup(runID, templateID, keyField, keyValue string) (string, string, string, string, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return "", "", "", "", fmt.Errorf("active flow instance descriptors require exact run_id")
+	}
+	if templateID == "" || templateID != strings.TrimSpace(templateID) {
+		return "", "", "", "", fmt.Errorf("keyed descriptor lookup requires canonical receiver template")
+	}
+	if !strings.HasPrefix(keyField, "entity.") {
+		return "", "", "", "", fmt.Errorf("keyed descriptor lookup requires entity.<literal field>")
+	}
+	field := strings.TrimPrefix(keyField, "entity.")
+	if field == "" || field != strings.TrimSpace(field) {
+		return "", "", "", "", fmt.Errorf("keyed descriptor lookup requires canonical literal entity field")
+	}
+	// The compiled matcher strips surrounding slashes after whitespace. Its
+	// normalized value must remain a substring of any matching raw JSON string.
+	return runID, templateID, field, strings.Trim(strings.TrimSpace(keyValue), "/"), nil
+}
+
+func (s *PipelinePostgresOwner) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
+	}
+	runID, templateID, field, value, err := exactDescriptorKeyLookup(runID, templateID, keyField, keyValue)
+	if err != nil {
+		return nil, err
+	}
+	query := postgresActiveFlowInstanceDescriptorsSQL + postgresActiveFlowInstanceDescriptorKeySQL + activeFlowInstanceDescriptorOrderSQL
+	rows, err := s.backend.QueryContext(ctx, query, runID, templateID, field, value)
+	if err != nil {
+		return nil, fmt.Errorf("list keyed active flow instance descriptors: %w", err)
+	}
+	return scanExactActiveFlowInstanceDescriptors(rows, "keyed active flow instance descriptor")
+}
+
+func (s *PipelineSQLiteOwner) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
+	}
+	runID, templateID, field, value, err := exactDescriptorKeyLookup(runID, templateID, keyField, keyValue)
+	if err != nil {
+		return nil, err
+	}
+	query := sqliteActiveFlowInstanceDescriptorsSQL + sqliteActiveFlowInstanceDescriptorKeySQL + activeFlowInstanceDescriptorOrderSQL
+	rows, err := s.backend.QueryContext(ctx, query, runID, templateID, field, value)
+	if err != nil {
+		return nil, fmt.Errorf("list sqlite keyed active flow instance descriptors: %w", err)
+	}
+	return scanExactActiveFlowInstanceDescriptors(rows, "sqlite keyed active flow instance descriptor")
+}
+
+const postgresSelectedRunTargetOwnersSQL = `
+		SELECT es.entity_id::text, es.flow_instance, es.current_state,
+ CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
+		FROM entity_state es
+ LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
+		JOIN runs run ON run.run_id = es.run_id
+		WHERE es.run_id = $1::uuid
+		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
+	`
+
+const sqliteSelectedRunTargetOwnersSQL = `
+		SELECT es.entity_id, es.flow_instance, es.current_state,
+ CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
+		FROM entity_state es
+ LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
+		JOIN runs run ON run.run_id = es.run_id
+		WHERE es.run_id = ?
+		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
+	`
+
+const selectedRunTargetOwnerOrderSQL = ` ORDER BY es.flow_instance ASC, es.entity_id ASC`
 
 func (s *PipelinePostgresOwner) ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	if s == nil || s.backend == nil {
@@ -982,16 +1215,7 @@ func (s *PipelinePostgresOwner) ListSelectedRunTargetOwners(ctx context.Context,
 	if runID == "" {
 		return nil, fmt.Errorf("selected-run target owners require exact run_id")
 	}
-	rows, err := s.backend.QueryContext(ctx, `
-		SELECT es.entity_id::text, es.flow_instance, es.current_state,
- CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
-		FROM entity_state es
- LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
-		JOIN runs run ON run.run_id = es.run_id
-		WHERE es.run_id = $1::uuid
-		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
-		ORDER BY es.flow_instance ASC, es.entity_id ASC
-	`, runID)
+	rows, err := s.backend.QueryContext(ctx, postgresSelectedRunTargetOwnersSQL+selectedRunTargetOwnerOrderSQL, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list selected-run target owners: %w", err)
 	}
@@ -1006,20 +1230,67 @@ func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwners(ctx context.Context, r
 	if runID == "" {
 		return nil, fmt.Errorf("selected-run target owners require exact run_id")
 	}
-	rows, err := s.selectedRunTargetOwners.QueryContext(ctx, s.backend, `
-		SELECT es.entity_id, es.flow_instance, es.current_state,
- CASE WHEN fi.instance_path IS NULL THEN 'active' ELSE fi.status END, fi.terminated_at IS NOT NULL
-		FROM entity_state es
- LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance
-		JOIN runs run ON run.run_id = es.run_id
-		WHERE es.run_id = ?
-		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
-		ORDER BY es.flow_instance ASC, es.entity_id ASC
-	`, runID)
+	rows, err := s.selectedRunTargetOwners.QueryContext(ctx, s.backend, sqliteSelectedRunTargetOwnersSQL+selectedRunTargetOwnerOrderSQL, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite selected-run target owners: %w", err)
 	}
 	return scanSelectedRunTargetOwners(rows, "sqlite selected-run target owner")
+}
+
+func (s *PipelinePostgresOwner) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("postgres store is required for selected-run target owners")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("selected-run target owners require exact run_id")
+	}
+	paths, err := exactScopeValues("instance path", instancePaths)
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("selected-run target owner lookup requires graph-owned instance paths")
+	}
+	args := make([]any, 0, len(paths)+1)
+	args = append(args, runID)
+	for _, path := range paths {
+		args = append(args, path)
+	}
+	query := postgresSelectedRunTargetOwnersSQL + " AND " + exactScopePredicate("es.flow_instance", true, 2, len(paths)) + selectedRunTargetOwnerOrderSQL
+	rows, err := s.backend.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list scoped selected-run target owners: %w", err)
+	}
+	return scanSelectedRunTargetOwners(rows, "scoped selected-run target owner")
+}
+
+func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite runtime store is required for selected-run target owners")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("selected-run target owners require exact run_id")
+	}
+	paths, err := exactScopeValues("instance path", instancePaths)
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("selected-run target owner lookup requires graph-owned instance paths")
+	}
+	args := make([]any, 0, len(paths)+1)
+	args = append(args, runID)
+	for _, path := range paths {
+		args = append(args, path)
+	}
+	query := sqliteSelectedRunTargetOwnersSQL + " AND " + exactScopePredicate("es.flow_instance", false, 2, len(paths)) + selectedRunTargetOwnerOrderSQL
+	rows, err := s.backend.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list sqlite scoped selected-run target owners: %w", err)
+	}
+	return scanSelectedRunTargetOwners(rows, "sqlite scoped selected-run target owner")
 }
 
 func scanSelectedRunTargetOwners(rows *sql.Rows, label string) ([]runtimebus.ActiveTargetDescriptor, error) {

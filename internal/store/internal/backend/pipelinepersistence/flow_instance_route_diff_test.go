@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -105,6 +106,108 @@ func TestRouteTopologyExactDiffUsesSelectedRowsBothStores(t *testing.T) {
 			}
 			if after := selectedRouteRows(t, db, postgres); !reflect.DeepEqual(after, extra) {
 				t.Fatalf("failed extra-route replacement changed selected rows: before=%v after=%v", extra, after)
+			}
+		})
+	}
+}
+
+func TestRouteTopologySnapshotReadsOnlySuppliedOwnersBothStores(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		name := "sqlite"
+		if postgres {
+			name = "postgres"
+		}
+		t.Run(name, func(t *testing.T) {
+			var db *sql.DB
+			var sets []runtimebus.FlowInstanceRouteRecordSet
+			if postgres {
+				db, sets = postgresRouteStatementFixture(t, 2, false)
+			} else {
+				db, sets = sqliteRouteStatementFixture(t, 2)
+			}
+			ctx := context.Background()
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := replaceFlowInstanceRouteTopologyTx(ctx, tx, postgres, sets); err != nil {
+				_ = tx.Rollback()
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			tx, err = db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			snapshot, err := loadRouteTopologySnapshot(ctx, tx, postgres, sets[0].Identity.RunID, []string{sets[0].Identity.Route.InstancePath})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(snapshot.byInstance) != 1 || !snapshot.exactOwner(sets[0]) {
+				t.Fatalf("selected owner and wildcard source were not retained: %+v", snapshot)
+			}
+			if _, leaked := snapshot.byInstance[sets[1].Identity.Route.InstancePath]; leaked {
+				t.Fatal("unrelated owner escaped selected route snapshot")
+			}
+			paths := []string{sets[0].Identity.Route.InstancePath}
+			for i := 0; i < routeTopologySnapshotBatchSize-1; i++ {
+				paths = append(paths, fmt.Sprintf("absent/%03d", i))
+			}
+			paths = append(paths, sets[1].Identity.Route.InstancePath)
+			batched, err := loadRouteTopologySnapshot(ctx, tx, postgres, sets[0].Identity.RunID, paths)
+			if err != nil || len(batched.byInstance) != 2 || !batched.exactOwner(sets[1]) {
+				t.Fatalf("last batched owner was lost: snapshot=%+v err=%v", batched, err)
+			}
+			if _, err := loadRouteTopologySnapshot(ctx, tx, postgres, sets[0].Identity.RunID, nil); err == nil {
+				t.Fatal("empty owner scope silently became a run-wide snapshot")
+			}
+		})
+	}
+}
+
+func TestRouteTopologyEmptySelectedOwnerLeavesSiblingActiveBothStores(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		name := "sqlite"
+		if postgres {
+			name = "postgres"
+		}
+		t.Run(name, func(t *testing.T) {
+			var db *sql.DB
+			var sets []runtimebus.FlowInstanceRouteRecordSet
+			if postgres {
+				db, sets = postgresRouteStatementFixture(t, 2, false)
+			} else {
+				db, sets = sqliteRouteStatementFixture(t, 2)
+			}
+			ctx := context.Background()
+			replace := func(scope []runtimebus.FlowInstanceRouteRecordSet) {
+				t.Helper()
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := replaceFlowInstanceRouteTopologyTx(ctx, tx, postgres, scope); err != nil {
+					_ = tx.Rollback()
+					t.Fatal(err)
+				}
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			replace(sets)
+			replace([]runtimebus.FlowInstanceRouteRecordSet{{Identity: sets[0].Identity}})
+			for index, want := range []int{0, 2} {
+				var active int
+				if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM routing_rules WHERE run_id=$1 AND flow_instance=$2 AND is_materialized=TRUE AND status='active'`,
+					sets[index].Identity.RunID, sets[index].Identity.Route.InstancePath).Scan(&active); err != nil {
+					t.Fatal(err)
+				}
+				if active != want {
+					t.Fatalf("owner %s has %d active routes, want %d", sets[index].Identity.Route.InstancePath, active, want)
+				}
 			}
 		})
 	}
