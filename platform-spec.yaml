@@ -14992,6 +14992,58 @@ platform_tables:
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
         );
+    channel_delivery_defaults:
+      description: >-
+        The single explicitly chosen operator delivery destination. The first verified binding
+        establishes the default in its confirmation transaction. A different connected interface
+        never replaces it by recency or availability. Reconnect retains its destination, verified
+        rebind advances its delivery epoch and changes only the chosen interface's destination;
+        reconnect preserves that epoch. Unbind retires authority while
+        preserving the selected identity as a fence. Notice admission serializes on the principal
+        before reading this row; only notices committed after the first-current cut may be planned
+        individually. No historical notice is inferred deliverable from a timestamp or list order.
+      ddl: |
+        CREATE TABLE channel_delivery_defaults (
+            singleton_id BIGINT PRIMARY KEY CHECK (singleton_id = 1),
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            delivery_epoch BIGINT NOT NULL CHECK (delivery_epoch > 0),
+            external_account_reference TEXT NOT NULL,
+            conversation_reference TEXT NOT NULL,
+            conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
+            state TEXT NOT NULL CHECK (state IN ('current','retired')),
+            first_operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
+            updated_at TIMESTAMPTZ NOT NULL
+        );
+    channel_delivery_plans:
+      description: >-
+        Selected-store responsibility for one source at one verified destination. A notice
+        plan is inserted in the same transaction as its mailbox item, after locking the
+        operator principal and reading the explicit current default. A missing or retired
+        default leaves the notice durable but creates no individual delivery obligation.
+        Reconnect does not create another plan for the same source and delivery epoch; verified
+        rebind or a fresh connect after retirement advances the epoch, even when returning to a
+        previously used destination. Planning is not evidence
+        that a provider write was launched, accepted, or acknowledged by a human.
+      ddl: |
+        CREATE TABLE channel_delivery_plans (
+            delivery_id UUID PRIMARY KEY,
+            source_kind TEXT NOT NULL CHECK (source_kind IN ('notice','card','summary')),
+            source_id UUID NOT NULL,
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            delivery_epoch BIGINT NOT NULL CHECK (delivery_epoch > 0),
+            external_account_reference TEXT NOT NULL,
+            conversation_reference TEXT NOT NULL,
+            conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
+            state TEXT NOT NULL CHECK (state IN ('planned','rendered','sent','uncertain','retired')),
+            created_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (source_kind, source_id, interface_key, delivery_epoch),
+            INDEX idx_channel_delivery_plan_source (source_kind, source_id),
+            INDEX idx_channel_delivery_plan_pending (state, created_at)
+        );
     channel_onboarding_operations:
       description: >-
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
