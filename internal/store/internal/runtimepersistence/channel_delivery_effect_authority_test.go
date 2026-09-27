@@ -198,9 +198,6 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			if err := handle.MarkLaunched(effectCtx); err != nil {
 				t.Fatalf("launch exact delivery: %v", err)
 			}
-			if err := handle.MarkResponseObserved(effectCtx, map[string]any{"provider": "accepted"}); err != nil {
-				t.Fatalf("observe exact delivery: %v", err)
-			}
 			_, _, err = selected.UnbindOperatorChannel(ctx, operatorchannel.UnbindRequest{
 				OperationID: uuid.NewString(), PrincipalID: principal.ID, Interface: binding.Interface,
 				ExpectedRevision: binding.Revision, RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(),
@@ -211,6 +208,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			}
 			if current(authority) {
 				t.Fatal("retired default admitted predecessor delivery")
+			}
+			if err := handle.MarkResponseObserved(effectCtx, map[string]any{"provider": "accepted"}); err != nil {
+				t.Fatalf("observe late exact delivery: %v", err)
 			}
 			if err := handle.Succeed(effectCtx, map[string]any{"projected_output": map[string]any{"delivery_reference": map[string]any{"id": 91}}}); err != nil {
 				t.Fatalf("settle late exact delivery: %v", err)
@@ -225,6 +225,11 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			}
 			if receiptState != "sent" || !strings.Contains(receiptJSON, "delivery_reference") {
 				t.Fatalf("late receipt = %s %s", receiptState, receiptJSON)
+			}
+			settledPlan, found, err := channeldelivery.LoadPlan(ctx, db, deliveryID, postgres)
+			if err != nil || !found || settledPlan.State != "sent" ||
+				settledPlan.CurrentRenderID != renderID || settledPlan.CurrentReceiptID != effectOperationID {
+				t.Fatalf("settled delivery plan = %#v, found=%t err=%v", settledPlan, found, err)
 			}
 			if _, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("message"), nil); err == nil {
 				t.Fatal("retired settled delivery was authorized for redispatch")
