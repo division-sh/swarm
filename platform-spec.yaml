@@ -14922,13 +14922,17 @@ platform_tables:
         rebind or a fresh connect after retirement advances the epoch, even when returning to a
         previously used destination. The first verified connection also freezes one bounded
         count-only summary of older pending notices; those notices are never planned individually.
-        Planning is not evidence
-        that a provider write was launched, accepted, or acknowledged by a human.
+        A response plan is a separate, inbound-publication-owned readback responsibility.
+        It freezes its complete presentation in the render ledger and targets only the
+        current authenticated conversation that requested it, which need not be the default.
+        Opening the inbox is not acknowledgment, a verdict, or resend consent. Planning is
+        not evidence that a provider write was launched, accepted, or acknowledged by a human.
       ddl: |
         CREATE TABLE channel_delivery_plans (
             delivery_id UUID PRIMARY KEY,
-            source_kind TEXT NOT NULL CHECK (source_kind IN ('notice','card','summary')),
+            source_kind TEXT NOT NULL CHECK (source_kind IN ('notice','card','summary','response')),
             source_id UUID NOT NULL,
+            entry_activation_id UUID,
             summary_count BIGINT CHECK (summary_count > 0),
             principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
@@ -14942,6 +14946,7 @@ platform_tables:
             current_receipt_operation_id UUID,
             created_at TIMESTAMPTZ NOT NULL,
             CHECK ((source_kind = 'summary' AND summary_count IS NOT NULL) OR (source_kind <> 'summary' AND summary_count IS NULL)),
+            CHECK ((source_kind = 'response' AND entry_activation_id IS NOT NULL) OR (source_kind <> 'response' AND entry_activation_id IS NULL)),
             UNIQUE (source_kind, source_id, interface_key, delivery_epoch),
             INDEX idx_channel_delivery_plan_source (source_kind, source_id),
             INDEX idx_channel_delivery_plan_pending (state, created_at)
@@ -14953,7 +14958,10 @@ platform_tables:
         checked together at selected-store admission and readback. A provider excerpt or page
         never replaces this full input. A new card or independent dispatch state creates a
         separate render member; previously shown input is never overwritten. This table owns
-        no verdict, provider effect attempt, or acknowledgment state.
+        no verdict, provider effect attempt, or acknowledgment state. A requested response
+        stores its immutable readback here in the same transaction that settles the exact
+        verified inbound intent; later launch reads these frozen bytes rather than
+        reconstructing the inbox from newer mailbox state.
       ddl: |
         CREATE TABLE channel_delivery_renders (
             render_id UUID PRIMARY KEY,
