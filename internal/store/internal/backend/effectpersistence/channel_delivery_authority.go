@@ -54,6 +54,7 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 		  AND binding.external_account_reference=selected.external_account_reference
 		  AND binding.conversation_reference=selected.conversation_reference
 		  AND binding.conversation_scope=selected.conversation_scope
+		  AND onboarding.identity_operation_id=binding.operation_id
 		  AND activation.status='current' AND activation.activation_revision=?
 		  AND onboarding.phase='succeeded'
 		  AND activation.principal_id=selected.principal_id AND activation.interface_key=selected.interface_key
@@ -99,6 +100,7 @@ func channelDeliveryAuthorityCurrent(ctx context.Context, q schemaQueryer, autho
 			  AND binding.external_account_reference=selected.external_account_reference
 			  AND binding.conversation_reference=selected.conversation_reference
 			  AND binding.conversation_scope=selected.conversation_scope
+			  AND onboarding.identity_operation_id=binding.operation_id
 			  AND activation.status='current' AND activation.activation_revision=$11
 			  AND onboarding.phase='succeeded'
 			  AND activation.principal_id=selected.principal_id AND activation.interface_key=selected.interface_key

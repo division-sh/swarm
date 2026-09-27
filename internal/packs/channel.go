@@ -1125,6 +1125,12 @@ func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSch
 	return out, nil
 }
 
+// ConnectorOperation returns the exact admitted connector operation for a
+// bound channel write. Runtime execution does not reconstruct this from YAML.
+func (p OutboundBindingPlan) ConnectorOperation(operation string) (string, runtimecontracts.ToolSchemaEntry, error) {
+	return p.structural.ConnectorOperation(operation)
+}
+
 func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (string, map[string]any, error) {
 	compiled, ok := p.structural.operations[strings.TrimSpace(operation)]
 	if !ok {

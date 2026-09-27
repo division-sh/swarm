@@ -14850,6 +14850,27 @@ platform_tables:
             CHECK ((state = 'sent' AND provider_reference IS NOT NULL) OR (state = 'uncertain' AND provider_reference IS NULL)),
             INDEX idx_channel_delivery_receipts_delivery (delivery_id, settled_at)
         );
+    channel_delivery_actions:
+      description: >-
+        Immutable opaque callbacks for one exact frozen channel render. The selected store mints
+        one stable token per ordered verdict or navigation control in the render transaction;
+        duplicate preparation reads back the same tokens. Tokens do not grant authority alone:
+        authenticated provider facts must still match current principal, binding, destination,
+        receipt, render and canonical card state before any mutation. Historical tokens remain
+        evidence but cannot mutate a successor render or destination.
+      ddl: |
+        CREATE TABLE channel_delivery_actions (
+            action_token UUID PRIMARY KEY,
+            render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
+            action_position INTEGER NOT NULL CHECK (action_position > 0),
+            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox')),
+            verdict TEXT,
+            label TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL,
+            CHECK ((action_kind = 'verdict' AND verdict IS NOT NULL) OR (action_kind <> 'verdict' AND verdict IS NULL)),
+            UNIQUE (render_id, action_position),
+            INDEX idx_channel_delivery_action_render (render_id, action_position)
+        );
     channel_onboarding_operations:
       description: >-
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
