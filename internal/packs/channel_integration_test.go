@@ -685,6 +685,13 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 			if err != nil || tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
 				t.Fatalf("native readback effect = %q, %v", tool.Effect(), err)
 			}
+			projected, err := binding.ProjectOperationOutput("read_inbox_entry", map[string]any{"commands": commands})
+			if err != nil || !reflect.DeepEqual(projected["commands"], commands) {
+				t.Fatalf("native readback projection = %#v, %v", projected, err)
+			}
+			if _, err := binding.ProjectOperationOutput("read_inbox_entry", map[string]any{}); err == nil {
+				t.Fatal("native readback accepted missing commands")
+			}
 		})
 	}
 }
