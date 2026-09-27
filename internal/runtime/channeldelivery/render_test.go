@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -65,12 +66,52 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	if err != nil || !bytes.Equal(frozen.Input, repeated.Input) || frozen.Hash != repeated.Hash {
 		t.Fatalf("repeated freeze changed: %#v, %v", repeated, err)
 	}
+	identity := operatorchannel.InterfaceIdentity{InterfaceRef: operatorchannel.InterfaceHITLChannelV2,
+		ChannelPackID: "provider.mock.hitl_channel", ChannelPackVersion: "1", ChannelManifestHash: "sha256:mock",
+		SemanticGeneration: "mock-generation"}.Normalized()
+	action := operatorchannel.InboundAction{ActionFact: operatorchannel.ActionFact{
+		Interface: identity, ExternalAccountRef: "account", ConversationRef: "group",
+		ConversationScope: operatorchannel.ConversationScopeShared, MessageReference: `{"id":91}`,
+		InteractionRef: "callback-91", Token: uuid.NewString(),
+	}, Provider: "mock", ProviderEventID: "event-91", PublicationID: uuid.NewString(), ProviderAuthorization: "verified"}
+	pending := PendingAction{PublicationID: action.PublicationID, Fact: action, ReceivedAt: now.Add(time.Second)}
+	resolved := ResolvedAction{Action: Action{Token: action.Token, Kind: "verdict", Verdict: "accept"},
+		SourceKind: "card", SourceID: card.CardID, PrincipalID: principalID, ReceiptOperationID: uuid.NewString(),
+		RenderHash: frozen.Hash, CurrentRender: true}
+	prepared, err := PrepareCardAction(pending, resolved, card)
+	if err != nil || prepared.Request.Method != "mailbox.decide" || prepared.Mutation.Kind() != runtimepipeline.DecisionCardMutationDecide ||
+		prepared.Request.IdempotencyKey != action.PublicationID {
+		t.Fatalf("direct verdict action = %#v, err=%v", prepared, err)
+	}
+	repeatedAction, err := PrepareCardAction(pending, resolved, card)
+	if err != nil || prepared.Request.RequestHash != repeatedAction.Request.RequestHash ||
+		!prepared.Mutation.SameRequest(repeatedAction.Mutation) {
+		t.Fatalf("callback retry changed request: %#v, err=%v", repeatedAction, err)
+	}
+	resolved.Action.Verdict = "revise"
+	prepared, err = PrepareCardAction(pending, resolved, card)
+	if err != nil || prepared.Request.Method != "mailbox.begin_input" || prepared.Mutation.Kind() != runtimepipeline.DecisionCardMutationBeginInput {
+		t.Fatalf("required-input action = %#v, err=%v", prepared, err)
+	}
+	stale := resolved
+	stale.CurrentRender = false
+	if _, err := PrepareCardAction(pending, stale, card); err == nil {
+		t.Fatal("stale render prepared a card mutation")
+	}
+	foreign := resolved
+	foreign.SourceID = uuid.NewString()
+	if _, err := PrepareCardAction(pending, foreign, card); err == nil {
+		t.Fatal("foreign card prepared a mutation")
+	}
 	fields, err := canonicaljson.FromGo(map[string]any{"zeta": "private-answer-one", "alpha": "private-answer-two"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	card.Status, card.Verdict, card.Fields = decisioncard.StatusDecided, "revise", fields
 	card.DecidedBy, card.DecidedAt, card.DecisionEventID = principalID, now.Add(time.Minute), uuid.NewString()
+	if _, err := PrepareCardAction(pending, resolved, card); err == nil {
+		t.Fatal("terminal card prepared a new mutation")
+	}
 	decided, err := FreezeCard(card, 18, "", audience)
 	if err != nil {
 		t.Fatal(err)
