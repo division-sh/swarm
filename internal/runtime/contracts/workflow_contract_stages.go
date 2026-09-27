@@ -31,6 +31,7 @@ type FlowStageGateDeclaration struct {
 type FlowStageGateOutcomeDeclaration struct {
 	Label      string                            `yaml:"label"`
 	Input      map[string]WorkflowGateInputField `yaml:"input"`
+	InputOrder []string                          `yaml:"-"`
 	AdvancesTo string                            `yaml:"advances_to"`
 	Emit       EmitSpec                          `yaml:"emit"`
 }
@@ -284,11 +285,12 @@ func (o *FlowStageGateOutcomeDeclaration) UnmarshalYAML(node *yaml.Node) error {
 				return err
 			}
 		case "input":
-			fields, err := decodeStageGateInputFields(value)
+			fields, order, err := decodeStageGateInputFields(value)
 			if err != nil {
 				return err
 			}
 			out.Input = fields
+			out.InputOrder = order
 		case "advances_to":
 			if err := value.Decode(&out.AdvancesTo); err != nil {
 				return err
@@ -358,29 +360,31 @@ func decodeStageGateOutcomes(node *yaml.Node) (map[string]FlowStageGateOutcomeDe
 	return out, nil
 }
 
-func decodeStageGateInputFields(node *yaml.Node) (map[string]WorkflowGateInputField, error) {
+func decodeStageGateInputFields(node *yaml.Node) (map[string]WorkflowGateInputField, []string, error) {
 	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("stage gate input must be a mapping")
+		return nil, nil, fmt.Errorf("stage gate input must be a mapping")
 	}
 	if err := validateUniqueNormalizedMappingKeys(node, "stage gate input"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make(map[string]WorkflowGateInputField, len(node.Content)/2)
+	order := make([]string, 0, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
-			return nil, fmt.Errorf("stage gate input contains an empty field name")
+			return nil, nil, fmt.Errorf("stage gate input contains an empty field name")
 		}
 		var field WorkflowGateInputField
 		if err := node.Content[i+1].Decode(&field); err != nil {
-			return nil, fmt.Errorf("stage gate input %s: %w", key, err)
+			return nil, nil, fmt.Errorf("stage gate input %s: %w", key, err)
 		}
 		out[key] = field
+		order = append(order, key)
 	}
-	return out, nil
+	return out, order, nil
 }
 
 func validateUniqueNormalizedMappingKeys(node *yaml.Node, label string) error {
@@ -420,6 +424,7 @@ func (d FlowStageDeclarations) GatePlans(flowID string) []WorkflowGatePlan {
 			}
 			plan.Outcomes[strings.TrimSpace(verdict)] = WorkflowGateOutcomePlan{
 				Verdict: strings.TrimSpace(verdict), Label: strings.TrimSpace(outcome.Label), Input: input,
+				InputOrder: append([]string(nil), outcome.InputOrder...),
 				AdvancesTo: strings.TrimSpace(outcome.AdvancesTo), Emit: cloneEmitSpec(outcome.Emit),
 			}
 		}
