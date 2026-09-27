@@ -54,6 +54,7 @@ interfaces:
             properties:
               command: {type: string, minLength: 1, maxLength: 32}
               description: {type: string, minLength: 1, maxLength: 256}
+        inbox_address: {type: string, minLength: 5, maxLength: 32}
       operations:
         deliver:
           effect_class: non_idempotent_write
@@ -105,6 +106,10 @@ interfaces:
             destination: {opaque: destination}
           output:
             commands: {schema: inbox_readback_commands}
+        identify_inbox_address:
+          effect_class: read_only
+          output:
+            address_reference: {schema: inbox_address}
       events:
         action:
           required_fields:
@@ -15098,6 +15103,11 @@ platform_tables:
         may have several compatible activation consumers. Unknown launched writes remain durable
         and block overlapping successor writes and usable readiness, even if a later readback
         happens to match. Retirement is local only and never deletes a remote command.
+        A text invocation is entry evidence only when its exact verified pending inbound intent
+        resolves through the current binding, succeeded activation, current compatible consumer,
+        and installed setting generation with the same opaque command reference. A shared
+        invocation additionally requires the current bot address; provider-native command
+        spelling is never interpreted by the selected-store owner.
       ddl: |
         CREATE TABLE channel_native_settings (
             setting_id UUID PRIMARY KEY,

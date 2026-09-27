@@ -28,6 +28,7 @@ type selectedChannelDeliveryTestStore interface {
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (render.ResolvedAction, bool, error)
 	ResolveCurrentChannelText(context.Context, operatorchannel.InboundText) (render.ResolvedText, bool, error)
+	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (render.ResolvedNativeEntry, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)
 	FreezeAndPersistChannelRender(context.Context, string) (render.PreparedRender, error)
@@ -367,9 +368,48 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("authorize exact physical native setting: %v", err)
 				}
+				entryText := textFact
+				entryText.PublicationID = uuid.NewString()
+				entryText.Text = "/" + setting.EntryCommand
+				entryText.EntryReference = setting.EntryCommand
+				if conversationScope == operatorchannel.ConversationScopeShared {
+					entryText.EntryAddress = "SwarmTestBot"
+				}
+				if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+					return channeldelivery.InsertTextIntentTx(txctx, tx, entryText, now, postgres)
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if _, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText); err != nil || found {
+					t.Fatalf("uninstalled native entry resolved: found=%t err=%v", found, err)
+				}
+				forgedEntry := entryText
+				forgedEntry.PublicationID = uuid.NewString()
+				if _, _, err := selected.ResolveCurrentNativeInboxEntry(ctx, forgedEntry); err == nil {
+					t.Fatal("native entry accepted a fact absent from verified inbound intent")
+				}
 				if late {
 					if err := nativeHandle.MarkLaunched(nativeCtx); err != nil {
 						t.Fatalf("launch physical native setting: %v", err)
+					}
+				} else {
+					if err := nativeHandle.MarkLaunched(nativeCtx); err != nil {
+						t.Fatalf("launch physical native setting: %v", err)
+					}
+					if err := nativeHandle.MarkResponseObserved(nativeCtx, map[string]any{"provider": "accepted"}); err != nil {
+						t.Fatalf("observe native setting: %v", err)
+					}
+					desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := nativeHandle.Succeed(nativeCtx, map[string]any{"readback_hash": runtimeeffects.Fingerprint(desired)}); err != nil {
+						t.Fatalf("settle native setting: %v", err)
+					}
+					entry, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText)
+					if err != nil || !found || entry.PrincipalID != principal.ID || entry.SettingID != setting.SettingID ||
+						entry.ActivationID != activation.ActivationID || entry.EntryReference != setting.EntryCommand {
+						t.Fatalf("installed native entry = %#v, found=%t err=%v", entry, found, err)
 					}
 				}
 				if !current(authority) {
@@ -405,6 +445,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}
 					if _, found, err := selected.ResolveCurrentChannelText(ctx, textFact); err != nil || found {
 						t.Fatalf("retired binding admitted predecessor text: found=%t err=%v", found, err)
+					}
+					if _, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText); err != nil || found {
+						t.Fatalf("retired binding admitted predecessor native entry: found=%t err=%v", found, err)
 					}
 					if err := native.RetireStaleNativeInboxConsumers(ctx); err != nil {
 						t.Fatal(err)

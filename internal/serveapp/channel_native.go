@@ -91,6 +91,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	if setting.State == "uncertain" || setting.State == "unavailable" || setting.State == "retired" {
 		return fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State)
 	}
+	if _, err := d.readNativeInboxAddress(ctx, compiled.Plan, activation.CredentialAdmissions); err != nil {
+		return fmt.Errorf("native inbox bot address is unavailable: %w", err)
+	}
 	observed, err := d.readNativeInboxCommands(ctx, compiled.Plan, activation.CredentialAdmissions, setting)
 	if err != nil {
 		return err
@@ -118,6 +121,38 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 		return fmt.Errorf("native inbox provider setting is already occupied")
 	}
 	return d.installNativeInboxCommands(ctx, activation, compiled.Plan, setting)
+}
+
+func (d *serveChannelDeliveryDispatcher) readNativeInboxAddress(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission) (string, error) {
+	const operation = "identify_inbox_address"
+	_, input, err := plan.PrepareOperation(operation, map[string]any{})
+	if err != nil {
+		return "", err
+	}
+	toolID, tool, err := plan.ConnectorOperation(operation)
+	if err != nil {
+		return "", err
+	}
+	if tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+		return "", fmt.Errorf("native inbox address requires a read-only operation")
+	}
+	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, admissions, tool)
+	if err != nil {
+		return "", err
+	}
+	output, err := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).Read(ctx, toolID, tool, input, credentials)
+	if err != nil {
+		return "", err
+	}
+	projected, err := plan.ProjectOperationOutput(operation, output)
+	if err != nil {
+		return "", err
+	}
+	address, ok := projected["address_reference"].(string)
+	if !ok || address == "" {
+		return "", fmt.Errorf("native inbox address readback is incomplete")
+	}
+	return address, nil
 }
 
 func nativeInboxOperation(scopeKind, action string) (string, error) {

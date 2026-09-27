@@ -1830,6 +1830,13 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
 			),
 		),
+		"mock.read_address": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+			runtimecontracts.WithToolSchemas(
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{}),
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"address": mockStringSchema(5, 32, "")}, "address"),
+			),
+		),
 		"mock.identify_workspace": mockRegistrationTool(
 			runtimecontracts.ActivityEffectClassReadOnly,
 			[]string{"mock_api_key"},
@@ -1913,6 +1920,9 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			"read_shared_inbox_entry": {Tool: "mock.read_member_inbox", Input: map[string]packs.ChannelMapping{
 				"destination.queue": {From: "context.destination.queue"}, "member.principal": {From: "input.member_reference.principal"},
 			}, Output: map[string]packs.ChannelMapping{"commands": {From: "result.commands"}}},
+			"identify_inbox_address": {Tool: "mock.read_address", Output: map[string]packs.ChannelMapping{
+				"address_reference": {From: "result.address"},
+			}},
 		},
 		Events: map[string]packs.ChannelEventBinding{
 			"action": {Event: "mock.action", Fields: map[string]string{
@@ -1952,7 +1962,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			case "native_entry":
 				schema = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 					"reference": mockStringSchema(1, 32, ""),
-					"address": mockStringSchema(5, 32, ""),
+					"address":   mockStringSchema(5, 32, ""),
 				}, "reference")
 			default:
 				panic("missing mock trigger field schema for " + name)
