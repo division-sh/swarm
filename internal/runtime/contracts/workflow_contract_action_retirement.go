@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func retiredHandlerFieldError(context, key string) error {
+func retiredHandlerActionFieldError(context, key string) error {
 	switch strings.TrimSpace(key) {
 	case "condition":
 		if context == "rules" {
@@ -23,7 +23,7 @@ func retiredHandlerFieldError(context, key string) error {
 
 // Inspect presence before decoding values; YAML aliases and merged mappings
 // cannot erase a retired declaration, even when another key overrides it.
-func validateRetiredHandlerFields(node *yaml.Node, context string) error {
+func validateRetiredHandlerActionFields(node *yaml.Node, context string) error {
 	resolved, err := resolveHandlerRuleYAMLNode(node)
 	if err != nil {
 		return err
@@ -36,7 +36,7 @@ func validateRetiredHandlerFields(node *yaml.Node, context string) error {
 		if err != nil {
 			return err
 		}
-		if err := retiredHandlerFieldError(context, key.Value); err != nil {
+		if err := retiredHandlerActionFieldError(context, key.Value); err != nil {
 			return err
 		}
 		if key.Value != "<<" || key.Tag != "!!merge" {
@@ -48,11 +48,11 @@ func validateRetiredHandlerFields(node *yaml.Node, context string) error {
 		}
 		if merged.Kind == yaml.SequenceNode {
 			for _, entry := range merged.Content {
-				if err := validateRetiredHandlerFields(entry, context); err != nil {
+				if err := validateRetiredHandlerActionFields(entry, context); err != nil {
 					return err
 				}
 			}
-		} else if err := validateRetiredHandlerFields(merged, context); err != nil {
+		} else if err := validateRetiredHandlerActionFields(merged, context); err != nil {
 			return err
 		}
 	}

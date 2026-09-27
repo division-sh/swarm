@@ -235,7 +235,7 @@ func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
 		*s = HandlerOnSuccessSpec{}
 		return nil
 	}
-	if err := validateRetiredHandlerFields(node, "on_success"); err != nil {
+	if err := validateRetiredHandlerActionFields(node, "on_success"); err != nil {
 		return err
 	}
 	if node.Kind != yaml.MappingNode {
@@ -680,7 +680,7 @@ var handlerFieldOptions = map[string]struct{}{
 }
 
 func validateHandlerFieldNodes(node *yaml.Node) error {
-	if err := validateRetiredHandlerFields(node, "handler"); err != nil {
+	if err := validateRetiredHandlerActionFields(node, "handler"); err != nil {
 		return err
 	}
 	if node == nil || node.Kind != yaml.MappingNode {
@@ -778,7 +778,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContex
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRetiredHandlerFields(resolved, string(context)); err != nil {
+	if err := validateRetiredHandlerActionFields(resolved, string(context)); err != nil {
 		return nil, err
 	}
 	var rule HandlerRuleEntry
@@ -803,7 +803,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 	switch node.Kind {
 	case yaml.SequenceNode:
 		for _, row := range node.Content {
-			if err := validateRetiredHandlerFields(row, string(context)); err != nil {
+			if err := validateRetiredHandlerActionFields(row, string(context)); err != nil {
 				return nil, err
 			}
 		}
@@ -838,7 +838,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 			if err != nil {
 				return nil, err
 			}
-			if err := validateRetiredHandlerFields(row, string(context)); err != nil {
+			if err := validateRetiredHandlerActionFields(row, string(context)); err != nil {
 				return nil, err
 			}
 			var rule HandlerRuleEntry
@@ -910,7 +910,7 @@ func classifyHandlerRuleMapping(node *yaml.Node) (handlerRuleMappingShape, error
 		return handlerRuleMappingSingleton, nil
 	case keyedStructureErr == nil:
 		if keyedErr != nil {
-			if err := validateRetiredHandlerFields(node, "rule"); err != nil {
+			if err := validateRetiredHandlerActionFields(node, "rule"); err != nil {
 				return 0, err
 			}
 		}
@@ -925,7 +925,7 @@ func decodeSingletonHandlerRuleShape(node *yaml.Node) error {
 	if err != nil {
 		return err
 	}
-	if err := validateRetiredHandlerFields(resolved, "rule"); err != nil {
+	if err := validateRetiredHandlerActionFields(resolved, "rule"); err != nil {
 		return err
 	}
 	var rule HandlerRuleEntry
