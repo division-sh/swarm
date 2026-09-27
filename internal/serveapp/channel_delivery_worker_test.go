@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 type channelDeliveryWorkerCards struct {
 	decisioncard.Store
+	changes []decisioncard.Change
 }
 
 func (channelDeliveryWorkerCards) ListDecisionCards(_ context.Context, opts decisioncard.ListOptions) ([]decisioncard.ListItem, string, error) {
@@ -29,14 +31,40 @@ func (channelDeliveryWorkerCards) ListDecisionCards(_ context.Context, opts deci
 	}
 }
 
+func (c channelDeliveryWorkerCards) ListDecisionCardChanges(_ context.Context, opts decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
+	var out []decisioncard.Change
+	for _, change := range c.changes {
+		if change.Sequence > opts.After {
+			out = append(out, change)
+		}
+	}
+	return out, nil
+}
+
 type channelDeliveryWorkerStore struct {
 	runtimechanneldelivery.Store
-	planned []string
+	planned        []string
+	changeCursor   int64
+	changed        []string
+	failOnSequence int64
 }
 
 func (s *channelDeliveryWorkerStore) PlanOpenChannelCard(_ context.Context, cardID string) (bool, error) {
 	s.planned = append(s.planned, cardID)
 	return true, nil
+}
+
+func (s *channelDeliveryWorkerStore) CurrentChannelCardChangeCursor(context.Context) (int64, bool, error) {
+	return s.changeCursor, true, nil
+}
+
+func (s *channelDeliveryWorkerStore) PlanChangedChannelCard(_ context.Context, sequence int64, cardID string) error {
+	if sequence == s.failOnSequence {
+		return fmt.Errorf("injected selected-store failure")
+	}
+	s.changeCursor = sequence
+	s.changed = append(s.changed, cardID)
+	return nil
 }
 
 func (*channelDeliveryWorkerStore) CurrentChannelDeliveryActivationID(context.Context) (string, bool, error) {
@@ -78,6 +106,26 @@ func TestChannelDeliveryReconciliationPlansOpenCardsWithoutResending(t *testing.
 	want := []string{"pending-a", "pending-b", "deferred-c"}
 	if !reflect.DeepEqual(selected.planned, want) {
 		t.Fatalf("planned cards = %v, want %v", selected.planned, want)
+	}
+}
+
+func TestChannelDeliveryChangeCursorResumesAfterPlanningFailure(t *testing.T) {
+	selected := &channelDeliveryWorkerStore{failOnSequence: 2}
+	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{changes: []decisioncard.Change{
+		{Sequence: 1, CardID: "first"}, {Sequence: 2, CardID: "second"},
+	}}}
+	if err := d.reconcileCardChanges(context.Background()); err == nil {
+		t.Fatal("second change failure was ignored")
+	}
+	if selected.changeCursor != 1 || !reflect.DeepEqual(selected.changed, []string{"first"}) {
+		t.Fatalf("committed progress after failure = cursor %d, cards %v", selected.changeCursor, selected.changed)
+	}
+	selected.failOnSequence = 0
+	if err := d.reconcileCardChanges(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if selected.changeCursor != 2 || !reflect.DeepEqual(selected.changed, []string{"first", "second"}) {
+		t.Fatalf("resumed progress = cursor %d, cards %v", selected.changeCursor, selected.changed)
 	}
 }
 
