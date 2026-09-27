@@ -168,6 +168,15 @@ func loadDecisionCard(ctx context.Context, db decisionCardSQL, id string, postgr
 	return scanDecisionCard(db.QueryRowContext(ctx, query, strings.TrimSpace(id)))
 }
 
+// LoadDecisionCardInTx lets channel presentation read the canonical card at
+// the same selected-store cut as its immutable render admission.
+func LoadDecisionCardInTx(ctx context.Context, tx *sql.Tx, id string, postgres bool) (decisioncard.Card, error) {
+	if tx == nil {
+		return decisioncard.Card{}, fmt.Errorf("decision card transaction is required")
+	}
+	return loadDecisionCard(ctx, tx, id, postgres, true)
+}
+
 func (s *DecisionPostgresOwner) LoadTx(ctx context.Context, attempt *mutationprotocol.Attempt, id string, forUpdate bool) (decisioncard.Card, error) {
 	return withDecisionSQL(ctx, attempt, func(txctx context.Context, tx *sql.Tx) (decisioncard.Card, error) {
 		return loadDecisionCard(txctx, tx, id, true, forUpdate)
