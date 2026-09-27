@@ -447,6 +447,31 @@ type sqliteFlowActivationCommitter struct {
 	store *SQLiteRuntimeStore
 }
 
+type sqliteFlowActivationLifecycleStore struct {
+	grant runtimestartupownership.LiveGenerationGrant
+}
+
+func (s *sqliteFlowActivationLifecycleStore) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
+	if s.grant == nil {
+		return runtimemanager.ProcessExecutionBinding{}, errors.New("flow activation fixture grant is required")
+	}
+	return s.grant.ProcessExecutionBinding()
+}
+
+func (s *sqliteFlowActivationLifecycleStore) InspectRunExecutionOwnership(ctx context.Context, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	if s.grant == nil {
+		return 0, errors.New("flow activation fixture grant is required")
+	}
+	return s.grant.InspectRunExecutionOwnership(ctx, runID)
+}
+
+func (s *sqliteFlowActivationLifecycleStore) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	if s.grant == nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("flow activation fixture grant is required")
+	}
+	return s.grant.CommitAgentLifecycleTransition(ctx, req)
+}
+
 func (o sqliteFlowActivationCommitter) CommitFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error) {
 	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
 		Plan: plan,
@@ -471,6 +496,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	requireRunFixtureForTest(t, ctx, sqliteStore, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
+	lifecycle := &sqliteFlowActivationLifecycleStore{}
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
@@ -478,6 +504,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		SemanticSource:     semanticview.Wrap(bundle),
 		WorkflowInstances:  workflowStore,
 		LLMBackend:         "anthropic",
+		LifecycleStore:     lifecycle,
 		DeliveryStore:      sqliteStore,
 		WorkOwner:          storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
@@ -497,38 +524,11 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	capability, err := sqliteStore.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "sqlite-flow-activation-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
+	grant, err := agentfixture.AdmitGeneration(t, ctx, sqliteStore, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var grant runtimestartupownership.LiveGenerationGrant
-	t.Cleanup(func() {
-		if err := manager.Shutdown(); err != nil {
-			t.Error(err)
-			return
-		}
-		if grant != nil {
-			if err := grant.Retire(context.Background()); err != nil {
-				t.Error(err)
-				return
-			}
-		}
-		if err := capability.Release(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
-	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
-		t.Fatal(err)
-	}
-	grant, err = capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	lifecycle.grant = grant
 	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, fact.BundleHash(), runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
@@ -536,6 +536,20 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ownership, err := grant.InspectRunExecutionOwnership(ctx, runID); err != nil || ownership != runtimemanager.RunExecutionOwned {
+		t.Fatalf("flow activation run ownership = %v, want owned: %v", ownership, err)
+	}
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Error(err)
+		}
+	})
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
 	if err := manager.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance through closed SQLite owner: %v", err)
@@ -570,18 +584,22 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle(t)
+	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
+	lifecycle := &sqliteFlowActivationLifecycleStore{}
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        ctx,
-		SourceArtifactFact: mustStoreTestSourceArtifactFact(authorActivityTestBundleHash),
+		SourceArtifactFact: fact,
 		SemanticSource:     semanticview.Wrap(bundle),
 		WorkflowInstances:  workflowStore,
 		LLMBackend:         "anthropic",
-		LifecycleStore:     agentfixture.Lifecycle(t, sqliteStore),
+		LifecycleStore:     lifecycle,
 		DeliveryStore:      sqliteStore,
 		WorkOwner:          storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
@@ -592,15 +610,31 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			RouteRestorer:  bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	// Template actors are admitted by flow readiness, not as static desired agents.
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agentfixture.AdmitGeneration(t, ctx, sqliteStore, plan, coordinate); err != nil {
+	grant, err := agentfixture.AdmitGeneration(t, ctx, sqliteStore, plan, coordinate)
+	if err != nil {
 		t.Fatal(err)
 	}
+	lifecycle.grant = grant
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ownership, err := grant.InspectRunExecutionOwnership(ctx, runID); err != nil || ownership != runtimemanager.RunExecutionOwned {
+		t.Fatalf("fan-out activation run ownership = %v, want owned: %v", ownership, err)
+	}
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Error(err)
+		}
+	})
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -1095,6 +1129,18 @@ func assertSQLiteActivatedAgentFlowTopologies(
 		want, err := runtimeagenttopology.FlowReadinessAdmission(runID, path, fingerprint)
 		if err != nil {
 			t.Fatalf("build exact readiness topology for %s: %v", path, err)
+		}
+		var attemptID string
+		var attemptRevision int64
+		if err := selected.backend.QueryRowContext(ctx, `SELECT activation_attempt_id, activation_attempt_revision FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`, runID, path).Scan(&attemptID, &attemptRevision); err != nil {
+			t.Fatalf("load exact activation attempt for %s: %v", path, err)
+		}
+		if attemptRevision <= 0 || uint64(attemptRevision) != readiness.PlanRevision {
+			t.Fatalf("activation attempt revision for %s = %d, want %d", path, attemptRevision, readiness.PlanRevision)
+		}
+		want, err = want.WithFlowActivationAttempt(attemptID, uint64(attemptRevision))
+		if err != nil {
+			t.Fatalf("bind exact activation attempt for %s: %v", path, err)
 		}
 		if !rec.Topology.Equal(want) {
 			t.Fatalf("activated agent topology for %s = %#v, want %#v", path, rec.Topology, want)

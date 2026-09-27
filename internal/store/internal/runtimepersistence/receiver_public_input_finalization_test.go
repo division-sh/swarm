@@ -44,7 +44,10 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			}
 			fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
 			runID := uuid.NewString()
-			ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), runID)
+			ctx := correlation.WithRuntimeInstanceID(
+				correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), runID),
+				authorActivityTestRuntimeInstanceID,
+			)
 			if err := ensureRunFixtureSourceArtifactForTest(ctx, selected, fact.BundleHash(), bundle.SourceArtifact); err != nil {
 				t.Fatal(err)
 			}
@@ -104,6 +107,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			if err := am.InstallStartupTopology(grant, admission, set); err != nil {
 				t.Fatal(err)
 			}
+			admitAgentFixtureFlowGrant(t, ctx, grant)
 			// Never Run/Resume/Ensure: only this first publication may finalize
 			// readiness. An eventual recovery cannot conceal the callback error.
 			apiEndpoint, err := bus.NewRootInputAPIEventPublicationEndpoint(source, "inbound.telegram.text_message")

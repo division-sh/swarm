@@ -123,7 +123,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			primaryModule := stubWorkflowModule{source: semanticview.Wrap(primaryBundle)}
 			primary := newStandingRuntimeContextRuntime(t, process, primaryStores, primaryModule, primaryFact, runtimeInstanceID, catalog)
 			selected := newStandingRuntimeContextRuntime(t, process, selectedStores, selectedModule, selectedFact, runtimeInstanceID, catalog)
-			capability, _ := installSelectedStoreTestProcessTopology(t, selectedStores, selected, selectedModule.SemanticSource(), selectedFact, runtimeInstanceID)
+			capability, _, grant := installSelectedStoreTestProcessTopology(t, selectedStores, selected, selectedModule.SemanticSource(), selectedFact, runtimeInstanceID)
 			t.Cleanup(func() {
 				if err := selected.Shutdown(); err != nil {
 					t.Error(err)
@@ -137,6 +137,12 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			selectedCtx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(runtimeInstanceID, selectedHash))
 			selectedCtx = runtimecorrelation.WithSourceArtifactFact(selectedCtx, selectedFact)
 			selectedCtx = worklifetime.WithRuntimeOccurrence(selectedCtx, selected.WorkOccurrence())
+			if _, err := grant.MarkProbesSettled(selectedCtx, nil); err != nil {
+				t.Fatalf("settle selected standing probes: %v", err)
+			}
+			if _, err := grant.AdmitExecution(selectedCtx); err != nil {
+				t.Fatalf("admit selected standing generation: %v", err)
+			}
 			targets, activations, err := selected.EnsureStandingTargets(selectedCtx)
 			if err != nil {
 				t.Fatalf("ensure selected standing targets: %v", err)

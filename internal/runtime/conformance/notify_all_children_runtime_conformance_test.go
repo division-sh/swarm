@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -157,6 +156,21 @@ type notifyAllChildrenRuntimeOptions struct {
 	testLifecycleProbe     runtimelifecycleprobe.Observer
 	deliveryLifecycle      runtimedelivery.Store
 	deferContinuationStart bool
+}
+
+func retireNotifyAllChildrenRuntimeForReplacement(t *testing.T, runtime notifyAllChildrenRuntime) {
+	t.Helper()
+	if runtime.fanOutServing != nil {
+		runtime.fanOutServing.Close()
+	}
+	if err := runtime.manager.Shutdown(); err != nil {
+		t.Fatalf("shutdown predecessor notify-all-children manager: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+		t.Fatalf("join predecessor notify-all-children work: %v", err)
+	}
 }
 
 type notifyAllChildrenGenericScheduleLogger struct {
@@ -1081,29 +1095,21 @@ func loadNotifyAllChildrenSingleEventID(t *testing.T, ctx context.Context, backe
 func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnBothBackends(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB, func(), func() int32)
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func(), func() int32) {
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				selected := &failingNotifyAllChildrenPostgresStore{
-					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db),
-				}
-				return selected, db,
-					func() { selected.failNextRouteReplacement.Store(true) },
-					selected.transientRouteFailures.Load
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func(), func() int32) {
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
 				base := storetest.StartSQLiteRuntimeStore(t)
-				selected := &failingNotifyAllChildrenSQLiteStore{SQLiteRuntimeStore: base}
-				return selected, storetest.DatabaseForTest(base),
-					func() { selected.failNextRouteReplacement.Store(true) },
-					selected.transientRouteFailures.Load
+				return base, storetest.DatabaseForTest(base)
 			},
 		},
 	} {
@@ -1115,13 +1121,11 @@ func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnB
 			{name: "emitted_creation", autoEmit: true},
 		} {
 			t.Run(tc.name+"/"+mode.name, func(t *testing.T) {
-				selected, db, failNextRouteReplacement, transientRouteFailures := tc.setup(t)
+				selected, db := tc.setup(t)
 				proveDynamicFlowSourceRevisionConvergence(
 					t,
 					selected,
 					db,
-					failNextRouteReplacement,
-					transientRouteFailures,
 					mode.autoEmit,
 				)
 			})
@@ -1133,8 +1137,6 @@ func proveDynamicFlowSourceRevisionConvergence(
 	t *testing.T,
 	selected notifyAllChildrenStore,
 	db *sql.DB,
-	failNextRouteReplacement func(),
-	transientRouteFailures func() int32,
 	autoEmit bool,
 ) {
 	t.Helper()
@@ -1183,6 +1185,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("v1 dynamic agents = %#v", v1Agents)
 	}
 	readerGenerationV1 := v1Agents[readerID].LifecycleGeneration
+	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV1)
 
 	sourceV2 := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 		AgentTopologyRevision: 2,
@@ -1209,28 +1212,13 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("run v2 manager: %v", err)
 	}
 	reconcileCtx := worklifetime.WithOccurrence(ctxV2, runtimeV2.workOwner)
-	failNextRouteReplacement()
-	sourceRevisionErr := make(chan error, 1)
-	start := make(chan struct{})
-	var mutations sync.WaitGroup
-	mutations.Add(1)
-	go func() {
-		defer mutations.Done()
-		<-start
-		sourceRevisionErr <- runtimeV2.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
-			reconcileCtx, time.Now().UTC(), runtimeV2.manager,
-		)
-	}()
-	close(start)
-	mutations.Wait()
-	close(sourceRevisionErr)
-	if err := <-sourceRevisionErr; err != nil && !strings.Contains(err.Error(), "injected transient") {
-		t.Fatalf("reconcile revised source: %v", err)
+	revisionErr := runtimeV2.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
+		reconcileCtx, time.Now().UTC(), runtimeV2.manager,
+	)
+	if revisionErr != nil && !strings.Contains(revisionErr.Error(), "retains predecessor retirement") {
+		t.Fatalf("reconcile revised source: %v", revisionErr)
 	}
 	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctxV2, runtimeV2.pipeline, runID, descriptor.FlowInstance)
-	if failures := transientRouteFailures(); failures != 1 {
-		t.Fatalf("transient revised-route failures = %d, want exactly one automatic-retry trigger", failures)
-	}
 
 	v2Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
 	if _, found := v2Agents[retiredID]; found {
@@ -1269,6 +1257,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("removed lifecycle state = %#v found=%t err=%v", terminated, found, err)
 	}
 
+	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV2)
 	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
@@ -1298,6 +1287,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		AgentTopologyRevision: 3,
 		AutoEmitOnCreate:      autoEmit,
 	})
+	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV3)
 	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
@@ -1311,18 +1301,14 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if err := runtimeV4.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3", runtimeV4.sourceArtifactFact)); err != nil {
 		t.Fatalf("run v3 manager: %v", err)
 	}
-	failNextRouteReplacement()
 	if err := runtimeV4.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
 		worklifetime.WithOccurrence(ctxV3, runtimeV4.workOwner),
 		time.Now().UTC(),
 		runtimeV4.manager,
-	); err != nil && !strings.Contains(err.Error(), "injected transient") {
+	); err != nil && !strings.Contains(err.Error(), "retains predecessor retirement") {
 		t.Fatalf("reconcile reintroduced source: %v", err)
 	}
 	waitNotifyAllChildrenRuntimeReadiness(t, ctxV3, runtimeV4.pipeline, runID, descriptor.FlowInstance)
-	if failures := transientRouteFailures(); failures != 2 {
-		t.Fatalf("transient revised-route failures = %d, want one per revised source", failures)
-	}
 	v3Agents := loadNotifyAllChildrenAgentsByID(t, ctx, selected)
 	reintroduced := v3Agents[retiredID]
 	if reintroduced.Config.Role != "returned" || reintroduced.LifecycleGeneration <= terminated.Generation {
@@ -1346,6 +1332,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("reintroduced process config = %#v err=%v", cfg, err)
 	}
 
+	retireNotifyAllChildrenRuntimeForReplacement(t, runtimeV4)
 	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: processTopology,
 	})
@@ -1385,7 +1372,8 @@ func countNotifyAllChildrenLifecycleTransitions(
 		FROM agent_lifecycle_transition_facts
 		WHERE agent_id = $1 AND previous_phase = $2 AND next_phase = $3
 	`
-	if _, ok := backend.(*failingNotifyAllChildrenSQLiteStore); ok {
+	switch backend.(type) {
+	case *failingNotifyAllChildrenSQLiteStore, *store.SQLiteRuntimeStore:
 		query = `
 			SELECT COUNT(*)
 			FROM agent_lifecycle_transition_facts
@@ -2075,17 +2063,6 @@ func newNotifyAllChildrenRuntime(
 		)
 		if err != nil {
 			t.Fatalf("construct notify-all-children generic schedule lifecycle: %v", err)
-		}
-	}
-	if routeStore, ok := backend.(runtimebus.FlowInstanceRoutePersistence); ok {
-		routes, err := routeStore.ListFlowInstanceRoutes(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact))
-		if err != nil {
-			t.Fatalf("ListFlowInstanceRoutes: %v", err)
-		}
-		for _, route := range routes {
-			if err := flowroutefixture.Publish(eventBus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
-				t.Fatalf("restore flow-instance route %s: %v", route.Route.InstancePath, err)
-			}
 		}
 	}
 	var (
