@@ -348,7 +348,7 @@ func (e *PackInterfaceEvent) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
 		return nil
 	}
-	if err := rejectUnknownYAMLFields(node, "pack interface event", "required_fields"); err != nil {
+	if err := rejectUnknownYAMLFields(node, "pack interface event", "required_fields", "optional_fields"); err != nil {
 		return err
 	}
 	type alias PackInterfaceEvent

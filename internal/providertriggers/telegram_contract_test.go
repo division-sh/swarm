@@ -239,6 +239,33 @@ func TestTelegramTextRejectsOutOfRangeProviderMessageReference(t *testing.T) {
 	}, "must be <= 2.147483647e+09")
 }
 
+func TestTelegramTextOptionalReplyToReference(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	update := map[string]any{
+		"update_id": 207,
+		"message": map[string]any{
+			"message_id": 17, "from": map[string]any{"id": 12345},
+			"chat": map[string]any{"id": 67890, "type": "private"}, "text": "reason",
+		},
+	}
+	delivery, err := plan.Accept(telegramContractRequest(t, update))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := delivery.Events[1].Payload["reply_to_message_reference"]; exists {
+		t.Fatalf("absent optional reply was projected: %#v", delivery.Events[1].Payload)
+	}
+	update["message"].(map[string]any)["reply_to_message"] = map[string]any{"message_id": 11}
+	delivery, err = plan.Accept(telegramContractRequest(t, update))
+	if err != nil || delivery.Events[1].Payload["reply_to_message_reference"] != json.Number("11") {
+		t.Fatalf("present reply projection = %#v err=%v", delivery.Events, err)
+	}
+	update["message"].(map[string]any)["reply_to_message"] = map[string]any{"message_id": 2147483648}
+	if _, err := plan.Accept(telegramContractRequest(t, update)); err == nil || !strings.Contains(err.Error(), "message.reply_to_message.message_id") {
+		t.Fatalf("malformed present reply error = %v", err)
+	}
+}
+
 func TestTelegramTextRejectsNegativeExternalAccountReference(t *testing.T) {
 	assertTelegramNormalizedIdentifierRejected(t, "text external account", "message.from.id", map[string]any{
 		"update_id": 202,
@@ -502,6 +529,7 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 				{Name: "conversation_scope", Type: "text", Required: true, CarryEligible: true},
 				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
+				{Name: "reply_to_message_reference", Type: "integer"},
 				{Name: "text", Type: "text", Required: true, CarryEligible: true},
 			},
 		},

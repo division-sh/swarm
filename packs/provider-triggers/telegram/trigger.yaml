@@ -73,6 +73,10 @@ normalized_events:
       provider_message_reference:
         from: message.message_id
         schema: {type: integer, minimum: 1, maximum: 2147483647}
+      reply_to_message_reference:
+        from: message.reply_to_message.message_id
+        schema: {type: integer, minimum: 1, maximum: 2147483647}
+        optional: true
     when:
       absent: [callback_query, message.sender_chat]
       one_of:
