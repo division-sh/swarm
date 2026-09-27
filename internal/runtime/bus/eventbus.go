@@ -786,6 +786,13 @@ func (eb *EventBus) activeFlowInstanceDescriptorsForSemanticSource(
 	if err != nil {
 		return nil, err
 	}
+	return eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, descriptors)
+}
+
+func (eb *EventBus) validateActiveFlowInstanceDescriptorsForSemanticSource(runID string, descriptors []ActiveFlowInstanceDescriptor) ([]ActiveFlowInstanceDescriptor, error) {
+	if eb == nil || strings.TrimSpace(runID) == "" {
+		return nil, errors.New("active flow-instance descriptors require exact EventBus and run identity")
+	}
 	if len(descriptors) == 0 {
 		return nil, nil
 	}
@@ -854,13 +861,27 @@ func (eb *EventBus) deriveFlowInstanceRouteTopologyWithInputProducers(
 	inputProducers runtimepinrouting.FlowInputProducerResolver,
 	deferRebuild bool,
 ) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
-	staged, err := deriveRouteTableWithInputProducers(table.source, graph, inputProducers)
-	if err != nil {
-		return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
-	}
 	descriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list active flow-instance route topology: %w", err)
+	}
+	return eb.deriveFlowInstanceRouteTopologyFromDescriptors(ctx, table, runID, include, exclude, graph, inputProducers, deferRebuild, descriptors)
+}
+
+func (eb *EventBus) deriveFlowInstanceRouteTopologyFromDescriptors(
+	ctx context.Context,
+	table *RouteTable,
+	runID string,
+	include *FlowInstanceRouteMaterializationRequest,
+	exclude runtimeflowidentity.RunScopedFlowInstance,
+	graph runtimepinrouting.CompiledConnectGraph,
+	inputProducers runtimepinrouting.FlowInputProducerResolver,
+	deferRebuild bool,
+	descriptors []ActiveFlowInstanceDescriptor,
+) (*RouteTable, []runtimeflowidentity.RunScopedFlowInstance, error) {
+	staged, err := deriveRouteTableWithInputProducers(table.source, graph, inputProducers)
+	if err != nil {
+		return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
 	}
 	identities := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(descriptors)+1)
 	changed := false

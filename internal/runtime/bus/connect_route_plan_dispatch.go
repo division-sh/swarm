@@ -575,6 +575,78 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 	return out
 }
 
+// selectedTargetScope uses compiled plan targets and the canonical instance
+// materialization owner. It is only a lookup scope; the later selected-run
+// projection still admits exact entity ownership and rejects contradictions.
+func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt events.Event) (selectedTargetOwnerLookupScope, bool) {
+	paths := make(map[string]struct{})
+	scope := selectedTargetOwnerLookupScope{}
+	add := func(route events.RouteIdentity) {
+		if path := route.Normalized().FlowInstance; path != "" {
+			paths[path] = struct{}{}
+		}
+	}
+	add(evt.RoutingSource().Route())
+	add(evt.SourceRoute())
+	add(evt.TargetRoute())
+	for _, route := range evt.TargetRoutes() {
+		add(route)
+	}
+	if evt.RoutingSource().Kind() == events.RoutingSourceRoot || evt.RoutingSource().Kind() == events.RoutingSourceDeploymentFeed {
+		paths["."] = struct{}{}
+	}
+	matched := r.matchedPlans(ctx, evt)
+	for _, plan := range matched {
+		if !plan.RequiresRuntimeResolution() {
+			materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{})
+			add(materialized.Target)
+			for _, route := range materialized.TargetSet {
+				add(route)
+			}
+			continue
+		}
+		if plan.InstanceKey() == nil {
+			return selectedTargetOwnerLookupScope{}, false
+		}
+		material, failure := instanceKeyMaterialForTemplateLifecycle(evt, plan, connectRoutePlanMatchValues(evt))
+		if !failure.Empty() {
+			continue
+		}
+		contract, failure := r.lifecycle.resolveInstanceContract(plan, material)
+		if !failure.Empty() {
+			continue
+		}
+		keys, err := contract.CanonicalKeyMaterial(material.CanonicalValues())
+		if err != nil {
+			continue
+		}
+		if len(keys) != 1 {
+			return selectedTargetOwnerLookupScope{}, false
+		}
+		scope.keys = append(scope.keys, selectedDescriptorKeyQuery{
+			flowTemplate: contract.FlowID, field: "entity." + keys[0].Field.Path(), value: keys[0].Value,
+		})
+		instanceID := templateInstanceLifecycleInstanceID(plan, keys)
+		if instanceID == "" {
+			continue
+		}
+		instance := plan.DeriveReceiverIdentity(r.source, instanceID)
+		if instance.InstancePath != "" {
+			paths[instance.InstancePath] = struct{}{}
+		}
+	}
+	if len(matched) == 0 && len(paths) == 0 {
+		return selectedTargetOwnerLookupScope{}, false
+	}
+	out := make([]string, 0, len(paths))
+	for path := range paths {
+		out = append(out, path)
+	}
+	sort.Strings(out)
+	scope.instancePaths = out
+	return scope, true
+}
+
 func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.Descriptor, error) {
 	needsDescriptors := false
 	for _, plan := range plans {

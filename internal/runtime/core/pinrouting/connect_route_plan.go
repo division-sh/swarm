@@ -1385,6 +1385,71 @@ type CompiledConnectGraph struct {
 	receiverPinCollisions []ConnectReceiverPinCollision
 }
 
+// RouteOwnerDependency is a compiled relationship between a producer scope
+// and a scope whose route records observe that producer. It carries no run
+// instance identity; that is selected from the current durable snapshot.
+type RouteOwnerDependency struct {
+	SourceFlowPath   string
+	ReceiverFlowPath string
+}
+
+// RouteDependencySelection separates the descriptors needed to derive a new
+// route from existing owners whose records may change because of that route.
+type RouteDependencySelection struct {
+	ContextFlowPaths  []string
+	AffectedFlowPaths []string
+}
+
+// SelectRouteDependencies is the compiled graph's owner of activation
+// dependency scope. RouteTable supplies already-admitted pub/sub observer
+// relationships; neither storage nor callers reinterpret their event names.
+func (g CompiledConnectGraph) SelectRouteDependencies(changedFlowPaths []string, observers []RouteOwnerDependency) RouteDependencySelection {
+	changed := make(map[string]struct{}, len(changedFlowPaths))
+	for _, flowPath := range changedFlowPaths {
+		flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
+		if flowPath != "" {
+			changed[flowPath] = struct{}{}
+		}
+	}
+	context := make(map[string]struct{})
+	affected := make(map[string]struct{})
+	dependencies := append([]RouteOwnerDependency(nil), observers...)
+	for _, plan := range g.plans {
+		if plan.source.IsRoot() || plan.receiver.IsRoot() {
+			continue
+		}
+		dependencies = append(dependencies, RouteOwnerDependency{
+			SourceFlowPath: plan.source.flowPath.value, ReceiverFlowPath: plan.receiver.flowPath.value,
+		})
+	}
+	for _, dependency := range dependencies {
+		source := strings.Trim(strings.TrimSpace(dependency.SourceFlowPath), "/")
+		receiver := strings.Trim(strings.TrimSpace(dependency.ReceiverFlowPath), "/")
+		if source == "" || receiver == "" {
+			continue
+		}
+		if _, newSource := changed[source]; newSource {
+			context[receiver] = struct{}{}
+			affected[receiver] = struct{}{}
+		}
+		if _, newReceiver := changed[receiver]; newReceiver {
+			context[source] = struct{}{}
+		}
+	}
+	selection := RouteDependencySelection{
+		ContextFlowPaths: make([]string, 0, len(context)), AffectedFlowPaths: make([]string, 0, len(affected)),
+	}
+	for flowPath := range context {
+		selection.ContextFlowPaths = append(selection.ContextFlowPaths, flowPath)
+	}
+	for flowPath := range affected {
+		selection.AffectedFlowPaths = append(selection.AffectedFlowPaths, flowPath)
+	}
+	sort.Strings(selection.ContextFlowPaths)
+	sort.Strings(selection.AffectedFlowPaths)
+	return selection
+}
+
 const ConnectReceiverPinCollisionFailure = "connect_receiver_pin_delivery_collision"
 
 type connectSourceEndpointIdentity struct {
@@ -1639,6 +1704,7 @@ func (g CompiledConnectGraph) EvaluateMaterializedRecipients(plan ConnectRoutePl
 	if len(targets) == 0 {
 		targets = []events.RouteIdentity{{}}
 	}
+	registrations = g.ScopeRecipientRegistrations(plan, targets, registrations)
 	recipients, candidates, err := evaluateConnectPlanRecipients(plan, targets, registrations)
 	if err != nil {
 		evaluation.err = err
@@ -1662,6 +1728,33 @@ func (g CompiledConnectGraph) EvaluateMaterializedRecipients(plan ConnectRoutePl
 	}
 	evaluation.recipients = normalizeConnectRecipients(evaluation.recipients)
 	return evaluation
+}
+
+// ScopeRecipientRegistrations selects only registrations whose compiled pin
+// and materialized target could receive this plan. A different instance's
+// registration is not negative evidence for the selected recipient.
+func (g CompiledConnectGraph) ScopeRecipientRegistrations(plan ConnectRoutePlan, targets []events.RouteIdentity, registrations []ConnectRecipientRegistration) []ConnectRecipientRegistration {
+	pin := plan.ReceiverPinIdentity()
+	if pin.Empty() {
+		return nil
+	}
+	selected := make([]ConnectRecipientRegistration, 0, 1)
+	for _, registration := range registrations {
+		if !registration.receiverPin.Equal(pin) {
+			continue
+		}
+		if registration.recipient.ID() == "" || registration.recipient.Kind() == 0 || registration.recipient.Path() == "" {
+			selected = append(selected, registration)
+			continue
+		}
+		for _, target := range targets {
+			if connectRecipientMatchesTarget(plan, registration.recipient, target.Normalized()) {
+				selected = append(selected, registration)
+				break
+			}
+		}
+	}
+	return selected
 }
 
 func (g CompiledConnectGraph) EvaluateSourceRecipients(sourceEvent SourceEvent, registrations []ConnectRecipientRegistration) ConnectRecipientEvaluation {

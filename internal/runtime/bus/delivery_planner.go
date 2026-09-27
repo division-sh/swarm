@@ -307,6 +307,9 @@ func (p deliveryPlanner) planForRecipientMaterialization(ctx context.Context, ev
 func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event) (RoutePlan, error) {
 	routePlan := newRoutePlan(evt)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	if scope, bounded := p.connectPlanner.selectedTargetScope(ctx, evt); bounded {
+		ctx = withSelectedTargetOwnerLookupScope(ctx, scope)
+	}
 	projection, err := p.recipientPolicy.loadSelectedRunTargetOwnerProjection(ctx)
 	if err != nil {
 		return RoutePlan{}, err

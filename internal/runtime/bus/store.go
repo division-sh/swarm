@@ -614,6 +614,20 @@ type ActiveFlowInstanceDescriptorLister interface {
 	ListActiveFlowInstanceDescriptors(ctx context.Context, runID string) ([]ActiveFlowInstanceDescriptor, error)
 }
 
+// ScopedActiveFlowInstanceDescriptorLister loads only graph-selected context
+// descriptors. Template IDs and instance paths are exact alternatives; an
+// empty scope is never interpreted as a full-run request.
+type ScopedActiveFlowInstanceDescriptorLister interface {
+	ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error)
+}
+
+// Key-matched lookup must return every selected descriptor with the supplied
+// canonical key value, including hostile rows at a noncanonical instance
+// path. The compiled lifecycle owner, not SQL, decides the expected identity.
+type KeyedActiveFlowInstanceDescriptorLister interface {
+	ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error)
+}
+
 type ActiveTargetDescriptor struct {
 	Availability  runtimepipeline.DeliveryTargetAvailability
 	ID            string
@@ -641,6 +655,12 @@ func (d ActiveTargetDescriptor) Normalized() ActiveTargetDescriptor {
 // additionally carry readiness and address evidence.
 type SelectedRunTargetOwnerLister interface {
 	ListSelectedRunTargetOwners(ctx context.Context, runID string) ([]ActiveTargetDescriptor, error)
+}
+
+// ScopedSelectedRunTargetOwnerLister consumes exact graph-selected instance
+// paths. It does not decide which receiver or entity owns an event.
+type ScopedSelectedRunTargetOwnerLister interface {
+	ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]ActiveTargetDescriptor, error)
 }
 
 func normalizeDescriptorAddressFields(in map[string]string) map[string]string {

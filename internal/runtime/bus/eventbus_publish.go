@@ -709,23 +709,51 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 		return nil, errors.New("flow activation publication requires route topology owners")
 	}
 	graph, inputProducers := runtimepinrouting.CompileConnectGraphWithInputProducerResolver(table.source)
-	staged, identities, err := eb.deriveFlowInstanceRouteTopologyWithInputProducers(
+	changedPaths := make([]string, 0, len(plans))
+	for _, plan := range plans {
+		changedPaths = append(changedPaths, plan.Identity.Route().ScopeKey)
+	}
+	selection := graph.SelectRouteDependencies(changedPaths, table.compiledRouteOwnerDependencies(inputProducers))
+	templateIDs := table.activeTemplateIDsForFlowPaths(selection.ContextFlowPaths)
+	var descriptors []ActiveFlowInstanceDescriptor
+	if len(templateIDs) > 0 {
+		scoped, ok := lister.(ScopedActiveFlowInstanceDescriptorLister)
+		if !ok {
+			return nil, errors.New("flow activation requires graph-scoped active descriptor owner")
+		}
+		var err error
+		descriptors, err = scoped.ListActiveFlowInstanceDescriptorsForScope(ctx, plans[0].Readiness.RunID, templateIDs, nil)
+		if err != nil {
+			return nil, fmt.Errorf("list graph-selected active route descriptors: %w", err)
+		}
+		descriptors, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(plans[0].Readiness.RunID, descriptors)
+		if err != nil {
+			return nil, err
+		}
+	}
+	staged, contextIdentities, err := eb.deriveFlowInstanceRouteTopologyFromDescriptors(
 		ctx,
 		table,
-		lister,
 		plans[0].Readiness.RunID,
 		nil,
 		runtimeflowidentity.RunScopedFlowInstance{},
 		graph,
 		inputProducers,
 		true,
+		descriptors,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("derive active route topology before activation: %w", err)
+		return nil, fmt.Errorf("derive selected route topology before activation: %w", err)
 	}
-	byIdentity := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(identities)+len(plans))
-	for _, identity := range identities {
-		byIdentity[identity] = struct{}{}
+	byIdentity := make(map[runtimeflowidentity.RunScopedFlowInstance]struct{}, len(contextIdentities)+len(plans))
+	affectedPaths := make(map[string]struct{}, len(selection.AffectedFlowPaths))
+	for _, path := range selection.AffectedFlowPaths {
+		affectedPaths[path] = struct{}{}
+	}
+	for _, identity := range contextIdentities {
+		if _, affected := affectedPaths[identity.Route.ScopeKey]; affected {
+			byIdentity[identity] = struct{}{}
+		}
 	}
 	for index, plan := range plans {
 		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.Readiness.RunID, plan.Identity.Route())
@@ -745,7 +773,7 @@ func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
 	}
 	// The staged table is discarded after record projection; it is never used
 	// to resolve subscribers, so rebuilding its resolution index is unnecessary.
-	identities = identities[:0]
+	identities := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(byIdentity))
 	for identity := range byIdentity {
 		identities = append(identities, identity)
 	}

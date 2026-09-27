@@ -147,6 +147,55 @@ type routeFlowTemplate struct {
 	Subscribers []routeSubscriberTemplate
 }
 
+func (rt *RouteTable) compiledRouteOwnerDependencies(inputProducers runtimepinrouting.FlowInputProducerResolver) []runtimepinrouting.RouteOwnerDependency {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	dependencies := make([]runtimepinrouting.RouteOwnerDependency, 0)
+	for receiverPath, template := range rt.templates {
+		for _, subscriber := range template.Subscribers {
+			for _, pattern := range subscriber.Patterns {
+				for _, resolved := range routeProjectAdmittedSubscriberPatterns(pattern.admission, template.FlowID, receiverPath, pattern.inputEvent, inputProducers) {
+					if resolved.SourceTemplatePath == "" {
+						continue
+					}
+					dependencies = append(dependencies, runtimepinrouting.RouteOwnerDependency{
+						SourceFlowPath: resolved.SourceTemplatePath, ReceiverFlowPath: receiverPath,
+					})
+				}
+			}
+		}
+	}
+	for sourcePath, observers := range rt.templateObservers {
+		for _, observer := range observers {
+			if observer.SubscriberInstancePath == "" {
+				continue
+			}
+			dependencies = append(dependencies, runtimepinrouting.RouteOwnerDependency{
+				SourceFlowPath: sourcePath,
+				ReceiverFlowPath: runtimeflowidentity.SemanticScopeFromInstancePath(observer.SubscriberInstancePath),
+			})
+		}
+	}
+	return dependencies
+}
+
+func (rt *RouteTable) activeTemplateIDsForFlowPaths(paths []string) []string {
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if template, ok := rt.templates[path]; ok {
+			seen[template.FlowID] = struct{}{}
+		}
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 type routeSubscriberTemplate struct {
 	IDTemplate    string
 	Kind          subscriberKind

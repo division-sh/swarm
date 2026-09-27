@@ -397,18 +397,73 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 	return out, nil
 }
 
+type selectedTargetOwnerLookupScopeKey struct{}
+
+type selectedTargetOwnerLookupScope struct {
+	instancePaths []string
+	keys          []selectedDescriptorKeyQuery
+}
+
+type selectedDescriptorKeyQuery struct {
+	flowTemplate string
+	field        string
+	value        string
+}
+
+func withSelectedTargetOwnerLookupScope(ctx context.Context, scope selectedTargetOwnerLookupScope) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, selectedTargetOwnerLookupScopeKey{}, scope)
+}
+
 func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTargetDescriptor, bool, error) {
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
 	if !ok || strings.TrimSpace(inbound.RunID()) == "" {
 		return nil, false, errors.New("active target descriptors require exact inbound run identity")
 	}
 	runID := inbound.RunID()
+	scope, scoped := ctx.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
+	lister := eb.durable.ActiveFlows
+	var keyDescriptors []ActiveFlowInstanceDescriptor
+	if scoped && len(scope.keys) > 0 {
+		selected, ok := lister.(KeyedActiveFlowInstanceDescriptorLister)
+		if !ok {
+			return nil, true, errors.New("selected store lacks graph-scoped key descriptor lookup")
+		}
+		for _, key := range scope.keys {
+			matched, err := selected.ListActiveFlowInstanceDescriptorsForKey(ctx, runID, key.flowTemplate, key.field, key.value)
+			if err != nil {
+				return nil, true, err
+			}
+			matched, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, matched)
+			if err != nil {
+				return nil, true, err
+			}
+			keyDescriptors = append(keyDescriptors, matched...)
+			for _, descriptor := range matched {
+				scope.instancePaths = append(scope.instancePaths, descriptor.FlowInstance)
+			}
+		}
+	}
 	ordered := newOrderedActiveTargetDescriptors([]ActiveTargetDescriptor{})
 	available := false
 	targetOwners := eb.durable.TargetOwners
 	if targetOwners != nil {
 		available = true
-		owners, err := targetOwners.ListSelectedRunTargetOwners(ctx, runID)
+		var owners []ActiveTargetDescriptor
+		var err error
+		if scoped {
+			selected, ok := targetOwners.(ScopedSelectedRunTargetOwnerLister)
+			if !ok {
+				return nil, true, errors.New("selected store lacks graph-scoped target owner lookup")
+			}
+			if len(scope.instancePaths) > 0 {
+				owners, err = selected.ListSelectedRunTargetOwnersForInstancePaths(ctx, runID, scope.instancePaths)
+			}
+		} else {
+			owners, err = targetOwners.ListSelectedRunTargetOwners(ctx, runID)
+		}
 		if err != nil {
 			return nil, true, err
 		}
@@ -416,15 +471,30 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 			ordered.add(owner)
 		}
 	}
-	lister := eb.durable.ActiveFlows
 	if lister == nil {
 		return ordered.descriptors, available, nil
 	}
 	available = true
-	flowDescriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
+	var flowDescriptors []ActiveFlowInstanceDescriptor
+	var err error
+	if scoped {
+		selected, ok := lister.(ScopedActiveFlowInstanceDescriptorLister)
+		if !ok {
+			return nil, true, errors.New("selected store lacks graph-scoped flow descriptor lookup")
+		}
+		if len(scope.instancePaths) > 0 {
+			flowDescriptors, err = selected.ListActiveFlowInstanceDescriptorsForScope(ctx, runID, nil, scope.instancePaths)
+			if err == nil {
+				flowDescriptors, err = eb.validateActiveFlowInstanceDescriptorsForSemanticSource(runID, flowDescriptors)
+			}
+		}
+	} else {
+		flowDescriptors, err = eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister, runID)
+	}
 	if err != nil {
 		return nil, true, err
 	}
+	flowDescriptors = append(flowDescriptors, keyDescriptors...)
 	for _, descriptor := range flowDescriptors {
 		if descriptor.RunID == runID {
 			ordered.add(descriptor.TargetDescriptor())
