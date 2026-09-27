@@ -832,6 +832,7 @@ var externalEffectStoryDispositions = map[string]externalEffectStoryDisposition{
 	"serve_registration/provider_registration":          {Launch: true},
 	"channel_confirmation/channel_confirmation":         {Launch: true},
 	"channel_delivery/channel_delivery":                 {Launch: true},
+	"channel_native_setting/channel_native_setting":     {Launch: true},
 	"http_tool_target/authored_http_tool":               {Launch: true},
 	"managed_credential_request/managed_credential":     {},
 	"native_web_search_http/native_web_search":          {Launch: true},
@@ -1360,7 +1361,7 @@ func authorizePrelaunchRetrySQLite(ctx context.Context, tx *sql.Tx, authority ru
 }
 
 func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) bool {
-	if (req.Adapter != "claude_cli" && req.Adapter != "provider_registration" && req.Adapter != "channel_confirmation" && req.Adapter != "channel_delivery") || existing.operationState != string(runtimeeffects.StateTerminalFailure) ||
+	if (req.Adapter != "claude_cli" && req.Adapter != "provider_registration" && req.Adapter != "channel_confirmation" && req.Adapter != "channel_delivery" && req.Adapter != "channel_native_setting") || existing.operationState != string(runtimeeffects.StateTerminalFailure) ||
 		existing.attemptState != string(runtimeeffects.StateTerminalFailure) {
 		return false
 	}
@@ -1375,7 +1376,7 @@ func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffec
 	if req.Adapter == "provider_registration" {
 		return launchRejected && failure.Retryable
 	}
-	if (req.Adapter == "channel_confirmation" || req.Adapter == "channel_delivery") && !existing.launched {
+	if (req.Adapter == "channel_confirmation" || req.Adapter == "channel_delivery" || req.Adapter == "channel_native_setting") && !existing.launched {
 		return failure.Retryable || failure.Detail.Code == "effect_recovery_prelaunch_abandoned"
 	}
 	if !existing.launched {
@@ -1385,7 +1386,7 @@ func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffec
 }
 
 func resumeProviderRegistrationAuthorization(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool) {
-	if (req.Adapter != "provider_registration" && req.Adapter != "channel_confirmation" && req.Adapter != "channel_delivery") || existing.operationState != string(runtimeeffects.StateAuthorized) ||
+	if (req.Adapter != "provider_registration" && req.Adapter != "channel_confirmation" && req.Adapter != "channel_delivery" && req.Adapter != "channel_native_setting") || existing.operationState != string(runtimeeffects.StateAuthorized) ||
 		existing.attemptState != string(runtimeeffects.StateAuthorized) || existing.launched ||
 		!existing.matchesRetryAuthority(authority) || !existing.matchesRequest(req) {
 		return runtimeeffects.Attempt{}, false
@@ -1637,6 +1638,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 	}
 	if authority.Kind == runtimeeffects.AuthorityChannelDelivery && bundleHash != strings.TrimSpace(authority.ChannelDelivery.BundleHash) {
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel delivery bundle")
+	}
+	if authority.Kind == runtimeeffects.AuthorityChannelNativeSetting && bundleHash != strings.TrimSpace(authority.ChannelNativeSetting.BundleHash) {
+		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel native setting bundle")
 	}
 	return bundleHash, nil
 }
@@ -1982,6 +1986,10 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 				if err := requireChannelDeliverySettlementAuthorityTx(txctx, tx, settlement, true); err != nil {
 					return err
 				}
+			} else if settlement.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
+				if err := requireChannelNativeSettingSettlementAuthorityTx(txctx, tx, settlement, true); err != nil {
+					return err
+				}
 			} else if settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
 					return err
@@ -1992,6 +2000,9 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 				return err
 			}
 			if err := projectChannelDeliverySettlementTx(txctx, tx, settlement, true); err != nil {
+				return err
+			}
+			if err := projectChannelNativeSettingSettlementTx(txctx, tx, settlement, true); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, settlement.AttemptID); err != nil {
@@ -2034,6 +2045,10 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 				if err := requireChannelDeliverySettlementAuthorityTx(txctx, tx, settlement, false); err != nil {
 					return err
 				}
+			} else if settlement.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
+				if err := requireChannelNativeSettingSettlementAuthorityTx(txctx, tx, settlement, false); err != nil {
+					return err
+				}
 			} else if settlement.Authority.Valid() {
 				if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 					return err
@@ -2044,6 +2059,9 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 				return err
 			}
 			if err := projectChannelDeliverySettlementTx(txctx, tx, settlement, false); err != nil {
+				return err
+			}
+			if err := projectChannelNativeSettingSettlementTx(txctx, tx, settlement, false); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, settlement.AttemptID); err != nil {
