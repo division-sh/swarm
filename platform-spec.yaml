@@ -25,6 +25,28 @@ interfaces:
         nonempty_text: {type: string, minLength: 1}
         inbound_text: {type: string, minLength: 1}
         conversation_scope: {type: string, enum: [direct, shared]}
+        inbox_install_commands:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
+        inbox_readback_commands:
+          type: array
+          minItems: 0
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [command, description]
+            properties:
+              command: {type: string, minLength: 1, maxLength: 32}
+              description: {type: string, minLength: 1, maxLength: 256}
       operations:
         deliver:
           effect_class: non_idempotent_write
@@ -49,6 +71,18 @@ interfaces:
           effect_class: non_idempotent_write
           input:
             interaction_reference: {opaque: interaction_reference}
+        install_inbox_entry:
+          effect_class: non_idempotent_write
+          input:
+            commands: {schema: inbox_install_commands}
+          context:
+            destination: {opaque: destination}
+        read_inbox_entry:
+          effect_class: read_only
+          context:
+            destination: {opaque: destination}
+          output:
+            commands: {schema: inbox_readback_commands}
       events:
         action:
           required_fields:
