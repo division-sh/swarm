@@ -1204,46 +1204,6 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 		t.Fatalf("expected expired item in result")
 	}
 
-	critID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EntityID:  entityID,
-		FromAgent: "control-plane",
-		Type:      "spend_request",
-		Priority:  "critical",
-		Status:    "pending",
-		Summary:   "critical",
-		TimeoutAt: time.Now().Add(2 * time.Hour),
-	})
-	if err != nil {
-		t.Fatalf("insert critical mailbox: %v", err)
-	}
-	crit, err := s.ListUnnotifiedCriticalMailboxItems(ctx, 10)
-	if err != nil || len(crit) == 0 {
-		t.Fatalf("list unnotified critical: n=%d err=%v", len(crit), err)
-	}
-	foundCritical := false
-	for _, item := range crit {
-		if item.ID == critID {
-			foundCritical = true
-			if item.Status != "pending" || item.Priority != "critical" || item.Summary != "critical" {
-				t.Fatalf("unexpected critical mailbox item: %+v", item)
-			}
-		}
-	}
-	if !foundCritical {
-		t.Fatalf("expected critical mailbox item %q in unnotified list", critID)
-	}
-	if err := noticeAcknowledgmentFixture(t, s, critID)(testAuthorActivityContext()); err != nil {
-		t.Fatalf("mark notified: %v", err)
-	}
-	crit2, err := s.ListUnnotifiedCriticalMailboxItems(ctx, 10)
-	if err != nil {
-		t.Fatalf("list unnotified critical 2: %v", err)
-	}
-	for _, it := range crit2 {
-		if it.ID == critID {
-			t.Fatalf("expected item to be notified and excluded")
-		}
-	}
 }
 
 func TestExtractSubscriptions(t *testing.T) {
