@@ -58,7 +58,7 @@ func TestPreparedProviderFactoryHasNoBusinessAuthority(t *testing.T) {
 			if controller != nil || sessionStore != nil || live != nil {
 				t.Fatal("preparation acquired business services")
 			}
-			if _, _, err := prepareCompletionContext(context.Background(), controller, cfg, &Session{}, ""); err == nil || !strings.Contains(err.Error(), "completion_execution_controller_missing") {
+			if _, _, err := prepareCompletionContext(context.Background(), controller, cfg, &Session{}, nil, ""); err == nil || !strings.Contains(err.Error(), "completion_execution_controller_missing") {
 				t.Fatalf("prepared client reached completion admission: %v", err)
 			}
 			if _, err := (RuntimeFactory{Cfg: cfg}).Build(); err == nil || !strings.Contains(err.Error(), "completion execution controller is required") {

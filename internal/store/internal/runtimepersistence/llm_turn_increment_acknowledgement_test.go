@@ -9,6 +9,7 @@ import (
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -44,7 +45,7 @@ func TestSessionTurnIncrementAcknowledgesPostcommitHandoffAndSurvivesRestartBoth
 				t.Fatal(err)
 			}
 			defer registration.Release()
-			result, err := store.IncrementTurnOutcome(ctx, identity, fixture.sessionID)
+			result, err := store.IncrementTurnOutcome(ctx, &sessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID})
 			if !result.Acknowledged || !errors.Is(err, injected) || submits != 1 {
 				t.Fatalf("turn result=%+v err=%v submissions=%d", result, err, submits)
 			}

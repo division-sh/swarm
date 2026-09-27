@@ -96,6 +96,15 @@ func acquireLiveTestSession(t *testing.T, ctx context.Context, db *sql.DB, agent
 	return lease.SessionID
 }
 
+func requireLiveTestLease(t *testing.T, ctx context.Context, pg *PostgresStore, identity agentmemory.Identity, sessionID string) *runtimesessions.Lease {
+	t.Helper()
+	lease, err := pg.Acquire(ctx, identity, "test-owner")
+	if err != nil || lease == nil || lease.SessionID != sessionID || lease.GrantID == "" {
+		t.Fatalf("acquire exact test grant: lease=%+v session=%s err=%v", lease, sessionID, err)
+	}
+	return lease
+}
+
 func seedSpecMemoryRun(t *testing.T, ctx context.Context, db *sql.DB) {
 	t.Helper()
 	seedManagerRun(t, ctx, db, specEntityStateRunID)
@@ -1418,7 +1427,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	if err := pg.UpsertConversation(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
@@ -1496,7 +1505,7 @@ func TestManagerStore_ConversationPersistenceUsesExactFlowInstanceIdentity(t *te
 	})
 	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID(), identity.FlowInstance())
 
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	if err := pg.UpsertConversation(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   "entity-agent",
 		Identity:  identity,
@@ -1593,8 +1602,9 @@ func TestManagerStore_LiveConversationPersistenceRequiresCanonicalLiveSession(t 
 	seedSpecMemoryRun(t, ctx, db)
 	identity := specMemoryIdentity("a1", "global")
 
-	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID: uuid.NewString(),
+	missingSessionID := uuid.NewString()
+	err := pg.UpsertConversation(ctx, &runtimesessions.Lease{SessionID: missingSessionID, Identity: identity, LockOwner: "test-owner", GrantID: uuid.NewString()}, runtimellm.ConversationRecord{
+		SessionID: missingSessionID,
 		AgentID:   "a1",
 		Identity:  identity,
 		Memory:    agentmemory.Authored(true),
@@ -1633,7 +1643,7 @@ func TestManagerStore_LoadActiveConversationIncludesRetryLineage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
-	rotated, err := registry.Rotate(sessionCtx, identity, "worker-1", runtimesessions.RotationMetadata{
+	rotated, err := registry.Rotate(sessionCtx, lease, runtimesessions.RotationMetadata{
 		CheckpointSummary: "rotation_reason=session not found",
 		RetryReason:       "session not found",
 		OperationID:       uuid.NewString(),
@@ -1778,7 +1788,7 @@ func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConve
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+	err := pg.UpdateLiveSessionWatchdog(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationWatchdogUpdate{
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
@@ -1813,13 +1823,13 @@ func TestManagerStore_UpdateLiveSessionWatchdog_RoundTripsThroughLoadActiveConve
 func TestManagerStore_UpdateLiveSessionWatchdogRejectsMalformedWrite(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 	seedSpecAgent(t, ctx, pg, "a1", "", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+	err := pg.UpdateLiveSessionWatchdog(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationWatchdogUpdate{
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
@@ -1853,7 +1863,8 @@ func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *tes
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	lease := requireLiveTestLease(t, ctx, pg, identity, sessionID)
+	if err := pg.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
@@ -1866,7 +1877,7 @@ func TestManagerStore_UpdateLiveSessionWatchdog_PreservesCanonicalSummary(t *tes
 		t.Fatalf("UpsertConversation: %v", err)
 	}
 
-	if err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+	if err := pg.UpdateLiveSessionWatchdog(ctx, lease, runtimellm.ConversationWatchdogUpdate{
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
@@ -1971,7 +1982,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_LeavesLiveSessionRuntimeStateFo
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	if err := pg.UpsertConversation(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
@@ -2175,7 +2186,7 @@ func TestManagerStore_MemoryConversationDoesNotPersistStatelessAuditRow(t *testi
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	if err := pg.UpsertConversation(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   "a1",
 		Identity:  identity,
@@ -2885,7 +2896,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
 	}
 
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	if err := pg.UpsertConversation(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,
@@ -2965,8 +2976,9 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	}
 
 	identity := specMemoryIdentity("agent-cleanup-1", "global")
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID: acquireLiveTestSession(t, ctx, db, identity.AgentID(), identity.FlowInstance()),
+	sessionID := acquireLiveTestSession(t, ctx, db, identity.AgentID(), identity.FlowInstance())
+	if err := pg.UpsertConversation(ctx, requireLiveTestLease(t, ctx, pg, identity, sessionID), runtimellm.ConversationRecord{
+		SessionID: sessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,
 		Memory:    agentmemory.Authored(true),

@@ -5,12 +5,23 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -28,6 +39,16 @@ type managedProjectionPostCommitFaultStore struct {
 	faults       int
 	joined       bool
 	independent  bool
+}
+
+type blockedProviderNoTools struct{}
+
+func (blockedProviderNoTools) Execute(context.Context, string, any) (any, error) {
+	return nil, errors.New("blocked provider test must not execute a tool")
+}
+
+func (blockedProviderNoTools) ToolCapabilitiesForActor(runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set {
+	return toolcapabilities.Set{}
 }
 
 func (s *managedProjectionPostCommitFaultStore) ProjectCompletionConversation(ctx context.Context, attempt runtimeeffects.Attempt, projection runtimeeffects.CompletionConversationProjection) error {
@@ -149,7 +170,16 @@ func terminalManagedCompletionPayload(t *testing.T, fixture completionSettlement
 
 func managedConsumerForCommittedCompletion(t *testing.T, fixture completionSettlementFixture, settlement runtimeeffects.CompletionSettlement, controller *runtimeeffects.Controller) *runtimellm.Conversation {
 	t.Helper()
-	runtime := runtimellm.NewMockRuntime(&config.Config{}, sessions.NewInMemoryRegistry(time.Minute), fixture.leaseHolder, nil, nil, controller)
+	registry, ok := fixture.store.(sessions.Registry)
+	if !ok {
+		t.Fatal("selected completion store does not expose its session registry")
+	}
+	runtime := runtimellm.NewMockRuntime(&config.Config{}, registry, fixture.leaseHolder, nil, nil, controller)
+	return managedConsumerWithRuntime(t, fixture, settlement, runtime)
+}
+
+func managedConsumerWithRuntime(t *testing.T, fixture completionSettlementFixture, settlement runtimeeffects.CompletionSettlement, runtime runtimellm.Runtime) *runtimellm.Conversation {
+	t.Helper()
 	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents."+fixture.agentID+".intent", "Complete the admitted business work.")
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +192,11 @@ func managedConsumerForCommittedCompletion(t *testing.T, fixture completionSettl
 	if err != nil {
 		t.Fatal(err)
 	}
-	contract := runtime.ProviderContract()
+	provider, ok := runtime.(runtimellm.ProviderContractProvider)
+	if !ok {
+		t.Fatal("managed test runtime has no provider contract")
+	}
+	contract := provider.ProviderContract()
 	seed := agentframe.SessionSeed{
 		AgentIdentity: fixture.authority.Normal.Identity, Role: "worker", FlowID: "global", Intent: intent,
 		ProviderPrompt: providerPrompt, RuntimeMode: contract.RuntimeMode, Provider: contract.Provider,
@@ -174,9 +208,168 @@ func managedConsumerForCommittedCompletion(t *testing.T, fixture completionSettl
 	}
 	conversation.Session = &runtimellm.Session{
 		ID: fixture.sessionID, AgentID: fixture.agentID, Memory: settlement.AgentTurn.Memory,
-		MemoryIdentity: settlement.AgentTurn.Identity,
+		MemoryIdentity: settlement.AgentTurn.Identity, SystemPrompt: conversation.SystemPrompt,
 	}
 	return conversation
+}
+
+func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, replaced := range []bool{false, true} {
+			name := backend + "/current"
+			if replaced {
+				name = backend + "/replaced"
+			}
+			t.Run(name, func(t *testing.T) {
+				var store completionSettlementTestStore
+				var db *sql.DB
+				if backend == "sqlite" {
+					sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
+					store, db = sqlite, sqlite.backend.ConstructionHandle()
+				} else {
+					_, db, _ = testutil.StartPostgres(t)
+					store = admitTestPostgresStore(t, db)
+				}
+				fixture := newCompletionSettlementFixture(t, store, db, backend == "sqlite")
+				started := make(chan struct{})
+				resume := make(chan struct{})
+				var providerCalls atomic.Int32
+				defer func() {
+					select {
+					case <-resume:
+					default:
+						close(resume)
+					}
+				}()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if providerCalls.Add(1) == 1 {
+						close(started)
+					}
+					<-resume
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"resp_1","model":"test-model","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"late answer"}]}],"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}`))
+				}))
+				defer server.Close()
+				cfg := &config.Config{LLM: config.LLMConfig{Backend: "openai_responses", OpenAIResponses: config.OpenAIResponsesConfig{BaseURL: server.URL}}}
+				controller := liveTestCompletionController(store, store, store, publicationGroupSpendProjection{})
+				runtime, err := (runtimellm.RuntimeFactory{
+					Cfg: cfg, Sessions: store.(sessions.Registry), LiveSessions: store.(runtimellm.LiveSessionAcquirer),
+					Conversations: store.(runtimellm.ConversationPersistence), LockOwner: fixture.leaseHolder,
+					Credentials: mapCredentialStore{"OPENAI_API_KEY": "test-key"}, CompletionController: controller,
+				}).Build()
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement := completionSettlementForTest(t, fixture.authority.Target, fixture, "openai_responses", "", "")
+				conversation := managedConsumerWithRuntime(t, fixture, settlement, runtime)
+				conversation.SetToolExecutor(blockedProviderNoTools{})
+				process := worklifetime.NewProcess()
+				root, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "grant-blocked-provider", BundleHash: "grant-blocked-provider"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					if _, err := root.RetireAndWait(context.Background()); err != nil {
+						t.Errorf("join blocked-provider runtime: %v", err)
+					}
+					process.Retire()
+					if _, err := process.Join(context.Background()); err != nil {
+						t.Errorf("join blocked-provider process: %v", err)
+					}
+				}()
+				work, err := root.Begin(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = work.Done() }()
+				ctx := worklifetime.WithProcess(testAuthorActivityContext(), process)
+				ctx = worklifetime.WithOccurrence(ctx, root)
+				ctx = runtimeeffects.WithController(ctx, controller)
+				ctx = runtimedelivery.WithClaim(ctx, fixture.origin)
+				ctx = runtimeeffects.WithLifecycleToken(ctx, fixture.authority.Normal)
+				ctx = managedExecutionStoreTestContext(t, ctx)
+				ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
+					ID: fixture.agentID, Identity: fixture.authority.Normal.Identity, Role: "worker", Type: "managed",
+					ExecutionMode: runtimeeffects.ExecutionModeLive, Model: "regular", LLMBackend: "openai_responses",
+					Memory: settlement.AgentTurn.Memory, FlowID: "global", FlowPath: "global",
+				})
+				ctx = agentmemory.WithExecution(ctx, settlement.AgentTurn.Memory, settlement.AgentTurn.Identity)
+				ctx = runtimecorrelation.WithInboundEvent(ctx, managedCompletionTestEvent(fixture.authority))
+				ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "blocked-provider-grant-replacement")
+				type providerOutcome struct {
+					response *runtimellm.Response
+					err      error
+				}
+				outcome := make(chan providerOutcome, 1)
+				go func() {
+					response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: managedCompletionTestEvent(fixture.authority)})
+					outcome <- providerOutcome{response: response, err: err}
+				}()
+				select {
+				case <-started:
+				case result := <-outcome:
+					t.Fatalf("provider did not launch: %v", result.err)
+				case <-time.After(15 * time.Second):
+					t.Fatal("provider did not reach blocked HTTP request")
+				}
+				readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				sessionQuery := `SELECT * FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
+				revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
+				var beforeSession, beforeRevision []string
+				if replaced {
+					var blockedGrant string
+					if err := db.QueryRowContext(readCtx, `SELECT lease_grant_id FROM agent_sessions WHERE session_id=$1`, fixture.sessionID).Scan(&blockedGrant); err != nil || blockedGrant == "" {
+						t.Fatalf("load blocked provider grant=%q err=%v", blockedGrant, err)
+					}
+					fresh, err := store.(sessions.Registry).Acquire(readCtx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
+					if err != nil || fresh == nil || fresh.GrantID == blockedGrant {
+						t.Fatalf("replace blocked provider grant: lease=%+v blocked=%q err=%v", fresh, blockedGrant, err)
+					}
+					beforeSession = snapshotRotationTableRows(t, readCtx, db, sessionQuery, fixture.authority.Target.RunID)
+					beforeRevision = snapshotRotationTableRows(t, readCtx, db, revisionQuery, fixture.authority.Target.RunID)
+				}
+				close(resume)
+				var result providerOutcome
+				select {
+				case result = <-outcome:
+				case <-time.After(15 * time.Second):
+					t.Fatal("blocked provider did not settle")
+				}
+				if replaced {
+					if result.err == nil || result.response != nil {
+						t.Fatalf("replaced grant admitted blocked provider result: response=%+v err=%v", result.response, result.err)
+					}
+					if after := snapshotRotationTableRows(t, readCtx, db, sessionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeSession, after) {
+						t.Fatalf("blocked provider changed replacement session: before=%v after=%v", beforeSession, after)
+					}
+					if after := snapshotRotationTableRows(t, readCtx, db, revisionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeRevision, after) {
+						t.Fatalf("blocked provider changed replacement revision: before=%v after=%v", beforeRevision, after)
+					}
+				} else {
+					if result.err != nil || result.response == nil || result.response.Message.Content != "late answer" {
+						t.Fatalf("current grant did not project blocked provider response: response=%+v err=%v", result.response, result.err)
+					}
+					var turnCount int
+					var conversationRaw []byte
+					if err := db.QueryRowContext(readCtx, `SELECT turn_count,conversation FROM agent_sessions WHERE session_id=$1`, fixture.sessionID).Scan(&turnCount, &conversationRaw); err != nil || turnCount != 1 || !strings.Contains(string(conversationRaw), "late answer") {
+						t.Fatalf("current grant projected turn=%d conversation=%s err=%v", turnCount, conversationRaw, err)
+					}
+				}
+				requireProviderAttemptCount(t, fixture, 1)
+				var attemptState string
+				wantState := runtimeeffects.StateSettled
+				if replaced {
+					wantState = runtimeeffects.StateOutcomeUncertain
+				}
+				if err := db.QueryRowContext(readCtx, `SELECT state FROM runtime_external_effect_attempts`).Scan(&attemptState); err != nil || attemptState != string(wantState) {
+					t.Fatalf("blocked provider attempt state=%q err=%v, want %s", attemptState, err, wantState)
+				}
+				if got := providerCalls.Load(); got != 1 {
+					t.Fatalf("blocked provider dispatched %d times, want exactly one", got)
+				}
+			})
+		}
+	}
 }
 
 func mustJSON(t *testing.T, value any) json.RawMessage {

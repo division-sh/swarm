@@ -65,7 +65,7 @@ func MockProviderContract() ProviderContract {
 	}
 }
 
-func (r *MockRuntime) PersistConversationSnapshot(ctx context.Context, session *Session) error {
+func (r *MockRuntime) PersistConversationSnapshot(ctx context.Context, lease *sessions.Lease, session *Session) error {
 	if r.conversations == nil || session == nil {
 		return nil
 	}
@@ -73,7 +73,7 @@ func (r *MockRuntime) PersistConversationSnapshot(ctx context.Context, session *
 	if err != nil || !persist {
 		return err
 	}
-	return r.conversations.UpsertConversation(ctx, record)
+	return r.conversations.UpsertConversation(ctx, lease, record)
 }
 
 func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
@@ -123,7 +123,7 @@ func (r *MockRuntime) ContinueManagedSession(ctx context.Context, session *Sessi
 }
 
 func (r *MockRuntime) recoverManagedCompletionContinuation(ctx context.Context, session *Session) (*Response, bool, error) {
-	return recoverCompletionContinuation(ctx, r.completionController, session, "mock_python")
+	return recoverCompletionContinuation(ctx, r.completionController, r.sessions, r.lockOwner, session, "mock_python")
 }
 
 func (r *MockRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
@@ -158,7 +158,11 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		defer func() {
 			retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, session.AgentID, r.events, retErr)
 		}()
+		var cancelLease context.CancelFunc
+		ctx, cancelLease = context.WithCancel(ctx)
+		defer cancelLease()
 		stopHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
+			cancelLease()
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the mock session lease heartbeat failed", session.AgentID, session.ID, entityID, nil, heartbeatErr)
 		})
 		defer stopHeartbeat()
@@ -192,7 +196,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_capability_in_process_request_mismatch", "mock-python-adapter", "build_request", nil, err)
 	}
-	ctx, targetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, session, entityID)
+	ctx, targetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, session, lease, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -243,19 +247,19 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	}
 	if !projected {
 		if resolved.Enabled() {
-			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, resolved.Identity, session.ID, session.AgentID, r.events); err != nil {
+			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, lease, session.AgentID, r.events); err != nil {
 				return nil, errors.Join(settlementErr, err)
 			}
 		}
 		session.Messages = append(session.Messages, message, response.Message)
 		session.TurnCount++
 		session.ParseFailures = 0
-		r.persistConversation(handoffCtx, session)
+		r.persistConversation(handoffCtx, lease, session)
 	}
 	return response, errors.Join(settlementErr, err)
 }
 
-func (r *MockRuntime) persistConversation(ctx context.Context, session *Session) {
+func (r *MockRuntime) persistConversation(ctx context.Context, lease *sessions.Lease, session *Session) {
 	if r.conversations == nil || session == nil {
 		return
 	}
@@ -265,7 +269,7 @@ func (r *MockRuntime) persistConversation(ctx context.Context, session *Session)
 		return
 	}
 	if persist {
-		if err := r.conversations.UpsertConversation(ctx, record); err != nil {
+		if err := r.conversations.UpsertConversation(ctx, lease, record); err != nil {
 			logPublisherRuntime(ctx, r.events, "error", "persist_mock_conversation_failed", "Persisting the mock conversation failed", session.AgentID, session.ID, "", nil, err)
 		}
 	}

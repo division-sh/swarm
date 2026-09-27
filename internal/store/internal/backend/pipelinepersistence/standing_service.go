@@ -1354,7 +1354,7 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 		return nil, fmt.Errorf("terminalize standing pipeline obligations: %w", pipelineErr)
 	}
 	if s.isSQLite() {
-		result, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = ?, termination_detail = ?, terminated_at = COALESCE(terminated_at, ?), lease_holder = NULL, lease_expires_at = NULL, updated_at = ? WHERE run_id = ? AND status IN ('active', 'suspended')`, sessionReason, reason, now, now, runID)
+		result, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = ?, termination_detail = ?, terminated_at = COALESCE(terminated_at, ?), lease_holder = NULL, lease_grant_id = NULL, lease_expires_at = NULL, updated_at = ? WHERE run_id = ? AND status IN ('active', 'suspended')`, sessionReason, reason, now, now, runID)
 		if err != nil {
 			return nil, fmt.Errorf("terminate sqlite standing sessions: %w", err)
 		}
@@ -1375,7 +1375,7 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 		}
 		return append(generic, workflow...), nil
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = $2, termination_detail = $3, terminated_at = COALESCE(terminated_at, $4), lease_holder = NULL, lease_expires_at = NULL, updated_at = $4 WHERE run_id = $1::uuid AND status IN ('active', 'suspended')`, runID, sessionReason, reason, now)
+	result, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = $2, termination_detail = $3, terminated_at = COALESCE(terminated_at, $4), lease_holder = NULL, lease_grant_id = NULL, lease_expires_at = NULL, updated_at = $4 WHERE run_id = $1::uuid AND status IN ('active', 'suspended')`, runID, sessionReason, reason, now)
 	if err != nil {
 		return nil, fmt.Errorf("terminate standing sessions: %w", err)
 	}

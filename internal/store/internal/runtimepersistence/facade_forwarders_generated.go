@@ -115,10 +115,6 @@ func (s *PostgresStore) AdmitStandingServiceRun(ctx context.Context, runID strin
 	return s.pipelinePostgresOwner.AdmitStandingServiceRun(ctx, runID, posture)
 }
 
-func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory.Identity, lockOwner string, newSessionID string) error {
-	return s.lLMPostgresOwner.AdoptSessionID(ctx, identity, lockOwner, newSessionID)
-}
-
 func (s *PostgresStore) AdvanceChannelOnboarding(ctx context.Context, req channelonboarding.AdvanceRequest) (channelonboarding.Operation, error) {
 	return s.channelOnboardingPostgresOwner.AdvanceChannelOnboarding(ctx, req)
 }
@@ -1039,6 +1035,10 @@ func (s *PostgresStore) RegisterCompletionCandidateSink(ctx context.Context, sco
 	return s.runLifecyclePostgresOwner.RegisterCompletionCandidateSink(ctx, scope, sink)
 }
 
+func (s *PostgresStore) Renew(ctx context.Context, lease *sessions.Lease) (*sessions.Lease, error) {
+	return s.lLMPostgresOwner.Renew(ctx, lease)
+}
+
 func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliveryPostgresOwner.RenewClaim(ctx, claim)
 }
@@ -1167,8 +1167,8 @@ func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity 
 	return s.pipelinePostgresOwner.RollbackFlowInstanceRoute(ctx, identity)
 }
 
-func (s *PostgresStore) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation sessions.RotationMetadata) (*sessions.Lease, error) {
-	return s.lLMPostgresOwner.Rotate(ctx, identity, lockOwner, rotation)
+func (s *PostgresStore) Rotate(ctx context.Context, leaseInput *sessions.Lease, rotation sessions.RotationMetadata) (*sessions.Lease, error) {
+	return s.lLMPostgresOwner.Rotate(ctx, leaseInput, rotation)
 }
 
 func (s *PostgresStore) RunDispatchBlocked(ctx context.Context, runID string) (bool, error) {
@@ -1275,12 +1275,12 @@ func (s *PostgresStore) UnbindOperatorChannel(ctx context.Context, req operatorc
 	return s.operatorChannelPostgresOwner.UnbindOperatorChannel(ctx, req)
 }
 
-func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {
-	return s.lLMPostgresOwner.UpdateLiveSessionWatchdog(ctx, update)
+func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, lease *sessions.Lease, update llm.ConversationWatchdogUpdate) error {
+	return s.lLMPostgresOwner.UpdateLiveSessionWatchdog(ctx, lease, update)
 }
 
-func (s *PostgresStore) UpsertConversation(ctx context.Context, rec llm.ConversationRecord) error {
-	return s.lLMPostgresOwner.UpsertConversation(ctx, rec)
+func (s *PostgresStore) UpsertConversation(ctx context.Context, lease *sessions.Lease, rec llm.ConversationRecord) error {
+	return s.lLMPostgresOwner.UpsertConversation(ctx, lease, rec)
 }
 
 func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route bus.FlowInstanceRouteRecord) error {
@@ -1361,10 +1361,6 @@ func (s *SQLiteRuntimeStore) AdmitOperatorConversationForkChat(ctx context.Conte
 
 func (s *SQLiteRuntimeStore) AdmitStandingServiceRun(ctx context.Context, runID string, posture executionposture.Posture) error {
 	return s.pipelineSQLiteOwner.AdmitStandingServiceRun(ctx, runID, posture)
-}
-
-func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, identity agentmemory.Identity, lockOwner string, newSessionID string) error {
-	return s.lLMSQLiteOwner.AdoptSessionID(ctx, identity, lockOwner, newSessionID)
 }
 
 func (s *SQLiteRuntimeStore) AdvanceChannelOnboarding(ctx context.Context, req channelonboarding.AdvanceRequest) (channelonboarding.Operation, error) {
@@ -2259,6 +2255,10 @@ func (s *SQLiteRuntimeStore) ReleaseConstructionPossession() error {
 	return s.startupSQLiteOwner.ReleaseConstructionPossession()
 }
 
+func (s *SQLiteRuntimeStore) Renew(ctx context.Context, lease *sessions.Lease) (*sessions.Lease, error) {
+	return s.lLMSQLiteOwner.Renew(ctx, lease)
+}
+
 func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
 	return s.deliverySQLiteOwner.RenewClaim(ctx, claim)
 }
@@ -2383,8 +2383,8 @@ func (s *SQLiteRuntimeStore) RollbackFlowInstanceRoute(ctx context.Context, iden
 	return s.pipelineSQLiteOwner.RollbackFlowInstanceRoute(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation sessions.RotationMetadata) (*sessions.Lease, error) {
-	return s.lLMSQLiteOwner.Rotate(ctx, identity, lockOwner, rotation)
+func (s *SQLiteRuntimeStore) Rotate(ctx context.Context, leaseInput *sessions.Lease, rotation sessions.RotationMetadata) (*sessions.Lease, error) {
+	return s.lLMSQLiteOwner.Rotate(ctx, leaseInput, rotation)
 }
 
 func (s *SQLiteRuntimeStore) RunDispatchBlocked(ctx context.Context, runID string) (bool, error) {
@@ -2495,12 +2495,12 @@ func (s *SQLiteRuntimeStore) UnbindOperatorChannel(ctx context.Context, req oper
 	return s.operatorChannelSQLiteOwner.UnbindOperatorChannel(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {
-	return s.lLMSQLiteOwner.UpdateLiveSessionWatchdog(ctx, update)
+func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, lease *sessions.Lease, update llm.ConversationWatchdogUpdate) error {
+	return s.lLMSQLiteOwner.UpdateLiveSessionWatchdog(ctx, lease, update)
 }
 
-func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec llm.ConversationRecord) error {
-	return s.lLMSQLiteOwner.UpsertConversation(ctx, rec)
+func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, lease *sessions.Lease, rec llm.ConversationRecord) error {
+	return s.lLMSQLiteOwner.UpsertConversation(ctx, lease, rec)
 }
 
 func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route bus.FlowInstanceRouteRecord) error {

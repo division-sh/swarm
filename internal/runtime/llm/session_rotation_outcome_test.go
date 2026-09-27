@@ -35,12 +35,12 @@ func (r *rotationOutcomeRegistry) Acquire(ctx context.Context, id agentmemory.Id
 	return lease, r.acquireErr
 }
 
-func (r *rotationOutcomeRegistry) Rotate(ctx context.Context, id agentmemory.Identity, owner string, metadata sessions.RotationMetadata) (*sessions.Lease, error) {
+func (r *rotationOutcomeRegistry) Rotate(ctx context.Context, predecessor *sessions.Lease, metadata sessions.RotationMetadata) (*sessions.Lease, error) {
 	r.rotations++
 	if r.uncommitted {
 		return nil, r.rotateErr
 	}
-	lease, err := r.Registry.Rotate(ctx, id, owner, metadata)
+	lease, err := r.Registry.Rotate(ctx, predecessor, metadata)
 	if err != nil {
 		return lease, err
 	}
@@ -89,11 +89,18 @@ func TestSessionRotationRetainsAcknowledgedLeaseAndErrors(t *testing.T) {
 				}
 				session := &Session{ID: lease.SessionID, ProviderSessionID: "provider-old", AgentID: identity.AgentID(), Memory: testMemory(), MemoryIdentity: identity, TurnCount: 1, ParseFailures: 1, Messages: []Message{{Role: "assistant", Content: "done"}}}
 				var result *sessions.Lease
+				var predecessor *sessions.Lease
+				if method != "prepare" {
+					predecessor, err = registry.Registry.Acquire(ctx, identity, "worker-1")
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
 				switch method {
 				case "turn":
-					result, err = MaybeRotateAfterTurn(ctx, session, registry, "worker-1", 1, nil)
+					result, err = MaybeRotateAfterTurn(ctx, session, registry, predecessor, 1, nil)
 				case "parse":
-					result, err = MaybeRotateAfterParseFailures(ctx, session, registry, "worker-1", 1, nil)
+					result, err = MaybeRotateAfterParseFailures(ctx, session, registry, predecessor, 1, nil)
 				case "prepare":
 					registry.cancel, registry.releaseErr = cancel, cleanup
 					err = prepareManagedSessionForTurn(ctx, session, registry, "worker-1", 1, nil)

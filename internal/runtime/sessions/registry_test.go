@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -39,6 +40,129 @@ func TestInMemoryRegistryLeaseConflictAndRelease(t *testing.T) {
 	}
 }
 
+func TestInMemoryRegistryStaleSameOwnerGrantCannotMutateSuccessor(t *testing.T) {
+	ctx := context.Background()
+	registry := NewInMemoryRegistry(time.Minute)
+	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
+	first, err := registry.Acquire(ctx, identity, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := registry.Acquire(ctx, identity, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.SessionID != second.SessionID || first.GrantID == second.GrantID {
+		t.Fatalf("same-owner reacquire did not replace grant: first=%+v second=%+v", first, second)
+	}
+	first.ExpiresAt = second.ExpiresAt
+	if _, err := registry.Renew(ctx, first); !errors.Is(err, ErrSessionLeased) {
+		t.Fatalf("stale renew=%v", err)
+	}
+	if result, err := registry.ReleaseOutcome(ctx, first); result.Acknowledged || !errors.Is(err, ErrSessionLeased) {
+		t.Fatalf("stale release=%+v err=%v", result, err)
+	}
+	if result, err := registry.IncrementTurnOutcome(ctx, first); result.Acknowledged || !errors.Is(err, ErrSessionLeased) {
+		t.Fatalf("stale turn=%+v err=%v", result, err)
+	}
+	if _, err := registry.Rotate(ctx, first, RotationMetadata{RetryReason: "stale"}); !errors.Is(err, ErrSessionLeased) {
+		t.Fatalf("stale rotate=%v", err)
+	}
+	current, found := registry.Snapshot(identity)
+	if !found || current.GrantID != second.GrantID || current.TurnCount != 0 || current.SessionID != second.SessionID {
+		t.Fatalf("stale grant changed current session: %+v found=%v", current, found)
+	}
+	renewed, err := registry.Renew(ctx, second)
+	if err != nil || renewed.GrantID != second.GrantID || renewed.ExpiresAt.Before(second.ExpiresAt) {
+		t.Fatalf("renew=%+v err=%v", renewed, err)
+	}
+	if result, err := registry.IncrementTurnOutcome(ctx, second); err != nil || !result.Acknowledged {
+		t.Fatalf("current turn=%+v err=%v", result, err)
+	}
+	third, err := registry.Rotate(ctx, second, RotationMetadata{RetryReason: "current"})
+	if err != nil || third.GrantID == second.GrantID || third.SessionID == second.SessionID {
+		t.Fatalf("current rotate=%+v err=%v", third, err)
+	}
+	if result, err := registry.ReleaseOutcome(ctx, second); result.Acknowledged || !errors.Is(err, ErrSessionLeased) {
+		t.Fatalf("retired predecessor release=%+v err=%v", result, err)
+	}
+	if result, err := registry.ReleaseOutcome(ctx, third); err != nil || !result.Acknowledged {
+		t.Fatalf("current release=%+v err=%v", result, err)
+	}
+	oldExpiry, err := registry.Acquire(ctx, identity, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Renew(ctx, oldExpiry); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := registry.ReleaseOutcome(ctx, oldExpiry); err != nil || !result.Acknowledged {
+		t.Fatalf("renewed exact grant refused old-expiry cleanup: result=%+v err=%v", result, err)
+	}
+	expired, err := registry.Acquire(ctx, identity, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry.mu.Lock()
+	registry.byKey[registryKey(identity)].LockExpiresAt = time.Now().Add(-time.Second)
+	registry.mu.Unlock()
+	if result, err := registry.ReleaseOutcome(ctx, expired); err != nil || !result.Acknowledged {
+		t.Fatalf("expired exact grant cleanup: result=%+v err=%v", result, err)
+	}
+	if result, err := registry.ReleaseOutcome(ctx, expired); result.Acknowledged || !errors.Is(err, ErrSessionLeased) {
+		t.Fatalf("duplicate expired cleanup: result=%+v err=%v", result, err)
+	}
+}
+
+func TestLeaseHeartbeatCannotRenewSameOwnerReplacement(t *testing.T) {
+	process := worklifetime.NewProcess()
+	runtime, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "heartbeat-test", BundleHash: "heartbeat-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := runtime.RetireAndWait(context.Background()); err != nil {
+			t.Errorf("retire runtime: %v", err)
+		}
+		process.Retire()
+		if _, err := process.Join(context.Background()); err != nil {
+			t.Errorf("join process: %v", err)
+		}
+	}()
+	work, err := runtime.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = work.Done() }()
+	ctx := worklifetime.WithOccurrence(work.Context(), runtime)
+	registry := NewInMemoryRegistry(10 * time.Second)
+	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
+	first, err := registry.Acquire(ctx, identity, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	heartbeatFailure := make(chan error, 1)
+	stop := StartLeaseHeartbeatWithErrorHandler(ctx, registry, first, func(err error) { heartbeatFailure <- err })
+	defer stop()
+	second, err := registry.Acquire(ctx, identity, "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-heartbeatFailure:
+		if !errors.Is(err, ErrSessionLeased) {
+			t.Fatalf("heartbeat error=%v, want stale grant", err)
+		}
+	case <-time.After(7 * time.Second):
+		t.Fatal("heartbeat did not report lost grant")
+	}
+	stop()
+	current, found := registry.Snapshot(identity)
+	if !found || current.GrantID != second.GrantID || !current.LockExpiresAt.Equal(second.ExpiresAt) {
+		t.Fatalf("heartbeat changed replacement grant: %+v found=%v", current, found)
+	}
+}
+
 func TestInMemoryRegistryExactIdentityIsolation(t *testing.T) {
 	sr := NewInMemoryRegistry(0)
 	base, err := sr.Acquire(context.Background(), testIdentity(t, "agent-a", "run-a", "chat-a"), "worker")
@@ -58,25 +182,22 @@ func TestInMemoryRegistryExactIdentityIsolation(t *testing.T) {
 	}
 }
 
-func TestInMemoryRegistryRotateAndAdopt(t *testing.T) {
+func TestInMemoryRegistryRotateGrant(t *testing.T) {
 	sr := NewInMemoryRegistry(0)
 	identity := testIdentity(t, "agent-a", "run-a", "chat-a")
 	lease, err := sr.Acquire(context.Background(), identity, "worker")
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	rotated, err := sr.Rotate(context.Background(), identity, "worker", RotationMetadata{CheckpointSummary: "checkpoint", RetryReason: "provider history invalid"})
+	rotated, err := sr.Rotate(context.Background(), lease, RotationMetadata{CheckpointSummary: "checkpoint", RetryReason: "provider history invalid"})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
 	if rotated.SessionID == lease.SessionID || rotated.RetriesFromSessionID != lease.SessionID {
 		t.Fatalf("rotation lineage = %#v", rotated)
 	}
-	if err := sr.AdoptSessionID(context.Background(), identity, "worker", "provider-session-a"); err != nil {
-		t.Fatalf("adopt: %v", err)
-	}
 	rec, ok := sr.Snapshot(identity)
-	if !ok || rec.ProviderSessionID != "provider-session-a" {
+	if !ok || rec.GrantID != rotated.GrantID || rec.GrantID == lease.GrantID {
 		t.Fatalf("snapshot = %#v, ok=%v", rec, ok)
 	}
 }

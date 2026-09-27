@@ -106,6 +106,7 @@ func mutateRunForkSessionExcludedColumns(t *testing.T, db *sql.DB, runID, sessio
 		        'watchdog', jsonb_build_object('state', 'healthy_long_running')
 		    ),
 		    lease_holder = 'excluded-owner',
+		    lease_grant_id = 'excluded-grant',
 		    lease_expires_at = $3,
 		    updated_at = $3
 		WHERE run_id = $1::uuid AND session_id = $2::uuid
@@ -131,13 +132,10 @@ func exerciseRunForkSessionExcludedWriters(t *testing.T, store *PostgresStore, r
 	if lease.SessionID != sessionID {
 		t.Fatalf("acquired session = %s, want %s", lease.SessionID, sessionID)
 	}
-	if _, err := store.IncrementTurnOutcome(ctx, identity, sessionID); err != nil {
+	if _, err := store.IncrementTurnOutcome(ctx, lease); err != nil {
 		t.Fatalf("increment session turn: %v", err)
 	}
-	if err := store.AdoptSessionID(ctx, identity, "revision-writer", "provider-revision-writer"); err != nil {
-		t.Fatalf("adopt provider session: %v", err)
-	}
-	if err := store.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+	if err := store.UpdateLiveSessionWatchdog(ctx, lease, runtimellm.ConversationWatchdogUpdate{
 		SessionID: sessionID, AgentID: agentID, Identity: identity,
 		Watchdog: &runtimellm.ConversationWatchdog{
 			State: "healthy_long_running", BlockingLayer: "session_execution", Action: "turn_long_running",

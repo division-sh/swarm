@@ -34,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -156,7 +157,7 @@ func (r *agentTestRuntimeAdapter) ContinueForkChatSession(context.Context, *llm.
 	return nil, errors.New("agent test runtime does not serve operator fork chat")
 }
 
-func (r *agentTestRuntimeAdapter) PersistConversationSnapshot(context.Context, *llm.Session) error {
+func (r *agentTestRuntimeAdapter) PersistConversationSnapshot(context.Context, *sessions.Lease, *llm.Session) error {
 	return nil
 }
 
@@ -773,7 +774,8 @@ func TestBoardDirectiveToolSuccessRequiresCanonicalContinuationProjection(t *tes
 }
 
 func TestHumanTaskOutcomeInjectsCanonicalAskHumanToolResult(t *testing.T) {
-	agent := mustBuildLLMAgent(t, models.AgentConfig{ExecutionMode: "live", ID: "reviewer"}, nil, nil, nil)
+	runtime := &boardTestRuntime{steps: []*llm.Response{{Message: llm.Message{Role: "assistant", Content: "handled"}}}}
+	agent := mustBuildLLMAgent(t, models.AgentConfig{ExecutionMode: "live", ID: "reviewer"}, runtime, nil, nil)
 	evt := eventtest.RunCreatingRootIngress(
 		"00000000-0000-0000-0000-000000000401",
 		events.EventType("human_task.approved"),
@@ -781,7 +783,7 @@ func TestHumanTaskOutcomeInjectsCanonicalAskHumanToolResult(t *testing.T) {
 		"",
 		[]byte(`{"card_id":"00000000-0000-0000-0000-000000000402","decision":"approved"}`),
 		0,
-		"00000000-0000-0000-0000-000000000403",
+		agent.cfg.Identity.RunID,
 		"",
 		events.EventEnvelope{},
 		time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
@@ -789,8 +791,14 @@ func TestHumanTaskOutcomeInjectsCanonicalAskHumanToolResult(t *testing.T) {
 	if err := agent.injectHumanTaskToolResult(context.Background(), evt); err != nil {
 		t.Fatalf("inject human-task result: %v", err)
 	}
-	if len(agent.conversation.Messages) != 1 {
-		t.Fatalf("conversation messages = %#v, want one async tool result", agent.conversation.Messages)
+	if len(agent.conversation.Messages) != 0 {
+		t.Fatalf("async input wrote conversation before session admission: %#v", agent.conversation.Messages)
+	}
+	if _, err := agent.OnEvent(agentManagedTestContext(t, agent), evt); err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	if len(agent.conversation.Messages) == 0 {
+		t.Fatal("admitted conversation omitted async tool result")
 	}
 	var result []map[string]any
 	if err := json.Unmarshal([]byte(agent.conversation.Messages[0].Content), &result); err != nil {
@@ -1131,6 +1139,7 @@ type taskRetryRuntime struct {
 	startCalls    int
 	continueCalls int
 	frames        []agentframe.Frame
+	seenSessions  [][]llm.Message
 }
 
 func (r *taskRetryRuntime) observeAgentTestFrame(frame agentframe.Frame) {
@@ -1147,8 +1156,9 @@ func (r *taskRetryRuntime) StartSession(_ context.Context, agentID, systemPrompt
 	}, nil
 }
 
-func (r *taskRetryRuntime) continueAgentTest(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+func (r *taskRetryRuntime) continueAgentTest(_ context.Context, session *llm.Session, _ llm.Message) (*llm.Response, error) {
 	r.continueCalls++
+	r.seenSessions = append(r.seenSessions, append([]llm.Message(nil), session.Messages...))
 	if r.continueCalls == 1 {
 		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
 			"budget_kind": "agent_turns",
@@ -1157,6 +1167,35 @@ func (r *taskRetryRuntime) continueAgentTest(_ context.Context, _ *llm.Session, 
 		})
 	}
 	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ok"}}, nil
+}
+
+func TestHumanTaskOutcomeSurvivesAgentScopeResetAndRepeatedDelivery(t *testing.T) {
+	runtime := &taskRetryRuntime{}
+	runID := eventtest.UUID("human-task-scope-reset")
+	agent := mustBuildLLMAgent(t, models.AgentConfig{
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		ID:            "reviewer",
+		Identity:      agentidentitytest.RootRuntimeForRun(t, runID, "reviewer", "agent-llm-test"),
+		Memory:        agentmemory.Authored(false),
+	}, runtime, nil, nil)
+	evt := eventtest.RunCreatingRootIngress(
+		"human-task-outcome", events.EventType("human_task.approved"), "runtime", "",
+		[]byte(`{"card_id":"00000000-0000-0000-0000-000000000402","decision":"approved"}`), 0,
+		runID, "", events.EventEnvelope{}, time.Time{},
+	)
+	for delivery := 0; delivery < 2; delivery++ {
+		if _, err := agent.OnEvent(agentManagedTestContext(t, agent), evt); err != nil {
+			t.Fatalf("delivery %d: %v", delivery, err)
+		}
+	}
+	if runtime.continueCalls != 3 || len(runtime.seenSessions) != 3 {
+		t.Fatalf("provider calls=%d sessions=%d, want first attempt, reset retry, repeated delivery", runtime.continueCalls, len(runtime.seenSessions))
+	}
+	for i, messages := range runtime.seenSessions {
+		if len(messages) != 1 || messages[0].Role != "tool" || !strings.Contains(messages[0].Content, `"card_id":"00000000-0000-0000-0000-000000000402"`) {
+			t.Fatalf("provider call %d saw lost or duplicated human-task result: %+v", i, messages)
+		}
+	}
 }
 
 func TestLLMAgent_StatelessTurnBudgetFailureResetsConversationAndRetries(t *testing.T) {

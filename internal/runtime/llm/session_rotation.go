@@ -36,14 +36,14 @@ func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sess
 			fmt.Errorf("managed session changed before rotation: have=%s want=%s", strings.TrimSpace(lease.SessionID), strings.TrimSpace(s.ID)))
 	}
 	releaseLease := lease
-	rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, registry, lockOwner, rotateAfter, sink)
+	rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, registry, lease, rotateAfter, sink)
 	if rotated != nil {
 		releaseLease = rotated
 	}
 	return releasePreProviderSessionLease(ctx, registry, releaseLease, s.AgentID, sink, rotateErr)
 }
 
-func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) (*sessions.Lease, error) {
+func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Registry, predecessor *sessions.Lease, rotateAfter int, sink any) (*sessions.Lease, error) {
 	if s == nil || registry == nil || rotateAfter <= 0 {
 		return nil, nil
 	}
@@ -57,7 +57,7 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Reg
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := BuildRotationCheckpoint(fmt.Sprintf("turn_limit_reached:%d", rotateAfter), s)
-	lease, err := registry.Rotate(ctx, s.MemoryIdentity, lockOwner, sessions.RotationMetadata{
+	lease, err := registry.Rotate(ctx, predecessor, sessions.RotationMetadata{
 		CheckpointSummary: summary,
 	})
 	// A returned lease acknowledges rotation even if its postcommit handoff failed.
@@ -86,7 +86,7 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Reg
 	return lease, err
 }
 
-func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, threshold int, sink any) (*sessions.Lease, error) {
+func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry sessions.Registry, predecessor *sessions.Lease, threshold int, sink any) (*sessions.Lease, error) {
 	if s == nil || registry == nil || threshold <= 0 {
 		return nil, nil
 	}
@@ -100,7 +100,7 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, registry ses
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := BuildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
-	lease, err := registry.Rotate(ctx, s.MemoryIdentity, lockOwner, sessions.RotationMetadata{
+	lease, err := registry.Rotate(ctx, predecessor, sessions.RotationMetadata{
 		CheckpointSummary: summary,
 		TerminationReason: sessions.TerminationReasonFailed,
 	})

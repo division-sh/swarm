@@ -10,13 +10,21 @@ import (
 )
 
 func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
-	for _, operation := range []string{"acquire", "rotate", "release", "adopt", "reset"} {
+	for _, operation := range []string{"acquire", "rotate", "release", "renew", "reset"} {
 		for _, phase := range []string{"healthy", "handoff_failure"} {
 			t.Run(operation+"/"+phase, func(t *testing.T) {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				fixture := newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true)
 				ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 				identity := fixture.authority.Target.AgentIdentity
+				var predecessor *runtimesessions.Lease
+				var err error
+				if operation == "rotate" || operation == "release" || operation == "renew" {
+					predecessor, _, err = store.AcquireLiveSession(ctx, identity, fixture.leaseHolder)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
 				var bundleHash string
 				if err := fixture.db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=?`, identity.RunID).Scan(&bundleHash); err != nil {
 					t.Fatal(err)
@@ -50,11 +58,11 @@ func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
 						t.Fatalf("lost committed conversation: %+v", record)
 					}
 				case "rotate":
-					lease, err = store.Rotate(ctx, identity, fixture.leaseHolder, runtimesessions.RotationMetadata{RetryReason: "outcome-proof"})
+					lease, err = store.Rotate(ctx, predecessor, runtimesessions.RotationMetadata{RetryReason: "outcome-proof"})
 				case "release":
-					_, err = store.ReleaseOutcome(ctx, &runtimesessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder})
-				case "adopt":
-					err = store.AdoptSessionID(ctx, identity, fixture.leaseHolder, "provider-outcome")
+					_, err = store.ReleaseOutcome(ctx, predecessor)
+				case "renew":
+					lease, err = store.Renew(ctx, predecessor)
 				case "reset":
 					summary, err = store.ResetAll(runtimesessions.ResetMetadata{Source: "outcome-proof"})
 				}
@@ -85,9 +93,9 @@ func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
 					if holder != "" || status != "active" {
 						t.Fatalf("lease not durably released: status=%s holder=%s", status, holder)
 					}
-				case "adopt":
-					if provider != "provider-outcome" {
-						t.Fatalf("provider session=%s", provider)
+				case "renew":
+					if lease == nil || lease.GrantID != predecessor.GrantID || holder != fixture.leaseHolder || provider != "provider-head-current" {
+						t.Fatalf("renewed wrong grant or provider head: lease=%+v holder=%s provider=%s", lease, holder, provider)
 					}
 				case "reset":
 					if len(summary.OrphanedSessions) != 1 || summary.OrphanedSessions[0].SessionID != fixture.sessionID || status != "terminated" || holder != "" {

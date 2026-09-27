@@ -106,8 +106,8 @@ func TestSessionCleanupErrorRetainsResponseAndDoesNotReplayProvider(t *testing.T
 			if err != nil || recovered == nil || recovered.Message.Content != "done" {
 				t.Fatalf("settled recovery failed: %+v err=%v", recovered, err)
 			}
-			if requests.Load() != 1 || probe.recoveries != 1 || registry.acquires != acquires+1 || len(probe.CompletionSettlementsForAdapter("openai_responses")) != 1 {
-				t.Fatalf("cleanup error authorized replay: requests=%d recoveries=%d acquires=%d", requests.Load(), probe.recoveries, registry.acquires-acquires)
+			if requests.Load() != 1 || probe.recoveries != 1 || registry.acquires != acquires+2 || registry.releases != releases+2 || len(probe.CompletionSettlementsForAdapter("openai_responses")) != 1 {
+				t.Fatalf("cleanup error authorized replay: requests=%d recoveries=%d acquires=%d releases=%d", requests.Load(), probe.recoveries, registry.acquires-acquires, registry.releases-releases)
 			}
 		})
 	}

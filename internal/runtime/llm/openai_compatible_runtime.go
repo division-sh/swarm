@@ -104,7 +104,7 @@ func OpenAICompatibleProviderContract() ProviderContract {
 	}
 }
 
-func (r *OpenAICompatibleRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
+func (r *OpenAICompatibleRuntime) PersistConversationSnapshot(ctx context.Context, lease *sessions.Lease, s *Session) error {
 	if r.conversations == nil || s == nil {
 		return nil
 	}
@@ -112,7 +112,7 @@ func (r *OpenAICompatibleRuntime) PersistConversationSnapshot(ctx context.Contex
 	if err != nil || !persist {
 		return err
 	}
-	return r.conversations.UpsertConversation(ctx, record)
+	return r.conversations.UpsertConversation(ctx, lease, record)
 }
 
 func (r *OpenAICompatibleRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
@@ -180,7 +180,7 @@ func (r *OpenAICompatibleRuntime) ContinueManagedSession(ctx context.Context, s 
 }
 
 func (r *OpenAICompatibleRuntime) recoverManagedCompletionContinuation(ctx context.Context, session *Session) (*Response, bool, error) {
-	return recoverCompletionContinuation(ctx, r.completionController, session, "openai_compatible")
+	return recoverCompletionContinuation(ctx, r.completionController, r.sessions, r.lockOwner, session, "openai_compatible")
 }
 
 func (r *OpenAICompatibleRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
@@ -211,7 +211,11 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	}
 	if resolved.Enabled() {
 		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
+		var cancelLease context.CancelFunc
+		ctx, cancelLease = context.WithCancel(ctx)
+		defer cancelLease()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
+			cancelLease()
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the OpenAI-compatible session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
 				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
 			}, heartbeatErr)
@@ -264,7 +268,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-compatible request: %w", err)
 	}
-	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
+	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, lease, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +296,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 			s.ParseFailures++
 		}
 		if projectionErr == nil && resolved.Enabled() {
-			rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events)
+			rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, lease, r.cfg.LLM.Session.RotateOnParseFailures, r.events)
 			if rotated != nil {
 				lease = rotated
 			}
@@ -382,14 +386,14 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	}
 	if !projected {
 		if resolved.Enabled() {
-			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, resolved.Identity, s.ID, s.AgentID, r.events); err != nil {
+			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, lease, s.AgentID, r.events); err != nil {
 				return nil, errors.Join(settlementErr, err)
 			}
 		}
 		s.Messages = append(s.Messages, message, resp.Message)
 		s.TurnCount++
 		s.ParseFailures = 0
-		r.persistConversation(handoffCtx, s)
+		r.persistConversation(handoffCtx, lease, s)
 	}
 
 	return &resp, errors.Join(settlementErr, err)
@@ -408,7 +412,7 @@ func (r *OpenAICompatibleRuntime) sendAdmittedRequest(ctx context.Context, profi
 	return raw, response, dispatch, err
 }
 
-func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, s *Session) {
+func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, lease *sessions.Lease, s *Session) {
 	if r.conversations == nil || s == nil {
 		return
 	}
@@ -420,7 +424,7 @@ func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, s *Se
 	if !persist {
 		return
 	}
-	if err := r.conversations.UpsertConversation(ctx, record); err != nil {
+	if err := r.conversations.UpsertConversation(ctx, lease, record); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_openai_compatible_conversation_failed", "Persisting the OpenAI-compatible conversation failed", s.AgentID, s.ID, "", map[string]any{
 			"run_id":        record.Identity.RunID,
 			"flow_instance": record.Identity.FlowInstance(),

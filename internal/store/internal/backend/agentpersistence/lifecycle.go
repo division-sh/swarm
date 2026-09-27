@@ -812,7 +812,7 @@ func applyPostgresLifecycleSessionMutation(ctx context.Context, tx *sql.Tx, req 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET status = 'terminated', termination_reason = $2, termination_detail = NULLIF($3, ''),
-		    successor_session_id = NULL, terminated_at = $4, lease_holder = NULL, lease_expires_at = NULL, updated_at = $4
+		    successor_session_id = NULL, terminated_at = $4, lease_holder = NULL, lease_grant_id = NULL, lease_expires_at = NULL, updated_at = $4
 		WHERE session_id = $1::uuid AND status IN ('active', 'suspended')
 	`, row.SessionID, req.Subordinate.TerminationReason.String(), req.Subordinate.TerminationDetail, req.Now.UTC()); err != nil {
 		return mutation, fmt.Errorf("terminate lifecycle subordinate session %s: %w", row.SessionID, err)
@@ -897,7 +897,7 @@ func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtim
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE agent_sessions
 			SET status = 'terminated', termination_reason = ?, termination_detail = ?, successor_session_id = NULL,
-			    terminated_at = ?, lease_holder = NULL, lease_expires_at = NULL, updated_at = ?
+			    terminated_at = ?, lease_holder = NULL, lease_grant_id = NULL, lease_expires_at = NULL, updated_at = ?
 			WHERE session_id = ? AND status IN ('active', 'suspended')
 		`, req.Subordinate.TerminationReason.String(), nullString(req.Subordinate.TerminationDetail), req.Now.UTC(), req.Now.UTC(), row.SessionID); err != nil {
 			return outcome, fmt.Errorf("terminate sqlite lifecycle subordinate session %s: %w", row.SessionID, err)

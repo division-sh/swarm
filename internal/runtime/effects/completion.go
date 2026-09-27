@@ -302,6 +302,7 @@ type CompletionProviderHead struct {
 	Identity             agentmemory.Identity
 	SessionID            string
 	LockOwner            string
+	GrantID              string
 	ExpectedProviderHead string
 	NewProviderHead      string
 }
@@ -370,7 +371,7 @@ func (s CompletionSettlement) Validate(attempt Attempt) error {
 	}
 	if s.ProviderHead != nil {
 		if attempt.Authority.Kind != AuthorityNormalAgent || s.Settlement.State != StateSettled ||
-			!nonEmpty(s.ProviderHead.Identity.RunID, s.ProviderHead.Identity.AgentID(), s.ProviderHead.Identity.FlowInstance(), s.ProviderHead.SessionID, s.ProviderHead.LockOwner, s.ProviderHead.NewProviderHead) {
+			!nonEmpty(s.ProviderHead.Identity.RunID, s.ProviderHead.Identity.AgentID(), s.ProviderHead.Identity.FlowInstance(), s.ProviderHead.SessionID, s.ProviderHead.LockOwner, s.ProviderHead.GrantID, s.ProviderHead.NewProviderHead) {
 			return fmt.Errorf("completion provider-head promotion requires a successful normal-agent settlement and complete lease identity")
 		}
 		if err := s.ProviderHead.Identity.Validate(); err != nil {

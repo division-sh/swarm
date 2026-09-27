@@ -72,7 +72,7 @@ type failingConversationStore struct {
 	err error
 }
 
-func (s *failingConversationStore) UpsertConversation(context.Context, ConversationRecord) error {
+func (s *failingConversationStore) UpsertConversation(context.Context, *sessions.Lease, ConversationRecord) error {
 	return s.err
 }
 
@@ -80,7 +80,7 @@ func (s *failingConversationStore) LoadActiveConversation(context.Context, strin
 	return ConversationRecord{}, false, nil
 }
 
-func (s *failingConversationStore) UpdateLiveSessionWatchdog(context.Context, ConversationWatchdogUpdate) error {
+func (s *failingConversationStore) UpdateLiveSessionWatchdog(context.Context, *sessions.Lease, ConversationWatchdogUpdate) error {
 	return s.err
 }
 
@@ -169,7 +169,7 @@ func TestProviderRuntimesFailBeforeAgentStartedWhenExactAcquireHydrateFails(t *t
 	}
 }
 
-func (s *captureConversationStore) UpsertConversation(_ context.Context, rec ConversationRecord) error {
+func (s *captureConversationStore) UpsertConversation(_ context.Context, _ *sessions.Lease, rec ConversationRecord) error {
 	s.record = rec
 	s.upsertCount++
 	return nil
@@ -179,7 +179,7 @@ func (s *captureConversationStore) LoadActiveConversation(context.Context, strin
 	return s.load, s.loadOK, nil
 }
 
-func (s *captureConversationStore) UpdateLiveSessionWatchdog(_ context.Context, update ConversationWatchdogUpdate) error {
+func (s *captureConversationStore) UpdateLiveSessionWatchdog(_ context.Context, _ *sessions.Lease, update ConversationWatchdogUpdate) error {
 	s.watchdogMu.Lock()
 	defer s.watchdogMu.Unlock()
 	s.watchdogUpdate = update
@@ -550,7 +550,7 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 	publisher := &eventPublisherStub{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", &failingConversationStore{err: errors.New("conversation boom")}, publisher)
 
-	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
+	runtime.persistConversation(unmanagedLLMTestContext(), nil, &Session{
 		ID:             "session-3",
 		AgentID:        "agent-3",
 		Memory:         testMemory(),
@@ -569,7 +569,7 @@ func TestAnthropicAPIRuntime_PersistConversationIncludesExactMemoryIdentity(t *t
 	store := &captureConversationStore{}
 	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", store, nil)
 
-	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
+	runtime.persistConversation(unmanagedLLMTestContext(), nil, &Session{
 		ID:             "session-3",
 		AgentID:        "agent-3",
 		Memory:         testMemory(),
@@ -587,7 +587,7 @@ func TestClaudeCLIRuntime_PersistConversationIncludesExactMemoryIdentity(t *test
 	runtime := NewClaudeCLIRuntime(&config.Config{}, registry, "worker-1", nil, store, nil)
 	runtime.liveSessions = registry
 
-	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
+	runtime.persistConversation(unmanagedLLMTestContext(), nil, &Session{
 		ID:             "session-4",
 		AgentID:        "agent-4",
 		Memory:         testMemory(),
@@ -604,7 +604,7 @@ func TestClaudeCLIRuntime_StatelessConversationIsNotPersisted(t *testing.T) {
 	publisher := &eventPublisherStub{}
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, store, publisher)
 
-	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
+	runtime.persistConversation(unmanagedLLMTestContext(), nil, &Session{
 		ID:        "session-stateless",
 		AgentID:   "agent-stateless",
 		Memory:    agentmemory.Authored(false),

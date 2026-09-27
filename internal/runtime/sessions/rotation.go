@@ -88,7 +88,7 @@ func ReplayRotation(request RotationRequest, receipt *RotationReceipt, current *
 	}
 	result := receipt.Result
 	if current == nil || result.SessionID != current.SessionID || result.Identity.Normalize() != current.Identity.Normalize() ||
-		result.LockOwner != current.LockOwner || result.ProviderSessionID != current.ProviderSessionID ||
+		result.LockOwner != current.LockOwner || result.GrantID != current.GrantID || result.ProviderSessionID != current.ProviderSessionID ||
 		result.RetryReason != current.RetryReason || result.RetriesFromSessionID != current.RetriesFromSessionID ||
 		!result.ExpiresAt.Equal(current.ExpiresAt) || !result.ExpiresAt.After(now) {
 		return nil, &RotationRefusal{Reason: RotationSuccessorNotCurrent}

@@ -23,13 +23,13 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 	if sessions == nil || lease == nil {
 		return func() {}
 	}
-	identity := lease.Identity.Normalize()
-	lockOwner := lease.LockOwner
-	if identity.Validate() != nil || lockOwner == "" {
+	current := *lease
+	identity := current.Identity.Normalize()
+	if identity.Validate() != nil || current.LockOwner == "" || current.GrantID == "" {
 		return func() {}
 	}
 
-	interval := LeaseHeartbeatInterval(lease.ExpiresAt)
+	interval := LeaseHeartbeatInterval(current.ExpiresAt)
 	owner, ok := worklifetime.OccurrenceFromContext(ctx)
 	if !ok {
 		if onError != nil {
@@ -60,17 +60,17 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				refreshed, err := sessions.Acquire(workLease.Context(), identity, lockOwner)
+				refreshed, err := sessions.Renew(workLease.Context(), &current)
 				if err != nil {
 					if onError != nil {
 						onError(err)
 					} else {
 						log.Printf("agent memory lease heartbeat failed: agent=%s run=%s flow_instance=%s err=%v", identity.AgentID(), identity.RunID, identity.FlowInstance(), err)
 					}
-					continue
+					return
 				}
 				if refreshed != nil {
-					lease.ExpiresAt = refreshed.ExpiresAt
+					current = *refreshed
 				}
 			}
 		}

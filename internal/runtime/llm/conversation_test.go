@@ -16,6 +16,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type fakeRuntime struct {
@@ -106,6 +107,8 @@ type managedRoundRuntime struct {
 	recoveryCalls     int
 	preparationCalls  int
 	resumeTerminal    bool
+	failFirst         bool
+	seenSessions      [][]Message
 }
 
 func (r *managedRoundRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
@@ -139,6 +142,11 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 	if _, err := validateManagedCall(ctx, session, call); err != nil {
 		return nil, err
 	}
+	r.seenSessions = append(r.seenSessions, append([]Message(nil), session.Messages...))
+	if r.failFirst {
+		r.failFirst = false
+		return nil, errors.New("scope reset required")
+	}
 	r.frames = append(r.frames, call.Frame())
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok {
@@ -154,7 +162,9 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 		return nil, err
 	}
 	ctx = managedcapabilities.WithContext(ctx, observed)
-	ctx, _, err = prepareCompletionContext(ctx, liveTestCompletionController(r.harness, r.harness, r.harness, r.harness), nil, session, "")
+	ctx, _, err = prepareCompletionContext(ctx, liveTestCompletionController(r.harness, r.harness, r.harness, r.harness), nil, session, &sessions.Lease{
+		SessionID: session.ID, Identity: session.MemoryIdentity, LockOwner: "managed-round-test", GrantID: "managed-round-grant",
+	}, "")
 	if err != nil {
 		return nil, err
 	}
@@ -550,6 +560,42 @@ func TestManagedConversationRootDoesNotRepeatConsumedTerminalTool(t *testing.T) 
 	}
 }
 
+func TestManagedConversationStagesAsyncResultAcrossScopeResetOnly(t *testing.T) {
+	runtime := &managedRoundRuntime{harness: effecttest.New(), resumeTerminal: true, failFirst: true}
+	conversation := newTestManagedConversation(t, "effect-test-agent", "effect-test/instance", "analysis", nil, testMemory(), 10, runtime)
+	conversation.SetToolExecutor(&managedEffectToolExecutor{harness: runtime.harness})
+	ctx := testManagedConversationContext(t, runtime.harness, "effect-test-agent", "effect-test/instance", "analysis")
+	draft := agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("effect-test-agent")}
+	if err := conversation.InjectAsyncToolResult(ctx, "ask_human", true, map[string]any{"answer": "yes"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conversation.RunManaged(ctx, draft); err == nil {
+		t.Fatal("expected first invocation to request scope reset")
+	}
+	conversation.Reset()
+	if response, err := conversation.RunManaged(ctx, draft); err != nil || response == nil {
+		t.Fatalf("scope-reset retry response=%+v err=%v", response, err)
+	}
+	if len(runtime.seenSessions) != 2 {
+		t.Fatalf("provider calls=%d want=2", len(runtime.seenSessions))
+	}
+	for i, messages := range runtime.seenSessions {
+		if len(messages) != 1 || messages[0].Role != "tool" || !strings.Contains(messages[0].Content, `"answer":"yes"`) {
+			t.Fatalf("provider call %d lost/duplicated staged async result: %+v", i, messages)
+		}
+	}
+	if conversation.pendingAsync != nil {
+		t.Fatal("successful invocation retained staged async result")
+	}
+	conversation.Reset()
+	if response, err := conversation.RunManaged(ctx, draft); err != nil || response == nil {
+		t.Fatalf("later invocation response=%+v err=%v", response, err)
+	}
+	if len(runtime.seenSessions) != 3 || len(runtime.seenSessions[2]) != 0 {
+		t.Fatalf("later invocation inherited async result: %+v", runtime.seenSessions)
+	}
+}
+
 func TestManagedCallRejectsSessionPromptDriftBeforeAdapterProjection(t *testing.T) {
 	harness := effecttest.New()
 	runtime := &managedRoundRuntime{harness: harness}
@@ -673,12 +719,12 @@ func TestConversation_MiscHelpers(t *testing.T) {
 	if err := c.InjectAsyncToolResult(context.Background(), "x", true, map[string]any{"ok": true}, ""); err != nil {
 		t.Fatalf("InjectAsyncToolResult: %v", err)
 	}
-	if len(c.Messages) != 1 || c.Messages[0].Role != "tool" {
-		t.Fatalf("expected tool message, got %+v", c.Messages)
+	if c.pendingAsync == nil || c.pendingAsync.Role != "tool" || len(c.Messages) != 0 {
+		t.Fatalf("expected staged tool message, got pending=%+v messages=%+v", c.pendingAsync, c.Messages)
 	}
 	var arr []map[string]any
-	if err := json.Unmarshal([]byte(c.Messages[0].Content), &arr); err != nil || len(arr) != 1 {
-		t.Fatalf("expected json array tool result, err=%v content=%q", err, c.Messages[0].Content)
+	if err := json.Unmarshal([]byte(c.pendingAsync.Content), &arr); err != nil || len(arr) != 1 {
+		t.Fatalf("expected json array tool result, err=%v content=%q", err, c.pendingAsync.Content)
 	}
 }
 

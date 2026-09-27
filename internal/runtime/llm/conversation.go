@@ -82,6 +82,7 @@ type Conversation struct {
 	seed          *agentframe.SessionSeed
 	causalEvent   *events.Event
 	lastFrameID   string
+	pendingAsync  *Message
 }
 
 func NewManagedConversation(seed agentframe.SessionSeed, taskID string, tools []ToolDefinition, memory agentmemory.Plan, maxTurns int, runtime Runtime) (*Conversation, error) {
@@ -153,7 +154,12 @@ func (c *Conversation) RunManaged(ctx context.Context, draft agentframe.TurnDraf
 	}
 	causalEvent := draft.Event
 	c.causalEvent = &causalEvent
-	defer func() { retErr = errors.Join(retErr, c.releaseInvocationState(ctx)) }()
+	defer func() {
+		retErr = errors.Join(retErr, c.releaseInvocationState(ctx))
+		if retErr == nil && response != nil {
+			c.pendingAsync = nil
+		}
+	}()
 	return c.stepManaged(ctx, draft)
 }
 
@@ -220,12 +226,14 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 		} else if resp.completionConsumed {
 			terminal := *resp
 			terminal.ToolCalls = nil
+			c.pendingAsync = nil
 			return &terminal, nil
 		}
 	} else {
 		if err := c.prepareManagedSession(ctx); err != nil {
 			return nil, err
 		}
+		c.attachPendingAsync()
 		resp, err = c.continueManagedOnce(ctx, draft)
 	}
 	if err != nil {
@@ -264,6 +272,15 @@ func (c *Conversation) prepareManagedSession(ctx context.Context) error {
 	c.Messages = append([]Message(nil), c.Session.Messages...)
 	c.TurnCount = c.Session.TurnCount
 	return nil
+}
+
+func (c *Conversation) attachPendingAsync() {
+	if c.pendingAsync == nil || c.Session == nil {
+		return
+	}
+	msg := *c.pendingAsync
+	c.Session.Messages = append(c.Session.Messages, msg)
+	c.Messages = append(c.Messages, msg)
 }
 
 func (c *Conversation) adoptRecoveredCompletion(response *Response) {
@@ -939,21 +956,8 @@ func clampRunes(s string, maxRunes int) string {
 	return string(runes[:maxRunes]) + "...(truncated)"
 }
 
-func (c *Conversation) appendMessage(ctx context.Context, msg Message) error {
-	if err := c.ensureSession(ctx); err != nil {
-		return err
-	}
-	c.Messages = append(c.Messages, msg)
-	if c.Session != nil {
-		c.Session.Messages = append(c.Session.Messages, msg)
-	}
-	_ = PersistConversationSnapshotForRuntime(ctx, c.runtime, c.Session)
-	return nil
-}
-
-// InjectAsyncToolResult appends a "tool-result style" message into the active session
-// without taking an extra model turn. This is used for async tool completion flows
-// like human tasks.
+// InjectAsyncToolResult stages the event-owned result until the managed base
+// session has been prepared. A scope reset can then retry without losing it.
 func (c *Conversation) InjectAsyncToolResult(ctx context.Context, toolName string, ok bool, result any, errText string) error {
 	entry := map[string]any{"name": strings.TrimSpace(toolName)}
 	if ok {
@@ -970,7 +974,15 @@ func (c *Conversation) InjectAsyncToolResult(ctx context.Context, toolName strin
 	if err != nil {
 		return fmt.Errorf("marshal async tool result: %w", err)
 	}
-	return c.appendMessage(ctx, Message{Role: "tool", Content: strings.TrimSpace(string(b))})
+	msg := Message{Role: "tool", Content: strings.TrimSpace(string(b))}
+	c.pendingAsync = &msg
+	return nil
+}
+
+func (c *Conversation) ClearPendingAsync() {
+	if c != nil {
+		c.pendingAsync = nil
+	}
 }
 
 func (c *Conversation) Reset() {

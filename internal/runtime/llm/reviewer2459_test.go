@@ -334,7 +334,7 @@ func TestReviewer2459RecoveryProjectionAcknowledgedErrorKeepsResponse(t *testing
 		ID: authority.Target.SessionID, AgentID: authority.Target.AgentID, Memory: authority.Target.Memory,
 		MemoryIdentity: identity, Messages: append([]Message(nil), messages...), TurnCount: 1,
 	}
-	response, found, err := recoverCompletionContinuation(ctx, controller, session, "anthropic_api")
+	response, found, err := recoverCompletionContinuation(ctx, controller, nil, "", session, "anthropic_api")
 	if !errors.Is(err, fault) {
 		t.Fatalf("missing retained diagnostic: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestReviewer2459RecoveryProjectionAcknowledgedErrorKeepsResponse(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			probe.independent, probe.foreign, probe.phase = tc.independent, tc.foreign, tc.phase
 			unprojected := &Session{ID: session.ID, AgentID: session.AgentID, Memory: session.Memory, MemoryIdentity: session.MemoryIdentity}
-			got, found, projectionErr := recoverCompletionContinuation(ctx, controller, unprojected, "anthropic_api")
+			got, found, projectionErr := recoverCompletionContinuation(ctx, controller, nil, "", unprojected, "anthropic_api")
 			if !found || got != nil || projectionErr == nil || unprojected.TurnCount != 0 || len(unprojected.Messages) != 0 {
 				t.Fatalf("unacknowledged projection was consumed: response=%+v found=%t session=%+v err=%v", got, found, unprojected, projectionErr)
 			}

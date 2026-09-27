@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 // The provider response and conversation already exist when this mutation runs.
-func incrementCompletedSessionTurn(ctx context.Context, registry sessions.Registry, identity agentmemory.Identity, sessionID, agentID string, sink any) error {
-	result, err := registry.IncrementTurnOutcome(ctx, identity, sessionID)
+func incrementCompletedSessionTurn(ctx context.Context, registry sessions.Registry, lease *sessions.Lease, agentID string, sink any) error {
+	result, err := registry.IncrementTurnOutcome(ctx, lease)
+	sessionID := ""
+	if lease != nil {
+		sessionID = lease.SessionID
+	}
 	if !result.Acknowledged {
 		if err == nil {
 			return errors.New("session turn increment was not acknowledged")

@@ -240,6 +240,7 @@ func (a *LLMAgent) prepareConversationForInvocation(evt events.Event) {
 	if a == nil || a.conversation == nil {
 		return
 	}
+	a.conversation.ClearPendingAsync()
 	if a.cfg.Memory.Enabled {
 		return
 	}

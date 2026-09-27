@@ -185,7 +185,9 @@ func (NoopRuntime) ContinueForkChatSession(_ context.Context, _ *Session, call F
 	return &Response{Message: Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
 }
 
-func (NoopRuntime) PersistConversationSnapshot(context.Context, *Session) error { return nil }
+func (NoopRuntime) PersistConversationSnapshot(context.Context, *sessions.Lease, *Session) error {
+	return nil
+}
 
 type EventPublisher interface {
 	Publish(ctx context.Context, evt events.Event) error

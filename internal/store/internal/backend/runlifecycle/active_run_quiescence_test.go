@@ -37,7 +37,7 @@ func TestQuiescenceTerminatesExactSessionsInAttempt(t *testing.T) {
 	db, backend := quiescenceTestBackend(t, `CREATE TABLE agent_sessions (
 		session_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, status TEXT NOT NULL,
 		termination_reason TEXT, termination_detail TEXT, terminated_at TEXT,
-		lease_holder TEXT, lease_expires_at TEXT, updated_at TEXT
+		lease_holder TEXT, lease_grant_id TEXT, lease_expires_at TEXT, updated_at TEXT
 	)`)
 	runID, sessionID, inactiveID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	for _, row := range []struct{ id, status string }{{sessionID, "active"}, {inactiveID, "terminated"}} {

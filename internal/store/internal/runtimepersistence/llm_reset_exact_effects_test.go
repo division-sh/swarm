@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -159,6 +160,27 @@ func registerLLMResetSink(t *testing.T, s exactFactStore, run string, submitted 
 func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
 		f := newLLMResetFixture(t, s)
+		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		identity := agentmemory.Identity(mustTestAgentIdentityForRun(f.runs[0], "reset-active", "global"))
+		lease, err := s.selected.(sessions.Registry).Acquire(ctx, identity, "reset-worker")
+		if err != nil || lease == nil || lease.GrantID == "" {
+			t.Fatalf("acquire reset predecessor: lease=%+v err=%v", lease, err)
+		}
+		assertGrant := func(want string) {
+			t.Helper()
+			var holder, grant, expiry string
+			if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(lease_holder,''),COALESCE(lease_grant_id,''),COALESCE(CAST(lease_expires_at AS TEXT),'') FROM agent_sessions WHERE session_id=$1`, lease.SessionID).Scan(&holder, &grant, &expiry); err != nil {
+				t.Fatal(err)
+			}
+			if want == "" {
+				if holder != "" || grant != "" || expiry != "" {
+					t.Fatalf("reset retained executable grant: holder=%q grant=%q expiry=%q", holder, grant, expiry)
+				}
+			} else if holder != "reset-worker" || grant != want || expiry == "" {
+				t.Fatalf("rollback changed predecessor grant: holder=%q grant=%q expiry=%q want=%q", holder, grant, expiry, want)
+			}
+		}
+		assertGrant(lease.GrantID)
 		terminal := llmTerminalSnapshot(t, s, f.terminal)
 		var submitted []runlifecycle.Candidate
 		registerLLMResetSink(t, s, f.runs[0], &submitted)
@@ -183,6 +205,7 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 			t.Fatalf("rollback leaked summary/candidate: summary=%+v submitted=%+v err=%v", failed, submitted, err)
 		}
 		assertLLMResetHistory(t, s, f, false)
+		assertGrant(lease.GrantID)
 		drop := `DROP TRIGGER fail_llm_reset_revision`
 		if s.postgres {
 			drop += ` ON run_fork_fact_revisions`
@@ -196,6 +219,7 @@ func TestLLMResetExactSessionsAndRollbackBothStores(t *testing.T) {
 		}
 		assertLLMResetSummary(t, f, summary)
 		assertLLMResetHistory(t, s, f, true)
+		assertGrant("")
 		if got := llmTerminalSnapshot(t, s, f.terminal); !reflect.DeepEqual(got, terminal) {
 			t.Fatalf("terminal evidence changed: got=%v want=%v", got, terminal)
 		}

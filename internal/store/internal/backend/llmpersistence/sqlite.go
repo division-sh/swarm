@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -85,9 +86,12 @@ func (s *LLMSQLiteOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, attem
 	})
 }
 
-func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
+func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, lease *runtimesessions.Lease, rec runtimellm.ConversationRecord) error {
 	plan, identity, err := validateConversationMemory(rec)
 	if err != nil {
+		return err
+	}
+	if err := lease.ValidateFor(identity, rec.SessionID); err != nil {
 		return err
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -115,9 +119,10 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 			  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
 			  AND flow_instance_id=? AND flow_instance=?
 			  AND memory_enabled=? AND memory_source=? AND status='active'
+			  AND lease_holder=? AND lease_grant_id=? AND lease_expires_at>?
 		`, string(messages), rec.TurnCount, state, s.now(), strings.TrimSpace(rec.SessionID), identity.RunID,
 				fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source))
+				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), lease.LockOwner, lease.GrantID, s.now())
 			if err != nil {
 				return fmt.Errorf("update exact sqlite live conversation: %w", err)
 			}
@@ -206,8 +211,11 @@ func (s *LLMSQLiteOwner) LoadActiveConversation(ctx context.Context, identity ag
 	return rec, err == nil, err
 }
 
-func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, update runtimellm.ConversationWatchdogUpdate) error {
+func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, lease *runtimesessions.Lease, update runtimellm.ConversationWatchdogUpdate) error {
 	identity := update.Identity.Normalize()
+	if err := lease.ValidateFor(identity, update.SessionID); err != nil {
+		return err
+	}
 	if err := identity.Validate(); err != nil {
 		return err
 	}
@@ -242,8 +250,9 @@ func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, update r
 			  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
 			  AND flow_instance_id=? AND flow_instance=?
 			  AND memory_enabled=1 AND status='active'
+			  AND lease_holder=? AND lease_grant_id=? AND lease_expires_at>?
 		`, patch, s.now(), update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner,
-				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
+				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lease.LockOwner, lease.GrantID, s.now())
 			if err != nil {
 				return fmt.Errorf("update exact sqlite memory watchdog: %w", err)
 			}

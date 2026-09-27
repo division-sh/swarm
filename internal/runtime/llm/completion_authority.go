@@ -23,6 +23,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
@@ -187,7 +188,7 @@ func ValidateCompletionToolContinuation(payload json.RawMessage, adapter string,
 	return nil
 }
 
-func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffects.Controller, session *Session, adapter string) (*Response, bool, error) {
+func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffects.Controller, registry sessions.Registry, lockOwner string, session *Session, adapter string) (*Response, bool, error) {
 	if controller == nil || session == nil {
 		return nil, false, nil
 	}
@@ -212,11 +213,30 @@ func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffec
 		return nil, true, fmt.Errorf("marshal completion continuation projection: %w", err)
 	}
 	snapshot, _ := handle.CompletionContinuation()
+	var continuationLease *sessions.Lease
+	if projection.Memory.Enabled && snapshot.Phase == runtimeeffects.CompletionProjectionResponseSettled {
+		if registry == nil {
+			return nil, true, fmt.Errorf("recovered completion requires a session registry")
+		}
+		continuationLease, err = registry.Acquire(ctx, session.MemoryIdentity, lockOwner)
+		if err != nil {
+			return nil, true, err
+		}
+		if err := continuationLease.ValidateFor(session.MemoryIdentity, session.ID); err != nil {
+			return nil, true, releasePreProviderSessionLease(ctx, registry, continuationLease, session.AgentID, nil, err)
+		}
+		if err := handle.BindRecoveredContinuationGrant(runtimeeffects.SessionGrant{SessionID: continuationLease.SessionID, GrantID: continuationLease.GrantID, LockOwner: continuationLease.LockOwner}); err != nil {
+			return nil, true, releasePreProviderSessionLease(ctx, registry, continuationLease, session.AgentID, nil, err)
+		}
+	}
 	projectionErr := handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
 		Payload: snapshot.Payload, SessionID: projection.SessionID, Identity: projection.Identity,
 		Memory: projection.Memory, ExpectedTurnCount: projection.ExpectedTurnCount,
 		TurnCount: projection.TurnCount, Messages: messages,
 	})
+	if continuationLease != nil {
+		projectionErr = releaseCompletedSessionLease(ctx, registry, continuationLease, session.AgentID, nil, projectionErr)
+	}
 	response := continuation.Response
 	attempt := handle.Attempt()
 	response.completionAttempt = &attempt
@@ -488,12 +508,21 @@ func completionAttemptHeartbeatLoss(err error) error {
 	return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "completion_attempt_heartbeat_lost", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "provider_execution"}, err)
 }
 
-func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Controller, cfg *config.Config, session *Session, entityID string) (context.Context, string, error) {
+func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Controller, cfg *config.Config, session *Session, lease *sessions.Lease, entityID string) (context.Context, string, error) {
+	if err := ctx.Err(); err != nil {
+		return ctx, "", err
+	}
 	if controller == nil || !controller.Enabled() {
 		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_execution_controller_missing", "llm-completion-authority", "prepare_completion", nil)
 	}
 	if session == nil {
 		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_session_missing", "llm-completion-authority", "prepare_completion", nil)
+	}
+	if session.Memory.Enabled {
+		if err := lease.ValidateFor(session.MemoryIdentity, session.ID); err != nil {
+			return ctx, "", runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_session_grant_missing", "llm-completion-authority", "prepare_completion", nil, err)
+		}
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner})
 	}
 	ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("completion:%d", session.TurnCount+1))
 	ctx = runtimeeffects.WithController(ctx, controller)

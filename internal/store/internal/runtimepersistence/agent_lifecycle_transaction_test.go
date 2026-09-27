@@ -95,7 +95,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		t.Fatalf("acquire active session: %v", err)
 	}
 	operationID := uuid.NewString()
-	active, err = store.Rotate(staleCtx, activeIdentity, "worker-1", runtimesessions.RotationMetadata{OperationID: operationID})
+	active, err = store.Rotate(staleCtx, active, runtimesessions.RotationMetadata{OperationID: operationID})
 	if err != nil {
 		t.Fatalf("seed registry receipt with lifecycle operation ID: %v", err)
 	}
@@ -164,7 +164,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	currentToken := staleToken
 	currentToken.Generation = rotated.Generation
 	currentCtx := runtimeeffects.WithLifecycleToken(ctx, currentToken)
-	_, err = store.Rotate(currentCtx, activeIdentity, "worker-1", runtimesessions.RotationMetadata{OperationID: operationID})
+	_, err = store.Rotate(currentCtx, active, runtimesessions.RotationMetadata{OperationID: operationID})
 	var staleReceipt *runtimesessions.RotationRefusal
 	if !errors.As(err, &staleReceipt) || staleReceipt.Reason != runtimesessions.RotationSuccessorNotCurrent {
 		t.Fatalf("registry receipt after same-ID lifecycle rotation=%v, want stale receipt", err)

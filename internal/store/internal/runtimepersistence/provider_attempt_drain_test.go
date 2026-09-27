@@ -754,6 +754,9 @@ func providerDrainAttemptContext(
 	ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), controller.WithExecutionPosture(posture))
 	ctx = runtimedelivery.WithClaim(ctx, claim)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-drain:"+operation)
+	if fixture.grantID != "" {
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: fixture.sessionID, GrantID: fixture.grantID, LockOwner: fixture.leaseHolder})
+	}
 	return withManagedCompletionTestSurface(t, ctx, authority, adapter)
 }
 

@@ -459,10 +459,11 @@ func TestSelectedContractForkDoesNotCopyRotationReceiptBothStores(t *testing.T) 
 				identity := agentmemory.Identity(mustTestAgentIdentityForRun(runID, "fork-receipt-agent", ""))
 				seedTestAgentRow(t, receiptCtx, fixture.db, backend.name == "postgres", identity, "active")
 				owner := fixture.store.(llmSessionAttemptJourneyOwner)
-				if _, _, err := owner.AcquireLiveSession(receiptCtx, identity, "fork-worker"); err != nil {
+				predecessor, _, err := owner.AcquireLiveSession(receiptCtx, identity, "fork-worker")
+				if err != nil {
 					t.Fatalf("acquire source receipt session: %v", err)
 				}
-				if _, err := owner.Rotate(receiptCtx, identity, "fork-worker", sessions.RotationMetadata{OperationID: receiptKey}); err != nil {
+				if _, err := owner.Rotate(receiptCtx, predecessor, sessions.RotationMetadata{OperationID: receiptKey}); err != nil {
 					t.Fatalf("seed source receipt: %v", err)
 				}
 			})

@@ -41,6 +41,13 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 					t.Fatal(err)
 				}
 				oldID := lease.SessionID
+				var predecessor *sessions.Lease
+				if operation == "turn" || operation == "parse" {
+					predecessor, err = store.Acquire(ctx, identity, "worker-1")
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
 				session := &runtimellm.Session{ID: oldID, ProviderSessionID: "provider-old", AgentID: identity.AgentID(), Memory: memory, MemoryIdentity: identity, TurnCount: 1, ParseFailures: 1, Messages: []runtimellm.Message{{Role: "assistant", Content: "done"}}}
 				var bundleHash string
 				if err := db.QueryRowContext(base, `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`, identity.RunID).Scan(&bundleHash); err != nil {
@@ -89,9 +96,9 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				var result *sessions.Lease
 				switch operation {
 				case "turn":
-					result, err = runtimellm.MaybeRotateAfterTurn(ctx, session, store, "worker-1", 1, nil)
+					result, err = runtimellm.MaybeRotateAfterTurn(ctx, session, store, predecessor, 1, nil)
 				case "parse":
-					result, err = runtimellm.MaybeRotateAfterParseFailures(ctx, session, store, "worker-1", 1, nil)
+					result, err = runtimellm.MaybeRotateAfterParseFailures(ctx, session, store, predecessor, 1, nil)
 				default:
 					cfg := &config.Config{}
 					cfg.LLM.Session.RotateAfterTurns = 1

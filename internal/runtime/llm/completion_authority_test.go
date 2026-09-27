@@ -215,7 +215,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 		ID: authority.Target.SessionID, AgentID: authority.Target.AgentID, Memory: authority.Target.Memory,
 		MemoryIdentity: identity, Messages: append([]Message(nil), messages...), TurnCount: 1,
 	}
-	response, found, err := recoverCompletionContinuation(ctx, controller, session, "anthropic_api")
+	response, found, err := recoverCompletionContinuation(ctx, controller, nil, "", session, "anthropic_api")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -179,6 +179,7 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 				f := newExactFactFixture(t, s)
 				identity := mustTestAgentIdentityForRun(f.runID, "revision-matrix-agent", "")
 				var oldID string
+				var predecessor *sessions.Lease
 				if operation == "rotate" {
 					oldID, identity = seedLLMExactSession(t, s, f.runID, "rotating-agent", "active")
 					exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
@@ -187,6 +188,11 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 							t.Fatal(err)
 						}
 					})
+					var acquireErr error
+					predecessor, acquireErr = store.Acquire(testAuthorActivityContext(), identity, "retry-worker")
+					if acquireErr != nil {
+						t.Fatal(acquireErr)
+					}
 				}
 				var submitted []runlifecycle.Candidate
 				registerLLMResetSink(t, s, f.runID, &submitted)
@@ -209,7 +215,7 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 				defer cancel()
 				var lease *sessions.Lease
 				if operation == "rotate" {
-					lease, err = owner.Rotate(ctx, identity, "retry-worker", sessions.RotationMetadata{RetryReason: "exact-retry"})
+					lease, err = owner.Rotate(ctx, predecessor, sessions.RotationMetadata{RetryReason: "exact-retry"})
 				} else {
 					var conversationSession string
 					acquired, conversation, acquireErr := owner.AcquireLiveSession(ctx, agentmemory.Identity(identity), "retry-worker")
