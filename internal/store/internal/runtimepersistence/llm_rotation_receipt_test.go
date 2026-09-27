@@ -70,8 +70,8 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		if err := selected.db.QueryRowContext(ctx, `SELECT termination_reason FROM agent_sessions WHERE session_id=$1`, rotatedID).Scan(&reason); err != nil || reason != "failed" {
 			t.Fatalf("parse-failure reason=%q err=%v", reason, err)
 		}
-		if _, err := selected.db.ExecContext(ctx, `UPDATE runs SET status='completed', completion_due_at=NULL, ended_at=$2 WHERE run_id=$1`, fixture.runID, time.Now().UTC()); err != nil {
-			t.Fatal(err)
+		if _, err := markRunTerminalStatusForTest(ctx, selected.selected, fixture.runID, "cancelled", nil, time.Now().UTC()); err != nil {
+			t.Fatalf("cancel run through lifecycle owner: %v", err)
 		}
 		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
 		if _, err := owner.Rotate(ctx, identity, "managed-worker", sessions.RotationMetadata{OperationID: "terminal-replay"}); err == nil {
