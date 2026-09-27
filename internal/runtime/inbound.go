@@ -682,10 +682,13 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 				if !matched {
 					continue
 				}
+				challenge, challengeShaped := operatorchannel.ChallengeFromText(fact.Text)
+				if !challengeShaped && fact.EntryReference == "" && fact.ReplyToReference == "" {
+					continue
+				}
 				if operatorEvent != nil {
 					return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("normalized provider output ambiguously satisfies multiple operator channel text interfaces")
 				}
-				challenge, challengeShaped := operatorchannel.ChallengeFromText(fact.Text)
 				if challengeShaped {
 					claim := operatorchannel.InboundClaim{
 						TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
