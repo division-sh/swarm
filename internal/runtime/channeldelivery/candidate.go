@@ -117,6 +117,8 @@ func (d ActionDisposition) Valid() bool {
 
 type Store interface {
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
+	CurrentChannelCardChangeCursor(context.Context) (int64, bool, error)
+	PlanChangedChannelCard(context.Context, int64, string) error
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]Candidate, error)
 	GetCurrentChannelDeliveryPlan(context.Context, string) (Candidate, bool, error)
 	GetCurrentChannelSentReceipt(context.Context, string, string) (SentReceipt, bool, error)
