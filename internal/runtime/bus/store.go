@@ -705,12 +705,12 @@ func (InMemoryEventStore) CommitPublication(_ context.Context, command Publicati
 	if command.DynamicFlowCreation != nil {
 		return CommittedPublication{}, errors.New("dynamic flow creation requires a durable selected store")
 	}
+	if len(command.Activations) != 0 {
+		return CommittedPublication{}, errors.New("flow instance activation requires a durable selected store")
+	}
 	result := CommittedPublication{
 		AppendOutcome: EventAppendInserted,
 		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
-	}
-	for _, plan := range command.Activations {
-		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true})
 	}
 	return result, result.Validate()
 }

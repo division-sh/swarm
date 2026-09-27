@@ -262,7 +262,7 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 			RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 		}
 		for _, plan := range command.Activations {
-			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan})
+			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, ReadinessRevision: 1})
 		}
 		s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 		return result, result.Validate()
@@ -286,7 +286,7 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
 	}
 	for _, plan := range command.Activations {
-		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true})
+		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true, ReadinessRevision: 1})
 	}
 	s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
 	return result, result.Validate()

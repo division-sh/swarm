@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -167,7 +168,7 @@ func (s *flowActivationAcknowledgementProbeStore) CommitFlowInstanceActivation(_
 	if !s.acknowledged {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, s.fault
 	}
-	return runtimepipeline.CommittedFlowInstanceActivation{Plan: command.Plan, Acknowledged: true}, s.fault
+	return runtimepipeline.CommittedFlowInstanceActivation{Plan: command.Plan, ReadinessRevision: 1, Acknowledged: true}, s.fault
 }
 
 func TestFlowActivationBusHelperPreservesAcknowledgedError(t *testing.T) {
@@ -202,6 +203,44 @@ func TestFlowActivationBusHelperPreservesAcknowledgedError(t *testing.T) {
 				t.Fatalf("activation acknowledged=%t commits=%d error=%v, want %t/1/post-commit fault", committed.Acknowledged, store.commits, err, acknowledged)
 			}
 		})
+	}
+}
+
+func TestInMemoryPublicationCannotCommitFlowActivation(t *testing.T) {
+	source, bus := topologyOperationFixture(t)
+	identity := runtimeflowidentity.Derive(source, "workers", "alpha")
+	plan := runtimepipeline.FlowInstanceActivationPlan{
+		Identity: identity,
+		Readiness: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+			Identity: identity, RunID: busInternalTestRunID, BundleHash: bus.sourceArtifactFact.BundleHash(),
+			WorkflowVersion: source.WorkflowVersion(), ExecutionMode: "live",
+		},
+		OccurredAt: time.Now().UTC(),
+		Instance: runtimepipeline.WorkflowInstance{
+			InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityType: "test_entity",
+		},
+	}
+	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.started", "gateway", "", json.RawMessage(`{}`), 0,
+		uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := events.NewNoDeliverySettlement(events.EventWriteNormalPublication, events.NoDeliveryDeclaredConsumerNoPlan, ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := PublicationCommand{Commit: CommitPublishRequest{Event: admitted, RouteSettlement: settlement}, Activations: []runtimepipeline.FlowInstanceActivationPlan{plan}}
+	if err := command.Validate(); err != nil {
+		t.Fatalf("valid activation publication fixture: %v", err)
+	}
+	committed, err := (InMemoryEventStore{}).CommitPublication(context.Background(), command)
+	if err == nil || !strings.Contains(err.Error(), "flow instance activation requires a durable selected store") || len(committed.Activations) != 0 {
+		t.Fatalf("in-memory activation committed %#v with error %v", committed, err)
 	}
 }
 
