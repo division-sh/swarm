@@ -65,6 +65,8 @@ interfaces:
             conversation_reference: {opaque: conversation_reference}
             conversation_scope: {schema: conversation_scope}
             provider_message_reference: {opaque: delivery_reference}
+          optional_fields:
+            reply_to_message_reference: {opaque: delivery_reference}
 spec_authority:
   merge_bearing_owner: platform-spec.yaml
   rule: |
@@ -10326,7 +10328,11 @@ tool_model:
       claim_rule: >
         Setup accepts only exact canonical SWARM- plus sixteen base32-character text from one current pack-authorized v2
         text fact. The fact carries opaque authenticated external-account and conversation references plus exactly direct
-        or shared scope. Provider display names, configured destinations, OS names, CLI strings, callback actions,
+        or shared scope. The same compiled text projection retains the required provider message reference and the
+        optional reply-to message reference. An absent reply-to reference is distinct from a malformed present one;
+        only the accepted trigger schema and channel satisfaction plan may project either reference. The same compiled
+        plan projects authenticated action facts with the required token, interaction reference, message reference,
+        account, conversation, and scope; projection itself grants no decision authority. Provider display names, configured destinations, OS names, CLI strings, callback actions,
         provider-native conversation kinds, proof filenames, and bearer-token hashes carry no authority. Accepted setup
         claims commit in the same selected-store transaction as the inbound publication and publish zero raw or normalized
         business events. Duplicate, expired, wrong-target, and rejected challenge-shaped facts receive one named durable

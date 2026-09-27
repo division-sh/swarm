@@ -500,7 +500,7 @@ func operatorChannelContractClaim(op operatorchannel.Operation, scope operatorch
 	return operatorchannel.InboundClaim{
 		TextFact: operatorchannel.TextFact{
 			Interface: op.Interface, ExternalAccountRef: account, ConversationRef: conversation,
-			ConversationScope: scope, Text: op.Challenge, AccountPresentation: "@operator",
+			ConversationScope: scope, Text: op.Challenge, MessageReference: `{"id":1}`, AccountPresentation: "@operator",
 		},
 		Provider: "telegram", ProviderEventID: "event-" + publicationID, PublicationID: publicationID,
 		ProviderAuthorization: "verified-pack-generation", Challenge: op.Challenge,
