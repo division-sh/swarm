@@ -164,8 +164,8 @@ func TestChannelCompilerPreservesExactEnumAndPinsItInGeneration(t *testing.T) {
 	if err := unmarshalToolTestYAML([]byte(`
 type: string
 minLength: 1
-pattern: ' approved $'
-enum: [' approved ']
+pattern: '^0[0-9]+$'
+enum: ['0042']
 `), &exact); err != nil {
 		t.Fatalf("decode exact schema: %v", err)
 	}
@@ -188,7 +188,7 @@ enum: [' approved ']
 	original := compile(t, exact)
 	for _, eventName := range []string{"text", "action"} {
 		eventSchema, ok := original.EventFieldSchema(eventName, "external_account_reference")
-		if !ok || eventSchema.Pattern() != " approved $" || channelSchemaEnumText(t, eventSchema) != " approved " {
+		if !ok || eventSchema.Pattern() != "^0[0-9]+$" || channelSchemaEnumText(t, eventSchema) != "0042" {
 			t.Fatalf("%s exact schema = %#v", eventName, eventSchema)
 		}
 	}
@@ -199,8 +199,8 @@ enum: [' approved ']
 	changed := runtimecontracts.MustToolInputSchema(
 		runtimecontracts.ToolSchemaString,
 		runtimecontracts.ToolSchemaMinLength(1),
-		runtimecontracts.ToolSchemaPattern(" accepted $"),
-		runtimecontracts.ToolSchemaEnum(" accepted "),
+		runtimecontracts.ToolSchemaPattern("^0[0-9]{3}$"),
+		runtimecontracts.ToolSchemaEnum("0043"),
 	)
 	changedGeneration, err := compile(t, changed).Generation()
 	if err != nil {
@@ -690,6 +690,38 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 			}
 			if _, err := binding.ProjectOperationOutput("read_inbox_entry", map[string]any{}); err == nil {
 				t.Fatal("native readback accepted missing commands")
+			}
+			member := any("12345")
+			if tc.name == "mock" {
+				member = map[string]any{"principal": "alice"}
+			}
+			_, sharedInstall, err := binding.PrepareOperation("install_shared_inbox_entry", map[string]any{"member_reference": member, "commands": commands})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, sharedRead, err := binding.PrepareOperation("read_shared_inbox_entry", map[string]any{"member_reference": member})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for field, want := range tc.wantInput {
+				if !reflect.DeepEqual(sharedInstall[field], want) || !reflect.DeepEqual(sharedRead[field], want) {
+					t.Fatalf("shared native operation lost %s: install=%#v read=%#v", field, sharedInstall, sharedRead)
+				}
+			}
+			if tc.name == "telegram" {
+				if sharedInstall["user_id"] != member || sharedRead["user_id"] != member {
+					t.Fatalf("telegram shared native setting lost member: install=%#v read=%#v", sharedInstall, sharedRead)
+				}
+			} else if !reflect.DeepEqual(sharedInstall["member"], member) || !reflect.DeepEqual(sharedRead["member"], member) {
+				t.Fatalf("mock shared native setting lost member: install=%#v read=%#v", sharedInstall, sharedRead)
+			}
+			_, sharedTool, err := binding.ConnectorOperation("read_shared_inbox_entry")
+			if err != nil || sharedTool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+				t.Fatalf("shared native readback effect = %q, %v", sharedTool.Effect(), err)
+			}
+			sharedProjection, err := binding.ProjectOperationOutput("read_shared_inbox_entry", map[string]any{"commands": commands})
+			if err != nil || !reflect.DeepEqual(sharedProjection["commands"], commands) {
+				t.Fatalf("shared native readback projection = %#v, %v", sharedProjection, err)
 			}
 		})
 	}
@@ -1775,6 +1807,16 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
 			),
 		),
+		"mock.install_member_inbox": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+			"destination": destination, "member": externalAccount, "commands": inboxInstall,
+		}, "destination", "member", "commands"), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))),
+		"mock.read_member_inbox": runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+			runtimecontracts.WithToolSchemas(
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination, "member": externalAccount}, "destination", "member"),
+				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
+			),
+		),
 		"mock.identify_workspace": mockRegistrationTool(
 			runtimecontracts.ActivityEffectClassReadOnly,
 			[]string{"mock_api_key"},
@@ -1850,6 +1892,13 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			}},
 			"read_inbox_entry": {Tool: "mock.read_inbox", Input: map[string]packs.ChannelMapping{
 				"destination.queue": {From: "context.destination.queue"},
+			}, Output: map[string]packs.ChannelMapping{"commands": {From: "result.commands"}}},
+			"install_shared_inbox_entry": {Tool: "mock.install_member_inbox", Input: map[string]packs.ChannelMapping{
+				"destination.queue": {From: "context.destination.queue"}, "member.principal": {From: "input.member_reference.principal"},
+				"commands": {From: "input.commands"},
+			}},
+			"read_shared_inbox_entry": {Tool: "mock.read_member_inbox", Input: map[string]packs.ChannelMapping{
+				"destination.queue": {From: "context.destination.queue"}, "member.principal": {From: "input.member_reference.principal"},
 			}, Output: map[string]packs.ChannelMapping{"commands": {From: "result.commands"}}},
 		},
 		Events: map[string]packs.ChannelEventBinding{
