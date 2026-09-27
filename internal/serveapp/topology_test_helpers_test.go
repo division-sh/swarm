@@ -131,7 +131,7 @@ func installSelectedStoreTestProcessTopology(
 	source semanticview.Source,
 	fact runtimecorrelation.SourceArtifactFact,
 	runtimeInstanceID string,
-) (runtimestartupownership.ProcessCapability, runtimeagenttopology.SourceSetPlan) {
+) (runtimestartupownership.ProcessCapability, runtimeagenttopology.SourceSetPlan, runtimestartupownership.LiveGenerationGrant) {
 	t.Helper()
 	if stores == nil || rt == nil || rt.Manager == nil {
 		t.Fatal("selected-store topology test requires an owner and runtime manager")
@@ -155,8 +155,8 @@ func installSelectedStoreTestProcessTopology(
 		_ = capability.Release(context.Background())
 		t.Fatalf("install selected-store test source set: %v", err)
 	}
-	installSelectedStoreTestGeneration(t, capability, rt, plan, 1)
-	return capability, plan
+	grant := installSelectedStoreTestGeneration(t, capability, rt, plan, 1)
+	return capability, plan, grant
 }
 
 func installSelectedStoreTestGeneration(
@@ -165,7 +165,7 @@ func installSelectedStoreTestGeneration(
 	rt *runtimepkg.Runtime,
 	plan runtimeagenttopology.SourceSetPlan,
 	generation uint64,
-) {
+) runtimestartupownership.LiveGenerationGrant {
 	t.Helper()
 	if capability == nil || rt == nil {
 		t.Fatal("selected-store test generation requires a capability and runtime")
@@ -182,6 +182,7 @@ func installSelectedStoreTestGeneration(
 		_ = grant.Retire(context.Background())
 		t.Fatalf("install selected-store test generation grant: %v", err)
 	}
+	return grant
 }
 
 func closeSelectedStoreTestProcess(process *worklifetime.Process, capability runtimestartupownership.ProcessCapability) error {

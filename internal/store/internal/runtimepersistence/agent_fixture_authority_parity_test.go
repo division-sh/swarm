@@ -37,6 +37,7 @@ type agentFixtureFlowStore interface {
 	agentfixture.Store
 	runtimedelivery.Store
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
+	BeginDynamicFlowRuntimeActivation(context.Context, runtimepipeline.DynamicFlowRuntimeReadinessPlan, uint64, runtimemanager.ProcessExecutionBinding) (runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult, error)
 	CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
 }
 
@@ -85,9 +86,11 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 			if _, exists, err := capability.CurrentSourceSet(ctx); err != nil || exists {
 				t.Fatalf("refused admission changed source plan: exists=%v err=%v", exists, err)
 			}
-			if _, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate); err != nil {
+			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
+			if err != nil {
 				t.Fatalf("admit flow fixture generation: %v", err)
 			}
+			admitAgentFixtureFlowGrant(t, ctx, grant)
 			manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 				ExecutionPosture:   executionposture.Live,
 				BaseContext:        ctx,
@@ -228,6 +231,16 @@ func currentAgentFixtureSourceSet(t *testing.T, ctx context.Context, selected ag
 	return plan
 }
 
+func admitAgentFixtureFlowGrant(t *testing.T, ctx context.Context, grant runtimestartupownership.GenerationGrant) {
+	t.Helper()
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle flow fixture probes: %v", err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("admit flow fixture execution: %v", err)
+	}
+}
+
 func assertExactAgentFixtureFlowAuthority(
 	t *testing.T,
 	ctx context.Context,
@@ -249,6 +262,29 @@ func assertExactAgentFixtureFlowAuthority(
 	want, err := runtimeagenttopology.FlowReadinessAdmission(runID, path, fingerprint)
 	if err != nil {
 		t.Fatalf("build expected readiness authority for %s: %v", path, err)
+	}
+	var db *sql.DB
+	query := `SELECT activation_attempt_id::text, activation_attempt_grant_id::text, activation_attempt_revision FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
+	switch backend := selected.(type) {
+	case *SQLiteRuntimeStore:
+		db = backend.backend.ConstructionHandle()
+		query = `SELECT activation_attempt_id, activation_attempt_grant_id, activation_attempt_revision FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
+	case *PostgresStore:
+		db = backend.backend.ConstructionHandle()
+	default:
+		t.Fatalf("unsupported flow fixture store %T", selected)
+	}
+	var attemptID, grantID string
+	var attemptRevision uint64
+	if err := db.QueryRowContext(ctx, query, runID, path).Scan(&attemptID, &grantID, &attemptRevision); err != nil {
+		t.Fatalf("load exact activation attempt for %s: %v", path, err)
+	}
+	if attemptRevision != readiness.PlanRevision || grantID != binding.GenerationGrantID {
+		t.Fatalf("activation attempt for %s = %s/%d/%s, want revision %d and grant %s", path, attemptID, attemptRevision, grantID, readiness.PlanRevision, binding.GenerationGrantID)
+	}
+	want, err = want.WithFlowActivationAttempt(attemptID, attemptRevision)
+	if err != nil {
+		t.Fatalf("bind expected readiness authority for %s: %v", path, err)
 	}
 	for _, rec := range agents {
 		if rec.Config.Identity.FlowInstance() != path {
@@ -437,8 +473,17 @@ func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context,
 	if err := agentfixture.UpsertStatic(t, ctx, selected, staticRecord); err != nil {
 		t.Fatalf("seed static fixture survivor: %v", err)
 	}
+	plan := currentAgentFixtureSourceSet(t, ctx, selected)
+	if len(plan.Sources) != 1 {
+		t.Fatalf("fixture source set has %d sources, want one", len(plan.Sources))
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
+	if err != nil {
+		t.Fatalf("load exact fixture generation: %v", err)
+	}
+	admitAgentFixtureFlowGrant(t, ctx, grant)
 	flowIdentity := testAgentIdentity(t, "flow-survivor", "review/fixture")
-	flowState := seedExactAgentFixtureFlowState(t, ctx, selected, flowIdentity)
+	flowState := seedExactAgentFixtureFlowState(t, ctx, selected, flowIdentity, grant)
 	before := captureAgentFixtureAuthority(t, ctx, selected)
 	probe := &agentFixtureAcquireProbe{Store: selected}
 	for index, topology := range rejectedAgentFixtureAdmissions(t) {
@@ -521,6 +566,7 @@ func seedExactAgentFixtureFlowState(
 	ctx context.Context,
 	selected agentFixtureFlowStore,
 	identity runtimeagentidentity.Identity,
+	grant runtimestartupownership.LiveGenerationGrant,
 ) runtimemanager.AgentLifecycleState {
 	t.Helper()
 	plan := currentAgentFixtureSourceSet(t, ctx, selected)
@@ -559,6 +605,22 @@ func seedExactAgentFixtureFlowState(
 	topology, err := runtimeagenttopology.FlowReadinessAdmission(runID, identity.FlowInstance(), fingerprint)
 	if err != nil {
 		t.Fatal(err)
+	}
+	binding, err := grant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatalf("bind flow fixture grant: %v", err)
+	}
+	readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(identity.FlowInstance()))
+	if err != nil || !found {
+		t.Fatalf("load seeded flow readiness: found=%v err=%v", found, err)
+	}
+	admitted, err := selected.BeginDynamicFlowRuntimeActivation(ctx, readiness.Plan, readiness.PlanRevision, binding)
+	if err != nil || !admitted.Acknowledged {
+		t.Fatalf("admit seeded flow activation: acknowledged=%v err=%v", admitted.Acknowledged, err)
+	}
+	topology, err = topology.WithFlowActivationAttempt(admitted.Attempt.ID(), admitted.Attempt.PlanRevision())
+	if err != nil {
+		t.Fatalf("bind seeded flow topology to activation attempt: %v", err)
 	}
 	record.Topology = topology
 	if _, err := agentfixture.CommitExact(t, ctx, selected, runtimemanager.AgentLifecycleTransition{

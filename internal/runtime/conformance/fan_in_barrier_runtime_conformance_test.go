@@ -31,6 +31,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -59,6 +60,9 @@ type fanInBarrierRuntime struct {
 	bus         *runtimebus.EventBus
 	diagnostics *fanInBarrierDiagnosticBus
 	pipeline    *runtimepipeline.PipelineCoordinator
+	manager     *runtimemanager.AgentManager
+	workOwner   *worklifetime.RuntimeOccurrence
+	grant       runtimestartupownership.LiveGenerationGrant
 }
 
 type fanInBarrierDiagnosticBus struct {
@@ -153,7 +157,16 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			}
 			// Reconstruct both EventBus and PipelineCoordinator. The second arrival
 			// must consume the persisted activation rather than in-memory state.
-			runtime = newFanInBarrierRuntime(t, backend, db, source)
+			if err := runtime.manager.Shutdown(); err != nil {
+				t.Fatalf("retire predecessor fan-in manager: %v", err)
+			}
+			if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+				t.Fatalf("join predecessor fan-in work: %v", err)
+			}
+			if err := runtime.grant.Retire(ctx); err != nil {
+				t.Fatalf("retire predecessor fan-in grant: %v", err)
+			}
+			runtime = newFanInBarrierRuntime(t, backend, db, source, 2)
 			publishFanInBarrierEvent(t, ctx, runtime.bus, source, memberA, "ingress", "operating.report.requested", map[string]any{
 				"period_id": periodID,
 				"revenue":   11,
@@ -660,8 +673,12 @@ func requireSelectedRunTargetOwner(t *testing.T, ctx context.Context, backend fa
 	}
 }
 
-func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source) fanInBarrierRuntime {
+func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source, generation ...uint64) fanInBarrierRuntime {
 	t.Helper()
+	runtimeGeneration := uint64(1)
+	if len(generation) > 0 {
+		runtimeGeneration = generation[0]
+	}
 	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
@@ -728,7 +745,8 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		GenericSchedules:        fanInBarrierGenericScheduleWakeups{}, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
-	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
+	lifecycle := &notifyAllChildrenLifecycleOwner{}
+	manager = runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
 		BaseContext:        testAuthorActivityContext(context.Background()),
 		SourceArtifactFact: authorActivityTestSourceArtifactFact,
@@ -736,9 +754,10 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		WorkflowInstances:  coordinator,
 		WorkOwner:          workOwner,
 		DeliveryStore:      backend,
+		LifecycleStore:     lifecycle,
 		PersistenceRoles:   conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
-	}))
-	ctx := testAuthorActivityContext(context.Background())
+	})
+	ctx := runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
@@ -748,9 +767,39 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, backend, plan, coordinate)
+	capability, err := agentfixture.ProcessCapability(t, ctx, backend)
 	if err != nil {
-		t.Fatalf("admit fan-in conformance generation: %v", err)
+		t.Fatalf("acquire fan-in conformance process capability: %v", err)
+	}
+	if current, exists, err := capability.CurrentSourceSet(ctx); err != nil {
+		t.Fatalf("read fan-in conformance source set: %v", err)
+	} else if !exists {
+		if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+			t.Fatalf("install fan-in conformance source set: %v", err)
+		}
+	} else if current.Revision != plan.Revision {
+		t.Fatalf("fan-in conformance source set changed: current=%s want=%s", current.Revision, plan.Revision)
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: coordinate.BundleHash, RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		RuntimeGeneration: runtimeGeneration, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("issue fan-in conformance generation: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := manager.Shutdown(); err != nil {
+			t.Errorf("shutdown fan-in conformance manager: %v", err)
+		}
+		if _, err := workOwner.RetireAndWait(context.Background()); err != nil {
+			t.Errorf("join fan-in conformance work: %v", err)
+		}
+		if err := grant.Retire(context.Background()); err != nil {
+			t.Errorf("retire fan-in conformance grant: %v", err)
+		}
+	})
+	if err := lifecycle.bind(grant); err != nil {
+		t.Fatalf("bind fan-in conformance generation: %v", err)
 	}
 	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
@@ -759,7 +808,13 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 	if err := manager.InstallStartupTopology(grant, admission, plan); err != nil {
 		t.Fatalf("install fan-in conformance generation: %v", err)
 	}
-	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatalf("settle fan-in conformance probes: %v", err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatalf("admit fan-in conformance execution: %v", err)
+	}
+	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator, manager: manager, workOwner: workOwner, grant: grant}
 }
 
 func seedFanInBarrierRun(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID string) {

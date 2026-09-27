@@ -131,7 +131,7 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 	authority := req.Topology.Authority.Readiness
 	present := req.TargetPhase != runtimemanager.AgentLifecycleTerminated
 	preparation := authority.AttemptID == "" && authority.PlanRevision != 0
-	takeover := !preparation && req.OperationKind == "process_takeover"
+	takeoverPreparation := !preparation && req.OperationKind == "process_takeover" && req.Agent == nil
 	if preparation {
 		switch req.OperationKind {
 		case "spawn", "reconfigure", "process_takeover":
@@ -143,7 +143,7 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 			return topologyConflict(req, "readiness_preparation_must_remain_non_executable")
 		}
 	}
-	if takeover && (req.Agent != nil || req.Subordinate.Action != runtimesessions.LifecycleMutationNone ||
+	if takeoverPreparation && (req.Subordinate.Action != runtimesessions.LifecycleMutationNone ||
 		req.TargetPhase != req.ExpectedPhase || req.TargetEpoch != req.ExpectedEpoch+1 ||
 		req.TargetGeneration != req.ExpectedGeneration+1) {
 		return topologyConflict(req, "readiness_takeover_must_only_rebind_execution")
@@ -152,7 +152,7 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 		var err error
 		if preparation {
 			err = AuthorizeDynamicFlowTopologyPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
-		} else if takeover {
+		} else if takeoverPreparation {
 			err = AuthorizeDynamicFlowTakeoverPreparationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
 		} else {
 			err = AuthorizeDynamicFlowActivationTx(ctx, tx, req.ProcessBinding, req.Identity.RunID, sqlite)
@@ -234,7 +234,7 @@ func authorizeFlowReadinessMutation(ctx context.Context, tx *sql.Tx, req runtime
 				return topologyConflict(req, "readiness_preparation_predecessor_not_joined")
 			}
 		}
-		if !preparation && !takeover && (authority.AttemptID == "" || authority.PlanRevision == 0 ||
+		if !preparation && !takeoverPreparation && (authority.AttemptID == "" || authority.PlanRevision == 0 ||
 			!attemptID.Valid || attemptID.String != authority.AttemptID ||
 			!grantID.Valid || grantID.String != req.ProcessBinding.GenerationGrantID ||
 			!attemptRevision.Valid || attemptRevision.Int64 != int64(authority.PlanRevision) ||
