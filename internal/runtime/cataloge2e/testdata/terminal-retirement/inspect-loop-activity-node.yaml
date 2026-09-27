@@ -7,7 +7,7 @@ inspect-node:
       advances_to: working
       emit:
         event: worker.execute
-        fields: {revision_id: "loop.revision_id"}
+        fields: {revision_id: "${loop.revision_id}"}
 activity-node:
   execution_type: system_node
   subscribes_to: [worker.execute]
@@ -35,4 +35,4 @@ activity-repeat-node:
       advances_to: working
       emit:
         event: worker.execute
-        fields: {revision_id: "loop.revision_id"}
+        fields: {revision_id: "${loop.revision_id}"}
