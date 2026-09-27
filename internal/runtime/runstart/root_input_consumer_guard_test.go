@@ -56,6 +56,10 @@ func TestValidateInputEventsConsumerGuardRejectsCommandCaller(t *testing.T) {
 		}
 	}
 	writeGuardFixture("internal/apiv1/operator_event_publish.go", `package apiv1
+func executeOperatorEventPublication() {
+	runstart.ValidateInputEvents()
+	rootInputApplicationError()
+}
 func validateEventPublication() {
 	runstart.ValidateInputEvents()
 	rootInputApplicationError()
