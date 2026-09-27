@@ -567,6 +567,37 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 	}
 }
 
+func TestDecisionCardOptionalOnlyInputStartsDraftOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			now := time.Date(2026, 7, 12, 14, 30, 0, 0, time.UTC)
+			card := newDecisionCardTestCard(t, runID, now)
+			outcome := card.Snapshot.Outcomes["revise"]
+			outcome.Input = map[string]runtimecontracts.WorkflowGateInputField{
+				"comment": {Type: "text", Required: false},
+			}
+			outcome.InputOrder = []string{"comment"}
+			card.Snapshot.Outcomes["revise"] = outcome
+			var err error
+			card, err = decisioncard.New(card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			draft, err := DecisionCardDomainForTest(cardStore).BeginInputForTest(ctx, decisioncard.BeginInputRequest{
+				CardID: card.CardID, Verdict: "revise", PrincipalID: "operator-a", Now: now,
+			})
+			if err != nil || draft.Status != decisioncard.DraftStatusActive {
+				t.Fatalf("optional-only draft = %#v, %v", draft, err)
+			}
+		})
+	}
+}
+
 func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
