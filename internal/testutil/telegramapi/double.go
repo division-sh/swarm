@@ -18,6 +18,8 @@ type Double struct {
 	resourceIDs                  map[string]int64
 	commands                     map[string][]map[string]any
 	commandWrites                []map[string]any
+	commandReadbacks             int
+	commandReadbackFailures      int
 	registrationRequests         []map[string]any
 	deliveries                   []map[string]any
 	edits                        []map[string]any
@@ -27,6 +29,8 @@ type Double struct {
 	loseNextDeliveryResponse     bool
 	loseNextEditResponse         bool
 	loseNextAckResponse          bool
+	loseNextCommandWriteResponse bool
+	failCommandReadbackAfterWrite bool
 	registrationResponseBarrier  *responseBarrier
 	deliveryResponseBarrier      *responseBarrier
 	editResponseBarrier          *responseBarrier
@@ -83,7 +87,21 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		}
 		p.commands[key] = payload.Commands
 		p.commandWrites = append(p.commandWrites, map[string]any{"scope": payload.Scope, "commands": payload.Commands, "language_code": payload.LanguageCode})
+		loseResponse := p.loseNextCommandWriteResponse
+		p.loseNextCommandWriteResponse = false
 		p.mu.Unlock()
+		if loseResponse {
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "provider response-loss injection requires HTTP hijacking", http.StatusInternalServerError)
+				return
+			}
+			connection, _, err := hijacker.Hijack()
+			if err == nil {
+				_ = connection.Close()
+			}
+			return
+		}
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 	case strings.HasSuffix(request.URL.Path, "/getMyCommands"):
 		var payload struct {
@@ -101,7 +119,17 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		}
 		p.mu.Lock()
 		commands := append([]map[string]any(nil), p.commands[key]...)
+		p.commandReadbacks++
+		failReadback := p.failCommandReadbackAfterWrite && len(p.commandWrites) > 0
+		if failReadback {
+			p.commandReadbackFailures++
+		}
 		p.mu.Unlock()
+		if failReadback {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"ok":false,"description":"readback unavailable"}`))
+			return
+		}
 		if commands == nil {
 			commands = []map[string]any{}
 		}
@@ -268,6 +296,24 @@ func (p *Double) CommandWrites() []map[string]any {
 		out[index] = clonePayload(write)
 	}
 	return out
+}
+
+func (p *Double) CommandReadbackCounts() (int, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.commandReadbacks, p.commandReadbackFailures
+}
+
+func (p *Double) LoseNextCommandWriteAcknowledgment() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loseNextCommandWriteResponse = true
+}
+
+func (p *Double) FailCommandReadbackAfterWrite() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.failCommandReadbackAfterWrite = true
 }
 
 // SetResourceID makes one credential represent a distinct provider resource.
