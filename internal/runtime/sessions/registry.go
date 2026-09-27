@@ -18,9 +18,10 @@ import (
 
 type Registry interface {
 	Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*Lease, error)
+	Renew(ctx context.Context, lease *Lease) (*Lease, error)
 	ReleaseOutcome(ctx context.Context, lease *Lease) (ReleaseResult, error)
-	Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error)
-	IncrementTurnOutcome(ctx context.Context, identity agentmemory.Identity, sessionID string) (TurnIncrementResult, error)
+	Rotate(ctx context.Context, lease *Lease, rotation RotationMetadata) (*Lease, error)
+	IncrementTurnOutcome(ctx context.Context, lease *Lease) (TurnIncrementResult, error)
 }
 
 type ReleaseResult struct {
@@ -61,12 +62,21 @@ func (s ResetSummary) OrphanedCount() int {
 
 type Lease struct {
 	SessionID            string
+	GrantID              string
 	ProviderSessionID    string
 	Identity             agentmemory.Identity
 	RetryReason          string
 	RetriesFromSessionID string
 	LockOwner            string
 	ExpiresAt            time.Time
+}
+
+func (l *Lease) ValidateFor(identity agentmemory.Identity, sessionID string) error {
+	if l == nil || strings.TrimSpace(l.GrantID) == "" || strings.TrimSpace(l.LockOwner) == "" ||
+		strings.TrimSpace(l.SessionID) != strings.TrimSpace(sessionID) || l.Identity.Normalize() != identity.Normalize() {
+		return errors.New("exact session grant does not match mutation target")
+	}
+	return nil
 }
 
 type RotationMetadata struct {
@@ -169,6 +179,7 @@ type Record struct {
 	RetryReason          string
 	RetriesFromSessionID string
 	LockOwner            string
+	GrantID              string
 	LockExpiresAt        time.Time
 	LastUsedAt           time.Time
 	TerminationReason    string
@@ -262,11 +273,13 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, identity agentmemory.Id
 	}
 
 	rec.LockOwner = lockOwner
+	rec.GrantID = uuid.NewString()
 	rec.LockExpiresAt = now.Add(sr.lockTTL)
 	rec.LastUsedAt = now
 
 	return &Lease{
 		SessionID:            rec.SessionID,
+		GrantID:              rec.GrantID,
 		ProviderSessionID:    rec.ProviderSessionID,
 		Identity:             rec.Identity,
 		RetryReason:          rec.RetryReason,
@@ -274,6 +287,29 @@ func (sr *InMemoryRegistry) Acquire(ctx context.Context, identity agentmemory.Id
 		LockOwner:            rec.LockOwner,
 		ExpiresAt:            rec.LockExpiresAt,
 	}, nil
+}
+
+func (sr *InMemoryRegistry) Renew(ctx context.Context, lease *Lease) (*Lease, error) {
+	if lease == nil || strings.TrimSpace(lease.GrantID) == "" {
+		return nil, errors.New("exact session grant is required")
+	}
+	sr.mu.Lock()
+	defer sr.mu.Unlock()
+	identity := lease.Identity.Normalize()
+	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "renew"); err != nil {
+		return nil, err
+	}
+	rec := sr.byKey[registryKey(identity)]
+	now := time.Now()
+	if rec == nil || rec.Status != "active" || rec.SessionID != lease.SessionID || rec.LockOwner != lease.LockOwner || rec.GrantID != lease.GrantID || !rec.LockExpiresAt.After(now) {
+		return nil, ErrSessionLeased
+	}
+	if next := now.Add(sr.lockTTL); next.After(rec.LockExpiresAt) {
+		rec.LockExpiresAt = next
+	}
+	result := *lease
+	result.ExpiresAt = rec.LockExpiresAt
+	return &result, nil
 }
 
 func (sr *InMemoryRegistry) ReleaseOutcome(_ context.Context, lease *Lease) (ReleaseResult, error) {
@@ -289,17 +325,22 @@ func (sr *InMemoryRegistry) ReleaseOutcome(_ context.Context, lease *Lease) (Rel
 	if !ok {
 		return ReleaseResult{}, fmt.Errorf("session for agent %s not found", lease.Identity.AgentID())
 	}
-	if rec.LockOwner != lease.LockOwner {
-		return ReleaseResult{}, fmt.Errorf("lease owner mismatch: have=%s want=%s", rec.LockOwner, lease.LockOwner)
+	if strings.TrimSpace(lease.GrantID) == "" || rec.Status != "active" || rec.SessionID != lease.SessionID || rec.LockOwner != lease.LockOwner || rec.GrantID != lease.GrantID {
+		return ReleaseResult{}, ErrSessionLeased
 	}
 
 	rec.LockOwner = ""
+	rec.GrantID = ""
 	rec.LockExpiresAt = time.Time{}
 	rec.LastUsedAt = time.Now()
 	return ReleaseResult{Acknowledged: true}, nil
 }
 
-func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation RotationMetadata) (*Lease, error) {
+func (sr *InMemoryRegistry) Rotate(ctx context.Context, lease *Lease, rotation RotationMetadata) (*Lease, error) {
+	if lease == nil || strings.TrimSpace(lease.GrantID) == "" {
+		return nil, errors.New("exact session grant is required")
+	}
+	identity, lockOwner := lease.Identity, lease.LockOwner
 	request, err := NormalizeRotationRequest(identity, lockOwner, rotation)
 	if err != nil {
 		return nil, err
@@ -321,7 +362,7 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 			if ok && rec != nil && rec.Status == "active" {
 				current = &Lease{SessionID: rec.SessionID, ProviderSessionID: rec.ProviderSessionID, Identity: rec.Identity,
 					RetryReason: rec.RetryReason, RetriesFromSessionID: rec.RetriesFromSessionID,
-					LockOwner: rec.LockOwner, ExpiresAt: rec.LockExpiresAt}
+					LockOwner: rec.LockOwner, GrantID: rec.GrantID, ExpiresAt: rec.LockExpiresAt}
 			}
 			return ReplayRotation(request, &receipt, current, now)
 		}
@@ -329,8 +370,8 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 	if !ok || rec == nil {
 		return nil, fmt.Errorf("session for agent %s not found", identity.AgentID())
 	}
-	if rec.LockOwner != "" && rec.LockOwner != lockOwner && rec.LockExpiresAt.After(now) {
-		return nil, fmt.Errorf("cannot rotate: leased by %s", rec.LockOwner)
+	if rec.SessionID != lease.SessionID || rec.LockOwner != lockOwner || rec.GrantID != lease.GrantID || !rec.LockExpiresAt.After(now) {
+		return nil, ErrSessionLeased
 	}
 
 	retryReason := rotation.RetryReason
@@ -338,6 +379,7 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 	terminated := *rec
 	terminated.Status = "terminated"
 	terminated.LockOwner = ""
+	terminated.GrantID = ""
 	terminated.LockExpiresAt = time.Time{}
 	terminated.TerminationReason = rotation.TerminationReason.String()
 	terminated.TerminationDetail = retryReason
@@ -354,6 +396,7 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 	rec.RetriesFromSessionID = oldSessionID
 	rec.TurnCount = 0
 	rec.LockOwner = lockOwner
+	rec.GrantID = uuid.NewString()
 	rec.LockExpiresAt = now.Add(sr.lockTTL)
 	rec.LastUsedAt = now
 	rec.TerminationReason = ""
@@ -362,8 +405,9 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 	rec.TerminatedAt = time.Time{}
 	rec.RotationOperationID = rotation.OperationID
 
-	lease := Lease{
+	successor := Lease{
 		SessionID:            rec.SessionID,
+		GrantID:              rec.GrantID,
 		ProviderSessionID:    rec.ProviderSessionID,
 		Identity:             rec.Identity,
 		RetryReason:          rec.RetryReason,
@@ -372,13 +416,16 @@ func (sr *InMemoryRegistry) Rotate(ctx context.Context, identity agentmemory.Ide
 		ExpiresAt:            rec.LockExpiresAt,
 	}
 	if rotation.OperationID != "" {
-		sr.rotationReceipts[rotation.OperationID] = RotationReceipt{OperationID: rotation.OperationID, RequestDigest: request.Digest, Result: lease}
+		sr.rotationReceipts[rotation.OperationID] = RotationReceipt{OperationID: rotation.OperationID, RequestDigest: request.Digest, Result: successor}
 	}
-	return &lease, nil
+	return &successor, nil
 }
 
-func (sr *InMemoryRegistry) IncrementTurnOutcome(ctx context.Context, identity agentmemory.Identity, sessionID string) (TurnIncrementResult, error) {
-	identity = identity.Normalize()
+func (sr *InMemoryRegistry) IncrementTurnOutcome(ctx context.Context, lease *Lease) (TurnIncrementResult, error) {
+	if lease == nil || strings.TrimSpace(lease.GrantID) == "" {
+		return TurnIncrementResult{}, errors.New("exact session grant is required")
+	}
+	identity := lease.Identity.Normalize()
 	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
 		return TurnIncrementResult{}, err
 	}
@@ -390,8 +437,8 @@ func (sr *InMemoryRegistry) IncrementTurnOutcome(ctx context.Context, identity a
 	}
 	key := registryKey(identity)
 	if rec, ok := sr.byKey[key]; ok {
-		if rec.SessionID != sessionID {
-			return TurnIncrementResult{}, fmt.Errorf("session mismatch: have=%s want=%s", rec.SessionID, sessionID)
+		if rec.SessionID != lease.SessionID || rec.LockOwner != lease.LockOwner || rec.GrantID != lease.GrantID || !rec.LockExpiresAt.After(time.Now()) || rec.Status != "active" {
+			return TurnIncrementResult{}, ErrSessionLeased
 		}
 		rec.TurnCount++
 		rec.LastUsedAt = time.Now()
@@ -472,6 +519,7 @@ func (sr *InMemoryRegistry) ApplyLifecycleProjection(_ context.Context, req Life
 			terminated := previous
 			terminated.Status = "terminated"
 			terminated.LockOwner = ""
+			terminated.GrantID = ""
 			terminated.LockExpiresAt = time.Time{}
 			terminated.TerminationReason = plan.TerminationReason.String()
 			terminated.TerminationDetail = plan.TerminationDetail
@@ -497,58 +545,6 @@ func (sr *InMemoryRegistry) ApplyLifecycleProjection(_ context.Context, req Life
 	sr.lifecycle[identity] = inMemoryLifecycleProjection{token: req.Target, phase: strings.TrimSpace(req.TargetPhase)}
 	sr.lifecycleOperations[req.OperationID] = inMemoryLifecycleOperation{requestHash: req.RequestHash, outcome: outcome}
 	return outcome, false, nil
-}
-
-func (sr *InMemoryRegistry) AdoptSessionID(ctx context.Context, identity agentmemory.Identity, lockOwner, newSessionID string) error {
-	identity = identity.Normalize()
-	lockOwner = strings.TrimSpace(lockOwner)
-	newSessionID = strings.TrimSpace(newSessionID)
-	if err := agentmemory.ValidateIdentity(identity, true); err != nil {
-		return err
-	}
-	if lockOwner == "" || newSessionID == "" {
-		return errors.New("lockOwner and newSessionID are required")
-	}
-
-	sr.mu.Lock()
-	defer sr.mu.Unlock()
-	if err := sr.requireCurrentLifecycleLocked(ctx, identity, "adopt_provider_session"); err != nil {
-		return err
-	}
-
-	var (
-		rec *Record
-		ok  bool
-	)
-	for _, candidate := range sr.byKey {
-		if candidate == nil {
-			continue
-		}
-		if candidate.Identity != identity {
-			continue
-		}
-		if candidate.LockOwner == lockOwner {
-			rec = candidate
-			ok = true
-			break
-		}
-		if !ok {
-			rec = candidate
-			ok = true
-		}
-	}
-	if !ok {
-		return fmt.Errorf("session for agent %s not found", identity.AgentID())
-	}
-	now := time.Now()
-	if rec.LockOwner != "" && rec.LockOwner != lockOwner && rec.LockExpiresAt.After(now) {
-		return fmt.Errorf("cannot adopt session id: leased by %s", rec.LockOwner)
-	}
-	rec.ProviderSessionID = newSessionID
-	rec.LockOwner = lockOwner
-	rec.LockExpiresAt = now.Add(sr.lockTTL)
-	rec.LastUsedAt = now
-	return nil
 }
 
 func (sr *InMemoryRegistry) Snapshot(identity agentmemory.Identity) (*Record, bool) {
@@ -600,6 +596,7 @@ func (sr *InMemoryRegistry) ResetAll(metadata ResetMetadata) (ResetSummary, erro
 		terminated.TerminationDetail = source
 		terminated.TerminatedAt = now
 		terminated.LockOwner = ""
+		terminated.GrantID = ""
 		terminated.LockExpiresAt = time.Time{}
 		terminated.SuccessorSessionID = ""
 		sr.history[key] = append(sr.history[key], &terminated)

@@ -20,6 +20,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -54,6 +55,7 @@ type completionSettlementFixture struct {
 	sessionID   string
 	agentID     string
 	leaseHolder string
+	grantID     string
 }
 
 func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
@@ -282,6 +284,16 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 				}
 				if settled.Attempt().AttemptID != handle.Attempt().AttemptID || snapshot.Phase != runtimeeffects.CompletionProjectionResponseSettled {
 					t.Fatalf("settled recovery attempt=%s phase=%s", settled.Attempt().AttemptID, snapshot.Phase)
+				}
+				if memoryPlan.plan.Enabled {
+					lease, err := store.(sessions.Registry).Acquire(ctx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := settled.BindRecoveredContinuationGrant(runtimeeffects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner}); err != nil {
+						t.Fatal(err)
+					}
+					fixture.grantID = lease.GrantID
 				}
 				projectionMessages, err := json.Marshal(messages)
 				if err != nil {
@@ -616,6 +628,13 @@ func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, f
 	if err := continuation.MarkLaunched(successorCtx); err == nil {
 		t.Fatal("completion continuation admitted a second provider launch")
 	}
+	continuationLease, err := fixture.store.(sessions.Registry).Acquire(successorCtx, settlement.AgentTurn.Identity, fixture.leaseHolder)
+	if err != nil {
+		t.Fatalf("acquire recovered continuation grant: %v", err)
+	}
+	if err := continuation.BindRecoveredContinuationGrant(runtimeeffects.SessionGrant{SessionID: continuationLease.SessionID, GrantID: continuationLease.GrantID, LockOwner: continuationLease.LockOwner}); err != nil {
+		t.Fatal(err)
+	}
 	messages := json.RawMessage(`[{"role":"user","content":"hello"},{"role":"assistant","content":"done"}]`)
 	projection := runtimeeffects.CompletionConversationProjection{
 		Payload: continuationSnapshot.Payload, SessionID: fixture.sessionID,
@@ -745,6 +764,157 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 	requireProviderHead(t, fixture.db, fixture.sqlite, fixture.sessionID, "provider-head-next")
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
 	requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
+}
+
+func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T) {
+	for _, phase := range []string{"prelaunch", "launched", "recovery"} {
+		t.Run(phase, func(t *testing.T) {
+			eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+				store := selected.selected.(completionSettlementTestStore)
+				if selected.postgres {
+					store = admitTestPostgresStore(t, selected.db)
+				}
+				fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+				ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "exact-session-grant:"+phase)
+				ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
+				var handle *runtimeeffects.Handle
+				if phase == "prelaunch" {
+					var err error
+					handle, err = beginManagedCompletionForTest(t, ctx, "claude_cli", []byte("prelaunch-grant"))
+					if err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					handle = beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "launched-grant")
+				}
+				identity := fixture.authority.Target.AgentIdentity
+				acquireCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				replacement, err := store.(sessions.Registry).Acquire(acquireCtx, identity, fixture.leaseHolder)
+				if err != nil || replacement == nil || replacement.GrantID == fixture.grantID {
+					t.Fatalf("replace admitted grant: lease=%+v err=%v", replacement, err)
+				}
+				sessionQuery := `SELECT * FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
+				revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
+				beforeSession := snapshotRotationTableRows(t, acquireCtx, selected.db, sessionQuery, identity.RunID)
+				beforeRevision := snapshotRotationTableRows(t, acquireCtx, selected.db, revisionQuery, identity.RunID)
+				if phase == "prelaunch" {
+					beforeAttempt := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID)
+					beforeCandidate := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`, identity.RunID)
+					if err := handle.MarkLaunched(ctx); err == nil {
+						t.Fatal("stale grant crossed launch boundary")
+					}
+					altered := handle.Attempt()
+					altered.SessionGrantID = replacement.GrantID
+					if err := fixture.store.MarkExternalAttemptLaunched(ctx, altered, time.Now().UTC()); err == nil {
+						t.Fatal("borrowed new grant launched old attempt")
+					}
+					requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateAuthorized)
+					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`, handle.Attempt().AttemptID); !reflect.DeepEqual(beforeAttempt, after) {
+						t.Fatalf("prelaunch refusal changed attempt: before=%v after=%v", beforeAttempt, after)
+					}
+					if after := snapshotRotationTableRows(t, acquireCtx, selected.db, `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`, identity.RunID); !reflect.DeepEqual(beforeCandidate, after) {
+						t.Fatalf("prelaunch refusal changed candidate: before=%v after=%v", beforeCandidate, after)
+					}
+				} else if phase == "launched" {
+					settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
+					settlement.ProviderHead.GrantID = replacement.GrantID
+					result, err := handle.SettleCompletion(ctx, settlement)
+					if !result.Committed || err == nil {
+						t.Fatalf("stale launched settlement result=%+v err=%v", result, err)
+					}
+					requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+					requireProviderHead(t, selected.db, !selected.postgres, fixture.sessionID, "provider-head-current")
+					requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateOutcomeUncertain, 1, 0)
+				} else {
+					now := time.Now().UTC()
+					setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, now.Add(-time.Second))
+					summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+					if err != nil {
+						t.Fatalf("recover replaced-grant attempt: summary=%+v err=%v", summary, err)
+					}
+					requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+					requireProviderHead(t, selected.db, !selected.postgres, fixture.sessionID, "provider-head-current")
+					requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
+				}
+				if after := snapshotRotationTableRows(t, acquireCtx, selected.db, sessionQuery, identity.RunID); !reflect.DeepEqual(beforeSession, after) {
+					t.Fatalf("stale attempt changed replacement session: before=%v after=%v", beforeSession, after)
+				}
+				if after := snapshotRotationTableRows(t, acquireCtx, selected.db, revisionQuery, identity.RunID); !reflect.DeepEqual(beforeRevision, after) {
+					t.Fatalf("stale attempt changed session revision: before=%v after=%v", beforeRevision, after)
+				}
+			})
+		})
+	}
+}
+
+func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		store := selected.selected.(completionSettlementTestStore)
+		if selected.postgres {
+			store = admitTestPostgresStore(t, selected.db)
+		}
+		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+		ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
+		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "original-projection-grant")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "mock_python", "original-projection-grant")
+		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "mock_python", "", "")
+		settlement.ProviderHead = nil
+		payload, messages := completionSuccessorPayload(t, "mock_python", fixture, settlement, "agent-frame:v1:"+uuid.NewString())
+		if err := runtimeeffects.AttachCompletionContinuationEvidence(settlement.Settlement.Evidence, []byte("original-projection-grant"), payload); err != nil {
+			t.Fatal(err)
+		}
+		if result, err := handle.SettleCompletion(ctx, settlement); err != nil || !result.Committed {
+			t.Fatalf("settle original response: result=%+v err=%v", result, err)
+		}
+		original, ok := handle.CompletionContinuation()
+		if !ok || original.Phase != runtimeeffects.CompletionProjectionResponseSettled {
+			t.Fatalf("original continuation=%+v present=%v", original, ok)
+		}
+		fresh, err := store.(sessions.Registry).Acquire(ctx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
+		if err != nil || fresh == nil || fresh.GrantID == fixture.grantID {
+			t.Fatalf("replace original grant: lease=%+v err=%v", fresh, err)
+		}
+		projectionMessages, err := json.Marshal(messages)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection := runtimeeffects.CompletionConversationProjection{
+			Payload: original.Payload, SessionID: fixture.sessionID, Identity: settlement.AgentTurn.Identity,
+			Memory: settlement.AgentTurn.Memory, ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages,
+		}
+		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		sessionQuery := `SELECT * FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
+		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
+		attemptQuery := `SELECT completion_projection_phase,completion_successor_turn FROM runtime_external_effect_attempts WHERE attempt_id=$1`
+		beforeSession := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID)
+		beforeRevision := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID)
+		beforeAttempt := snapshotRotationTableRows(t, readCtx, selected.db, attemptQuery, handle.Attempt().AttemptID)
+		if err := handle.ProjectCompletionConversation(ctx, projection); err == nil {
+			t.Fatal("original handle projected under a replacement grant")
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeSession, after) {
+			t.Fatalf("stale projection changed session: before=%v after=%v", beforeSession, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeRevision, after) {
+			t.Fatalf("stale projection changed revision: before=%v after=%v", beforeRevision, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, attemptQuery, handle.Attempt().AttemptID); !reflect.DeepEqual(beforeAttempt, after) {
+			t.Fatalf("stale projection changed attempt phase: before=%v after=%v", beforeAttempt, after)
+		}
+		controller := newCompletionControllerForTest(store)
+		recovered, found, err := controller.RecoverCompletionContinuation(managedExecutionStoreTestContext(t, fixture.context), fixture.sessionID, settlement.AgentTurn.Memory)
+		if err != nil || !found {
+			t.Fatalf("recover settled response: found=%v err=%v", found, err)
+		}
+		if err := recovered.BindRecoveredContinuationGrant(runtimeeffects.SessionGrant{SessionID: fresh.SessionID, GrantID: fresh.GrantID, LockOwner: fresh.LockOwner}); err != nil {
+			t.Fatal(err)
+		}
+		if err := recovered.ProjectCompletionConversation(ctx, projection); err != nil {
+			t.Fatalf("fresh recovered projection: %v", err)
+		}
+		requireCompletionProjectionState(t, fixture, handle.Attempt().AttemptID, runtimeeffects.CompletionProjectionConversationProjected, 1,
+			json.RawMessage(`[{"role":"user","content":"start"},{"role":"assistant","content":"use tool"}]`))
+	})
 }
 
 func TestCompletionProviderHeadConflictCommitsUncertaintySQLite(t *testing.T) {
@@ -1115,6 +1285,7 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	runID := uuid.NewString()
 	flowInstance := "global"
 	leaseHolder := "completion-worker"
+	grantID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(runID, agentID, flowInstance)
 	identityFields, err := identity.StorageFields()
 	if err != nil {
@@ -1137,20 +1308,20 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	if sqlite {
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if memory.Enabled {
-			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,'active',?,?)`,
+			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,?,'active',?,?)`,
 				sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 				identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
-				`{"provider_session_id":"provider-head-current"}`, leaseHolder, now.Add(10*time.Minute), now, now); err != nil {
+				`{"provider_session_id":"provider-head-current"}`, leaseHolder, grantID, now.Add(10*time.Minute), now, now); err != nil {
 				t.Fatalf("seed completion session: %v", err)
 			}
 		}
 	} else {
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if memory.Enabled {
-			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13)`,
+			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,$13,'active',$14,$14)`,
 				sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 				identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
-				`{"provider_session_id":"provider-head-current"}`, leaseHolder, now.Add(10*time.Minute), now); err != nil {
+				`{"provider_session_id":"provider-head-current"}`, leaseHolder, grantID, now.Add(10*time.Minute), now); err != nil {
 				t.Fatalf("seed completion session: %v", err)
 			}
 		}
@@ -1164,9 +1335,12 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	authority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
 	origin := claimCompletionOriginForTest(t, ctx, store, authority, now)
 	completionCtx := runtimedelivery.WithClaim(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store)), origin)
+	if memory.Enabled {
+		completionCtx = runtimeeffects.WithSessionGrant(completionCtx, runtimeeffects.SessionGrant{SessionID: sessionID, GrantID: grantID, LockOwner: leaseHolder})
+	}
 	return completionSettlementFixture{
 		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx,
-		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder,
+		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder, grantID: grantID,
 	}
 }
 
@@ -1194,6 +1368,9 @@ func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store 
 
 func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authority) context.Context {
 	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(f.store))
+	if authority.Target.Memory.Enabled {
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
+	}
 	return runtimedelivery.WithClaim(ctx, f.origin)
 }
 
@@ -1239,7 +1416,7 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 		},
 		ProviderHead: &runtimeeffects.CompletionProviderHead{
 			Identity:  testAgentMemoryIdentity(t, target.RunID, fixture.agentID, target.FlowInstance),
-			SessionID: fixture.sessionID, LockOwner: fixture.leaseHolder,
+			SessionID: fixture.sessionID, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID,
 			ExpectedProviderHead: expectedHead, NewProviderHead: newHead,
 		},
 		Now: time.Now().UTC(),

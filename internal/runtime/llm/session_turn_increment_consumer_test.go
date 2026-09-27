@@ -23,12 +23,12 @@ type turnIncrementFaultRegistry struct {
 	calls          int
 }
 
-func (r *turnIncrementFaultRegistry) IncrementTurnOutcome(ctx context.Context, identity agentmemory.Identity, sessionID string) (sessions.TurnIncrementResult, error) {
+func (r *turnIncrementFaultRegistry) IncrementTurnOutcome(ctx context.Context, lease *sessions.Lease) (sessions.TurnIncrementResult, error) {
 	r.calls++
 	if r.unacknowledged {
 		return sessions.TurnIncrementResult{}, r.fault
 	}
-	result, err := r.Registry.IncrementTurnOutcome(ctx, identity, sessionID)
+	result, err := r.Registry.IncrementTurnOutcome(ctx, lease)
 	return result, errors.Join(err, r.fault)
 }
 
@@ -42,7 +42,7 @@ func TestCompletedSessionTurnIncrementRejectsUnacknowledgedMutation(t *testing.T
 	fault := errors.New("turn increment not committed")
 	registry := &turnIncrementFaultRegistry{Registry: base, fault: fault, unacknowledged: true}
 	publisher := &eventPublisherStub{}
-	err = incrementCompletedSessionTurn(context.Background(), registry, identity, lease.SessionID, identity.AgentID(), publisher)
+	err = incrementCompletedSessionTurn(context.Background(), registry, lease, identity.AgentID(), publisher)
 	if !errors.Is(err, fault) || registry.calls != 1 || len(publisher.runtimeLogs) != 0 {
 		t.Fatalf("unacknowledged turn projected: err=%v calls=%d logs=%+v", err, registry.calls, publisher.runtimeLogs)
 	}

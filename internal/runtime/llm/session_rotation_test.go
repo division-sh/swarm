@@ -19,7 +19,7 @@ func TestPrepareManagedSessionRotatesExactCompletedRootBeforeNextFrame(t *testin
 		t.Fatal(err)
 	}
 	oldSessionID := lease.SessionID
-	if _, err := registry.IncrementTurnOutcome(ctx, identity, oldSessionID); err != nil {
+	if _, err := registry.IncrementTurnOutcome(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := registry.ReleaseOutcome(ctx, lease); err != nil {

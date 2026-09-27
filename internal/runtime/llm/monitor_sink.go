@@ -11,11 +11,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 const defaultMonitorDir = "/tmp/runtime-monitor"
 
 type MonitorTurnMeta struct {
+	Lease                    *sessions.Lease
 	AgentID                  string
 	Runtime                  string
 	SessionID                string

@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type noopMonitorWriter struct{}
@@ -27,7 +28,7 @@ type blockingWatchdogStore struct {
 	started chan struct{}
 }
 
-func (s *blockingWatchdogStore) UpsertConversation(context.Context, ConversationRecord) error {
+func (s *blockingWatchdogStore) UpsertConversation(context.Context, *sessions.Lease, ConversationRecord) error {
 	return nil
 }
 
@@ -35,7 +36,7 @@ func (s *blockingWatchdogStore) LoadActiveConversation(context.Context, string, 
 	return ConversationRecord{}, false, nil
 }
 
-func (s *blockingWatchdogStore) UpdateLiveSessionWatchdog(ctx context.Context, _ ConversationWatchdogUpdate) error {
+func (s *blockingWatchdogStore) UpdateLiveSessionWatchdog(ctx context.Context, _ *sessions.Lease, _ ConversationWatchdogUpdate) error {
 	select {
 	case s.started <- struct{}{}:
 	default:

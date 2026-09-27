@@ -10,10 +10,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
-func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) {
+func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, lease *sessions.Lease, s *Session) {
 	if r.conversations == nil || s == nil {
 		return
 	}
@@ -25,7 +26,7 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 	if !persist {
 		return
 	}
-	if err := r.conversations.UpsertConversation(ctx, record); err != nil {
+	if err := r.conversations.UpsertConversation(ctx, lease, record); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", "Persisting the CLI conversation failed", s.AgentID, s.ID, "", map[string]any{
 			"run_id":        record.Identity.RunID,
 			"flow_instance": record.Identity.FlowInstance(),

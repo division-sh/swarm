@@ -501,6 +501,7 @@ func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, attempt *muta
 		    termination_detail = $2,
 		    terminated_at = COALESCE(terminated_at, $3),
 		    lease_holder = NULL,
+		    lease_grant_id = NULL,
 		    lease_expires_at = NULL,
 		    updated_at = $3
 		WHERE run_id = ANY($1::uuid[])
@@ -541,6 +542,7 @@ func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, attempt
 		    termination_detail = ?,
 		    terminated_at = COALESCE(terminated_at, ?),
 		    lease_holder = NULL,
+		    lease_grant_id = NULL,
 		    lease_expires_at = NULL,
 		    updated_at = ?
 		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)

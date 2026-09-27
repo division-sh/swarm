@@ -23,6 +23,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -295,7 +296,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	authority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{
 		Identity: identity, AgentID: rec.AgentID,
 		RuntimeEpoch: lifecycle.RuntimeEpoch, Generation: lifecycle.Generation,
-	}, "store-test-owner", now.Add(time.Hour))
+	}, "test-owner", now.Add(time.Hour))
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: rec.RunID,
 		AgentID: rec.AgentID, AgentIdentity: identity, SessionID: rec.SessionID,
@@ -323,7 +324,24 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	if !hasOrigin {
 		origin = claimCompletionOriginEventForTest(t, fixtureCtx, store, authority, originEvent)
 	}
+	var lease *sessions.Lease
+	if plan.Enabled {
+		registry, ok := store.(sessions.Registry)
+		if !ok {
+			return fmt.Errorf("memory-enabled managed fixture requires session registry")
+		}
+		lease, err = registry.Acquire(runtimeeffects.WithDifferentOwner(fixtureCtx, runtimeeffects.OwnerBuildTestInfrastructure), identity, "test-owner")
+		if err != nil {
+			return fmt.Errorf("acquire managed fixture grant: %w", err)
+		}
+		if err := lease.ValidateFor(identity, rec.SessionID); err != nil {
+			return err
+		}
+	}
 	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(fixtureCtx, authority), newCompletionControllerForTest(store))
+	if lease != nil {
+		completionCtx = runtimeeffects.WithSessionGrant(completionCtx, runtimeeffects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner})
+	}
 	completionCtx = runtimedelivery.WithClaim(completionCtx, origin)
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, "managed-turn-fixture:"+authority.Target.ID)
 	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, adapter)

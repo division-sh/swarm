@@ -877,11 +877,12 @@ func TestPostTSourceSessionDoesNotChangeFixedEventMaterialization(t *testing.T) 
 	receiptCtx := runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	identity := agentmemory.Identity(mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"))
 	seedTestAgentRow(t, receiptCtx, db, true, identity, "active")
-	if _, _, err := pg.AcquireLiveSession(receiptCtx, identity, "fork-worker"); err != nil {
+	predecessor, _, err := pg.AcquireLiveSession(receiptCtx, identity, "fork-worker")
+	if err != nil {
 		t.Fatalf("acquire post-T source session: %v", err)
 	}
 	receiptKey := uuid.NewString()
-	receipt, err := pg.Rotate(receiptCtx, identity, "fork-worker", sessions.RotationMetadata{OperationID: receiptKey})
+	receipt, err := pg.Rotate(receiptCtx, predecessor, sessions.RotationMetadata{OperationID: receiptKey})
 	if err != nil {
 		t.Fatalf("rotate post-T source session: %v", err)
 	}

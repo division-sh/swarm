@@ -452,6 +452,9 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			if err := s.validateProviderOrigin(ctx, tx, authority, req); err != nil {
 				return err
 			}
+			if err := requireAttemptSessionGrant(ctx, tx, true, authority, req); err != nil {
+				return err
+			}
 			var err error
 			authority.LeaseExpiresAt, err = externalEffectAttemptLeasePostgres(ctx, tx, authority)
 			if err != nil {
@@ -498,6 +501,52 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 	return attempt, result.Err()
 }
 
+func requireAttemptSessionGrant(ctx context.Context, tx *sql.Tx, postgres bool, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) error {
+	if req.Kind != runtimeeffects.KindProviderTurn || authority.Target.Kind != runtimeeffects.UsageTargetAgentTurn || !authority.Target.Memory.Enabled {
+		if req.SessionGrantID != "" || req.SessionLockOwner != "" {
+			return fmt.Errorf("session grant cannot attach to a non-memory provider attempt")
+		}
+		return nil
+	}
+	if strings.TrimSpace(req.SessionGrantID) == "" || strings.TrimSpace(req.SessionLockOwner) == "" {
+		return fmt.Errorf("memory provider attempt requires its exact session grant")
+	}
+	query := `SELECT 1 FROM agent_sessions WHERE session_id=? AND run_id=? AND lease_grant_id=? AND lease_holder=? AND status='active' AND lease_expires_at>?`
+	args := []any{authority.Target.SessionID, authority.Target.RunID, req.SessionGrantID, req.SessionLockOwner, req.Now.UTC()}
+	if postgres {
+		query = `SELECT 1 FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND status='active' AND lease_expires_at>clock_timestamp() FOR UPDATE`
+		args = args[:4]
+	}
+	var one int
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("memory provider attempt session grant is no longer current")
+		}
+		return fmt.Errorf("check memory provider attempt session grant: %w", err)
+	}
+	return nil
+}
+
+func requireLaunchSessionGrant(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, now time.Time) error {
+	if attempt.Kind != runtimeeffects.KindProviderTurn || attempt.Authority.Target.Kind != runtimeeffects.UsageTargetAgentTurn || !attempt.Authority.Target.Memory.Enabled {
+		return nil
+	}
+	query := `SELECT session_grant_id, session_lock_owner FROM runtime_external_effect_attempts WHERE attempt_id=? AND operation_id=?`
+	if postgres {
+		query = `SELECT session_grant_id, session_lock_owner FROM runtime_external_effect_attempts WHERE attempt_id=$1::uuid AND operation_id=$2::uuid FOR UPDATE`
+	}
+	var storedGrant, storedOwner sql.NullString
+	if err := tx.QueryRowContext(ctx, query, attempt.AttemptID, attempt.OperationID).Scan(&storedGrant, &storedOwner); err != nil {
+		return fmt.Errorf("read original completion session grant: %w", err)
+	}
+	if !storedGrant.Valid || !storedOwner.Valid || storedGrant.String != attempt.SessionGrantID || storedOwner.String != attempt.SessionLockOwner {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_session_grant_stale", "external-effects", "launch_attempt", nil)
+	}
+	return requireAttemptSessionGrant(ctx, tx, postgres, attempt.Authority, runtimeeffects.AuthorizeRequest{
+		Kind: attempt.Kind, SessionGrantID: storedGrant.String, SessionLockOwner: storedOwner.String, Now: now,
+	})
+}
+
 func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
 	if authority.StartupProbe.Preparation != nil {
 		if err := authority.ValidatePreparedProbeRequest(req); err != nil {
@@ -519,6 +568,9 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 				return err
 			}
 			if err := s.validateProviderOrigin(txctx, tx, authority, req); err != nil {
+				return err
+			}
+			if err := requireAttemptSessionGrant(txctx, tx, false, authority, req); err != nil {
 				return err
 			}
 			var err error
@@ -1320,7 +1372,7 @@ func insertExternalRetryAttemptPostgres(ctx context.Context, tx *sql.Tx, authori
 	}
 	args := []any{attemptID, req.OperationID, ordinal, req.Adapter, req.Transport, authority.RuntimeEpoch(), authority.ExecutionMode, authority.Generation(), authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration, string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	args = append(args, completionOriginValues(req.Origin)...)
-	args = append(args, req.Now.UTC())
+	args = append(args, req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_attempts (
 			attempt_id, operation_id, attempt_ordinal, adapter, transport, runtime_epoch,
@@ -1328,10 +1380,10 @@ func insertExternalRetryAttemptPostgres(ctx context.Context, tx *sql.Tx, authori
 			usage_target_kind, usage_target_id, target_ordinal, capability_surface_id,
 				origin_kind, origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token,
 				origin_claim_version, origin_subscriber_type, origin_subscriber_id, origin_directive_operation_id, origin_directive_owner_id,
-			state, authorized_at, updated_at
+			state, authorized_at, updated_at, session_grant_id, session_lock_owner
 		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, NULLIF($6,0), $7, $8, $9, $10, $11, NULLIF($12,''), NULLIF($13,'')::uuid, NULLIF($14,0), NULLIF($15,'')::uuid,
 			          NULLIF($16,''), NULLIF($17,'')::uuid, NULLIF($18,'')::uuid, NULLIF($19,''), NULLIF($20,'')::uuid,
-			          NULLIF($21,0), NULLIF($22,''), NULLIF($23,''), NULLIF($24,'')::uuid, NULLIF($25,''), 'authorized', $26, $26)
+			          NULLIF($21,0), NULLIF($22,''), NULLIF($23,''), NULLIF($24,'')::uuid, NULLIF($25,''), 'authorized', $26, $26, NULLIF($27,''), NULLIF($28,''))
 	`, args...); err != nil {
 		return runtimeeffects.Attempt{}, false, fmt.Errorf("insert external retry attempt: %w", err)
 	}
@@ -1352,7 +1404,7 @@ func insertExternalRetryAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authori
 	}
 	args := []any{attemptID, req.OperationID, ordinal, req.Adapter, req.Transport, authority.RuntimeEpoch(), authority.ExecutionMode, authority.Generation(), authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration, string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	args = append(args, completionOriginValues(req.Origin)...)
-	args = append(args, req.Now.UTC(), req.Now.UTC())
+	args = append(args, req.Now.UTC(), req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_attempts (
 			attempt_id, operation_id, attempt_ordinal, adapter, transport, runtime_epoch,
@@ -1360,9 +1412,9 @@ func insertExternalRetryAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authori
 			usage_target_kind, usage_target_id, target_ordinal, capability_surface_id,
 				origin_kind, origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token,
 				origin_claim_version, origin_subscriber_type, origin_subscriber_id, origin_directive_operation_id, origin_directive_owner_id,
-			state, authorized_at, updated_at
+			state, authorized_at, updated_at, session_grant_id, session_lock_owner
 		) VALUES (?, ?, ?, ?, ?, NULLIF(?,0), ?, ?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''),
-			          NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'authorized', ?, ?)
+			          NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'authorized', ?, ?, NULLIF(?,''), NULLIF(?,''))
 	`, args...); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external retry attempt: %w", err)
 	}
@@ -1448,7 +1500,7 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	attemptArgs = append(attemptArgs, completionOriginValues(req.Origin)...)
-	attemptArgs = append(attemptArgs, req.Now.UTC())
+	attemptArgs = append(attemptArgs, req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
@@ -1471,11 +1523,11 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 			usage_target_kind, usage_target_id, target_ordinal, capability_surface_id,
 				origin_kind, origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token,
 				origin_claim_version, origin_subscriber_type, origin_subscriber_id, origin_directive_operation_id, origin_directive_owner_id,
-			state, authorized_at, updated_at
+			state, authorized_at, updated_at, session_grant_id, session_lock_owner
 		) VALUES ($1::uuid, $2::uuid, 1, $3, $4, NULLIF($5,0), $6, $7, $8, $9, $10,
 		          NULLIF($11,''), NULLIF($12,'')::uuid, NULLIF($13,0), NULLIF($14,'')::uuid,
 			          NULLIF($15,''), NULLIF($16,'')::uuid, NULLIF($17,'')::uuid, NULLIF($18,''), NULLIF($19,'')::uuid,
-			          NULLIF($20,0), NULLIF($21,''), NULLIF($22,''), NULLIF($23,'')::uuid, NULLIF($24,''), 'authorized', $25, $25)
+			          NULLIF($20,0), NULLIF($21,''), NULLIF($22,''), NULLIF($23,'')::uuid, NULLIF($24,''), 'authorized', $25, $25, NULLIF($26,''), NULLIF($27,''))
 	`, attemptArgs...); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert external effect attempt: %w", err)
 	}
@@ -1505,7 +1557,7 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	attemptArgs = append(attemptArgs, completionOriginValues(req.Origin)...)
-	attemptArgs = append(attemptArgs, req.Now.UTC(), req.Now.UTC())
+	attemptArgs = append(attemptArgs, req.Now.UTC(), req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
@@ -1527,9 +1579,9 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 			usage_target_kind, usage_target_id, target_ordinal, capability_surface_id,
 				origin_kind, origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token,
 				origin_claim_version, origin_subscriber_type, origin_subscriber_id, origin_directive_operation_id, origin_directive_owner_id,
-			state, authorized_at, updated_at
+			state, authorized_at, updated_at, session_grant_id, session_lock_owner
 		) VALUES (?, ?, 1, ?, ?, NULLIF(?,0), ?, ?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''),
-			          NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'authorized', ?, ?)
+			          NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'authorized', ?, ?, NULLIF(?,''), NULLIF(?,''))
 	`, attemptArgs...); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external effect attempt: %w", err)
 	}
@@ -1569,6 +1621,7 @@ func externalAuthorizedAttempt(authority runtimeeffects.Authority, req runtimeef
 		OperationID: req.OperationID, AttemptID: attemptID, Token: authority.Normal, Authority: authority,
 		Kind: req.Kind, Class: req.Class, Adapter: req.Adapter, Transport: req.Transport,
 		Ordinal: ordinal, AuthorizedAt: req.Now.UTC(), Origin: req.Origin,
+		SessionGrantID: req.SessionGrantID, SessionLockOwner: req.SessionLockOwner,
 	}
 }
 
@@ -1590,6 +1643,9 @@ func (s *EffectPostgresOwner) MarkExternalAttemptLaunched(ctx context.Context, a
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
+				return err
+			}
+			if err := requireLaunchSessionGrant(txctx, tx, true, attempt, now); err != nil {
 				return err
 			}
 			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = $2, updated_at = $2 WHERE attempt_id = $1::uuid AND operation_id = $3::uuid AND execution_owner=$4 AND fence_generation=$5 AND state = 'authorized'`, attempt.AttemptID, now.UTC(), attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
@@ -1626,6 +1682,9 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptLaunched(ctx context.Context, att
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite mark external attempt launched", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
+				return err
+			}
+			if err := requireLaunchSessionGrant(txctx, tx, false, attempt, now); err != nil {
 				return err
 			}
 			res, err := tx.ExecContext(txctx, `UPDATE runtime_external_effect_attempts SET state = 'launched', launched_at = ?, updated_at = ? WHERE attempt_id = ? AND operation_id = ? AND execution_owner=? AND fence_generation=? AND state = 'authorized'`, now.UTC(), now.UTC(), attempt.AttemptID, attempt.OperationID, attempt.Authority.ExecutionOwner, attempt.Authority.FenceGeneration)
@@ -2040,29 +2099,21 @@ func promoteProviderHeadPostgres(ctx context.Context, tx *sql.Tx, req completion
 		  AND agent_name_owner = $6 AND agent_name_source = $7
 		  AND agent_route_presence = $8 AND flow_scope_key = $9
 		  AND flow_instance_id = $10 AND flow_instance = $11
-		  AND status = 'active'
-		  AND lease_holder = $12
+			  AND status = 'active'
+			  AND lease_holder = $12
+			  AND lease_grant_id = $14
 		  AND lease_expires_at IS NOT NULL
 		  AND lease_expires_at > $2
 		  AND COALESCE(runtime_state->>'provider_session_id', '') = $13
 	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), req.Identity.RunID,
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		strings.TrimSpace(req.LockOwner), strings.TrimSpace(req.ExpectedProviderHead))
+		strings.TrimSpace(req.LockOwner), strings.TrimSpace(req.ExpectedProviderHead), strings.TrimSpace(req.GrantID))
 	if err != nil {
 		return fmt.Errorf("promote provider head: %w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows != 1 {
-		var currentHead, attemptState string
-		err := tx.QueryRowContext(ctx, `
-			SELECT COALESCE(s.runtime_state->>'provider_session_id', ''), a.state
-			FROM agent_sessions s, runtime_external_effect_attempts a
-			WHERE s.session_id=$1::uuid AND a.attempt_id=$2::uuid AND a.operation_id=$3::uuid
-		`, strings.TrimSpace(req.SessionID), req.AttemptID, req.OperationID).Scan(&currentHead, &attemptState)
-		if err == nil && currentHead == strings.TrimSpace(req.NewProviderHead) && attemptState == string(runtimeeffects.StateSettled) {
-			return nil
-		}
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_cas_conflict", "external-effects", "settle_provider_head", map[string]any{"session_id": req.SessionID, "expected_provider_head": req.ExpectedProviderHead})
 	}
 	return nil
@@ -2083,29 +2134,21 @@ func promoteProviderHeadSQLiteTx(ctx context.Context, tx *sql.Tx, req completion
 		  AND agent_name_owner = ? AND agent_name_source = ?
 		  AND agent_route_presence = ? AND flow_scope_key = ?
 		  AND flow_instance_id = ? AND flow_instance = ?
-		  AND status = 'active'
-		  AND lease_holder = ?
-		  AND lease_expires_at IS NOT NULL
+			  AND status = 'active'
+			  AND lease_holder = ?
+			  AND lease_grant_id = ?
+			  AND lease_expires_at IS NOT NULL
 		  AND lease_expires_at > ?
 		  AND COALESCE(json_extract(runtime_state, '$.provider_session_id'), '') = ?
 	`, strings.TrimSpace(req.NewProviderHead), req.Now.UTC(), strings.TrimSpace(req.SessionID), req.Identity.RunID,
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		strings.TrimSpace(req.LockOwner), req.Now.UTC(), strings.TrimSpace(req.ExpectedProviderHead))
+		strings.TrimSpace(req.LockOwner), strings.TrimSpace(req.GrantID), req.Now.UTC(), strings.TrimSpace(req.ExpectedProviderHead))
 	if err != nil {
 		return fmt.Errorf("promote sqlite provider head: %w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows != 1 {
-		var currentHead, attemptState string
-		err := tx.QueryRowContext(ctx, `
-			SELECT COALESCE(json_extract(s.runtime_state, '$.provider_session_id'), ''), a.state
-			FROM agent_sessions s, runtime_external_effect_attempts a
-			WHERE s.session_id=? AND a.attempt_id=? AND a.operation_id=?
-		`, strings.TrimSpace(req.SessionID), req.AttemptID, req.OperationID).Scan(&currentHead, &attemptState)
-		if err == nil && currentHead == strings.TrimSpace(req.NewProviderHead) && attemptState == string(runtimeeffects.StateSettled) {
-			return nil
-		}
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_head_cas_conflict", "external-effects", "settle_provider_head", map[string]any{"session_id": req.SessionID, "expected_provider_head": req.ExpectedProviderHead})
 	}
 	return nil

@@ -57,13 +57,16 @@ type resetTestRegistry struct {
 func (*resetTestRegistry) Acquire(context.Context, agentmemory.Identity, string) (*sessions.Lease, error) {
 	return nil, nil
 }
+func (*resetTestRegistry) Renew(context.Context, *sessions.Lease) (*sessions.Lease, error) {
+	return nil, nil
+}
 func (*resetTestRegistry) ReleaseOutcome(context.Context, *sessions.Lease) (sessions.ReleaseResult, error) {
 	return sessions.ReleaseResult{Acknowledged: true}, nil
 }
-func (*resetTestRegistry) Rotate(context.Context, agentmemory.Identity, string, sessions.RotationMetadata) (*sessions.Lease, error) {
+func (*resetTestRegistry) Rotate(context.Context, *sessions.Lease, sessions.RotationMetadata) (*sessions.Lease, error) {
 	return nil, nil
 }
-func (*resetTestRegistry) IncrementTurnOutcome(context.Context, agentmemory.Identity, string) (sessions.TurnIncrementResult, error) {
+func (*resetTestRegistry) IncrementTurnOutcome(context.Context, *sessions.Lease) (sessions.TurnIncrementResult, error) {
 	return sessions.TurnIncrementResult{Acknowledged: true}, nil
 }
 func (r *resetTestRegistry) ResetAll(sessions.ResetMetadata) (sessions.ResetSummary, error) {

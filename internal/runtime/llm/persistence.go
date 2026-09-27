@@ -151,8 +151,8 @@ type ConversationWatchdogUpdate struct {
 }
 
 type ConversationPersistence interface {
-	UpsertConversation(ctx context.Context, rec ConversationRecord) error
-	UpdateLiveSessionWatchdog(ctx context.Context, update ConversationWatchdogUpdate) error
+	UpsertConversation(ctx context.Context, lease *runtimesessions.Lease, rec ConversationRecord) error
+	UpdateLiveSessionWatchdog(ctx context.Context, lease *runtimesessions.Lease, update ConversationWatchdogUpdate) error
 }
 
 type LiveSessionAcquirer interface {

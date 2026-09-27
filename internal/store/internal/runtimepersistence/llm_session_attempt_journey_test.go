@@ -18,7 +18,7 @@ import (
 
 type llmSessionAttemptJourneyOwner interface {
 	AcquireLiveSession(context.Context, agentmemory.Identity, string) (*sessions.Lease, runtimellm.ConversationRecord, error)
-	Rotate(context.Context, agentmemory.Identity, string, sessions.RotationMetadata) (*sessions.Lease, error)
+	Rotate(context.Context, *sessions.Lease, sessions.RotationMetadata) (*sessions.Lease, error)
 	ReleaseOutcome(context.Context, *sessions.Lease) (sessions.ReleaseResult, error)
 }
 
@@ -110,12 +110,12 @@ func TestLLMSessionAcquireRotateReleaseAttemptJourneyBothStores(t *testing.T) {
 
 		phase = "rotate"
 		rotation := sessions.RotationMetadata{OperationID: uuid.NewString(), RetryReason: "session-attempt-journey"}
-		failedRotation, err := owner.Rotate(ctx, identity, "journey-worker", rotation)
+		failedRotation, err := owner.Rotate(ctx, acquired, rotation)
 		if failedRotation != nil || !errors.Is(err, lateFailure) || len(submissions) != 1 {
 			t.Fatalf("failed rotation leaked result or handoff: lease=%+v err=%v submissions=%d", failedRotation, err, len(submissions))
 		}
 		handoffError = postcommitFailure
-		rotated, err := owner.Rotate(ctx, identity, "journey-worker", rotation)
+		rotated, err := owner.Rotate(ctx, acquired, rotation)
 		if rotated == nil || !errors.Is(err, postcommitFailure) || rotated.RetriesFromSessionID != acquired.SessionID {
 			t.Fatalf("acknowledged rotation lost lease or cleanup error: lease=%+v err=%v", rotated, err)
 		}
@@ -124,7 +124,7 @@ func TestLLMSessionAcquireRotateReleaseAttemptJourneyBothStores(t *testing.T) {
 			t.Fatalf("rotation candidate handoffs=%d want=2", len(submissions))
 		}
 		beforeReplay := len(submissions)
-		replayed, err := owner.Rotate(ctx, identity, "journey-worker", rotation)
+		replayed, err := owner.Rotate(ctx, acquired, rotation)
 		if err != nil || replayed == nil || replayed.SessionID != rotated.SessionID ||
 			replayed.RetriesFromSessionID != rotated.RetriesFromSessionID || replayed.RetryReason != rotated.RetryReason ||
 			replayed.LockOwner != rotated.LockOwner || !replayed.ExpiresAt.Equal(rotated.ExpiresAt) ||

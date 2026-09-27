@@ -40,6 +40,8 @@ type completionRecoveryAttempt struct {
 	ExecutionOwner       string
 	FenceGeneration      int64
 	LeaseExpiresAt       time.Time
+	SessionGrantID       string
+	SessionLockOwner     string
 	AgentRunID           string
 	LineageRunID         string
 	AgentID              string
@@ -90,7 +92,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id::text,''),COALESCE(s.surface::text,''),
-		       a.execution_owner,a.fence_generation,a.lease_expires_at,
+		       a.execution_owner,a.fence_generation,a.lease_expires_at,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),
 		       COALESCE(o.agent_run_id::text,''),COALESCE(o.lineage->>'run_id',''),
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
@@ -147,7 +149,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id,''),COALESCE(s.surface,''),
-		       a.execution_owner,a.fence_generation,a.lease_expires_at,
+		       a.execution_owner,a.fence_generation,a.lease_expires_at,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),
 		       COALESCE(o.agent_run_id,''),COALESCE(json_extract(o.lineage,'$.run_id'),''),
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
@@ -217,7 +219,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 			&attempt.AuthorityEvidence, &attempt.AgentFrame, &attempt.OperationMode, &attempt.AttemptMode, &attempt.Adapter, &attempt.Transport, &attempt.State,
 			&attempt.TargetKind, &attempt.TargetID, &attempt.TargetOrdinal,
 			&attempt.CapabilitySurfaceID, &attempt.CapabilitySurface,
-			&attempt.ExecutionOwner, &attempt.FenceGeneration, &lease,
+			&attempt.ExecutionOwner, &attempt.FenceGeneration, &lease, &attempt.SessionGrantID, &attempt.SessionLockOwner,
 			&attempt.AgentRunID, &attempt.LineageRunID,
 			&attempt.AgentID, &attempt.AgentNameOwner, &attempt.AgentNameSource, &attempt.AgentRoutePresence,
 			&attempt.FlowScopeKey, &attempt.FlowInstanceID, &attempt.FlowInstance,
@@ -284,6 +286,15 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 			}
 		}
 		projectCurrent := resolution.Kind == completionSettlementCurrent
+		if projectCurrent && !prelaunch {
+			projectCurrent, err = completionSessionGrantCurrent(ctx, tx, postgres, attempt, now)
+			if err != nil {
+				return runtimeeffects.RecoverySummary{}, err
+			}
+			if !projectCurrent {
+				settlement = completionProviderHeadUncertainty(settlement, fmt.Errorf("recovered completion session grant is no longer current"))
+			}
+		}
 		if postgres {
 			if !prelaunch {
 				if err := insertCompletionTargetPostgres(ctx, tx, postgresLLM, mutation, attempt, settlement, projectCurrent); err != nil {
@@ -403,6 +414,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	attempt := runtimeeffects.Attempt{
 		OperationID: recovered.OperationID, AttemptID: recovered.AttemptID, Authority: authority,
 		Kind: runtimeeffects.KindProviderTurn, Adapter: recovered.Adapter, Transport: recovered.Transport,
+		SessionGrantID: recovered.SessionGrantID, SessionLockOwner: recovered.SessionLockOwner,
 	}
 	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
 		origin, err := decodeCompletionOrigin(recovered.OriginKind, recovered.OriginDeliveryID, recovered.OriginRunID, recovered.OriginRouteIdentity, recovered.OriginClaimToken, recovered.OriginClaimVersion, recovered.OriginSubscriber, recovered.OriginDirectiveID, recovered.OriginDirectiveOwner)

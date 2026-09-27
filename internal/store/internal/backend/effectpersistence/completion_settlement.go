@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -58,16 +59,29 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			if err := requireCompletionAttemptPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
 				return err
 			}
-			if permit.Kind == completionSettlementCurrent && attemptSettlement.ProviderHead != nil {
+			currentGrant, err := completionSessionGrantCurrent(txctx, tx, true, attempt, attemptSettlement.Now)
+			if err != nil {
+				return err
+			}
+			if permit.Kind == completionSettlementCurrent && !currentGrant {
+				outcome.providerHeadErr = fmt.Errorf("completion session grant is no longer current")
+				attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, outcome.providerHeadErr)
+			}
+			if permit.Kind == completionSettlementCurrent && currentGrant && attemptSettlement.ProviderHead != nil {
 				req := completionProviderHeadSettlement(attempt, attemptSettlement)
-				if outcome.providerHeadErr = requireProviderHeadLifecyclePostgres(txctx, tx, req); outcome.providerHeadErr == nil {
+				if req.GrantID != attempt.SessionGrantID || req.LockOwner != attempt.SessionLockOwner {
+					outcome.providerHeadErr = fmt.Errorf("completion provider head grant differs from original attempt")
+				} else {
+					outcome.providerHeadErr = requireProviderHeadLifecyclePostgres(txctx, tx, req)
+				}
+				if outcome.providerHeadErr == nil {
 					outcome.providerHeadErr = promoteProviderHeadPostgres(txctx, tx, req)
 				}
 				if outcome.providerHeadErr != nil {
 					attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, outcome.providerHeadErr)
 				}
 			}
-			if err := insertCompletionTargetPostgres(txctx, tx, s.llm, mutation, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent); err != nil {
+			if err := insertCompletionTargetPostgres(txctx, tx, s.llm, mutation, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent && currentGrant && outcome.providerHeadErr == nil); err != nil {
 				return err
 			}
 			if err := s.llm.RecordCompletionTurnAuthorActivityTx(txctx, mutation, attempt, attemptSettlement); err != nil {
@@ -166,16 +180,29 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			if err := requireCompletionAttemptSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
 				return err
 			}
-			if permit.Kind == completionSettlementCurrent && attemptSettlement.ProviderHead != nil {
+			currentGrant, err := completionSessionGrantCurrent(txctx, tx, false, attempt, attemptSettlement.Now)
+			if err != nil {
+				return err
+			}
+			if permit.Kind == completionSettlementCurrent && !currentGrant {
+				outcome.providerHeadErr = fmt.Errorf("completion session grant is no longer current")
+				attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, outcome.providerHeadErr)
+			}
+			if permit.Kind == completionSettlementCurrent && currentGrant && attemptSettlement.ProviderHead != nil {
 				req := completionProviderHeadSettlement(attempt, attemptSettlement)
-				if outcome.providerHeadErr = requireProviderHeadLifecycleSQLiteTx(txctx, tx, req); outcome.providerHeadErr == nil {
+				if req.GrantID != attempt.SessionGrantID || req.LockOwner != attempt.SessionLockOwner {
+					outcome.providerHeadErr = fmt.Errorf("completion provider head grant differs from original attempt")
+				} else {
+					outcome.providerHeadErr = requireProviderHeadLifecycleSQLiteTx(txctx, tx, req)
+				}
+				if outcome.providerHeadErr == nil {
 					outcome.providerHeadErr = promoteProviderHeadSQLiteTx(txctx, tx, req)
 				}
 				if outcome.providerHeadErr != nil {
 					attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, outcome.providerHeadErr)
 				}
 			}
-			if err := insertCompletionTargetSQLite(txctx, tx, s.llm, mutation, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent); err != nil {
+			if err := insertCompletionTargetSQLite(txctx, tx, s.llm, mutation, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent && currentGrant && outcome.providerHeadErr == nil); err != nil {
 				return err
 			}
 			if err := s.llm.RecordCompletionTurnAuthorActivityTx(txctx, mutation, attempt, attemptSettlement); err != nil {
@@ -258,12 +285,48 @@ func completionProviderHeadUncertainty(settlement runtimeeffects.CompletionSettl
 	return settlement
 }
 
+func completionSessionGrantCurrent(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, now time.Time) (bool, error) {
+	target := attempt.Authority.Target
+	if target.Kind != runtimeeffects.UsageTargetAgentTurn || !target.Memory.Enabled {
+		return true, nil
+	}
+	if strings.TrimSpace(attempt.SessionGrantID) == "" || strings.TrimSpace(attempt.SessionLockOwner) == "" {
+		return false, nil
+	}
+	query := `SELECT COALESCE(session_grant_id,''), COALESCE(session_lock_owner,'') FROM runtime_external_effect_attempts WHERE attempt_id=? AND operation_id=?`
+	if postgres {
+		query = `SELECT COALESCE(session_grant_id,''), COALESCE(session_lock_owner,'') FROM runtime_external_effect_attempts WHERE attempt_id=$1::uuid AND operation_id=$2::uuid`
+	}
+	var recordedGrant, recordedOwner string
+	if err := tx.QueryRowContext(ctx, query, attempt.AttemptID, attempt.OperationID).Scan(&recordedGrant, &recordedOwner); err != nil {
+		return false, fmt.Errorf("load completion attempt grant: %w", err)
+	}
+	if recordedGrant != attempt.SessionGrantID || recordedOwner != attempt.SessionLockOwner {
+		return false, fmt.Errorf("completion attempt grant attachment differs from durable admission")
+	}
+	query = `SELECT 1 FROM agent_sessions WHERE session_id=? AND run_id=? AND lease_grant_id=? AND lease_holder=? AND lease_expires_at>? AND status='active'`
+	args := []any{target.SessionID, target.RunID, attempt.SessionGrantID, attempt.SessionLockOwner, now.UTC()}
+	if postgres {
+		query = `SELECT 1 FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND lease_expires_at>clock_timestamp() AND status='active' FOR UPDATE`
+		args = args[:4]
+	}
+	var one int
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&one); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check exact completion session grant: %w", err)
+	}
+	return true, nil
+}
+
 type completionProviderHeadRequest struct {
 	runtimeeffects.Settlement
 	Token                runtimeeffects.LifecycleToken
 	Identity             agentmemory.Identity
 	SessionID            string
 	LockOwner            string
+	GrantID              string
 	ExpectedProviderHead string
 	NewProviderHead      string
 }
@@ -276,6 +339,7 @@ func completionProviderHeadSettlement(attempt runtimeeffects.Attempt, settlement
 		Identity:             head.Identity,
 		SessionID:            head.SessionID,
 		LockOwner:            head.LockOwner,
+		GrantID:              head.GrantID,
 		ExpectedProviderHead: head.ExpectedProviderHead,
 		NewProviderHead:      head.NewProviderHead,
 	}

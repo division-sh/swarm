@@ -209,7 +209,7 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			fixture.freeze(t)
 			ctx := runtimeeffects.WithExecutionMode(testAuthorActivitySourceArtifactContext(), runtimeeffects.ExecutionModeLive)
 			identity := testAgentMemoryIdentity(t, fixture.sourceRun, "freeze-agent", "freeze/flow")
-			lease := &runtimesessions.Lease{SessionID: uuid.NewString(), Identity: identity, LockOwner: "worker", ExpiresAt: time.Now().Add(time.Minute)}
+			lease := &runtimesessions.Lease{SessionID: uuid.NewString(), Identity: identity, LockOwner: "worker", GrantID: uuid.NewString(), ExpiresAt: time.Now().Add(time.Minute)}
 			conversation := runtimellm.ConversationRecord{
 				SessionID: lease.SessionID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Authored(true),
 				TurnCount: 1, Status: "active",
@@ -220,12 +220,12 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			}
 			var store interface {
 				Acquire(context.Context, agentmemory.Identity, string) (*runtimesessions.Lease, error)
+				Renew(context.Context, *runtimesessions.Lease) (*runtimesessions.Lease, error)
 				ReleaseOutcome(context.Context, *runtimesessions.Lease) (runtimesessions.ReleaseResult, error)
-				Rotate(context.Context, agentmemory.Identity, string, runtimesessions.RotationMetadata) (*runtimesessions.Lease, error)
-				IncrementTurnOutcome(context.Context, agentmemory.Identity, string) (runtimesessions.TurnIncrementResult, error)
-				AdoptSessionID(context.Context, agentmemory.Identity, string, string) error
-				UpsertConversation(context.Context, runtimellm.ConversationRecord) error
-				UpdateLiveSessionWatchdog(context.Context, runtimellm.ConversationWatchdogUpdate) error
+				Rotate(context.Context, *runtimesessions.Lease, runtimesessions.RotationMetadata) (*runtimesessions.Lease, error)
+				IncrementTurnOutcome(context.Context, *runtimesessions.Lease) (runtimesessions.TurnIncrementResult, error)
+				UpsertConversation(context.Context, *runtimesessions.Lease, runtimellm.ConversationRecord) error
+				UpdateLiveSessionWatchdog(context.Context, *runtimesessions.Lease, runtimellm.ConversationWatchdogUpdate) error
 				LoadActiveConversation(context.Context, agentmemory.Identity) (runtimellm.ConversationRecord, bool, error)
 			}
 			if fixture.postgres != nil {
@@ -238,14 +238,15 @@ func TestForkedSourceSessionTurnAndConversationConsumersRefuse(t *testing.T) {
 			}
 			_, releaseErr := store.ReleaseOutcome(ctx, lease)
 			requireForkedSourceRefusal(t, "session release", releaseErr)
-			if _, err := store.Rotate(ctx, identity, "worker", runtimesessions.RotationMetadata{OperationID: uuid.NewString()}); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
+			if _, err := store.Rotate(ctx, lease, runtimesessions.RotationMetadata{OperationID: uuid.NewString()}); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
 				t.Fatalf("session rotate error = %v", err)
 			}
-			_, incrementErr := store.IncrementTurnOutcome(ctx, identity, lease.SessionID)
+			_, incrementErr := store.IncrementTurnOutcome(ctx, lease)
 			requireForkedSourceRefusal(t, "session turn", incrementErr)
-			requireForkedSourceRefusal(t, "session adopt", store.AdoptSessionID(ctx, identity, "worker", uuid.NewString()))
-			requireForkedSourceRefusal(t, "conversation upsert", store.UpsertConversation(ctx, conversation))
-			requireForkedSourceRefusal(t, "watchdog update", store.UpdateLiveSessionWatchdog(ctx, watchdog))
+			_, renewErr := store.Renew(ctx, lease)
+			requireForkedSourceRefusal(t, "session renew", renewErr)
+			requireForkedSourceRefusal(t, "conversation upsert", store.UpsertConversation(ctx, lease, conversation))
+			requireForkedSourceRefusal(t, "watchdog update", store.UpdateLiveSessionWatchdog(ctx, lease, watchdog))
 			if _, found, err := store.LoadActiveConversation(ctx, identity); err != nil || found {
 				t.Fatalf("active conversation selector = found:%v err:%v", found, err)
 			}

@@ -464,6 +464,7 @@ func beginProviderRecoveryPostureMatrix(t *testing.T, fixture completionSettleme
 		ctx = runtimedelivery.WithClaim(ctx, origin)
 		ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "posture-provider:"+string(mode)+":"+tc.name+":"+uuid.NewString())
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: fixture.sessionID, GrantID: fixture.grantID, LockOwner: fixture.leaseHolder})
 		ctx = withManagedCompletionTestSurface(t, ctx, authority, adapter)
 		handle, err := beginManagedCompletionForTest(t, ctx, adapter, []byte(tc.name))
 		if err != nil {

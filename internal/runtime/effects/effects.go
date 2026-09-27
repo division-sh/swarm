@@ -242,6 +242,8 @@ func RegistrationFor(adapter string) (Registration, bool) {
 }
 
 type AuthorizeRequest struct {
+	SessionGrantID     string
+	SessionLockOwner   string
 	OperationID        string
 	AttemptID          string
 	Kind               Kind
@@ -257,8 +259,10 @@ type AuthorizeRequest struct {
 }
 
 type Attempt struct {
-	OperationID string
-	AttemptID   string
+	SessionGrantID   string
+	SessionLockOwner string
+	OperationID      string
+	AttemptID        string
 	// AuthorizationAcknowledged is set only after the authorization commit is acknowledged.
 	AuthorizationAcknowledged bool `json:"-"`
 	Token                     LifecycleToken
@@ -275,6 +279,25 @@ type Attempt struct {
 	completionSurface         *managedcapabilities.Surface
 	completionPhase           CompletionProjectionPhase
 	completionSuccessor       *agentframe.ToolContinuation
+}
+
+// SessionGrant is the immutable provider-attempt attachment to one session acquisition.
+// It is not a replacement for the session registry's live authority check.
+type SessionGrant struct {
+	SessionID string
+	GrantID   string
+	LockOwner string
+}
+
+type sessionGrantContextKey struct{}
+
+func WithSessionGrant(ctx context.Context, grant SessionGrant) context.Context {
+	return context.WithValue(ctx, sessionGrantContextKey{}, grant)
+}
+
+func sessionGrantFromContext(ctx context.Context) SessionGrant {
+	grant, _ := ctx.Value(sessionGrantContextKey{}).(SessionGrant)
+	return grant
 }
 
 type CompletionProjectionPhase string
@@ -464,6 +487,9 @@ type CompletionContinuationRequest struct {
 }
 
 type CompletionConversationProjection struct {
+	GrantID           string
+	LockOwner         string
+	Recovered         bool
 	Payload           json.RawMessage
 	SessionID         string
 	Identity          agentmemory.Identity
@@ -603,7 +629,7 @@ func (c *Controller) RecoverCompletionContinuation(ctx context.Context, sessionI
 	if err != nil || !found {
 		return nil, found, err
 	}
-	return &Handle{controller: c, attempt: attempt}, true, nil
+	return &Handle{controller: c, attempt: attempt, recovered: true}, true, nil
 }
 
 func (c *Controller) ExecutionPosture() executionposture.Posture {
@@ -654,9 +680,20 @@ func Fingerprint(raw []byte) string {
 }
 
 type Handle struct {
-	controller     *Controller
-	attempt        Attempt
-	differentOwner DifferentOwner
+	controller        *Controller
+	attempt           Attempt
+	differentOwner    DifferentOwner
+	recovered         bool
+	continuationGrant SessionGrant
+}
+
+func (h *Handle) BindRecoveredContinuationGrant(grant SessionGrant) error {
+	if h == nil || !h.recovered || strings.TrimSpace(grant.GrantID) == "" || strings.TrimSpace(grant.LockOwner) == "" ||
+		grant.SessionID != h.attempt.Authority.Target.SessionID {
+		return fmt.Errorf("recovered continuation requires a fresh exact session grant")
+	}
+	h.continuationGrant = grant
+	return nil
 }
 
 type MutationPhase uint8
@@ -992,6 +1029,7 @@ func beginCompletion(ctx context.Context, adapter string, request []byte, frame 
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
 		CapabilitySurface: capabilitySurface, AgentFrame: frame, Origin: origin, Lineage: lineage,
+		SessionGrantID: sessionGrantFromContext(ctx).GrantID, SessionLockOwner: sessionGrantFromContext(ctx).LockOwner,
 	})
 	return authorizedHandle(controller, attempt, err)
 }
@@ -1226,6 +1264,14 @@ func (h *Handle) ProjectCompletionConversation(ctx context.Context, projection C
 	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "project_completion", nil)
 	}
+	if h.recovered {
+		projection.Recovered = true
+		projection.GrantID = h.continuationGrant.GrantID
+		projection.LockOwner = h.continuationGrant.LockOwner
+	} else {
+		projection.GrantID = h.attempt.SessionGrantID
+		projection.LockOwner = h.attempt.SessionLockOwner
+	}
 	return reportPostCommitMutation(h.controller.completionContinuationStore.ProjectCompletionConversation(context.WithoutCancel(ctx), h.attempt, projection))
 }
 
@@ -1307,6 +1353,15 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 			return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
 		}
 		if authority.Target.Kind == UsageTargetAgentTurn {
+			if authority.Target.Memory.Enabled {
+				grant := sessionGrantFromContext(ctx)
+				if strings.TrimSpace(req.SessionGrantID) == "" || strings.TrimSpace(req.SessionLockOwner) == "" ||
+					grant.SessionID != authority.Target.SessionID || grant.GrantID != req.SessionGrantID || grant.LockOwner != req.SessionLockOwner {
+					return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_session_grant_missing", "external-effects", "authorize_attempt", nil)
+				}
+			} else if req.SessionGrantID != "" || req.SessionLockOwner != "" {
+				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_stateless_grant_rejected", "external-effects", "authorize_attempt", nil)
+			}
 			if req.CapabilitySurface == nil {
 				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 			}

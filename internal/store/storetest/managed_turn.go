@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type ManagedAgentTurnFixtureStore interface {
@@ -151,12 +152,32 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	}
 	controller := runtimeeffects.NewCompletionController(fixture.Store, fixture.Store, fixture.Store, managedTurnFixtureSpendProjector{}).WithExecutionPosture(posture)
 	executionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), controller)
+	executionCtx = runtimeeffects.WithLifecycleToken(executionCtx, authority.Normal)
 	executionCtx = runtimeeffects.WithExecutionMode(executionCtx, mode)
 	executionCtx = runtimeeffects.WithLogicalOperationIdentity(executionCtx, "storetest-managed-turn:"+fixture.TurnID)
 	executionCtx = runtimedelivery.WithClaim(executionCtx, claimed.Claim)
 	executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, fixture.Event)
 	executionCtx = managedexecution.WithAdmission(executionCtx, admission)
 	executionCtx = managedcapabilities.WithContext(executionCtx, surface)
+	if memory.Enabled {
+		registry, ok := fixture.Selected.(sessions.Registry)
+		if !ok {
+			t.Fatal("managed turn fixture selected store has no session registry")
+		}
+		lease, err := registry.Acquire(executionCtx, agentmemory.Identity(identity), authority.ExecutionOwner)
+		if err != nil {
+			t.Fatalf("acquire managed turn fixture session: %v", err)
+		}
+		if lease.SessionID != fixture.SessionID {
+			t.Fatalf("managed turn fixture acquired session %s, want %s", lease.SessionID, fixture.SessionID)
+		}
+		defer func() {
+			if result, err := registry.ReleaseOutcome(executionCtx, lease); err != nil || !result.Acknowledged {
+				t.Errorf("release managed turn fixture session: acknowledged=%v err=%v", result.Acknowledged, err)
+			}
+		}()
+		executionCtx = runtimeeffects.WithSessionGrant(executionCtx, runtimeeffects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner})
+	}
 	handle, err := runtimeeffects.BeginManagedCompletion(executionCtx, adapter, []byte(`{"fixture":"managed-turn"}`), frame, nil)
 	if err != nil {
 		t.Fatalf("authorize managed turn fixture: %v", err)

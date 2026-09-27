@@ -196,7 +196,7 @@ func (w *sessionWatchdogMonitorWriter) emit(state, action, outcome string, lastO
 	if !lastOutputAt.IsZero() {
 		payload.LastOutputAt = lastOutputAt.UTC().Format(time.RFC3339Nano)
 	}
-	if err := w.store.UpdateLiveSessionWatchdog(w.ctx, ConversationWatchdogUpdate{
+	if err := w.store.UpdateLiveSessionWatchdog(w.ctx, w.meta.Lease, ConversationWatchdogUpdate{
 		SessionID: strings.TrimSpace(w.meta.SessionID),
 		AgentID:   strings.TrimSpace(w.meta.AgentID),
 		Identity:  w.meta.MemoryIdentity.Normalize(),

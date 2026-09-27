@@ -146,7 +146,7 @@ func ClaudeCLIProviderContract() ProviderContract {
 	}
 }
 
-func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
+func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, lease *sessions.Lease, s *Session) error {
 	if r.conversations == nil || s == nil {
 		return nil
 	}
@@ -154,7 +154,7 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 	if err != nil || !persist {
 		return err
 	}
-	return r.conversations.UpsertConversation(ctx, record)
+	return r.conversations.UpsertConversation(ctx, lease, record)
 }
 
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
@@ -221,7 +221,7 @@ func (r *ClaudeCLIRuntime) ContinueManagedSession(ctx context.Context, s *Sessio
 }
 
 func (r *ClaudeCLIRuntime) recoverManagedCompletionContinuation(ctx context.Context, session *Session) (*Response, bool, error) {
-	return recoverCompletionContinuation(ctx, r.completionController, session, claudeCLICompletionAdapter)
+	return recoverCompletionContinuation(ctx, r.completionController, r.sessions, r.lockOwner, session, claudeCLICompletionAdapter)
 }
 
 func (r *ClaudeCLIRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
@@ -252,7 +252,11 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}
 	if resolved.Enabled() {
 		defer func() { retErr = releaseCompletedSessionLease(ctx, r.sessions, lease, s.AgentID, r.events, retErr) }()
+		var cancelLease context.CancelFunc
+		ctx, cancelLease = context.WithCancel(ctx)
+		defer cancelLease()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, func(heartbeatErr error) {
+			cancelLease()
 			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the CLI session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
 				"run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
 			}, heartbeatErr)
@@ -298,7 +302,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_provider_head_missing", "claude-cli-adapter", "continue_session", map[string]any{"session_id": s.ID})
 	}
 	transportFallback := promptTransportFallback{}
-	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, entityID)
+	ctx, completionTargetID, err := prepareCompletionContext(ctx, r.completionController, r.cfg, s, lease, entityID)
 	if err != nil {
 		return nil, err
 	}
@@ -381,6 +385,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	start := time.Now()
 	longRunningAfter, noOutputAfter := conversationWatchdogThresholds(r.effectiveCLITimeout(ctx))
 	monitorMeta := MonitorTurnMeta{
+		Lease:                    lease,
 		AgentID:                  s.AgentID,
 		Runtime:                  "cli_test",
 		SessionID:                s.ID,
@@ -433,7 +438,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			s.ParseFailures++
 		}
 		if projectionErr == nil && resolved.Enabled() {
-			rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events)
+			rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, r.sessions, lease, r.cfg.LLM.Session.RotateOnParseFailures, r.events)
 			if rotated != nil {
 				lease = rotated
 			}
@@ -527,7 +532,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_session_lease_missing", "claude-cli-adapter", "settle_provider_head", nil)
 		}
 		settled, err = settleCompletionTurnWithProviderHead(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence, &runtimeeffects.CompletionProviderHead{
-			Identity: resolved.Identity, SessionID: s.ID, LockOwner: lease.LockOwner,
+			Identity: resolved.Identity, SessionID: s.ID, LockOwner: lease.LockOwner, GrantID: lease.GrantID,
 			ExpectedProviderHead: confirmedHead, NewProviderHead: childSessionID,
 		})
 	}
@@ -549,14 +554,14 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}
 	if !projected {
 		if resolved.Enabled() {
-			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, resolved.Identity, s.ID, s.AgentID, r.events); err != nil {
+			if err := incrementCompletedSessionTurn(handoffCtx, r.sessions, lease, s.AgentID, r.events); err != nil {
 				return nil, errors.Join(settlementErr, err)
 			}
 		}
 		s.Messages = append(s.Messages, message, resp.Message)
 		s.TurnCount++
 		s.ParseFailures = 0
-		r.persistConversation(handoffCtx, s)
+		r.persistConversation(handoffCtx, lease, s)
 	}
 
 	return resp, errors.Join(settlementErr, err)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -130,9 +131,12 @@ func (s *LLMPostgresOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, att
 	})
 }
 
-func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
+func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, lease *runtimesessions.Lease, rec runtimellm.ConversationRecord) error {
 	plan, identity, err := validateConversationMemory(rec)
 	if err != nil {
+		return err
+	}
+	if err := lease.ValidateFor(identity, rec.SessionID); err != nil {
 		return err
 	}
 	if err := s.requireCurrentSchema(); err != nil {
@@ -162,10 +166,11 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 			  AND agent_name_owner=$7 AND agent_name_source=$8 AND agent_route_presence=$9
 			  AND flow_scope_key=$10 AND flow_instance_id=$11 AND flow_instance=$12
 			  AND memory_enabled=$13 AND memory_source=$14 AND status='active'
+			  AND lease_holder=$15 AND lease_grant_id=$16 AND lease_expires_at>clock_timestamp()
 			RETURNING session_id::text, run_id::text
 		`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
 				fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source)).Scan(&storedSessionID, &storedRunID)
+				fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), lease.LockOwner, lease.GrantID).Scan(&storedSessionID, &storedRunID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), rec.SessionID)
 			}
@@ -295,8 +300,11 @@ func (s *LLMPostgresOwner) LoadActiveConversation(ctx context.Context, identity 
 	return rec, err == nil, err
 }
 
-func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update runtimellm.ConversationWatchdogUpdate) error {
+func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, lease *runtimesessions.Lease, update runtimellm.ConversationWatchdogUpdate) error {
 	identity := update.Identity.Normalize()
+	if err := lease.ValidateFor(identity, update.SessionID); err != nil {
+		return err
+	}
 	if err := identity.Validate(); err != nil {
 		return err
 	}
@@ -329,9 +337,10 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 			  AND agent_name_owner=$5 AND agent_name_source=$6 AND agent_route_presence=$7
 			  AND flow_scope_key=$8 AND flow_instance_id=$9 AND flow_instance=$10
 			  AND memory_enabled=TRUE AND status='active'
+			  AND lease_holder=$11 AND lease_grant_id=$12 AND lease_expires_at>clock_timestamp()
 			RETURNING session_id::text, run_id::text
 		`, patch, update.SessionID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-				fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&storedSessionID, &storedRunID)
+				fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, lease.LockOwner, lease.GrantID).Scan(&storedSessionID, &storedRunID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("no exact active memory row found for watchdog update")
 			}

@@ -1672,13 +1672,14 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if _, err := store.Acquire(ctx, identity, "owner-2"); !errors.Is(err, runtimesessions.ErrSessionLeased) {
 		t.Fatalf("competing Acquire error = %v, want ErrSessionLeased", err)
 	}
-	if err := store.AdoptSessionID(ctx, identity, "owner-1", "provider-session-1"); err != nil {
-		t.Fatalf("AdoptSessionID: %v", err)
+	renewed, err := store.Renew(ctx, lease)
+	if err != nil || renewed.GrantID != lease.GrantID {
+		t.Fatalf("Renew exact grant: lease=%+v err=%v", renewed, err)
 	}
-	if _, err := store.IncrementTurnOutcome(ctx, identity, lease.SessionID); err != nil {
+	if _, err := store.IncrementTurnOutcome(ctx, lease); err != nil {
 		t.Fatalf("IncrementTurn: %v", err)
 	}
-	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	if err := store.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{
 		SessionID: lease.SessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,
@@ -1969,7 +1970,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	if err != nil {
 		t.Fatalf("Acquire session: %v", err)
 	}
-	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	if err := store.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{
 		SessionID: lease.SessionID,
 		AgentID:   identity.AgentID(),
 		Identity:  identity,

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type ProviderTransport string
@@ -81,7 +82,7 @@ type ProviderContractProvider interface {
 }
 
 type ConversationSnapshotPersister interface {
-	PersistConversationSnapshot(ctx context.Context, s *Session) error
+	PersistConversationSnapshot(ctx context.Context, lease *sessions.Lease, s *Session) error
 }
 
 func ProviderContractForRuntime(runtime Runtime) (ProviderContract, bool) {
@@ -226,7 +227,7 @@ func StartupVisibleToolSurfaceProberForRuntime(runtime Runtime) (StartupVisibleT
 	return prober, ok && prober != nil
 }
 
-func PersistConversationSnapshotForRuntime(ctx context.Context, runtime Runtime, session *Session) error {
+func PersistConversationSnapshotForRuntime(ctx context.Context, runtime Runtime, lease *sessions.Lease, session *Session) error {
 	if session == nil {
 		return nil
 	}
@@ -238,5 +239,5 @@ func PersistConversationSnapshotForRuntime(ctx context.Context, runtime Runtime,
 	if !ok || persister == nil {
 		return fmt.Errorf("llm runtime %T declares conversation snapshot persistence but does not implement it", runtime)
 	}
-	return persister.PersistConversationSnapshot(ctx, session)
+	return persister.PersistConversationSnapshot(ctx, lease, session)
 }
