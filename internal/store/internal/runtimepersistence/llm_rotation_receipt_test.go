@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -30,7 +31,8 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "managed-agent", "support/instance-1"))
 		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, identity, "active")
 		token := runtimeeffects.LifecycleToken{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 1, Generation: 1}
-		ctx, cancel := context.WithTimeout(runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), token), 20*time.Second)
+		base := agentmemory.WithExecution(runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), token), agentmemory.Authored(true), identity)
+		ctx, cancel := context.WithTimeout(base, 20*time.Second)
 		defer cancel()
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		registry := selected.selected.(sessions.Registry)
@@ -40,10 +42,11 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		}
 		session := &runtimellm.Session{ID: acquired.SessionID, AgentID: identity.AgentID(), Memory: agentmemory.Authored(true), MemoryIdentity: identity,
 			TurnCount: 1, Messages: []runtimellm.Message{{Role: "assistant", Content: "first turn"}}}
-		rotated, err := runtimellm.MaybeRotateAfterTurn(ctx, session, registry, "managed-worker", 1, nil)
-		if err != nil || rotated == nil || rotated.SessionID == acquired.SessionID || session.ID != rotated.SessionID {
-			t.Fatalf("managed turn rotation=%+v session=%+v err=%v", rotated, session, err)
+		adapter := runtimellm.NewMockRuntime(&config.Config{LLM: config.LLMConfig{Session: config.LLMSessionConfig{RotateAfterTurns: 1}}}, registry, "managed-worker", nil, nil, nil)
+		if err := adapter.PrepareManagedSession(ctx, session); err != nil || session.ID == acquired.SessionID {
+			t.Fatalf("managed adapter turn rotation: session=%+v err=%v", session, err)
 		}
+		rotatedID := session.ID
 		var reason string
 		if err := selected.db.QueryRowContext(ctx, `SELECT termination_reason FROM agent_sessions WHERE session_id=$1`, acquired.SessionID).Scan(&reason); err != nil || reason != "normal" {
 			t.Fatalf("turn-limit reason=%q err=%v", reason, err)
@@ -61,10 +64,10 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		}
 		session.ParseFailures = 1
 		second, err := runtimellm.MaybeRotateAfterParseFailures(ctx, session, registry, "managed-worker", 1, nil)
-		if err != nil || second == nil || second.SessionID == rotated.SessionID {
+		if err != nil || second == nil || second.SessionID == rotatedID {
 			t.Fatalf("managed parse-failure rotation=%+v err=%v", second, err)
 		}
-		if err := selected.db.QueryRowContext(ctx, `SELECT termination_reason FROM agent_sessions WHERE session_id=$1`, rotated.SessionID).Scan(&reason); err != nil || reason != "failed" {
+		if err := selected.db.QueryRowContext(ctx, `SELECT termination_reason FROM agent_sessions WHERE session_id=$1`, rotatedID).Scan(&reason); err != nil || reason != "failed" {
 			t.Fatalf("parse-failure reason=%q err=%v", reason, err)
 		}
 		if _, err := selected.db.ExecContext(ctx, `UPDATE runs SET status='completed', completion_due_at=NULL, ended_at=$2 WHERE run_id=$1`, fixture.runID, time.Now().UTC()); err != nil {
@@ -205,6 +208,15 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
 		if rows, _ := rotationCounts(t, ctx, selected.db, fixture.runID); rows != beforeRows {
 			t.Fatalf("stale replay created row: %d want=%d", rows, beforeRows)
+		}
+		otherLease, _, err := owner.AcquireLiveSession(ctx, identity, "other-worker")
+		if err != nil || otherLease == nil {
+			t.Fatalf("other-owner acquire=%+v err=%v", otherLease, err)
+		}
+		_, err = reopened.Rotate(ctx, identity, "receipt-worker", request)
+		requireSelectedRotationRefusal(t, err, sessions.RotationSuccessorNotCurrent)
+		if released, err := owner.ReleaseOutcome(ctx, otherLease); err != nil || !released.Acknowledged {
+			t.Fatalf("other-owner release=%+v err=%v", released, err)
 		}
 		if _, _, err := owner.AcquireLiveSession(ctx, identity, "receipt-worker"); err != nil {
 			t.Fatal(err)
