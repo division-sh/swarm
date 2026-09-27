@@ -190,10 +190,15 @@ tools:
     output_schema:
       type: object
       additionalProperties: false
+      required: [accepted]
+      properties:
+        accepted: {type: boolean}
     response_success:
       kind: json_field_equals
       path: response.body.ok
       equals: true
+    response_mapping:
+      accepted: "{{response.body.result}}"
     http:
       method: POST
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/setMyCommands
