@@ -681,6 +681,44 @@ func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Co
 	return descriptors, nil
 }
 
+func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	templates := make(map[string]struct{}, len(templateIDs))
+	paths := make(map[string]struct{}, len(instancePaths))
+	for _, templateID := range templateIDs {
+		templates[templateID] = struct{}{}
+	}
+	for _, path := range instancePaths {
+		paths[path] = struct{}{}
+	}
+	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	var selected []runtimebus.ActiveFlowInstanceDescriptor
+	for _, descriptor := range descriptors {
+		_, templateMatch := templates[descriptor.FlowTemplate]
+		_, pathMatch := paths[descriptor.FlowInstance]
+		if descriptor.RunID == runID && (templateMatch || pathMatch) {
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected, nil
+}
+
+func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	var selected []runtimebus.ActiveFlowInstanceDescriptor
+	for _, descriptor := range descriptors {
+		if descriptor.RunID == runID && descriptor.FlowTemplate == templateID && descriptor.AddressFields[keyField] == keyValue {
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected, nil
+}
+
 func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.activeAgents...), nil
 }

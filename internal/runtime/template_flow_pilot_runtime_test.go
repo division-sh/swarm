@@ -243,6 +243,44 @@ func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptors(context
 	return descriptors, nil
 }
 
+func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptorsForScope(ctx context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	selectedTemplates := make(map[string]struct{}, len(templateIDs))
+	selectedPaths := make(map[string]struct{}, len(instancePaths))
+	for _, templateID := range templateIDs {
+		selectedTemplates[templateID] = struct{}{}
+	}
+	for _, path := range instancePaths {
+		selectedPaths[path] = struct{}{}
+	}
+	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	var selected []runtimebus.ActiveFlowInstanceDescriptor
+	for _, descriptor := range descriptors {
+		_, templateMatch := selectedTemplates[descriptor.FlowTemplate]
+		_, pathMatch := selectedPaths[descriptor.FlowInstance]
+		if descriptor.RunID == runID && (templateMatch || pathMatch) {
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected, nil
+}
+
+func (s *templateFlowPilotMemoryStore) ListActiveFlowInstanceDescriptorsForKey(ctx context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	descriptors, err := s.ListActiveFlowInstanceDescriptors(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	var selected []runtimebus.ActiveFlowInstanceDescriptor
+	for _, descriptor := range descriptors {
+		if descriptor.RunID == runID && descriptor.FlowTemplate == templateID && descriptor.AddressFields[keyField] == keyValue {
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected, nil
+}
+
 func (s *templateFlowPilotMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
 	if s.deliveryRoutes == nil {
 		s.deliveryRoutes = map[string][]events.DeliveryRoute{}

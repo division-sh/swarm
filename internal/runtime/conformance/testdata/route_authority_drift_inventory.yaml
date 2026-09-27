@@ -773,7 +773,9 @@ seam_families:
     paths:
       - platform-spec.yaml
       - internal/runtime/core/pinrouting/connect_route_plan.go
+      - internal/runtime/core/pinrouting/connect_scoped_candidates_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/connect_candidate_scope_test.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/routing_derivation.go
@@ -818,6 +820,7 @@ seam_families:
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/delivery_planner_test.go
       - internal/runtime/bus/eventbus.go
+      - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/active_target_descriptor_dedup_test.go
       - internal/runtime/bus/eventbus_flow_instance_descriptors_test.go
       - internal/runtime/bus/eventbus_publish_test.go
@@ -843,6 +846,7 @@ seam_families:
       - internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go
       - internal/store/internal/runtimepersistence/flow_instance_descriptors_sqlite_test.go
       - internal/store/internal/runtimepersistence/flow_instance_routes_test.go
+      - internal/store/internal/backend/pipelinepersistence/flow_instance_routes.go
     search_dimensions: [descriptor_evidence, connect_route_plan]
     invalid_authority:
       - active-agent descriptor lookup

@@ -331,6 +331,15 @@ func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context, st
 	}}, nil
 }
 
+func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
+	for _, path := range instancePaths {
+		if path == templatefanin.ReceiverFlowInstance {
+			return s.ListSelectedRunTargetOwners(ctx, runID)
+		}
+	}
+	return nil, nil
+}
+
 func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
 	return runtimebustest.CommitPublish(ctx, command, func(_ context.Context, admitted events.AdmittedEvent) (bus.EventAppendOutcome, error) {
 		if original, exists := s.events[admitted.ID()]; exists {

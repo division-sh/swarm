@@ -1161,8 +1161,30 @@ func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Contex
 	return nil, nil
 }
 
+func (s *replyConformanceStore) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func (s *replyConformanceStore) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
 func (s *replyConformanceStore) ListSelectedRunTargetOwners(context.Context, string) ([]bus.ActiveTargetDescriptor, error) {
 	return replyConformanceTargetOwners(), nil
+}
+
+func (s *replyConformanceStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
+	selected := make(map[string]struct{}, len(instancePaths))
+	for _, path := range instancePaths {
+		selected[path] = struct{}{}
+	}
+	var owners []bus.ActiveTargetDescriptor
+	for _, owner := range replyConformanceTargetOwners() {
+		if _, ok := selected[owner.FlowInstance]; ok {
+			owners = append(owners, owner)
+		}
+	}
+	return owners, nil
 }
 
 func replyConformanceTargetOwners() []bus.ActiveTargetDescriptor {
