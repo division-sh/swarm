@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -401,8 +402,30 @@ func (s *routePersistenceTestStore) ListSelectedRunTargetOwners(context.Context,
 	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
+func (s *routePersistenceTestStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, instancePaths []string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	var selected []runtimebus.ActiveTargetDescriptor
+	for _, owner := range s.targetOwners {
+		if slices.Contains(instancePaths, owner.FlowInstance) {
+			selected = append(selected, owner)
+		}
+	}
+	return selected, nil
+}
+
 func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(_ context.Context, runID string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), nil
+}
+
+func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, runID string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return scalarTemplateScopedDescriptors(
+		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), templateIDs, instancePaths,
+	), nil
+}
+
+func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, runID, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return scalarTemplateKeyedDescriptors(
+		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), templateID, keyField, keyValue,
+	), nil
 }
 
 func (s *routePersistenceTestStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {

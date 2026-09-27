@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -39,6 +41,22 @@ func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(
 	return slices.Clone(s.descriptors), nil
 }
 
+func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, _ string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	s.descriptorCalls++
+	if s.descriptorErr != nil {
+		return nil, s.descriptorErr
+	}
+	return scalarTemplateScopedDescriptors(s.descriptors, templateIDs, instancePaths), nil
+}
+
+func (s *postgresScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, _ string, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	s.descriptorCalls++
+	if s.descriptorErr != nil {
+		return nil, s.descriptorErr
+	}
+	return scalarTemplateKeyedDescriptors(s.descriptors, templateID, keyField, keyValue), nil
+}
+
 type sqliteScalarTemplateInstanceStore struct {
 	*store.SQLiteRuntimeStore
 	descriptors     []runtimebus.ActiveFlowInstanceDescriptor
@@ -52,6 +70,47 @@ func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptors(co
 		return nil, s.descriptorErr
 	}
 	return slices.Clone(s.descriptors), nil
+}
+
+func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, _ string, templateIDs, instancePaths []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	s.descriptorCalls++
+	if s.descriptorErr != nil {
+		return nil, s.descriptorErr
+	}
+	return scalarTemplateScopedDescriptors(s.descriptors, templateIDs, instancePaths), nil
+}
+
+func (s *sqliteScalarTemplateInstanceStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, _ string, templateID, keyField, keyValue string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	s.descriptorCalls++
+	if s.descriptorErr != nil {
+		return nil, s.descriptorErr
+	}
+	return scalarTemplateKeyedDescriptors(s.descriptors, templateID, keyField, keyValue), nil
+}
+
+func scalarTemplateScopedDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor, templateIDs, instancePaths []string) []runtimebus.ActiveFlowInstanceDescriptor {
+	var selected []runtimebus.ActiveFlowInstanceDescriptor
+	for _, descriptor := range descriptors {
+		if slices.Contains(templateIDs, descriptor.FlowTemplate) || slices.Contains(instancePaths, descriptor.FlowInstance) {
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected
+}
+
+func scalarTemplateKeyedDescriptors(descriptors []runtimebus.ActiveFlowInstanceDescriptor, templateID, keyField, keyValue string) []runtimebus.ActiveFlowInstanceDescriptor {
+	field, err := runtimecontracts.ParseTemplateInstanceField(strings.TrimPrefix(keyField, "entity."))
+	if err != nil || keyField != "entity."+field.Path() {
+		return nil
+	}
+	key := []runtimecontracts.TemplateInstanceKeyValue{{Field: field, Value: keyValue}}
+	var selected []runtimebus.ActiveFlowInstanceDescriptor
+	for _, descriptor := range descriptors {
+		if descriptor.FlowTemplate == templateID && runtimepinrouting.ConnectInstanceKeyDescriptorMatches(key, runtimepinrouting.Descriptor{AddressFields: descriptor.AddressFields}) {
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected
 }
 
 type scalarTemplateInstanceParityStore interface {
@@ -121,6 +180,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				InstanceID:      "one",
 				EntityID:        entityID,
 				FlowInstance:    "account/one",
+				FlowTemplate:    "account",
 				BundleHash:      sourceBundleHash,
 				WorkflowVersion: source.WorkflowVersion(),
 				AddressFields:   map[string]string{"entity.account_id": "acct-1"},

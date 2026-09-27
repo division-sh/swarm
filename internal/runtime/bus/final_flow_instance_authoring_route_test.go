@@ -32,6 +32,22 @@ func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescrip
 	return exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID), nil
 }
 
+func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptorsForScope(_ context.Context, runID string, templateIDs, instancePaths []string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.flowInstanceDescriptorCalls++
+	return connectRoutePlanScopedDescriptors(
+		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID),
+		templateIDs, instancePaths,
+	), nil
+}
+
+func (s *finalFlowInstanceAuthoringLifecycleStore) ListActiveFlowInstanceDescriptorsForKey(_ context.Context, runID, templateID, keyField, keyValue string) ([]ActiveFlowInstanceDescriptor, error) {
+	s.flowInstanceDescriptorCalls++
+	return connectRoutePlanKeyedDescriptors(
+		exactTestFlowInstanceDescriptors(s.flowInstances, s.workflowVersion, s.sourceArtifactFact, runID),
+		templateID, keyField, keyValue,
+	), nil
+}
+
 func (s *finalFlowInstanceAuthoringLifecycleStore) setTestSemanticSource(fact runtimecorrelation.SourceArtifactFact, workflowVersion string) {
 	s.sourceArtifactFact = fact
 	s.workflowVersion = workflowVersion
