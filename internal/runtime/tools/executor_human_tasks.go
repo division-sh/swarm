@@ -174,7 +174,7 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 		"approve": {Verdict: "approve", Label: "Approve", Input: map[string]runtimecontracts.WorkflowGateInputField{}},
 		"reject": {Verdict: "reject", Label: "Reject", Input: map[string]runtimecontracts.WorkflowGateInputField{
 			"reason": {Type: "text", Required: true, Label: "Reason"},
-		}},
+		}, InputOrder: []string{"reason"}},
 	}
 	snapshot, err := decisioncard.FreezeSnapshot("human_task", in.Description, contextSnapshot, outcomes)
 	if err != nil {

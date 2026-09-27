@@ -215,7 +215,7 @@ func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 		state.decisionCards.card.Anchor = anchor
 		state.decisionCards.card.Snapshot = mustTestDecisionSnapshot("human_task", "Review provider result", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 			"approve": {Verdict: "approve"},
-			"reject":  {Verdict: "reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}},
+			"reject":  {Verdict: "reject", Input: map[string]runtimecontracts.WorkflowGateInputField{"reason": {Type: "text", Required: true}}, InputOrder: []string{"reason"}},
 		})
 	})
 	status, resp, body := callMutatingProbeRPC(t, handler, "mailbox.decide", map[string]any{
@@ -1735,7 +1735,7 @@ type mutatingProbeDecisionCardStore struct {
 func newMutatingProbeDecisionCardStore(state *mutatingRuntimeProbeState) *mutatingProbeDecisionCardStore {
 	snapshot := mustTestDecisionSnapshot("launch_review", "Launch review", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
 		"approve": {AdvancesTo: "operating"},
-		"reject":  {AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
+		"reject":  {AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}},
 	})
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
 		Route: runtimeflowidentity.RouteForInstancePath("review/primary"), FlowID: "review", EntityID: eventtest.UUID("entity-1"),
