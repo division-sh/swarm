@@ -62,12 +62,12 @@ func (s *targetRouteMemoryStore) ListSelectedRunTargetOwners(context.Context, st
 	return append([]ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
-func (s *targetRouteMemoryStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, instancePaths []string) ([]ActiveTargetDescriptor, error) {
+func (s *targetRouteMemoryStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var selected []ActiveTargetDescriptor
 	for _, owner := range s.targetOwners {
-		if slices.Contains(instancePaths, owner.FlowInstance) {
+		if slices.Contains(instancePaths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
 			selected = append(selected, owner)
 		}
 	}
@@ -3488,10 +3488,10 @@ func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwners(context.Context
 	return append([]ActiveTargetDescriptor(nil), s.owners...), nil
 }
 
-func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, paths []string) ([]ActiveTargetDescriptor, error) {
+func (s rejectingDeliveryRouteStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, paths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error) {
 	var selected []ActiveTargetDescriptor
 	for _, owner := range s.owners {
-		if slices.Contains(paths, owner.FlowInstance) {
+		if slices.Contains(paths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
 			selected = append(selected, owner)
 		}
 	}

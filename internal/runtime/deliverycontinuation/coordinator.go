@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	scanPageSize = 200
+	scanPageSize    = 200
+	dispatchWorkers = 4
 )
 
 var errCoordinatorRetired = errors.New("delivery continuation coordinator is retired")
@@ -46,6 +47,12 @@ type synchronizationRequest struct {
 	result chan error
 }
 
+type dispatchJob struct {
+	deliveryID string
+	event      events.Event
+	route      events.DeliveryRoute
+}
+
 // Coordinator is the one execution-generation owner for executable
 // delivery continuations. It is a bounded selected-store projection, not a
 // durable queue or a second eligibility clock.
@@ -57,15 +64,20 @@ type Coordinator struct {
 	dispatcher Dispatcher
 	report     ErrorReporter
 
-	mu      sync.Mutex
-	entries map[string]entry
-	started bool
-	retired bool
-	wake    chan struct{}
-	sync    chan synchronizationRequest
-	done    chan struct{}
-	cancel  context.CancelFunc
-	failure error
+	mu            sync.Mutex
+	entries       map[string]entry
+	reserved      map[string]struct{}
+	started       bool
+	retired       bool
+	wake          chan struct{}
+	sync          chan synchronizationRequest
+	done          chan struct{}
+	cancel        context.CancelFunc
+	failure       error
+	workerFailure error
+	jobs          chan dispatchJob
+	workers       sync.WaitGroup
+	rescanNeeded  bool
 }
 
 func New(
@@ -122,7 +134,9 @@ func newCoordinator(
 	}
 	return &Coordinator{
 		store: store, restarts: restarts, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
-		entries: make(map[string]entry), wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
+		entries: make(map[string]entry), reserved: make(map[string]struct{}),
+		wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
+		jobs: make(chan dispatchJob, dispatchWorkers),
 	}, nil
 }
 
@@ -166,6 +180,10 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	if err := runCtx.Err(); err != nil {
 		return c.finish(runCtx, cancel, lease, err, false)
 	}
+	c.workers.Add(dispatchWorkers)
+	for range dispatchWorkers {
+		go c.dispatch(runCtx)
+	}
 	next, wake, err := c.scan(runCtx)
 	if err != nil {
 		return c.finish(runCtx, cancel, lease, fmt.Errorf("enumerate delivery continuations before readiness: %w", err), false)
@@ -173,7 +191,10 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	c.mu.Lock()
 	retired = c.retired
 	if !retired {
-		err = runCtx.Err()
+		err = c.workerFailure
+		if err == nil {
+			err = runCtx.Err()
+		}
 	} else {
 		err = errCoordinatorRetired
 	}
@@ -446,7 +467,10 @@ func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) er
 			if c.retired {
 				err = errCoordinatorRetired
 			} else {
-				err = ctx.Err()
+				err = c.workerFailure
+				if err == nil {
+					err = ctx.Err()
+				}
 			}
 			c.mu.Unlock()
 		}
@@ -470,11 +494,16 @@ func (c *Coordinator) finish(ctx context.Context, cancel context.CancelFunc, lea
 	retired := c.retired
 	c.retired = true
 	c.mu.Unlock()
-	failure := err
-	if ordinaryCoordinatorStop(ctx, err, retired) {
+	canceledAsOrdinary := ordinaryCoordinatorStop(ctx, err, retired)
+	cancel()
+	c.workers.Wait()
+	c.mu.Lock()
+	workerFailure := c.workerFailure
+	c.mu.Unlock()
+	failure := errors.Join(err, workerFailure)
+	if canceledAsOrdinary && workerFailure == nil {
 		failure = nil
 	}
-	cancel()
 	var cleanupErr error
 	if lease != nil {
 		cleanupErr = lease.Done()
@@ -489,10 +518,7 @@ func (c *Coordinator) finish(ctx context.Context, cancel context.CancelFunc, lea
 		c.report(ctx, failure)
 	}
 	close(c.done)
-	if cleanupErr != nil {
-		return errors.Join(err, cleanupErr)
-	}
-	return err
+	return errors.Join(err, workerFailure, cleanupErr)
 }
 
 func ordinaryCoordinatorStop(ctx context.Context, err error, retired bool) bool {
@@ -540,13 +566,89 @@ func (c *Coordinator) scanStopError(ctx context.Context) error {
 	if c.retired {
 		return errCoordinatorRetired
 	}
+	if c.workerFailure != nil {
+		return c.workerFailure
+	}
 	return ctx.Err()
+}
+
+func (c *Coordinator) dispatch(ctx context.Context) {
+	defer c.workers.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job := <-c.jobs:
+			if ctx.Err() != nil {
+				c.completeDispatch(job.deliveryID, nil)
+				return
+			}
+			result := c.dispatcher.DispatchDeliveryContinuation(ctx, job.event, job.route)
+			var err error
+			if validationErr := result.Validate(); validationErr != nil {
+				err = fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", job.deliveryID, validationErr)
+			} else {
+				switch result.Disposition() {
+				case DispatchTransferred, DispatchAlreadyOwned, DispatchDeferred:
+				case DispatchTerminal:
+					err = c.releaseTerminal(job.deliveryID)
+				case DispatchFatal:
+					err = fmt.Errorf("dispatch delivery continuation %s: %w", job.deliveryID, result.Failure())
+				default:
+					err = fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", job.deliveryID)
+				}
+			}
+			if ctx.Err() != nil && ordinaryCoordinatorStop(ctx, err, true) {
+				err = nil
+			}
+			c.completeDispatch(job.deliveryID, err)
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *Coordinator) completeDispatch(deliveryID string, err error) {
+	c.mu.Lock()
+	delete(c.reserved, deliveryID)
+	if err != nil {
+		c.workerFailure = errors.Join(c.workerFailure, err)
+	}
+	wake := err != nil || c.rescanNeeded
+	c.rescanNeeded = false
+	c.mu.Unlock()
+	if wake {
+		c.Signal()
+	}
+}
+
+func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.ContinuationItem) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.retired || ctx.Err() != nil {
+		return errCoordinatorRetired
+	}
+	if c.workerFailure != nil {
+		return c.workerFailure
+	}
+	if _, exists := c.reserved[item.DeliveryID]; exists {
+		return nil
+	}
+	if len(c.reserved) == dispatchWorkers {
+		c.rescanNeeded = true
+		return nil
+	}
+	c.reserved[item.DeliveryID] = struct{}{}
+	c.jobs <- dispatchJob{deliveryID: item.DeliveryID, event: item.Event, route: item.Snapshot.Route}
+	return nil
 }
 
 func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 	var cursor runtimedelivery.ContinuationCursor
 	var next time.Duration
 	var wake bool
+	seen := make(map[string]struct{})
 	for {
 		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
@@ -560,6 +662,7 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 			return 0, false, err
 		}
 		for _, item := range page.Items {
+			seen[item.DeliveryID] = struct{}{}
 			if err := c.scanStopError(ctx); err != nil {
 				return 0, false, err
 			}
@@ -584,28 +687,8 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 					return 0, false, err
 				}
 				c.reclaimAttempt(item.DeliveryID, beforeScan[item.DeliveryID])
-				{
-					if err := c.scanStopError(ctx); err != nil {
-						return 0, false, err
-					}
-					result := c.dispatcher.DispatchDeliveryContinuation(ctx, item.Event, item.Snapshot.Route)
-					if err := result.Validate(); err != nil {
-						return 0, false, fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", item.DeliveryID, err)
-					}
-					switch result.Disposition() {
-					case DispatchTransferred, DispatchAlreadyOwned:
-					case DispatchTerminal:
-						if err := c.releaseTerminal(item.DeliveryID); err != nil {
-							return 0, false, err
-						}
-					case DispatchDeferred:
-						// The named owner signals this coordinator after its
-						// transition commits. A deferral never invents a timer.
-					case DispatchFatal:
-						return 0, false, fmt.Errorf("dispatch delivery continuation %s: %w", item.DeliveryID, result.Failure())
-					default:
-						return 0, false, fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", item.DeliveryID)
-					}
+				if err := c.schedule(ctx, item); err != nil {
+					return 0, false, err
 				}
 			case runtimedelivery.ClaimDeferred:
 				if err := c.observe(item.DeliveryID); err != nil {
@@ -634,7 +717,7 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 		}
 		cursor = page.Next
 	}
-	reconcileNext, reconcileWake, err := c.reconcileHeld(ctx)
+	reconcileNext, reconcileWake, err := c.reconcileHeld(ctx, seen)
 	if err != nil {
 		return 0, false, err
 	}
@@ -668,6 +751,9 @@ func (c *Coordinator) observe(deliveryID string) error {
 func (c *Coordinator) reclaimAttempt(deliveryID string, observed entry) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, reserved := c.reserved[deliveryID]; reserved {
+		return false
+	}
 	if current, exists := c.entries[deliveryID]; exists && current == observed && observed.state == ownershipAttempt {
 		c.entries[deliveryID] = entry{state: ownershipCoordinator}
 		return true
@@ -687,10 +773,13 @@ func (c *Coordinator) heldEntries() map[string]entry {
 	return held
 }
 
-func (c *Coordinator) reconcileHeld(ctx context.Context) (time.Duration, bool, error) {
+func (c *Coordinator) reconcileHeld(ctx context.Context, seen map[string]struct{}) (time.Duration, bool, error) {
 	var next time.Duration
 	var wake bool
 	for deliveryID, observed := range c.heldEntries() {
+		if _, current := seen[deliveryID]; current {
+			continue
+		}
 		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
 		}

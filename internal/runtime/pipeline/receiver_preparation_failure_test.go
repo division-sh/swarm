@@ -38,10 +38,22 @@ func (r *failingReceiverPersistenceReader) LoadWorkflowTargetPersistence(ctx con
 
 type receiverSettlementFaultStore struct {
 	runtimedelivery.Store
-	renewCalls     atomic.Int32
-	claim          atomic.Pointer[runtimedelivery.Claim]
-	failRenewAt    int32
-	failSettlement bool
+	renewCalls       atomic.Int32
+	claim            atomic.Pointer[runtimedelivery.Claim]
+	failRenewAt      int32
+	failClaimRenewal bool
+	failSettlement   bool
+}
+
+func (s *receiverSettlementFaultStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	result, err := s.Store.ClaimDelivery(ctx, authority, event, route)
+	if claim, acquired := result.Acquired(); acquired {
+		s.claim.Store(&claim.Claim)
+		if s.failClaimRenewal {
+			result.Renewal.Acknowledged = false
+		}
+	}
+	return result, err
 }
 
 func (s *receiverSettlementFaultStore) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
@@ -97,9 +109,9 @@ func TestReceiverPreparationUnsettledAuthorityBothStores(t *testing.T) {
 				defer cancel()
 				switch fault {
 				case "heartbeat_start", "newer_claim":
-					faultStore.failRenewAt = 1
+					faultStore.failClaimRenewal = true
 				case "settlement_renewal":
-					faultStore.failRenewAt = 2
+					faultStore.failRenewAt = 1
 				case "settlement_rollback":
 					faultStore.failSettlement = true
 				case "cancellation":

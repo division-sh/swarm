@@ -110,15 +110,15 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 			reader.enabled.Store(true)
 			completed := make(chan error, 1)
 			if coordinated {
-				go func() { completed <- c.Start(ctx) }()
+				if err := c.Start(ctx); err != nil {
+					t.Fatal(err)
+				}
 			} else {
 				go func() { _, err := reader.LoadRunOrigin(ctx, f.event.RunID()); completed <- err }()
 			}
 			var readCtx context.Context
 			select {
 			case readCtx = <-reader.entered:
-			case err := <-completed:
-				t.Fatalf("origin read not reached: %v", err)
 			case <-time.After(5 * time.Second):
 				t.Fatal("origin not entered")
 			}
@@ -136,6 +136,7 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 				wait, stop := context.WithCancel(context.Background())
 				stop()
 				_ = c.Retire(wait)
+				go func() { completed <- c.Retire(context.Background()) }()
 				if readCtx.Done() != nil {
 					t.Error("retirement can cancel admitted SQL")
 				}
@@ -177,7 +178,7 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 			}
 			select {
 			case err := <-completed:
-				if err == nil {
+				if !coordinated && err == nil {
 					t.Fatal("retired read continued business work")
 				}
 			case <-time.After(5 * time.Second):

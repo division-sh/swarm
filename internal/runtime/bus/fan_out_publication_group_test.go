@@ -61,6 +61,27 @@ func (p *publicationSettlementProbe) ReadPublicationSettlement(_ context.Context
 }
 func (*publicationSettlementProbe) Close(context.Context) error { return nil }
 
+func TestNodeRouteCoverageDoesNotConflateAgentAndNodeIDs(t *testing.T) {
+	node := events.MustNodeDeliveryRecipient(testRootNode(t, "handoff"))
+	routes := []events.DeliveryRoute{{Recipient: node}}
+	for _, tc := range []struct {
+		name      string
+		recipient RoutePlanLiveRecipient
+		wantCover bool
+	}{
+		{name: "typed node", recipient: RoutePlanLiveRecipient{Recipient: node}, wantCover: true},
+		{name: "internal node", recipient: RoutePlanLiveRecipient{InternalID: node.ID()}, wantCover: true},
+		{name: "same-id agent", recipient: RoutePlanLiveRecipient{Recipient: events.MustAgentDeliveryRecipient(node.ID())}},
+		{name: "other node", recipient: RoutePlanLiveRecipient{Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "other"))}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nodeRoutesCoverLiveRecipients([]RoutePlanLiveRecipient{tc.recipient}, routes); got != tc.wantCover {
+				t.Fatalf("node route coverage = %t, want %t", got, tc.wantCover)
+			}
+		})
+	}
+}
+
 func publicationCollectorClaim(t *testing.T, bus *EventBus) *pipelinePublicationClaim {
 	t.Helper()
 	claim, err := pipelineobligation.NewClaimIssuer().Issue(uuid.NewString(), pipelineobligation.PurposePublication)

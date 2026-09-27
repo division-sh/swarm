@@ -167,7 +167,7 @@ portfolio.notify.completed:
 `, `      - account.notify.requested
       - portfolio.notify.completed
 `)
-		applyClosedReplacement(t, ownerNodes, "              canceled: join.dispositions.canceled\n", "              canceled: join.dispositions.canceled\n    portfolio.notify.completed: {}\n")
+		applyClosedReplacement(t, ownerNodes, "              canceled: ${join.dispositions.canceled}\n", "              canceled: ${join.dispositions.canceled}\n    portfolio.notify.completed: {}\n")
 	}
 	if opts.NumericRegistrationRows {
 		// Keep row fields addressable under the compiled structural-type contract.

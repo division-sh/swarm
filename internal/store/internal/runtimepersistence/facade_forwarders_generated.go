@@ -634,8 +634,8 @@ func (s *PostgresStore) ListSelectedRunTargetOwners(ctx context.Context, runID s
 	return s.pipelinePostgresOwner.ListSelectedRunTargetOwners(ctx, runID)
 }
 
-func (s *PostgresStore) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
-	return s.pipelinePostgresOwner.ListSelectedRunTargetOwnersForInstancePaths(ctx, runID, instancePaths)
+func (s *PostgresStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelinePostgresOwner.ListSelectedRunTargetOwnersForScope(ctx, runID, instancePaths, sourceEntityID)
 }
 
 func (s *PostgresStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
@@ -1834,8 +1834,8 @@ func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwners(ctx context.Context, ru
 	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwners(ctx, runID)
 }
 
-func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
-	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwnersForInstancePaths(ctx, runID, instancePaths)
+func (s *SQLiteRuntimeStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]bus.ActiveTargetDescriptor, error) {
+	return s.pipelineSQLiteOwner.ListSelectedRunTargetOwnersForScope(ctx, runID, instancePaths, sourceEntityID)
 }
 
 func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {

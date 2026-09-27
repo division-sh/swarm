@@ -306,12 +306,18 @@ func (s *pipelineTestDeliveryOwner) InspectDeliveryRecovery(
 func (s *pipelineTestDeliveryOwner) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (out runtimedelivery.ClaimResult, err error) {
 	result := s.mutateOutcome(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {
 		out, err = s.adapter.ClaimExactResult(ctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+		if err == nil && out.Disposition == runtimedelivery.ClaimAcquired {
+			out.Renewal.Snapshot, err = s.adapter.RenewClaim(ctx, attempt, out.Claimed.Claim, runtimedelivery.DefaultLeaseTTL)
+			out.Snapshot = out.Renewal.Snapshot
+			out.Claimed.Snapshot = out.Renewal.Snapshot
+		}
 		return err
 	})
 	if !result.Acknowledged() {
 		return runtimedelivery.ClaimResult{}, result.Err()
 	}
 	out.Acknowledged = result.Acknowledged()
+	out.Renewal.Acknowledged = out.Acknowledged && out.Disposition == runtimedelivery.ClaimAcquired
 	return out, result.Err()
 }
 

@@ -124,7 +124,7 @@ func (unexpectedDurableTestRoles) ListActiveFlowInstanceDescriptorsForKey(contex
 func (unexpectedDurableTestRoles) ListSelectedRunTargetOwners(context.Context, string) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
-func (unexpectedDurableTestRoles) ListSelectedRunTargetOwnersForInstancePaths(context.Context, string, []string) ([]ActiveTargetDescriptor, error) {
+func (unexpectedDurableTestRoles) ListSelectedRunTargetOwnersForScope(context.Context, string, []string, string) ([]ActiveTargetDescriptor, error) {
 	return nil, nil
 }
 func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {

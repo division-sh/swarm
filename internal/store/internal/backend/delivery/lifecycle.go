@@ -131,12 +131,18 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 				}
 			}
 			claimed, err = s.receiverAdapter.ClaimExactResult(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+			if err == nil && claimed.Disposition == runtimedelivery.ClaimAcquired {
+				claimed.Renewal.Snapshot, err = postgresDeliveryAdapter.RenewClaim(txctx, attempt, claimed.Claimed.Claim, runtimedelivery.DefaultLeaseTTL)
+				claimed.Snapshot = claimed.Renewal.Snapshot
+				claimed.Claimed.Snapshot = claimed.Renewal.Snapshot
+			}
 			return err
 		})
 		return claimed, err
 	})
 	claimed, acknowledged := result.Value()
 	claimed.Acknowledged = acknowledged
+	claimed.Renewal.Acknowledged = acknowledged && claimed.Disposition == runtimedelivery.ClaimAcquired
 	return claimed, result.Err()
 }
 
@@ -157,12 +163,18 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 				}
 			}
 			claimed, err = s.receiverAdapter.ClaimExactResult(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
+			if err == nil && claimed.Disposition == runtimedelivery.ClaimAcquired {
+				claimed.Renewal.Snapshot, err = sqliteDeliveryAdapter.RenewClaim(txctx, attempt, claimed.Claimed.Claim, runtimedelivery.DefaultLeaseTTL)
+				claimed.Snapshot = claimed.Renewal.Snapshot
+				claimed.Claimed.Snapshot = claimed.Renewal.Snapshot
+			}
 			return err
 		})
 		return claimed, err
 	})
 	claimed, acknowledged := result.Value()
 	claimed.Acknowledged = acknowledged
+	claimed.Renewal.Acknowledged = acknowledged && claimed.Disposition == runtimedelivery.ClaimAcquired
 	return claimed, result.Err()
 }
 
@@ -378,6 +390,9 @@ func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccessTx(
 	selection runtimedelivery.HandlerRuleSelectionFact,
 ) (runtimedelivery.Snapshot, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
+		if _, err := s.renewClaimTx(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL); err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
 		snapshot, err := postgresDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, selection)
 		if err != nil {
 			return runtimedelivery.Snapshot{}, err
@@ -400,6 +415,9 @@ func (s *DeliverySQLiteOwner) SettleWorkflowNodeSuccessTx(
 	selection runtimedelivery.HandlerRuleSelectionFact,
 ) (runtimedelivery.Snapshot, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (runtimedelivery.Snapshot, error) {
+		if _, err := s.renewClaimTx(ctx, attempt, claim, runtimedelivery.DefaultLeaseTTL); err != nil {
+			return runtimedelivery.Snapshot{}, err
+		}
 		snapshot, err := sqliteDeliveryAdapter.SettleSuccess(ctx, attempt, claim, sideEffects, duration, selection)
 		if err != nil {
 			return runtimedelivery.Snapshot{}, err

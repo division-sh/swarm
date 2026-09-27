@@ -158,11 +158,27 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 				if held.TestQuiescence == nil || cliapp.BoolPointerValue(held.TestQuiescence.Ready) || cliapp.IntPointerValue(held.TestQuiescence.ActiveDeliveries) == 0 || cliapp.IntPointerValue(held.TestQuiescence.FanOutUnsettled) != 1 || held.FanOut.Cursor != 1 || held.FanOut.Unsettled != 1 {
 					t.Fatalf("held reporter must remain unready with one unsettled delivery: %+v", held)
 				}
+				publishIssue2394ReporterBatch(t, rt, opened.RunID, portfolio, []map[string]any{{
+					"account_id": "held-2", "eng_roles": 2, "gem_score": 2.25, "external_id": uuid.NewString(),
+				}})
+				advanced := false
+				for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &held)
+					if held.FanOut.Cursor == 2 && held.FanOut.Intents == 2 && held.FanOut.Unsettled == 2 &&
+						held.TestQuiescence != nil && !cliapp.BoolPointerValue(held.TestQuiescence.Ready) && cliapp.IntPointerValue(held.TestQuiescence.FanOutUnsettled) == 2 {
+						advanced = true
+						break
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
+				if !advanced {
+					t.Fatalf("held reporter blocked the next acknowledged fan-out intent or readiness diverged: %+v", held)
+				}
 				release()
 				for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
 					var settled cliapp.DiagnosticRunDiagnosisResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &settled)
-					if settled.TestQuiescence != nil && cliapp.BoolPointerValue(settled.TestQuiescence.Ready) && cliapp.IntPointerValue(settled.TestQuiescence.FanOutUnsettled) == 0 && settled.FanOut.Cursor == 1 && settled.FanOut.Settled == 1 && settled.FanOut.Unsettled == 0 {
+					if settled.TestQuiescence != nil && cliapp.BoolPointerValue(settled.TestQuiescence.Ready) && cliapp.IntPointerValue(settled.TestQuiescence.FanOutUnsettled) == 0 && settled.FanOut.Cursor == 2 && settled.FanOut.Settled == 2 && settled.FanOut.Unsettled == 0 {
 						return
 					}
 					time.Sleep(20 * time.Millisecond)

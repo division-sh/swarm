@@ -589,6 +589,9 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 		}
 	}
 	add(evt.RoutingSource().Route())
+	if evt.RoutingSource().Kind() == events.RoutingSourceExternalIngress {
+		scope.sourceEntityID = evt.RoutingSource().Route().EntityID
+	}
 	add(evt.SourceRoute())
 	add(evt.TargetRoute())
 	for _, route := range evt.TargetRoutes() {
@@ -640,7 +643,7 @@ func (r connectRoutePlanResolver) selectedTargetScope(ctx context.Context, evt e
 			paths[instance.InstancePath] = struct{}{}
 		}
 	}
-	if len(matched) == 0 && len(paths) == 0 {
+	if len(matched) == 0 && len(paths) == 0 && scope.sourceEntityID == "" {
 		return selectedTargetOwnerLookupScope{}, false
 	}
 	out := make([]string, 0, len(paths))

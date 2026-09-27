@@ -103,7 +103,7 @@ func beginWorkflowEngineDeliverySuccess(ctx context.Context, selection handlerse
 	if !heartbeat.Owns(claim) {
 		return nil, nil, fmt.Errorf("workflow engine delivery heartbeat disagrees with the inbound claim")
 	}
-	guard, err := heartbeat.BeginSettlement()
+	guard, err := heartbeat.BeginSettlementInMutation()
 	if err != nil {
 		return nil, nil, err
 	}

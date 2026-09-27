@@ -84,7 +84,20 @@ func StartClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 	return startClaimHeartbeat(ctx, owner, store, claim, 0)
 }
 
+// StartClaimHeartbeatFromClaim consumes renewal evidence committed atomically
+// with the exact claim. Recovery claims still use StartClaimHeartbeat.
+func StartClaimHeartbeatFromClaim(ctx context.Context, owner worklifetime.Occurrence, store Store, claim Claim, renewal ClaimCommit) (*ClaimHeartbeat, error) {
+	if !renewal.Acknowledged || renewal.Snapshot.DeliveryID == "" {
+		return nil, errors.New("delivery claim transaction did not acknowledge its pre-execution renewal")
+	}
+	return startClaimHeartbeatWithRenewal(ctx, owner, store, claim, renewal, 0)
+}
+
 func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, store Store, claim Claim, interval time.Duration) (*ClaimHeartbeat, error) {
+	return startClaimHeartbeatWithRenewal(ctx, owner, store, claim, ClaimCommit{}, interval)
+}
+
+func startClaimHeartbeatWithRenewal(ctx context.Context, owner worklifetime.Occurrence, store Store, claim Claim, renewal ClaimCommit, interval time.Duration) (*ClaimHeartbeat, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -101,7 +114,10 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 	if err != nil {
 		return nil, fmt.Errorf("admit delivery claim heartbeat: %w", err)
 	}
-	commit, err := store.RenewClaim(workLease.Context(), claim)
+	commit, err := renewal, error(nil)
+	if renewal.Snapshot.DeliveryID == "" {
+		commit, err = store.RenewClaim(workLease.Context(), claim)
+	}
 	if !commit.Acknowledged {
 		_ = workLease.Done()
 		return nil, fmt.Errorf("renew delivery claim before execution: %w", unacknowledgedRenewalError(err))
@@ -217,6 +233,25 @@ func (h *ClaimHeartbeat) BeginSettlement() (*ClaimSettlementGuard, error) {
 	}
 	if err != nil {
 		h.recordRenewalDiagnostic("renew delivery claim before settlement", err)
+	}
+	return &ClaimSettlementGuard{heartbeat: h}, nil
+}
+
+// BeginSettlementInMutation excludes periodic renewal while the selected-store
+// mutation renews and settles this exact claim atomically. Only a mutation
+// owner that performs both operations may use this guard.
+func (h *ClaimHeartbeat) BeginSettlementInMutation() (*ClaimSettlementGuard, error) {
+	if h == nil {
+		return nil, fmt.Errorf("delivery claim settlement requires a heartbeat")
+	}
+	h.renewMu.Lock()
+	if err := h.currentRenewalError(); err != nil {
+		h.renewMu.Unlock()
+		return nil, err
+	}
+	if h.settled {
+		h.renewMu.Unlock()
+		return nil, fmt.Errorf("delivery claim heartbeat is already settled")
 	}
 	return &ClaimSettlementGuard{heartbeat: h}, nil
 }

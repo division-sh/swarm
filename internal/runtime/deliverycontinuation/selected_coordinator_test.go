@@ -3,6 +3,7 @@ package deliverycontinuation
 import (
 	"context"
 	"testing"
+	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
@@ -46,6 +47,11 @@ func TestSelectedContinuationUsesExactSelectedScanAndElection(t *testing.T) {
 			t.Errorf("retire selected coordinator: %v", err)
 		}
 	}()
+	select {
+	case <-dispatcher.dispatched:
+	case <-time.After(time.Second):
+		t.Fatal("selected scan did not dispatch the exact continuation")
+	}
 	if dispatcher.callCount() != 1 {
 		t.Fatalf("selected startup dispatched %d exact continuations, want 1", dispatcher.callCount())
 	}

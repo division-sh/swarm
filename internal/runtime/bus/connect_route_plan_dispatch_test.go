@@ -4596,6 +4596,27 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 	}
 }
 
+func TestExternalIngressSelectedTargetScopeIncludesExactSourceEntity(t *testing.T) {
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true))
+	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
+	entityID := eventtest.UUID("provider-selected-source")
+	routingSource, err := events.NewExternalIngressRoutingSource("consumer", entityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routingSource.Route().FlowInstance != "" {
+		t.Fatalf("external ingress unexpectedly has an instance path: %#v", routingSource.Route())
+	}
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
+		uuid.NewString(), "inbound.telegram.text_message", "provider", "", json.RawMessage(`{"chat_id":"42"}`),
+		0, uuid.NewString(), "", events.EventEnvelope{}, routingSource, time.Now().UTC(),
+	)
+	scope, ok := resolver.selectedTargetScope(context.Background(), evt)
+	if !ok || scope.sourceEntityID != entityID {
+		t.Fatalf("provider source owner omitted from selected scope: ok=%t scope=%#v", ok, scope)
+	}
+}
+
 func TestPrivateTemplateInputCannotBecomePublicAPIEndpoint(t *testing.T) {
 	for _, tc := range []struct {
 		name string

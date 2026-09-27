@@ -400,8 +400,9 @@ func (eb *EventBus) PinRoutingDescriptors(ctx context.Context) ([]runtimepinrout
 type selectedTargetOwnerLookupScopeKey struct{}
 
 type selectedTargetOwnerLookupScope struct {
-	instancePaths []string
-	keys          []selectedDescriptorKeyQuery
+	instancePaths  []string
+	sourceEntityID string
+	keys           []selectedDescriptorKeyQuery
 }
 
 type selectedDescriptorKeyQuery struct {
@@ -458,8 +459,8 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 			if !ok {
 				return nil, true, errors.New("selected store lacks graph-scoped target owner lookup")
 			}
-			if len(scope.instancePaths) > 0 {
-				owners, err = selected.ListSelectedRunTargetOwnersForInstancePaths(ctx, runID, scope.instancePaths)
+			if len(scope.instancePaths) > 0 || scope.sourceEntityID != "" {
+				owners, err = selected.ListSelectedRunTargetOwnersForScope(ctx, runID, scope.instancePaths, scope.sourceEntityID)
 			}
 		} else {
 			owners, err = targetOwners.ListSelectedRunTargetOwners(ctx, runID)

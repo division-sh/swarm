@@ -404,10 +404,10 @@ func (s *routePersistenceTestStore) ListSelectedRunTargetOwners(context.Context,
 	return append([]runtimebus.ActiveTargetDescriptor(nil), s.targetOwners...), nil
 }
 
-func (s *routePersistenceTestStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, instancePaths []string) ([]runtimebus.ActiveTargetDescriptor, error) {
+func (s *routePersistenceTestStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	var selected []runtimebus.ActiveTargetDescriptor
 	for _, owner := range s.targetOwners {
-		if slices.Contains(instancePaths, owner.FlowInstance) {
+		if slices.Contains(instancePaths, owner.FlowInstance) || sourceEntityID != "" && owner.EntityID == sourceEntityID {
 			selected = append(selected, owner)
 		}
 	}

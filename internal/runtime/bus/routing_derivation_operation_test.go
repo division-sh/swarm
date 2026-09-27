@@ -199,8 +199,8 @@ func TestRouteTopologyPublicationUsesTableCompilationButRereadsCurrentTopology(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if source.censuses.Load() != 1 || table == first {
-		t.Fatalf("route-table replacement did not recompile its source: censuses=%d same=%t", source.censuses.Load(), table == first)
+	if source.censuses.Load() != 0 || table == first {
+		t.Fatalf("route-table replacement did not consume compiled source: raw_censuses=%d same=%t", source.censuses.Load(), table == first)
 	}
 	eb.routeTable = table
 	source.censuses.Store(0)
@@ -267,8 +267,8 @@ func TestConnectPreviewUsesPairedRouteTableSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := source.censuses.Load(); got != 1 {
-		t.Fatalf("replacement route table compiled source %d times, want one", got)
+	if got := source.censuses.Load(); got != 0 {
+		t.Fatalf("replacement route table bypassed compiled source: raw_censuses=%d", got)
 	}
 	resolver.routeTable = live
 	source.censuses.Store(0)

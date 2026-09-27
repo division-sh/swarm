@@ -29,6 +29,7 @@ func TestCoordinatorCarrierWinsBeforeScanDispatch(t *testing.T) {
 	}}}
 	var c *Coordinator
 	var winner worklifetime.DeliveryContinuation
+	dispatched := make(chan struct{}, 1)
 	dispatcher := electionDispatcher(func(context.Context, events.Event, events.DeliveryRoute) DispatchResult {
 		// The real competing carrier wins after the store's scan observation
 		// and before dispatch's election. No timing or goroutine-start proxy.
@@ -48,6 +49,7 @@ func TestCoordinatorCarrierWinsBeforeScanDispatch(t *testing.T) {
 		if second.Disposition() != worklifetime.DeliveryAlreadyOwned {
 			t.Fatal("scan fabricated a second winner")
 		}
+		defer func() { dispatched <- struct{}{} }()
 		return AlreadyOwned()
 	})
 	c, err = New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
@@ -58,6 +60,11 @@ func TestCoordinatorCarrierWinsBeforeScanDispatch(t *testing.T) {
 	defer cancel()
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("lawful loser failed startup: %v", err)
+	}
+	select {
+	case <-dispatched:
+	case <-ctx.Done():
+		t.Fatal("scan did not reach real acquisition")
 	}
 	if winner == nil {
 		t.Fatal("scan did not reach real acquisition")

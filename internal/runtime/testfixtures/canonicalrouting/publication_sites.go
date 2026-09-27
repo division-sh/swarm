@@ -51,7 +51,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		siblingRequest := "sibling." + family + ".requested"
 		siblingInputPins += "      - " + siblingRequest + "\n"
 		siblingRequestSchemas += fmt.Sprintf("%s:\n  case_id: text\n  value: %s\n", siblingRequest, valueType)
-		siblingProducers += fmt.Sprintf("sibling-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: payload.case_id, value: payload.value}}\n", family, siblingRequest, siblingRequest, result)
+		siblingProducers += fmt.Sprintf("sibling-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {case_id: \"${payload.case_id}\", value: \"${payload.value}\"}}\n", family, siblingRequest, siblingRequest, result)
 		connects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", siblingRequest)
 		if mode == "template" {
 			inputPins += fmt.Sprintf("      - {event: %s, resolution: {mode: select-or-create}}\n", request)
