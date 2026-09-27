@@ -17,13 +17,17 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	channeldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -565,10 +569,10 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 		t.Fatalf("wrong-event authorization matched action: matched=%v err=%v", matched, err)
 	}
 	wantMax := map[string]int{
-		"presentation.text": 128,
+		"presentation.text": 512,
 		"actions":           2,
 		"actions[].label":   24,
-		"actions[].token":   20,
+		"actions[].token":   64,
 	}
 	for name, want := range wantMax {
 		schema, ok := plan.Constraint(name)
@@ -598,6 +602,103 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	}
 	if _, hasDestination := prepared["destination"]; hasDestination {
 		t.Fatalf("acknowledgment gained ambient destination context: %#v", prepared)
+	}
+}
+
+func TestChannelGoldenCardDifferentialSatisfierParity(t *testing.T) {
+	entityID := uuid.NewString()
+	source, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		Route: runtimeflowidentity.RouteForInstancePath("root"), FlowID: ".", EntityID: entityID,
+		Stage: "review", StageActivationID: uuid.NewString(), Source: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := decisioncard.FreezeSnapshot("review", "Review", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"accept": {Verdict: "accept"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := decisioncard.New(decisioncard.Card{
+		CardID: uuid.NewString(), RunID: uuid.NewString(), Anchor: anchor, Snapshot: snapshot,
+		ExecutionMode: "live", BundleHash: "sha256:example", WorkflowVersion: "1", CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := channeldelivery.FreezeCard(card, 1, "", channeldelivery.Audience{
+		PrincipalID: uuid.NewString(), InterfaceKey: "golden-card", DeliveryEpoch: 1,
+		ExternalAccountRef: "operator", ConversationRef: "room", ConversationScope: operatorchannel.ConversationScopeShared,
+	}, channeldelivery.DraftPrompt{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	presentation, truncated, err := channeldelivery.PresentationText(frozen)
+	if err != nil || truncated || len(frozen.Choices) != 1 {
+		t.Fatalf("golden card presentation = %q, truncated=%t, choices=%d, err=%v", presentation, truncated, len(frozen.Choices), err)
+	}
+	token := uuid.NewString()
+	semantic := map[string]any{
+		"presentation": map[string]any{"text": presentation},
+		"actions":      []any{map[string]any{"label": "accept", "token": token}},
+	}
+	registry := loadChannelInterfaceRegistry(t)
+	mockChannel, mockTrigger, mockConnector := mockChannelSatisfier()
+	mockPlan, err := packs.CompileChannel(registry, mockChannel, []packs.TriggerPackDescriptor{mockTrigger}, []packs.ConnectorPackDescriptor{mockConnector})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name        string
+		plan        packs.SatisfactionPlan
+		destination any
+		result      map[string]any
+	}{
+		{"telegram", loadTelegramChannelPlan(t), "1001", map[string]any{"message_id": 42}},
+		{"mock", mockPlan, map[string]any{"queue": "ops"}, map[string]any{"ref": "mock-delivery:12345678"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binding, err := packs.NewOutboundBindingPlan("golden", tc.plan, tc.destination, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, providerInput, err := binding.PrepareOperation("deliver", semantic)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body, actionToken string
+			if tc.name == "telegram" {
+				body, _ = providerInput["text"].(string)
+				markup, _ := providerInput["reply_markup"].(map[string]any)
+				rows, _ := markup["inline_keyboard"].([]any)
+				if len(rows) != 1 {
+					t.Fatalf("Telegram lost golden action: %#v", providerInput)
+				}
+				row, _ := rows[0].([]any)
+				control, _ := row[0].(map[string]any)
+				actionToken, _ = control["callback_data"].(string)
+			} else {
+				body, _ = providerInput["body"].(string)
+				controls, _ := providerInput["controls"].([]any)
+				if len(controls) != 1 {
+					t.Fatalf("mock lost golden action: %#v", providerInput)
+				}
+				control, _ := controls[0].(map[string]any)
+				actionToken, _ = control["value"].(string)
+			}
+			if body != frozen.FullText || actionToken != token {
+				t.Fatalf("provider changed frozen card meaning: body=%q token=%q", body, actionToken)
+			}
+			receipt, err := binding.ProjectOperationOutput("deliver", tc.result)
+			if err != nil || receipt["delivery_reference"] == nil {
+				t.Fatalf("provider receipt = %#v, err=%v", receipt, err)
+			}
+		})
 	}
 }
 
@@ -1815,11 +1916,11 @@ func loadChannelPlatformSpec(t *testing.T) runtimecontracts.PlatformSpecDocument
 }
 
 func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescriptor, packs.ConnectorPackDescriptor) {
-	text128 := mockStringSchema(1, 128, "")
+	text512 := mockStringSchema(1, 512, "")
 	label24 := mockStringSchema(1, 24, "")
-	token20 := mockStringSchema(1, 20, `^[a-z0-9-]+$`)
+	token64 := mockStringSchema(1, 64, `^[a-z0-9-]+$`)
 	actions := mockArraySchema(0, 2, mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
-		"name": label24, "value": token20,
+		"name": label24, "value": token64,
 	}, "name", "value"))
 	destination := mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"queue": mockStringSchema(1, 10, `^[a-z0-9-]+$`)}, "queue")
 	deliveryReference := mockStringSchema(22, 22, `^mock-delivery:[0-9a-f]{8}$`)
@@ -1834,10 +1935,10 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 	inboxReadback := mockArraySchema(0, 100, inboxCommand)
 	connectorTools := map[string]runtimecontracts.ToolSchemaEntry{
 		"mock.deliver": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
-			"destination": destination, "body": text128, "controls": actions,
+			"destination": destination, "body": text512, "controls": actions,
 		}, "destination", "body", "controls"), mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"ref": deliveryReference}, "ref")),
 		"mock.edit": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
-			"destination": destination, "reference": deliveryReference, "body": text128, "controls": actions,
+			"destination": destination, "reference": deliveryReference, "body": text512, "controls": actions,
 		}, "destination", "reference", "body", "controls"), mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"revision": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaInteger)}, "revision")),
 		"mock.ack": mockConnectorTool(mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 			"cursor": mockStringSchema(1, 16, ""),
@@ -1990,7 +2091,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			case "message_ref", "reply_ref":
 				schema = deliveryReference
 			case "text":
-				schema = text128
+				schema = text512
 			case "native_entry":
 				schema = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
 					"reference": mockStringSchema(1, 32, ""),
