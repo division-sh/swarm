@@ -68,6 +68,15 @@ func resolveCompletionSettlementPermitPostgres(
 			}
 			return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
 		}
+		if attempt.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
+			if err := requireChannelNativeSettingSettlementAuthorityTx(ctx, tx, runtimeeffects.Settlement{
+				AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
+				Authority: attempt.Authority, State: runtimeeffects.StateSettled,
+			}, true); err != nil {
+				return completionSettlementPermit{}, err
+			}
+			return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
+		}
 		if err := requireExternalEffectAuthorityPostgres(ctx, tx, attempt.Authority, false); err != nil {
 			return completionSettlementPermit{}, err
 		}
@@ -117,6 +126,15 @@ func resolveCompletionSettlementPermitSQLite(
 	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
 		if attempt.Authority.Kind == runtimeeffects.AuthorityChannelDelivery {
 			if err := requireChannelDeliverySettlementAuthorityTx(ctx, tx, runtimeeffects.Settlement{
+				AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
+				Authority: attempt.Authority, State: runtimeeffects.StateSettled,
+			}, false); err != nil {
+				return completionSettlementPermit{}, err
+			}
+			return completionSettlementPermit{Kind: completionSettlementCurrent}, nil
+		}
+		if attempt.Authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
+			if err := requireChannelNativeSettingSettlementAuthorityTx(ctx, tx, runtimeeffects.Settlement{
 				AttemptID: attempt.AttemptID, OperationID: attempt.OperationID,
 				Authority: attempt.Authority, State: runtimeeffects.StateSettled,
 			}, false); err != nil {
