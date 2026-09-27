@@ -964,11 +964,13 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 }
 
 func (r *selectedContractAgentRuntime) WaitForQuiescence(ctx context.Context, bus *runtimebus.EventBus) error {
-	if r == nil || r.manager == nil {
+	if r == nil {
 		return nil
 	}
-	if err := r.manager.WaitForQuiescence(ctx); err != nil {
-		return err
+	if r.manager != nil {
+		if err := r.manager.WaitForQuiescence(ctx); err != nil {
+			return err
+		}
 	}
 	if bus != nil {
 		return bus.WaitForQuiescence(ctx)

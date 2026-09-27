@@ -231,13 +231,7 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 		active.timersRetired = true
 		am.dynamicFlowReadinessMu.Unlock()
 	}
-	var durableErr error
-	if disposition == flowActivationFailedRetirement {
-		durableErr = am.workflowInstances.AbandonDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
-	} else {
-		durableErr = am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
-	}
-	if err := durableErr; err != nil {
+	if err := am.settleDynamicFlowAttemptDurably(ctx, active); err != nil {
 		return fmt.Errorf("retire durable flow activation attempt: %w", err)
 	}
 	am.dynamicFlowReadinessMu.Lock()
@@ -249,9 +243,18 @@ func (am *AgentManager) settleDynamicFlowActiveAttempt(
 	return nil
 }
 
+func (am *AgentManager) settleDynamicFlowAttemptDurably(ctx context.Context, active *dynamicFlowActiveAttempt) error {
+	if active.retirementKind == flowActivationFailedRetirement {
+		return am.workflowInstances.AbandonDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
+	}
+	return am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempt(ctx, active.receipt)
+}
+
 // A joined manager generation no longer owns executable flow work. Release
 // process projections before making its exact durable attempt reusable.
 func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) error {
+	am.dynamicFlowRetirementMu.Lock()
+	defer am.dynamicFlowRetirementMu.Unlock()
 	am.dynamicFlowReadinessMu.Lock()
 	attempts := make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt, len(am.dynamicFlowActiveAttempts))
 	for key, active := range am.dynamicFlowActiveAttempts {
@@ -261,36 +264,73 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 	var result error
 	for key, active := range attempts {
 		am.dynamicFlowReadinessMu.Lock()
-		incomplete := active.retiring || (active.retirementKind != 0 && !active.locallyRetired)
+		current := am.dynamicFlowActiveAttempts[key] == active
+		incomplete := active.retiring || (active.retirementKind == flowActivationTerminalRetirement && !active.locallyRetired)
+		if current && !incomplete {
+			active.retiring = true
+			if active.retirementKind == 0 {
+				active.retirementKind = flowActivationProcessRetirement
+			}
+		}
 		am.dynamicFlowReadinessMu.Unlock()
+		if !current {
+			result = errors.Join(result, fmt.Errorf("flow activation attempt %s changed before joined retirement", key.instancePath))
+			continue
+		}
 		if incomplete {
 			result = errors.Join(result, fmt.Errorf("flow activation attempt %s retains unsettled local retirement", key.instancePath))
 			continue
 		}
-		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
-		if err != nil {
-			result = errors.Join(result, err)
-			continue
-		}
-		if err := am.retireFlowRouteAttempt(active.receipt, active.publication); err != nil {
-			result = errors.Join(result, fmt.Errorf("retire flow route publication %s: %w", key.instancePath, err))
-			continue
-		}
-		if active.timersProjected {
-			if err := am.workflowInstances.RetireInitialEntryTimerWakeups(ctx, identity); err != nil {
-				result = errors.Join(result, fmt.Errorf("retire flow timer wakeups %s: %w", key.instancePath, err))
-				continue
-			}
-		}
-		if err := am.workflowInstances.RetireDynamicFlowRuntimeActivationAttempt(ctx, active.receipt); err != nil {
-			result = errors.Join(result, fmt.Errorf("retire flow activation attempt %s: %w", key.instancePath, err))
-			continue
-		}
+		result = errors.Join(result, am.settleDynamicFlowAttemptAfterJoin(ctx, key, active))
 		am.dynamicFlowReadinessMu.Lock()
 		if am.dynamicFlowActiveAttempts[key] == active {
-			delete(am.dynamicFlowActiveAttempts, key)
+			active.retiring = false
 		}
 		am.dynamicFlowReadinessMu.Unlock()
 	}
 	return result
+}
+
+func (am *AgentManager) settleDynamicFlowAttemptAfterJoin(ctx context.Context, key dynamicFlowRuntimeReadinessKey, active *dynamicFlowActiveAttempt) (result error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = fmt.Errorf("retire joined flow activation attempt %s: %v", key.instancePath, recovered)
+		}
+	}()
+	if !active.locallyRetired {
+		if err := am.retireFlowRouteAttempt(active.receipt, active.publication); err != nil {
+			return fmt.Errorf("retire flow route publication %s: %w", key.instancePath, err)
+		}
+		if active.retirementSet != nil {
+			if err := am.lifecycle.retryProcessFlowRetirement(active.retirementSet); err != nil {
+				return fmt.Errorf("retry flow agent retirement %s: %w", key.instancePath, err)
+			}
+		}
+		am.dynamicFlowReadinessMu.Lock()
+		active.locallyRetired = true
+		am.dynamicFlowReadinessMu.Unlock()
+	}
+	if !active.timersRetired {
+		if active.timersProjected {
+			identity, err := runtimeflowidentity.NewRunScopedFlowInstance(key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
+			if err != nil {
+				return err
+			}
+			if err := am.workflowInstances.RetireInitialEntryTimerWakeups(ctx, identity); err != nil {
+				return fmt.Errorf("retire flow timer wakeups %s: %w", key.instancePath, err)
+			}
+		}
+		am.dynamicFlowReadinessMu.Lock()
+		active.timersRetired = true
+		am.dynamicFlowReadinessMu.Unlock()
+	}
+	if err := am.settleDynamicFlowAttemptDurably(ctx, active); err != nil {
+		return fmt.Errorf("retire flow activation attempt %s: %w", key.instancePath, err)
+	}
+	am.dynamicFlowReadinessMu.Lock()
+	if am.dynamicFlowActiveAttempts[key] == active {
+		delete(am.dynamicFlowActiveAttempts, key)
+	}
+	am.dynamicFlowReadinessMu.Unlock()
+	return nil
 }

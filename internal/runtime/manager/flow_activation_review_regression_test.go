@@ -73,6 +73,177 @@ func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
 	}
 }
 
+func TestFlowActivationShutdownPreservesFailedAttemptDisposition(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle(t, "")
+	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		instances.readinessLoadErr = errors.New("readback failed after topology mark")
+	}
+	calls := 0
+	instances.retireAttempt = func() error {
+		calls++
+		if calls == 1 {
+			return errors.New("failed abandonment retained for retry")
+		}
+		return nil
+	}
+	ctx := testAuthorActivityContext(context.Background())
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
+		t.Fatal("missing injected error")
+	}
+	instances.readinessLoadErr = nil
+	key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.Route().InstancePath}
+	am.dynamicFlowReadinessMu.Lock()
+	active := am.dynamicFlowActiveAttempts[key]
+	failed := active != nil && active.retirementKind == flowActivationFailedRetirement && active.locallyRetired
+	am.dynamicFlowReadinessMu.Unlock()
+	if !failed {
+		t.Fatal("control: expected retained failed attempt after local join")
+	}
+	if err := am.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	row, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, req.Instance.Route())
+	if err != nil || !found {
+		t.Fatalf("load: found=%v err=%v", found, err)
+	}
+	if !row.Pending() {
+		t.Fatal("shutdown changed failed abandonment into orderly retirement")
+	}
+}
+
+func TestFlowActivationShutdownRetriesAcknowledgedFailedAbandonment(t *testing.T) {
+	for _, autoEmit := range []string{"", "task.started"} {
+		name := "no_creation"
+		if autoEmit != "" {
+			name = "creation_emitted"
+		}
+		t.Run(name, func(t *testing.T) {
+			instances := &flowActivationTestInstanceStore{settleAttemptPostCommitErr: errors.New("acknowledged abandonment response lost")}
+			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+			am := newFlowActivationManager(t, bus, instances)
+			bundle := testFlowBundle(t, autoEmit)
+			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+			instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+				instances.readinessLoadErr = errors.New("readback failed after topology mark")
+			}
+			ctx := testAuthorActivityContext(context.Background())
+			if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
+				t.Fatal("missing injected failure")
+			}
+			instances.readinessLoadErr = nil
+			key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.Route().InstancePath}
+			am.dynamicFlowReadinessMu.Lock()
+			active := am.dynamicFlowActiveAttempts[key]
+			failed := active != nil && active.retirementKind == flowActivationFailedRetirement && active.locallyRetired
+			am.dynamicFlowReadinessMu.Unlock()
+			if !failed {
+				t.Fatal("acknowledged abandonment lost retained failure disposition")
+			}
+			if err := am.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
+			row, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, req.Instance.Route())
+			if err != nil || !found || !row.Pending() {
+				t.Fatalf("failed abandonment did not return readiness to pending: found=%v pending=%v err=%v", found, row.Pending(), err)
+			}
+		})
+	}
+}
+
+func TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle(t, "")
+	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		instances.readinessLoadErr = errors.New("readback failed after topology mark")
+	}
+	calls := 0
+	instances.retireAttempt = func() error {
+		calls++
+		if calls <= 2 {
+			return errors.New("durable abandonment unavailable")
+		}
+		return nil
+	}
+	ctx := testAuthorActivityContext(context.Background())
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
+		t.Fatal("missing injected activation failure")
+	}
+	instances.readinessLoadErr = nil
+	key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.Route().InstancePath}
+	if err := am.Shutdown(); err == nil {
+		t.Fatal("shutdown released a persistently failed abandonment")
+	}
+	am.dynamicFlowReadinessMu.Lock()
+	retained := am.dynamicFlowActiveAttempts[key]
+	am.dynamicFlowReadinessMu.Unlock()
+	if retained == nil || retained.retirementKind != flowActivationFailedRetirement {
+		t.Fatal("failed shutdown lost the exact abandonment owner")
+	}
+	if err := am.Shutdown(); err != nil {
+		t.Fatalf("retry joined shutdown settlement: %v", err)
+	}
+	row, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, req.Instance.Route())
+	if err != nil || !found || !row.Pending() {
+		t.Fatalf("retry did not abandon failed attempt: found=%v pending=%v err=%v", found, row.Pending(), err)
+	}
+}
+
+func TestFlowActivationFailedAttemptShutdownRetriesSettlementPanic(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	am := newFlowActivationManager(t, bus, instances)
+	bundle := testFlowBundle(t, "")
+	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		instances.readinessLoadErr = errors.New("readback failed after topology mark")
+	}
+	calls := 0
+	instances.retireAttempt = func() error {
+		calls++
+		switch calls {
+		case 1:
+			return errors.New("durable abandonment unavailable")
+		case 2:
+			panic("durable abandonment panicked")
+		default:
+			return nil
+		}
+	}
+	ctx := testAuthorActivityContext(context.Background())
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
+		t.Fatal("missing injected activation failure")
+	}
+	instances.readinessLoadErr = nil
+	if err := am.Shutdown(); err == nil || !strings.Contains(err.Error(), "durable abandonment panicked") {
+		t.Fatalf("shutdown did not report retained settlement panic: %v", err)
+	}
+	key := dynamicFlowRuntimeReadinessKey{runID: req.TriggerEvent.RunID(), instancePath: req.Instance.Route().InstancePath}
+	am.dynamicFlowReadinessMu.Lock()
+	retained := am.dynamicFlowActiveAttempts[key]
+	am.dynamicFlowReadinessMu.Unlock()
+	if retained == nil || retained.retirementKind != flowActivationFailedRetirement {
+		t.Fatal("settlement panic lost failed disposition")
+	}
+	if err := am.Shutdown(); err != nil {
+		t.Fatalf("retry after settlement panic: %v", err)
+	}
+	row, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, req.Instance.Route())
+	if err != nil || !found || !row.Pending() {
+		t.Fatalf("retry did not abandon failed attempt: found=%v pending=%v err=%v", found, row.Pending(), err)
+	}
+}
+
 func TestCompletedStandingPreRunHandoffRetainsReconstructionAuthority(t *testing.T) {
 	for _, replay := range []bool{false, true} {
 		name := "replay_off"
