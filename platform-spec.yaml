@@ -14845,6 +14845,9 @@ platform_tables:
         preserving the selected identity as a fence. Notice admission serializes on the principal
         before reading this row; only notices committed after the first-current cut may be planned
         individually. No historical notice is inferred deliverable from a timestamp or list order.
+        The card change cursor advances in the same selected-store transaction that verifies the
+        exact change and durably plans an open card. Paginated open-card list reconciliation and
+        exact readback of every retained delivery receipt remain mandatory independent repairs.
       ddl: |
         CREATE TABLE channel_delivery_defaults (
             singleton_id BIGINT PRIMARY KEY CHECK (singleton_id = 1),
@@ -14856,6 +14859,7 @@ platform_tables:
             conversation_reference TEXT NOT NULL,
             conversation_scope TEXT NOT NULL CHECK (conversation_scope IN ('direct','shared')),
             state TEXT NOT NULL CHECK (state IN ('current','retired')),
+            card_change_cursor BIGINT NOT NULL DEFAULT 0 CHECK (card_change_cursor >= 0),
             first_operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
             updated_at TIMESTAMPTZ NOT NULL
         );
