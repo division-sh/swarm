@@ -10,16 +10,17 @@ import (
 
 func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 	cases := map[string]string{
-		"list":      "rules:\n  - condition: payload.ready\n",
-		"empty":     "rules:\n  - condition: ''\n",
-		"null":      "rules:\n  - condition: null\n",
-		"default":   "rules:\n  - condition: else\n",
-		"singleton": "rules:\n  condition: payload.ready\n",
-		"keyed":     "rules:\n  ready:\n    condition: payload.ready\n",
-		"mixed":     "rules:\n  - when: payload.ready\n    condition: payload.other\n  - else: true\n",
-		"duplicate": "rules:\n  - condition: payload.ready\n    condition: payload.other\n",
-		"alias":     "template: &old {condition: payload.ready}\nrules:\n  - *old\n",
-		"merge":     "rules:\n  - <<: &old {condition: payload.ready}\n",
+		"list":           "rules:\n  - condition: payload.ready\n",
+		"empty":          "rules:\n  - condition: ''\n",
+		"null":           "rules:\n  - condition: null\n",
+		"default":        "rules:\n  - condition: else\n",
+		"singleton":      "rules:\n  condition: payload.ready\n",
+		"singleton_list": "rules:\n  condition: []\n",
+		"keyed":          "rules:\n  ready:\n    condition: payload.ready\n",
+		"mixed":          "rules:\n  - when: payload.ready\n    condition: payload.other\n  - else: true\n",
+		"duplicate":      "rules:\n  - condition: payload.ready\n    condition: payload.other\n",
+		"alias":          "template: &old {condition: payload.ready}\nrules:\n  - *old\n",
+		"merge":          "rules:\n  - <<: &old {condition: payload.ready}\n",
 	}
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -43,6 +44,24 @@ func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 				t.Fatalf("condition admission error = %v, want teaching retirement", err)
 			}
 		})
+	}
+}
+
+func TestHandlerRulesConditionCanBeKeyedDisplayLabel(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte("rules:\n  condition:\n    when: payload.ready\n  fallback:\n    else: true\n"), &handler); err != nil {
+		t.Fatal(err)
+	}
+	if len(handler.Rules) != 2 || handler.Rules[0].ID != "condition" || handler.Rules[0].PolicyRow.Kind != PolicySheetRowKindWhen {
+		t.Fatalf("keyed rule label changed: %#v", handler.Rules)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte("rules:\n  condition: {when: payload.ready}\n  malformed: []\n"), &document); err != nil {
+		t.Fatal(err)
+	}
+	_, err := decodeHandlerRuleEntriesNode(document.Content[0].Content[1], handlerRuleDecodeContextRules)
+	if err == nil || strings.Contains(err.Error(), "RETIRED-POLICY-SHEET-ROW") {
+		t.Fatalf("keyed display label was mistaken for predicate: %v", err)
 	}
 }
 

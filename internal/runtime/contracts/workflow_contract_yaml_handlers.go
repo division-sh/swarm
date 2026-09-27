@@ -818,6 +818,11 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 	case yaml.MappingNode:
 		shape, err := classifyHandlerRuleMapping(node)
 		if err != nil {
+			if context == handlerRuleDecodeContextRules {
+				if retiredErr := validateRetiredHandlerActionFields(node, "rules_unclassified"); retiredErr != nil {
+					return nil, retiredErr
+				}
+			}
 			return nil, err
 		}
 		if shape == handlerRuleMappingSingleton {
