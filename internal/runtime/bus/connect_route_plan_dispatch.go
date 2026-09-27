@@ -79,7 +79,6 @@ type connectRoutePlanResolver struct {
 	loadAgents      connectAgentDescriptorLoader
 	lifecycle       templateInstanceLifecycleOwner
 	replyStore      runtimereplycontext.Store
-	topologySource  *routeTopologyCompilationScope
 }
 
 type connectRoutePlanDispatch struct {
@@ -534,19 +533,16 @@ func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(ctx co
 		return errors.New("connect route planning preview table is required before lifecycle materialization")
 	}
 	if preview.table == nil {
-		var table *RouteTable
-		var err error
-		if r.topologySource != nil && r.routeTable != nil {
-			graph, inputProducers := r.topologySource.forTable(r.routeTable)
-			table, err = deriveRouteTableWithInputProducers(r.source, graph, inputProducers)
-			preview.inputProducers = &inputProducers
-		} else {
-			table, err = DeriveRouteTable(r.source)
+		if r.routeTable == nil || !r.routeTable.compiledSourceReady {
+			return errors.New("connect route preview requires paired compiled route source")
 		}
+		inputProducers := r.routeTable.inputProducers
+		table, err := deriveRouteTableWithInputProducers(r.source, r.routeTable.connectGraph, inputProducers)
 		if err != nil {
 			return fmt.Errorf("derive connect route planning preview table: %w", err)
 		}
 		preview.table = table
+		preview.inputProducers = &inputProducers
 	}
 	identity := decision.Route()
 	if !identity.Valid() {

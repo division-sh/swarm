@@ -5323,6 +5323,11 @@ engine:
           Selecting an affected observer also selects every active producer dependency needed to derive that observer's
           complete set, including unchanged and older producer instances in other scopes. Selecting only the changed
           producer may delete valid observer routes during exact-set replacement; unrelated owners remain outside scope.
+          Publication activation, lifecycle route staging, and route retirement MUST consume the same compiled
+          dependency selection. The compiled graph and input-producer resolver are one immutable pair owned by the
+          current semantic route table and replaced together on source revision; these operations freshly read their
+          selected descriptor context. None may fall back to a full-run descriptor read for an independent route change
+          or retain descriptor membership across operations.
           Descriptor `flow_template` is an authored template ID. Route scope is the semantic full template path; exact-set
           derivation MUST resolve that scope through the current semantic route-template registry and compare the resulting
           template ID. Direct equality between a nested scope path and template ID is invalid.
