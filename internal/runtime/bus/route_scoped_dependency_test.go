@@ -58,8 +58,8 @@ func TestCompiledRouteDependenciesPreserveCrossInstanceObserverInBothCreationOrd
 
 			dependencies := rt.compiledRouteOwnerDependencies(runtimepinrouting.FlowInputProducerResolver{})
 			selection := graph.SelectRouteDependencies([]string{"producer"}, dependencies)
-			if !reflect.DeepEqual(selection.ContextFlowPaths, []string{"observer"}) || !reflect.DeepEqual(selection.AffectedFlowPaths, []string{"observer"}) {
-				t.Fatalf("source activation dependencies = %#v, want observer context and affected owner", selection)
+			if !reflect.DeepEqual(selection.ContextFlowPaths, []string{"observer", "producer"}) || !reflect.DeepEqual(selection.AffectedFlowPaths, []string{"observer"}) {
+				t.Fatalf("source activation dependencies = %#v, want complete observer derivation context and only observer affected", selection)
 			}
 			reverse := graph.SelectRouteDependencies([]string{"observer"}, dependencies)
 			if !reflect.DeepEqual(reverse.ContextFlowPaths, []string{"producer"}) || len(reverse.AffectedFlowPaths) != 0 {
