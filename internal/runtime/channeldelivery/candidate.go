@@ -2,6 +2,7 @@ package channeldelivery
 
 import (
 	"context"
+	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 )
@@ -48,6 +49,40 @@ type ResolvedAction struct {
 	CurrentRender      bool
 }
 
+type CardActionDemand struct {
+	CardID             string
+	PrincipalID        string
+	Method             string
+	Verdict            string
+	ReceiptOperationID string
+	RenderHash         string
+}
+
+type PendingAction struct {
+	PublicationID string
+	Fact          operatorchannel.InboundAction
+	ReceivedAt    time.Time
+}
+
+type ActionDisposition string
+
+const (
+	ActionApplied      ActionDisposition = "applied"
+	ActionInputStarted ActionDisposition = "input_started"
+	ActionStale        ActionDisposition = "stale"
+	ActionRejected     ActionDisposition = "rejected"
+	ActionUnsupported  ActionDisposition = "unsupported"
+)
+
+func (d ActionDisposition) Valid() bool {
+	switch d {
+	case ActionApplied, ActionInputStarted, ActionStale, ActionRejected, ActionUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
 type Store interface {
 	CurrentChannelDeliveryActivationID(context.Context) (string, bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]Candidate, error)
@@ -55,4 +90,5 @@ type Store interface {
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	FreezeAndPersistChannelRender(context.Context, string) (PreparedRender, error)
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
+	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
 }

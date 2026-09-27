@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
@@ -21,6 +23,7 @@ import (
 
 type serveChannelDeliveryDispatcher struct {
 	store             runtimechanneldelivery.Store
+	cards             decisioncard.Store
 	activations       channelonboarding.Store
 	manager           *runtime.RuntimeContextManager
 	effects           runtimeeffects.Store
@@ -29,6 +32,49 @@ type serveChannelDeliveryDispatcher struct {
 	runtimeInstanceID string
 	httpClient        *http.Client
 	now               func() time.Time
+}
+
+type channelCardActionResult struct {
+	Response json.RawMessage
+	Replayed bool
+}
+
+func (d *serveChannelDeliveryDispatcher) processCardAction(ctx context.Context, pending runtimechanneldelivery.PendingAction) (channelCardActionResult, error) {
+	if d == nil || d.store == nil || d.cards == nil || d.manager == nil {
+		return channelCardActionResult{}, fmt.Errorf("channel card action owners are unavailable")
+	}
+	resolved, found, err := d.store.ResolveChannelActionFact(ctx, pending.Fact.ActionFact)
+	if err != nil {
+		return channelCardActionResult{}, err
+	}
+	if !found || resolved.SourceKind != "card" {
+		return channelCardActionResult{}, fmt.Errorf("channel callback has no current card receipt")
+	}
+	card, err := d.cards.GetDecisionCard(ctx, resolved.SourceID)
+	if err != nil {
+		return channelCardActionResult{}, err
+	}
+	prepared, err := runtimechanneldelivery.PrepareCardAction(pending, resolved, card)
+	if err != nil {
+		return channelCardActionResult{}, err
+	}
+	use, lookup, err := d.manager.AcquireBundleHash(ctx, card.BundleHash)
+	if err != nil {
+		return channelCardActionResult{}, err
+	}
+	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().Pipeline == nil || use.Runtime().Bus == nil {
+		return channelCardActionResult{}, fmt.Errorf("channel card runtime source is unavailable")
+	}
+	defer use.Done()
+	actionCtx, err := use.Runtime().Bus.AdmitSourceArtifactFact(use.WorkContext())
+	if err != nil {
+		return channelCardActionResult{}, err
+	}
+	response, replayed, err := use.Runtime().Pipeline.CommitDecisionCardMutation(actionCtx, prepared.Request, prepared.Mutation)
+	if err != nil {
+		return channelCardActionResult{}, err
+	}
+	return channelCardActionResult{Response: response, Replayed: replayed}, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) dispatchInitial(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender) error {
