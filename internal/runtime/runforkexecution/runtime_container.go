@@ -497,6 +497,10 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			if err != nil || fingerprint != req.Prepared.inputCoordinates[sourceEvent.SourceEventID] {
 				return out, fmt.Errorf("selected input evidence changed after preparation: %v", err)
 			}
+			input, err = input.WithStoreProjectedPayload(sourceEvent.Payload)
+			if err != nil {
+				return out, err
+			}
 		}
 		forkEventID := activityidentity.ForkLineageEventID(req.ForkRunID, sourceEvent.SourceEventID)
 		evt, err := selectedContractForkEvent(req.SourceRunID, req.ForkRunID, forkEventID, sourceEvent, c.proof.ExecutionOwner)

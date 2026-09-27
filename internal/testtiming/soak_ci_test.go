@@ -52,7 +52,6 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 			if profile == testplanning.ProfileLocal {
 				allowed := map[string]string{
 					"local-generated-fanout-fixture": "^TestFanOutSemanticProofFixtureAdmitsExactProducerSites$",
-					"local-routing-reporter":         "^TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends$",
 				}
 				if len(units) != len(allowed) {
 					t.Fatalf("local conformance canaries = %+v, want %d exact units", units, len(allowed))
@@ -61,6 +60,15 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 					if unit.Run != allowed[unit.ID] || unit.Skip != "" || unit.CountMode != "count-1" {
 						t.Fatalf("local conformance unit widened beyond short canary: %+v", unit)
 					}
+				}
+				var reporter *testplanning.ProofUnit
+				for i := range plan.Units {
+					if plan.Units[i].ID == "local-routing-reporter" {
+						reporter = &plan.Units[i]
+					}
+				}
+				if reporter == nil || !slices.Equal(reporter.Packages, []string{"github.com/division-sh/swarm/internal/serveapp"}) || reporter.Run != "^TestIssue2394ServedFanOutSupportedSurfacesBothStores$" || reporter.Skip != "" || reporter.CountMode != "count-1" || !slices.Equal(reporter.RequiredChildren["TestIssue2394ServedFanOutSupportedSurfacesBothStores"], []string{"sqlite", "postgres"}) {
+					t.Fatalf("local reporter must remain exact two-store served canary: %+v", reporter)
 				}
 				return
 			}

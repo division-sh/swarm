@@ -3,6 +3,7 @@ package bus
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -14,11 +15,12 @@ import (
 // SelectedInputValidation is immutable input resolution data. Execution still
 // requires the selected owner, binding and exact recipient-plan guards.
 type SelectedInputValidation struct {
-	original   events.Event
-	source     semanticview.Source
-	bundleHash string
-	flowID     string
-	recipients []forkrecipient.Evidence
+	original         events.Event
+	source           semanticview.Source
+	bundleHash       string
+	flowID           string
+	recipients       []forkrecipient.Evidence
+	projectedPayload []byte
 }
 
 func RevalidateSelectedInput(source semanticview.Source, original events.Event) (SelectedInputValidation, error) {
@@ -117,6 +119,16 @@ func (v SelectedInputValidation) SelectRecipients(recipients []forkrecipient.Evi
 	return v, nil
 }
 
+// WithStoreProjectedPayload binds the exact payload returned by selected-store
+// source-event preparation after the original publication has been rechecked.
+func (v SelectedInputValidation) WithStoreProjectedPayload(payload []byte) (SelectedInputValidation, error) {
+	if !v.Present() || !json.Valid(payload) {
+		return SelectedInputValidation{}, fmt.Errorf("selected input requires a valid store-projected payload")
+	}
+	v.projectedPayload = append([]byte(nil), payload...)
+	return v, nil
+}
+
 func (v SelectedInputValidation) FilterSubscribers(in []Subscriber) []Subscriber {
 	out := make([]Subscriber, 0, len(in))
 	for _, subscriber := range in {
@@ -134,9 +146,13 @@ func (v SelectedInputValidation) bind(ctx context.Context, event events.Event, b
 		return ctx, nil
 	}
 	lineage, ok := event.SelectedForkLineage()
+	payload := v.original.Payload()
+	if v.projectedPayload != nil {
+		payload = v.projectedPayload
+	}
 	if !ok || lineage.SourceRunID() != v.original.RunID() || lineage.SourceEventID() != v.original.ID() ||
 		event.Type() != v.original.Type() || event.ExecutionMode() != v.original.ExecutionMode() ||
-		!bytes.Equal(event.Payload(), v.original.Payload()) || bundleHash != v.bundleHash {
+		!bytes.Equal(event.Payload(), payload) || bundleHash != v.bundleHash {
 		return nil, fmt.Errorf("selected input validation differs from exact source/event/artifact")
 	}
 	return context.WithValue(ctx, selectedInputValidationContextKey{}, v), nil
@@ -145,6 +161,10 @@ func (v SelectedInputValidation) bind(ctx context.Context, event events.Event, b
 func selectedInputValidationFromContext(ctx context.Context, event events.Event) (SelectedInputValidation, bool) {
 	v, ok := ctx.Value(selectedInputValidationContextKey{}).(SelectedInputValidation)
 	lineage, selected := event.SelectedForkLineage()
+	payload := v.original.Payload()
+	if v.projectedPayload != nil {
+		payload = v.projectedPayload
+	}
 	return v, ok && v.Present() && selected && lineage.SourceEventID() == v.original.ID() && lineage.SourceRunID() == v.original.RunID() &&
-		event.Type() == v.original.Type() && event.ExecutionMode() == v.original.ExecutionMode() && bytes.Equal(event.Payload(), v.original.Payload())
+		event.Type() == v.original.Type() && event.ExecutionMode() == v.original.ExecutionMode() && bytes.Equal(event.Payload(), payload)
 }

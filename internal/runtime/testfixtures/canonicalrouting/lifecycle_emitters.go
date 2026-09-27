@@ -91,7 +91,7 @@ pins:
       - work.first
       - work.second
 `)
-		writeClosedVariantFile(t, root, prefix+"events.yaml", "work.seeded:\n  seed: boolean\nwork.first:\n  choice: text\nwork.second:\n  choice: text\nwork.completed:\n  result: text\n")
+		writeClosedVariantFile(t, root, prefix+"events.yaml", "work.completed:\n  result: text\n")
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  result: text\n")
 		nodes := `controller:
   execution_type: system_node
@@ -136,6 +136,22 @@ pins:
 `
 		writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	}
+	var inputs, outputs, connects, events strings.Builder
+	for _, event := range []string{"work.seeded", "work.first", "work.second"} {
+		inputs.WriteString("      - " + event + "\n")
+		outputs.WriteString("      - " + event + "\n")
+		field, kind := "choice", "text"
+		if event == "work.seeded" {
+			field, kind = "seed", "boolean"
+		}
+		events.WriteString(fmt.Sprintf("%s:\n  %s: %s\n", event, field, kind))
+		for _, child := range []string{"child", "sibling", "child/nested"} {
+			connects.WriteString(fmt.Sprintf("  - {event: %s, from: ., to: %s}\n", event, child))
+		}
+	}
+	writeClosedVariantFile(t, root, "schema.yaml", "name: selected-carriers\nstages:\n  waiting: {initial: true}\n  active: {}\n  done: {terminal: true}\npins:\n  inputs:\n    events:\n"+inputs.String()+"  outputs:\n    events:\n"+outputs.String()+"connect:\n"+connects.String())
+	events.WriteString("work.completed:\n  result: text\n")
+	writeClosedVariantFile(t, root, "events.yaml", events.String())
 	return root
 }
 
