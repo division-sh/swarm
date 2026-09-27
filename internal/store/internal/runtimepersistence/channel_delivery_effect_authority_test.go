@@ -135,6 +135,18 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			altered, err := render.FreezeNotice(render.Notice{ID: noticeID, Type: runtimetools.NotifyHumanMailboxItemType,
+				Summary: "Altered delivery", Priority: "normal", Context: []byte(`{"message":"Delivery authority proof"}`)},
+				frozen.Audience)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := runTx(func(txctx context.Context, tx *sql.Tx) error {
+				_, _, err := channeldelivery.PersistRenderTx(txctx, tx, deliveryID, altered, postgres)
+				return err
+			}); err == nil {
+				t.Fatal("altered notice render was admitted")
+			}
 			var renderID string
 			err = runTx(func(txctx context.Context, tx *sql.Tx) error {
 				var persistErr error
