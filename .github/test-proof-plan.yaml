@@ -27,6 +27,7 @@ special_packages:
   - github.com/division-sh/swarm/internal/runtime/conformance
   - github.com/division-sh/swarm/internal/runtime/contracts
   - github.com/division-sh/swarm/internal/runtime/bus
+  - github.com/division-sh/swarm/internal/runtime/deliverycontinuation
   - github.com/division-sh/swarm/internal/runtime/llm
   - github.com/division-sh/swarm/internal/serveapp
   - github.com/division-sh/swarm/internal/store
@@ -45,6 +46,7 @@ profiles:
       - local-api-matrix-registry
       - local-api-routing-canaries
       - local-routing-reporter
+      - local-delivery-continuation
       - local-release-golden-restart
       - local-release-lifecycle-smoke
       - local-serveapp-canaries
@@ -68,6 +70,7 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - delivery-continuation-full
       - serveapp-channel
       - serveapp-runtime
       - contracts-first
@@ -128,6 +131,7 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - delivery-continuation-full
       - serveapp-channel
       - serveapp-runtime
       - contracts-first
@@ -188,6 +192,7 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - delivery-continuation-full
       - serveapp-channel
       - serveapp-runtime
       - contracts-first
@@ -248,6 +253,7 @@ profiles:
       - hitl-releasee2e-invocation-5
       - hitl-releasee2e-invocation-6
       - runtime-full
+      - delivery-continuation-full
       - serveapp-channel
       - serveapp-runtime
       - contracts-first
@@ -321,6 +327,12 @@ units:
     required_children:
       TestIssue2394ServedFanOutSupportedSurfacesBothStores: [sqlite, postgres]
       TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores: [sqlite/run.start, sqlite/event.publish, postgres/run.start, postgres/event.publish]
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
+  local-delivery-continuation:
+    packages: [github.com/division-sh/swarm/internal/runtime/deliverycontinuation]
+    run: '^TestCoordinator(HeldDispatchDoesNotBlockIndependentDelivery|RetirementCancellationIsNotReportedAsExecutionFailure|StopsAfterFatalDispatchWithoutPolling)$'
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -606,6 +618,12 @@ units:
   runtime-full:
     packages:
       - github.com/division-sh/swarm/internal/runtime
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  delivery-continuation-full:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/deliverycontinuation
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

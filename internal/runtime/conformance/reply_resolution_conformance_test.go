@@ -1177,14 +1177,15 @@ func (s *replyConformanceStore) ListSelectedRunTargetOwners(context.Context, str
 	return replyConformanceTargetOwners(), nil
 }
 
-func (s *replyConformanceStore) ListSelectedRunTargetOwnersForInstancePaths(_ context.Context, _ string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
+func (s *replyConformanceStore) ListSelectedRunTargetOwnersForScope(_ context.Context, _ string, instancePaths []string, sourceEntityID string) ([]bus.ActiveTargetDescriptor, error) {
 	selected := make(map[string]struct{}, len(instancePaths))
 	for _, path := range instancePaths {
 		selected[path] = struct{}{}
 	}
 	var owners []bus.ActiveTargetDescriptor
 	for _, owner := range replyConformanceTargetOwners() {
-		if _, ok := selected[owner.FlowInstance]; ok {
+		_, selectedPath := selected[owner.FlowInstance]
+		if selectedPath || sourceEntityID != "" && owner.EntityID == sourceEntityID {
 			owners = append(owners, owner)
 		}
 	}

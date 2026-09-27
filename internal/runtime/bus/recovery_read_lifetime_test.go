@@ -110,25 +110,27 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					}})
 					ctx, cancel := context.WithCancel(context.Background())
 					defer cancel()
-					started := make(chan error, 1)
-					go func() { started <- c.Start(ctx) }()
+					if err := c.Start(ctx); err != nil {
+						t.Fatal(err)
+					}
 					var readCtx context.Context
 					select {
 					case readCtx = <-probe.entered:
-					case err := <-started:
-						t.Fatalf("did not reach read: %v", err)
 					case <-time.After(5 * time.Second):
 						t.Fatal("read not entered")
 					}
+					retired := make(chan error, 1)
 					if stop == "retire" {
 						waitCtx, stopWait := context.WithCancel(context.Background())
 						stopWait()
 						_ = c.Retire(waitCtx)
+						go func() { retired <- c.Retire(context.Background()) }()
 					} else {
 						cancel()
+						go func() { retired <- c.Retire(context.Background()) }()
 					}
 					select {
-					case err := <-started:
+					case err := <-retired:
 						t.Errorf("worker completed before read: %v", err)
 					default:
 					}
@@ -140,9 +142,9 @@ func TestContinuationOriginReadDrainsBeforeRetirement(t *testing.T) {
 					}
 					close(probe.release)
 					select {
-					case err := <-started:
-						if err == nil || (failure != "none" && !errors.Is(err, independent)) {
-							t.Errorf("start result: %v", err)
+					case err := <-retired:
+						if (failure == "none" && err != nil) || (failure != "none" && !errors.Is(err, independent)) {
+							t.Errorf("retirement result: %v", err)
 						}
 					case <-time.After(5 * time.Second):
 						t.Fatal("read did not drain")

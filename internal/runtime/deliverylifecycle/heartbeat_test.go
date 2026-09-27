@@ -107,6 +107,50 @@ func TestClaimHeartbeatUnacknowledgedRenewalFailsClosedWithoutStoreError(t *test
 	}
 }
 
+func TestClaimHeartbeatConsumesAtomicClaimAndSettlementRenewals(t *testing.T) {
+	owner := newHeartbeatTestOwner(t)
+	store := &heartbeatTestStore{}
+	claim := heartbeatTestClaim()
+	if heartbeat, err := StartClaimHeartbeatFromClaim(context.Background(), owner, store, claim, ClaimCommit{}); heartbeat != nil || err == nil {
+		t.Fatalf("missing atomic claim renewal admitted: %v %v", heartbeat, err)
+	}
+	committed, err := store.RenewClaim(context.Background(), claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed.Snapshot.RunID = uuid.NewString()
+	if heartbeat, err := StartClaimHeartbeatFromClaim(context.Background(), owner, store, claim, committed); heartbeat != nil || err == nil {
+		t.Fatalf("wrong exact claim renewal admitted: %v %v", heartbeat, err)
+	}
+	committed.Snapshot.RunID = claim.RunID()
+	heartbeat, err := StartClaimHeartbeatFromClaim(context.Background(), owner, store, claim, committed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.renewalCount(); got != 1 {
+		t.Fatalf("startup added standalone renewal after atomic claim: %d", got)
+	}
+	guard, err := heartbeat.BeginSettlementInMutation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.renewalCount(); got != 1 {
+		t.Fatalf("atomic settlement guard added standalone renewal: %d", got)
+	}
+	if err := guard.MarkCommitted(); err != nil {
+		t.Fatal(err)
+	}
+	if err := heartbeat.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.renewalCount(); got != 1 {
+		t.Fatalf("terminal claim added standalone renewal: %d", got)
+	}
+	if err := owner.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClaimHeartbeatAcknowledgedWrongClaimFailsClosedDespiteCleanupError(t *testing.T) {
 	owner := newHeartbeatTestOwner(t)
 	cleanup := errors.New("postcommit cleanup")

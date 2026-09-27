@@ -660,7 +660,7 @@ type SelectedRunTargetOwnerLister interface {
 // ScopedSelectedRunTargetOwnerLister consumes exact graph-selected instance
 // paths. It does not decide which receiver or entity owns an event.
 type ScopedSelectedRunTargetOwnerLister interface {
-	ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]ActiveTargetDescriptor, error)
+	ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]ActiveTargetDescriptor, error)
 }
 
 func normalizeDescriptorAddressFields(in map[string]string) map[string]string {

@@ -331,11 +331,14 @@ func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwners(context.Context, st
 	}}, nil
 }
 
-func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]bus.ActiveTargetDescriptor, error) {
+func (s *fanInStreamMemoryStore) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]bus.ActiveTargetDescriptor, error) {
 	for _, path := range instancePaths {
 		if path == templatefanin.ReceiverFlowInstance {
 			return s.ListSelectedRunTargetOwners(ctx, runID)
 		}
+	}
+	if sourceEntityID == fanInStreamSelectedOwner() {
+		return s.ListSelectedRunTargetOwners(ctx, runID)
 	}
 	return nil, nil
 }

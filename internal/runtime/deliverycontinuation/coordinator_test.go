@@ -241,9 +241,80 @@ func TestCoordinatorStartRequiresExplicitExhaustionBeforeReadiness(t *testing.T)
 	if calls := store.scanCalls(); calls < 2 {
 		t.Fatalf("startup scan calls = %d, want explicit second-page exhaustion", calls)
 	}
+	select {
+	case <-dispatcher.dispatched:
+	case <-time.After(time.Second):
+		t.Fatal("startup did not dispatch the acquired continuation")
+	}
 	if calls := dispatcher.callCount(); calls != 1 {
 		t.Fatalf("startup dispatch calls = %d, want one acquired continuation", calls)
 	}
+}
+
+func TestCoordinatorHeldDispatchDoesNotBlockIndependentDelivery(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	first := coordinatorTestEvent("held")
+	second := coordinatorTestEvent("independent")
+	route := coordinatorTestAgentRoute(t, "agent-a")
+	items := make([]runtimedelivery.ContinuationItem, 0, 2)
+	for _, event := range []events.Event{first, second} {
+		id, err := runtimedelivery.DeliveryID(event.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items = append(items, runtimedelivery.ContinuationItem{
+			DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired,
+			Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Status: runtimedelivery.StatusPending, Authority: authority},
+		})
+	}
+	store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{{Items: items, Exhausted: true}}}
+	held := make(chan struct{})
+	started := make(chan struct{}, 1)
+	independent := make(chan struct{}, 1)
+	dispatcher := electionDispatcher(func(ctx context.Context, event events.Event, _ events.DeliveryRoute) DispatchResult {
+		if event.ID() == first.ID() {
+			started <- struct{}{}
+			select {
+			case <-held:
+			case <-ctx.Done():
+				return Fatal(ctx.Err())
+			}
+			return Transferred()
+		}
+		independent <- struct{}{}
+		return Transferred()
+	})
+	coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := coordinator.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("held dispatch never started")
+	}
+	select {
+	case <-independent:
+	case <-ctx.Done():
+		t.Fatal("independent dispatch waited for the held delivery")
+	}
+	retired := make(chan error, 1)
+	go func() { retired <- coordinator.Retire(context.Background()) }()
+	select {
+	case err := <-retired:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("retirement did not join the held worker")
+	}
+	close(held)
 }
 
 func TestCoordinatorParksNonExecutableStandingDelivery(t *testing.T) {
@@ -639,7 +710,7 @@ func TestCoordinatorAttemptOwnershipReconcilesFromExactStoreState(t *testing.T) 
 	store.observations[deliveryID] = runtimedelivery.ContinuationObservation{
 		DeliveryID: deliveryID, Disposition: runtimedelivery.ClaimBusy,
 	}
-	if _, _, err := coordinator.reconcileHeld(context.Background()); err != nil {
+	if _, _, err := coordinator.reconcileHeld(context.Background(), nil); err != nil {
 		t.Fatalf("reconcile busy attempt: %v", err)
 	}
 	if state, ok := coordinatorOwnershipState(coordinator, deliveryID); !ok || state != ownershipAttempt {
@@ -649,7 +720,7 @@ func TestCoordinatorAttemptOwnershipReconcilesFromExactStoreState(t *testing.T) 
 	store.observations[deliveryID] = runtimedelivery.ContinuationObservation{
 		DeliveryID: deliveryID, Disposition: runtimedelivery.ClaimReclaimable,
 	}
-	if _, wake, err := coordinator.reconcileHeld(context.Background()); err != nil {
+	if _, wake, err := coordinator.reconcileHeld(context.Background(), nil); err != nil {
 		t.Fatalf("reconcile reclaimable attempt: %v", err)
 	} else if !wake {
 		t.Fatal("reclaimable attempt did not request immediate continuation scan")
@@ -661,7 +732,7 @@ func TestCoordinatorAttemptOwnershipReconcilesFromExactStoreState(t *testing.T) 
 	store.observations[deliveryID] = runtimedelivery.ContinuationObservation{
 		DeliveryID: deliveryID, Disposition: runtimedelivery.ClaimTerminal,
 	}
-	if _, _, err := coordinator.reconcileHeld(context.Background()); err != nil {
+	if _, _, err := coordinator.reconcileHeld(context.Background(), nil); err != nil {
 		t.Fatalf("reconcile terminal delivery: %v", err)
 	}
 	if state, ok := coordinatorOwnershipState(coordinator, deliveryID); !ok || state != ownershipTerminal {
@@ -750,7 +821,7 @@ func TestCoordinatorTerminalReleaseFencesUnclaimedAndCarrierOwnedWork(t *testing
 		Disposition: runtimedelivery.ClaimTerminal,
 	}
 	for range 2 {
-		if _, _, err := coordinator.reconcileHeld(context.Background()); err != nil {
+		if _, _, err := coordinator.reconcileHeld(context.Background(), nil); err != nil {
 			t.Fatalf("reconcile repeated terminal carrier observation: %v", err)
 		}
 	}

@@ -694,6 +694,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		return false, false, fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
 	}
 	recoveryClaim := claimed
+	var admissionRenewal runtimedelivery.ClaimCommit
 	for {
 		if !claimed {
 			authorityProvider := pc.deliveryRuntime
@@ -715,13 +716,20 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				return true, false, nil
 			}
 			claim = admission.claim
+			admissionRenewal = admission.renewal
 		}
 		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
 		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(runtimedelivery.StatusInProgress)))
 		attemptCtx = withPipelineFlowScope(attemptCtx, nodeFlowID)
 		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleHandlerStarted(attemptCtx, node.Key(), evt))
 		started := time.Now()
-		heartbeat, heartbeatErr := runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
+		var heartbeat *runtimedelivery.ClaimHeartbeat
+		var heartbeatErr error
+		if recoveryClaim {
+			heartbeat, heartbeatErr = runtimedelivery.StartClaimHeartbeat(attemptCtx, pc.workOwner, deliveryStore, claim)
+		} else {
+			heartbeat, heartbeatErr = runtimedelivery.StartClaimHeartbeatFromClaim(attemptCtx, pc.workOwner, deliveryStore, claim, admissionRenewal)
+		}
 		if heartbeatErr != nil {
 			return false, false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
@@ -968,6 +976,7 @@ type workflowNodeDeliveryAuthority interface {
 
 type workflowNodeDeliveryAdmission struct {
 	claim         runtimedelivery.Claim
+	renewal       runtimedelivery.ClaimCommit
 	handled       bool
 	postCommitErr error
 }
@@ -1055,7 +1064,7 @@ func admitWorkflowNodeDelivery(
 		}
 		return workflowNodeDeliveryAdmission{handled: true, postCommitErr: postCommitErr}, nil
 	}
-	return workflowNodeDeliveryAdmission{claim: owned.Claim, postCommitErr: postCommitErr}, nil
+	return workflowNodeDeliveryAdmission{claim: owned.Claim, renewal: claimResult.Renewal, postCommitErr: postCommitErr}, nil
 }
 
 func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context, evt events.Event, nodeID string, err error) {

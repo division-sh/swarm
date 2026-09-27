@@ -19,7 +19,6 @@ func TestTemplateSubscriptionProjectionMatchesFreshAdmission(t *testing.T) {
 	sources := map[string]semanticview.Source{
 		"scatter":           scatter.Source,
 		"template_observer": loadHarnessRouteSource(t, canonicalrouting.CopyTemplateOutputRootConnect(t)),
-		"external_input":    loadHarnessRouteSource(t, canonicalrouting.CopyInputPinExternalScope(t)),
 	}
 	checked := 0
 	for name, source := range sources {

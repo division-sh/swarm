@@ -178,6 +178,7 @@ func (eb *EventBus) DispatchFanOutPublications(ctx context.Context, group runtim
 	settlement := &fanOutPublicationSettlement{ctx: ctx, bus: eb, group: group}
 	defer func() { err = errors.Join(err, settlement.finish()) }()
 	dispatcher := engineDispatcher{bus: eb}
+	transferGroup := nodeOnlyCommittedFanOutGroup(values)
 	for _, value := range values {
 		committed, ok := value.(CommittedEnginePublication)
 		if !ok {
@@ -201,7 +202,7 @@ func (eb *EventBus) DispatchFanOutPublications(ctx context.Context, group runtim
 			}
 			continue
 		}
-		if err := dispatcher.dispatchFanOutOperation(ctx, operation, settlement); err != nil {
+		if err := dispatcher.dispatchFanOutOperation(ctx, operation, committed.plan.prepared.plan, settlement, transferGroup); err != nil {
 			return err
 		}
 		if eb.testLifecycleProbe != nil {
@@ -281,7 +282,7 @@ func (eb *EventBus) takeFanOutOutboxOperation(committed CommittedEnginePublicati
 	return operation, true, nil
 }
 
-func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation pendingOutboxOperation, settlement *fanOutPublicationSettlement) (err error) {
+func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation pendingOutboxOperation, plan RoutePlan, settlement *fanOutPublicationSettlement, transferGroup bool) (err error) {
 	claim := operation.publicationClaim
 	retained := false
 	defer func() {
@@ -298,6 +299,16 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 	if err := d.bus.AcceptCommittedDeliveryHandoffs(operation.deliveryHandoffs); err != nil {
 		return err
 	}
+	if transferGroup && d.bus.canTransferFanOutDelivery(operation, plan) {
+		if err := settlement.collect(claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
+			return err
+		}
+		// Every process-local recipient is represented by an exact durable
+		// route. The selected-store settlement makes those routes executable.
+		d.bus.clearPendingInternalDeliveryRoutes(operation.intent.Event.ID())
+		retained = true
+		return nil
+	}
 	disposition, completed, dispatchErr := d.dispatchIntentDispositionWithBoundary(ctx, operation.intent, settlement)
 	if !completed {
 		return errors.Join(dispatchErr, settlement.flushBeforeNestedPublication())
@@ -313,6 +324,71 @@ func (d engineDispatcher) dispatchFanOutOperation(ctx context.Context, operation
 	}
 	retained = true
 	return dispatchErr
+}
+
+func nodeOnlyCommittedFanOutGroup(values []runtimeengine.CommittedDurablePublication) bool {
+	if len(values) == 0 {
+		return false
+	}
+	for _, value := range values {
+		committed, ok := value.(CommittedEnginePublication)
+		if !ok {
+			return false
+		}
+		routes := committed.plan.prepared.plan.DeliveryRoutes()
+		if len(routes) == 0 {
+			return false
+		}
+		for _, route := range routes {
+			if !route.Recipient.IsNode() {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// A fan-out publication may leave the finite issuance turn only when its
+// executable recipients can be resumed from exact selected-store routes.
+// Event-wide interceptors or mixed route classes still require the ordinary
+// publication decision path before their claims can be settled.
+func (eb *EventBus) canTransferFanOutDelivery(operation pendingOutboxOperation, plan RoutePlan) bool {
+	if operation.outcome != EventAppendInserted || len(operation.deliveryHandoffs) == 0 {
+		return false
+	}
+	routes := plan.DeliveryRoutes()
+	if !plan.TargetFailure.Empty() || len(routes) != len(operation.deliveryHandoffs) {
+		return false
+	}
+	if !nodeRoutesCoverLiveRecipients(plan.LiveRecipients, routes) {
+		return false
+	}
+	eventInterceptors, _ := splitDeliveryRouteInterceptors(eb.interceptorsSnapshot())
+	return len(eventInterceptors) == 0
+}
+
+func nodeRoutesCoverLiveRecipients(recipients []RoutePlanLiveRecipient, routes []events.DeliveryRoute) bool {
+	for _, recipient := range recipients {
+		if recipient.PersistAsDelivery {
+			continue
+		}
+		if recipient.Recipient.IsAgent() {
+			return false
+		}
+		covered := false
+		for _, route := range routes {
+			if route.Recipient.IsNode() &&
+				((recipient.Recipient.IsNode() && route.Recipient == recipient.Recipient) ||
+					(recipient.Recipient.Empty() && route.Recipient.ID() == recipient.subscriberID())) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
 }
 
 type fanOutPublicationSettlement struct {

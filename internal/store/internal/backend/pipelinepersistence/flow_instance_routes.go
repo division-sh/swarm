@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -1237,7 +1239,7 @@ func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwners(ctx context.Context, r
 	return scanSelectedRunTargetOwners(rows, "sqlite selected-run target owner")
 }
 
-func (s *PipelinePostgresOwner) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]runtimebus.ActiveTargetDescriptor, error) {
+func (s *PipelinePostgresOwner) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres store is required for selected-run target owners")
 	}
@@ -1249,15 +1251,30 @@ func (s *PipelinePostgresOwner) ListSelectedRunTargetOwnersForInstancePaths(ctx 
 	if err != nil {
 		return nil, err
 	}
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("selected-run target owner lookup requires graph-owned instance paths")
+	sourceEntityID = strings.TrimSpace(sourceEntityID)
+	if len(paths) == 0 && sourceEntityID == "" {
+		return nil, fmt.Errorf("selected-run target owner lookup requires graph-owned paths or source entity")
 	}
-	args := make([]any, 0, len(paths)+1)
+	if sourceEntityID != "" {
+		parsed, err := uuid.Parse(sourceEntityID)
+		if err != nil || parsed.String() != sourceEntityID {
+			return nil, fmt.Errorf("selected-run source entity identity is not a canonical UUID")
+		}
+	}
+	args := make([]any, 0, len(paths)+2)
 	args = append(args, runID)
+	predicates := make([]string, 0, 2)
+	if len(paths) > 0 {
+		predicates = append(predicates, exactScopePredicate("es.flow_instance", true, 2, len(paths)))
+	}
 	for _, path := range paths {
 		args = append(args, path)
 	}
-	query := postgresSelectedRunTargetOwnersSQL + " AND " + exactScopePredicate("es.flow_instance", true, 2, len(paths)) + selectedRunTargetOwnerOrderSQL
+	if sourceEntityID != "" {
+		predicates = append(predicates, fmt.Sprintf("es.entity_id=$%d::uuid", len(args)+1))
+		args = append(args, sourceEntityID)
+	}
+	query := postgresSelectedRunTargetOwnersSQL + " AND (" + strings.Join(predicates, " OR ") + ")" + selectedRunTargetOwnerOrderSQL
 	rows, err := s.backend.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list scoped selected-run target owners: %w", err)
@@ -1265,7 +1282,7 @@ func (s *PipelinePostgresOwner) ListSelectedRunTargetOwnersForInstancePaths(ctx 
 	return scanSelectedRunTargetOwners(rows, "scoped selected-run target owner")
 }
 
-func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwnersForInstancePaths(ctx context.Context, runID string, instancePaths []string) ([]runtimebus.ActiveTargetDescriptor, error) {
+func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required for selected-run target owners")
 	}
@@ -1277,15 +1294,30 @@ func (s *PipelineSQLiteOwner) ListSelectedRunTargetOwnersForInstancePaths(ctx co
 	if err != nil {
 		return nil, err
 	}
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("selected-run target owner lookup requires graph-owned instance paths")
+	sourceEntityID = strings.TrimSpace(sourceEntityID)
+	if len(paths) == 0 && sourceEntityID == "" {
+		return nil, fmt.Errorf("selected-run target owner lookup requires graph-owned paths or source entity")
 	}
-	args := make([]any, 0, len(paths)+1)
+	if sourceEntityID != "" {
+		parsed, err := uuid.Parse(sourceEntityID)
+		if err != nil || parsed.String() != sourceEntityID {
+			return nil, fmt.Errorf("selected-run source entity identity is not a canonical UUID")
+		}
+	}
+	args := make([]any, 0, len(paths)+2)
 	args = append(args, runID)
+	predicates := make([]string, 0, 2)
+	if len(paths) > 0 {
+		predicates = append(predicates, exactScopePredicate("es.flow_instance", false, 2, len(paths)))
+	}
 	for _, path := range paths {
 		args = append(args, path)
 	}
-	query := sqliteSelectedRunTargetOwnersSQL + " AND " + exactScopePredicate("es.flow_instance", false, 2, len(paths)) + selectedRunTargetOwnerOrderSQL
+	if sourceEntityID != "" {
+		predicates = append(predicates, "es.entity_id=?")
+		args = append(args, sourceEntityID)
+	}
+	query := sqliteSelectedRunTargetOwnersSQL + " AND (" + strings.Join(predicates, " OR ") + ")" + selectedRunTargetOwnerOrderSQL
 	rows, err := s.backend.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite scoped selected-run target owners: %w", err)

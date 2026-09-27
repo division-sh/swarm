@@ -640,6 +640,7 @@ type ClaimResult struct {
 	Previous     ClaimDisposition
 	Snapshot     Snapshot
 	Claimed      ClaimedObligation
+	Renewal      ClaimCommit
 	Invariant    error
 }
 

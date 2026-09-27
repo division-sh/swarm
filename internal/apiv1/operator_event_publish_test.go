@@ -1741,10 +1741,14 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 			if len(targetViolations) != 1 || asMap(t, targetViolations[0])["field_path"] != "$.target.entity_id" || asMap(t, targetViolations[0])["rule"] != "create_entity_mints_entity_id" {
 				t.Fatalf("selected creator target violations = %#v", targetViolations)
 			}
-			for _, table := range []string{"runs", "events", "api_idempotency"} {
+			for _, table := range []string{"runs", "events", "event_deliveries", "api_idempotency"} {
 				var count int
-				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 1 {
-					t.Fatalf("%s rows after forbidden target = %d, err=%v", table, count, err)
+				want := 1
+				if table == "event_deliveries" {
+					want = 2
+				}
+				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != want {
+					t.Fatalf("%s rows after forbidden target = %d, want %d, err=%v", table, count, want, err)
 				}
 			}
 			plain := rpcCall(t, handler, eventPublishBody("", runStartTestBundleHash, "note.requested", `{"entity_id":"11111111-1111-4111-8111-111111111111","amount":52}`, "", "noncreating-identity-valid"))
@@ -1766,6 +1770,17 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 				}
 			}
 		})
+	}
+}
+
+func TestEventPublicationExplicitRootTargetExcludesConnectedCreator(t *testing.T) {
+	source := semanticview.Wrap(eventPublishRenamedConnectedCreateEntityTestBundle())
+	runID := uuid.NewString()
+	if !eventPublicationHasCreateEntityHandler(source, "thing.requested", events.RouteIdentity{}, runID) {
+		t.Fatal("untargeted root publication did not select the connected creator")
+	}
+	if eventPublicationHasCreateEntityHandler(source, "thing.requested", events.RouteIdentity{FlowID: ".", FlowInstance: runID}, runID) {
+		t.Fatal("explicit root target selected a connected child creator")
 	}
 }
 
