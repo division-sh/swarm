@@ -771,11 +771,11 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 		return operatorchannel.TextFact{}, matched, err
 	}
 	text, textOK := projected["text"].(string)
-	account, accountOK, err := operatorChannelOpaqueReference(projected["external_account_reference"])
+	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account_reference"])
 	if err != nil {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q external_account_reference: %w", eventName, err)
 	}
-	conversation, conversationOK, err := operatorChannelOpaqueReference(projected["conversation_reference"])
+	conversation, conversationOK, err := operatorchannel.OpaqueReference(projected["conversation_reference"])
 	if err != nil {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q conversation_reference: %w", eventName, err)
 	}
@@ -783,7 +783,7 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 	if !textOK || !accountOK || !conversationOK || !scopeOK {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q does not project admitted identity fields", eventName)
 	}
-	message, messageOK, err := operatorChannelOpaqueReference(projected["provider_message_reference"])
+	message, messageOK, err := operatorchannel.OpaqueReference(projected["provider_message_reference"])
 	if err != nil {
 		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q provider_message_reference: %w", eventName, err)
 	}
@@ -793,7 +793,7 @@ func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtim
 	var replyTo string
 	if value, exists := projected["reply_to_message_reference"]; exists {
 		var ok bool
-		replyTo, ok, err = operatorChannelOpaqueReference(value)
+		replyTo, ok, err = operatorchannel.OpaqueReference(value)
 		if err != nil || !ok {
 			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q has invalid reply_to_message_reference: %v", eventName, err)
 		}
@@ -820,19 +820,19 @@ func (p SatisfactionPlan) ProjectActionFact(eventName string, authorization runt
 	if err != nil || !matched {
 		return operatorchannel.ActionFact{}, matched, err
 	}
-	account, accountOK, err := operatorChannelOpaqueReference(projected["external_account_reference"])
+	account, accountOK, err := operatorchannel.OpaqueReference(projected["external_account_reference"])
 	if err != nil {
 		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q external_account_reference: %w", eventName, err)
 	}
-	conversation, conversationOK, err := operatorChannelOpaqueReference(projected["conversation_reference"])
+	conversation, conversationOK, err := operatorchannel.OpaqueReference(projected["conversation_reference"])
 	if err != nil {
 		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q conversation_reference: %w", eventName, err)
 	}
-	message, messageOK, err := operatorChannelOpaqueReference(projected["provider_message_reference"])
+	message, messageOK, err := operatorchannel.OpaqueReference(projected["provider_message_reference"])
 	if err != nil {
 		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q provider_message_reference: %w", eventName, err)
 	}
-	interaction, interactionOK, err := operatorChannelOpaqueReference(projected["interaction_reference"])
+	interaction, interactionOK, err := operatorchannel.OpaqueReference(projected["interaction_reference"])
 	if err != nil {
 		return operatorchannel.ActionFact{}, false, fmt.Errorf("channel action event %q interaction_reference: %w", eventName, err)
 	}
@@ -900,24 +900,6 @@ func (p SatisfactionPlan) projectOperatorEvent(kind, eventName string, authoriza
 		}
 	}
 	return projected, true, nil
-}
-
-func operatorChannelOpaqueReference(value any) (string, bool, error) {
-	switch value := value.(type) {
-	case string:
-		if strings.TrimSpace(value) == "" {
-			return "", false, nil
-		}
-		return value, true, nil
-	case map[string]any:
-		encoded, err := canonicaljson.Bytes(value)
-		if err != nil {
-			return "", false, err
-		}
-		return string(encoded), true, nil
-	default:
-		return "", false, nil
-	}
 }
 
 func (p SatisfactionPlan) OperationNames() []string {
