@@ -123,12 +123,13 @@ func TestLLMSessionAcquireRotateReleaseAttemptJourneyBothStores(t *testing.T) {
 		if len(submissions) != 2 {
 			t.Fatalf("rotation candidate handoffs=%d want=2", len(submissions))
 		}
-		if selected.postgres {
-			beforeReplay := len(submissions)
-			replayed, err := owner.Rotate(ctx, identity, "journey-worker", rotation)
-			if err != nil || replayed == nil || replayed.SessionID != rotated.SessionID || len(submissions) != beforeReplay {
-				t.Fatalf("rotation replay duplicated effect: lease=%+v err=%v handoffs=%d", replayed, err, len(submissions))
-			}
+		beforeReplay := len(submissions)
+		replayed, err := owner.Rotate(ctx, identity, "journey-worker", rotation)
+		if err != nil || replayed == nil || replayed.SessionID != rotated.SessionID ||
+			replayed.RetriesFromSessionID != rotated.RetriesFromSessionID || replayed.RetryReason != rotated.RetryReason ||
+			replayed.LockOwner != rotated.LockOwner || !replayed.ExpiresAt.Equal(rotated.ExpiresAt) ||
+			len(submissions) != beforeReplay {
+			t.Fatalf("rotation replay duplicated effect or lost result: first=%+v replay=%+v err=%v handoffs=%d", rotated, replayed, err, len(submissions))
 		}
 
 		phase, handoffError = "release", nil

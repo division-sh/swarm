@@ -205,17 +205,14 @@ func (s *LLMPostgresOwner) ReleaseOutcome(ctx context.Context, lease *runtimeses
 }
 
 func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Identity, lockOwner string, rotation runtimesessions.RotationMetadata) (*runtimesessions.Lease, error) {
-	identity = identity.Normalize()
-	if err := identity.Validate(); err != nil {
-		return nil, err
-	}
-	fields, err := storeagent.IdentityFields(identity)
+	request, err := runtimesessions.NormalizeRotationRequest(identity, lockOwner, rotation)
 	if err != nil {
 		return nil, err
 	}
-	lockOwner = strings.TrimSpace(lockOwner)
-	if lockOwner == "" {
-		return nil, errors.New("lockOwner is required")
+	identity, lockOwner, rotation = request.Identity, request.LockOwner, request.Metadata
+	fields, err := storeagent.IdentityFields(identity)
+	if err != nil {
+		return nil, err
 	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, s.runLifecycleCandidates, func(sqlCtx context.Context, attempt *mutationprotocol.Attempt) (*runtimesessions.Lease, error) {
 		var lease *runtimesessions.Lease
@@ -226,11 +223,30 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 			if _, err := requirePostgresLiveSessionAuthority(sqlCtx, tx, identity, "rotate", false); err != nil {
 				return err
 			}
+			var receipt *runtimesessions.RotationReceipt
+			if rotation.OperationID != "" {
+				// Serialize the store-wide key before reading the receipt or current row.
+				if _, err := tx.ExecContext(sqlCtx, `SELECT pg_advisory_xact_lock(2458, hashtext($1))`, rotation.OperationID); err != nil {
+					return err
+				}
+				var digest string
+				var raw []byte
+				err := tx.QueryRowContext(sqlCtx, `SELECT rotation_request_digest, rotation_result FROM agent_sessions WHERE rotation_operation_id=$1 FOR UPDATE`, rotation.OperationID).Scan(&digest, &raw)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if err == nil {
+					receipt = &runtimesessions.RotationReceipt{OperationID: rotation.OperationID, RequestDigest: digest}
+					if err := json.Unmarshal(raw, &receipt.Result); err != nil {
+						return fmt.Errorf("decode rotation receipt: %w", err)
+					}
+				}
+			}
 			var currentID, currentRunID string
 			var existingOwner sql.NullString
 			var existingExpiry sql.NullTime
 			var runtimeStateRaw []byte
-			if err := tx.QueryRowContext(sqlCtx, `
+			currentErr := tx.QueryRowContext(sqlCtx, `
 			SELECT session_id::text, run_id::text, lease_holder, lease_expires_at, runtime_state
 			FROM agent_sessions
 			WHERE run_id=$1::uuid AND agent_id=$2 AND agent_name_owner=$3
@@ -238,60 +254,74 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 			  AND flow_instance_id=$7 AND flow_instance=$8 AND status='active'
 			ORDER BY created_at DESC LIMIT 1 FOR UPDATE
 		`, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&currentID, &currentRunID, &existingOwner, &existingExpiry, &runtimeStateRaw); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return fmt.Errorf("no active session to rotate for agent=%s", identity.AgentID())
-				}
-				return err
-			}
-			operationID := strings.TrimSpace(rotation.OperationID)
-			if operationID != "" {
-				var state map[string]any
-				if err := json.Unmarshal(runtimeStateRaw, &state); err != nil {
-					return fmt.Errorf("decode active session runtime state: %w", err)
-				}
-				if strings.TrimSpace(fmt.Sprint(state["rotation_operation_id"])) == operationID {
-					lease = &runtimesessions.Lease{SessionID: currentID, Identity: identity, LockOwner: existingOwner.String, ExpiresAt: existingExpiry.Time}
-					return nil
-				}
+				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(&currentID, &currentRunID, &existingOwner, &existingExpiry, &runtimeStateRaw)
+			if currentErr != nil && !errors.Is(currentErr, sql.ErrNoRows) {
+				return currentErr
 			}
 			var now time.Time
-			if err := tx.QueryRowContext(sqlCtx, `SELECT CURRENT_TIMESTAMP`).Scan(&now); err != nil {
+			if err := tx.QueryRowContext(sqlCtx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 				return fmt.Errorf("read selected-store session time: %w", err)
 			}
 			now = now.UTC()
+			if receipt != nil {
+				var current *runtimesessions.Lease
+				if currentErr == nil {
+					var state struct {
+						ProviderSessionID    string `json:"provider_session_id"`
+						RetryReason          string `json:"retry_reason"`
+						RetriesFromSessionID string `json:"retries_from_session_id"`
+					}
+					if err := json.Unmarshal(runtimeStateRaw, &state); err != nil {
+						return fmt.Errorf("decode active session runtime state: %w", err)
+					}
+					current = &runtimesessions.Lease{SessionID: currentID, ProviderSessionID: state.ProviderSessionID, Identity: identity,
+						RetryReason: state.RetryReason, RetriesFromSessionID: state.RetriesFromSessionID,
+						LockOwner: existingOwner.String, ExpiresAt: existingExpiry.Time}
+				}
+				lease, err = runtimesessions.ReplayRotation(request, receipt, current, now)
+				return err
+			}
+			if currentErr != nil {
+				return fmt.Errorf("no active session to rotate for agent=%s", identity.AgentID())
+			}
 			if existingOwner.Valid && existingExpiry.Valid && existingExpiry.Time.After(now) && existingOwner.String != lockOwner {
 				return runtimesessions.ErrSessionLeased
 			}
-			reason := rotation.TerminationReason
-			if reason == "" {
-				reason = runtimesessions.TerminationReasonContaminated
-			}
 			newID := uuid.NewString()
-			retryReason := strings.TrimSpace(rotation.RetryReason)
+			retryReason := rotation.RetryReason
 			if _, err := tx.ExecContext(sqlCtx, `
 			UPDATE agent_sessions SET status='terminated', termination_reason=$2, termination_detail=NULLIF($3,''),
 			terminated_at=$4, successor_session_id=NULL, lease_holder=NULL, lease_expires_at=NULL, updated_at=$4
 			WHERE session_id=$1::uuid AND status='active'
-		`, currentID, reason.String(), retryReason, now); err != nil {
+		`, currentID, rotation.TerminationReason.String(), retryReason, now); err != nil {
 				return err
 			}
-			runtimeState, err := json.Marshal(map[string]any{"summary": strings.TrimSpace(rotation.CheckpointSummary), "retry_reason": retryReason, "retries_from_session_id": currentID, "rotation_operation_id": operationID})
+			runtimeState, err := json.Marshal(map[string]any{"summary": rotation.CheckpointSummary, "retry_reason": retryReason, "retries_from_session_id": currentID})
 			if err != nil {
 				return err
 			}
 			expires := now.Add(s.postgresSessionLockTTL())
+			lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: currentID, LockOwner: lockOwner, ExpiresAt: expires}
+			var receiptJSON []byte
+			if rotation.OperationID != "" {
+				receiptJSON, err = json.Marshal(lease)
+				if err != nil {
+					return err
+				}
+			}
 			var newRunID string
 			if err := tx.QueryRowContext(sqlCtx, `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 				memory_enabled, memory_source, conversation, turn_count, runtime_state,
-				lease_holder, lease_expires_at, status, created_at, updated_at
-			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13)
+				lease_holder, lease_expires_at, status, created_at, updated_at,
+				rotation_operation_id, rotation_request_digest, rotation_result
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13,$14,$15,$16::jsonb)
 			RETURNING session_id::text, run_id::text
 		`, newID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, string(runtimeState), lockOwner, expires, now).Scan(&newID, &newRunID); err != nil {
+				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, string(runtimeState), lockOwner, expires, now,
+				rotationReceiptValue(rotation.OperationID, rotation.OperationID != ""), rotationReceiptValue(request.Digest, rotation.OperationID != ""), receiptJSON).Scan(&newID, &newRunID); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(sqlCtx, `UPDATE agent_sessions SET successor_session_id=$2::uuid, updated_at=$3 WHERE session_id=$1::uuid AND status='terminated'`, currentID, newID, now); err != nil {
@@ -313,7 +343,6 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 			if err := addAgentSessionFacts(attempt, newRunID, newID); err != nil {
 				return err
 			}
-			lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: currentID, LockOwner: lockOwner, ExpiresAt: expires}
 			return nil
 		})
 		return lease, err
