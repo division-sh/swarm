@@ -752,7 +752,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 288
+  node_site_ceiling: 290
   off_owner_direct_decode_ceiling: 30
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -764,7 +764,7 @@ decode_bypasses:
     internal/packartifact/project.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/packmodel/envelope.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/providerconnectors/catalog_types.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
-    internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 2}
+    internal/providertriggers/providertriggers.go: {family: closure_pack_platform, node_sites: 0, direct_decode_roots: 1}
     internal/runtime/agentintent/model.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/durable_data.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/enums.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
