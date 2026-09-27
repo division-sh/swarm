@@ -24,6 +24,10 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			ctx := testAuthorActivityContext()
 			cards, runID := decisionCardTestStore(t, backend)
 			selected := cards.(operatorchannel.Store)
+			delivery := cards.(render.Store)
+			if cursor, current, err := delivery.CurrentChannelCardChangeCursor(ctx); err != nil || current || cursor != 0 {
+				t.Fatalf("card change cursor before default = %d, %t, %v", cursor, current, err)
+			}
 			var settle func(context.Context, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
 			var plan func(string) (bool, error)
 			var count func(string) (int, error)
@@ -155,8 +159,28 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 				return binding
 			}
 			bound := connect(operatorchannel.OperationConnect, 0, "account-a", "chat-a")
+			if cursor, current, err := delivery.CurrentChannelCardChangeCursor(ctx); err != nil || !current || cursor != 0 {
+				t.Fatalf("initial card change cursor = %d, %t, %v", cursor, current, err)
+			}
 			if created, err := plan(backlog.CardID); err != nil || !created {
 				t.Fatalf("first backlog plan = %t, %v", created, err)
+			}
+			changes, err := cards.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 200})
+			if err != nil || len(changes) == 0 {
+				t.Fatalf("initial card changes = %+v, %v", changes, err)
+			}
+			sequence := changes[0].Sequence
+			if err := delivery.PlanChangedChannelCard(ctx, sequence, uuid.NewString()); err == nil {
+				t.Fatal("wrong card identity advanced the channel cursor")
+			}
+			if cursor, _, err := delivery.CurrentChannelCardChangeCursor(ctx); err != nil || cursor != 0 {
+				t.Fatalf("cursor after rejected change = %d, %v", cursor, err)
+			}
+			if err := delivery.PlanChangedChannelCard(ctx, sequence, backlog.CardID); err != nil {
+				t.Fatalf("plan exact card change: %v", err)
+			}
+			if cursor, _, err := delivery.CurrentChannelCardChangeCursor(ctx); err != nil || cursor != sequence {
+				t.Fatalf("cursor after exact planned change = %d, want %d: %v", cursor, sequence, err)
 			}
 			firstPlans, err := list()
 			if err != nil {
@@ -235,6 +259,17 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 			terminal, entityID, activationID := newCard()
 			if err := cards.SupersedeDecisionCardsForStage(ctx, runID, entityID, activationID, "flow moved on", now.Add(5*time.Second)); err != nil {
 				t.Fatal(err)
+			}
+			changes, err = cards.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{After: sequence, Limit: 200})
+			if err != nil || len(changes) == 0 {
+				t.Fatalf("terminal card changes = %+v, %v", changes, err)
+			}
+			terminalSequence := changes[len(changes)-1].Sequence
+			if err := delivery.PlanChangedChannelCard(ctx, terminalSequence, terminal.CardID); err != nil {
+				t.Fatalf("advance terminal card change: %v", err)
+			}
+			if cursor, _, err := delivery.CurrentChannelCardChangeCursor(ctx); err != nil || cursor != terminalSequence {
+				t.Fatalf("terminal card cursor = %d, want %d: %v", cursor, terminalSequence, err)
 			}
 			if created, err := plan(terminal.CardID); err != nil || created {
 				t.Fatalf("terminal plan = %t, %v", created, err)
