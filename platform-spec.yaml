@@ -25,6 +25,13 @@ interfaces:
         nonempty_text: {type: string, minLength: 1}
         inbound_text: {type: string, minLength: 1}
         conversation_scope: {type: string, enum: [direct, shared]}
+        entry_invocation:
+          type: object
+          additionalProperties: false
+          required: [reference]
+          properties:
+            reference: {type: string, minLength: 1, maxLength: 32}
+            address: {type: string, minLength: 5, maxLength: 32}
         inbox_install_commands:
           type: array
           minItems: 1
@@ -116,6 +123,7 @@ interfaces:
             provider_message_reference: {opaque: delivery_reference}
           optional_fields:
             reply_to_message_reference: {opaque: delivery_reference}
+            entry_invocation: {schema: entry_invocation}
 spec_authority:
   merge_bearing_owner: platform-spec.yaml
   rule: |
@@ -10558,6 +10566,9 @@ tool_model:
         or shared scope. The same compiled text projection retains the required provider message reference and the
         optional reply-to message reference. An absent reply-to reference is distinct from a malformed present one;
         only the accepted trigger schema and channel satisfaction plan may project either reference. The same compiled
+        plan may project an optional typed native-entry invocation with a reference and optional provider address;
+        that projection is evidence only and grants no entry or mutation authority. Provider command spelling is
+        interpreted only inside its accepted trigger/adapter, never by the generic operator-channel runtime. The same compiled
         plan projects authenticated action facts with the required token, interaction reference, message reference,
         account, conversation, and scope; projection itself grants no decision authority. Provider display names, configured destinations, OS names, CLI strings, callback actions,
         provider-native conversation kinds, proof filenames, and bearer-token hashes carry no authority. Accepted setup

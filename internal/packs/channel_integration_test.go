@@ -529,6 +529,13 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	if fact.ExternalAccountRef != `{"principal":"operator-a"}` || fact.ConversationRef != `{"room":"ops-room"}` || fact.ConversationScope != operatorchannel.ConversationScopeShared || fact.MessageReference != "mock-delivery:12345678" || fact.ReplyToReference != "" {
 		t.Fatalf("mock operator-channel fact = %#v", fact)
 	}
+	entry, matched, err := plan.ProjectTextFact("mock.text", authorization, map[string]any{
+		"text": "open", "principal": "operator-a", "room": "ops-room", "scope": "shared",
+		"message_ref": "mock-delivery:12345678", "native_entry": map[string]any{"reference": "button_17", "address": "MockInbox"},
+	})
+	if err != nil || !matched || entry.EntryReference != "button_17" || entry.EntryAddress != "MockInbox" {
+		t.Fatalf("mock native-entry projection = %#v matched=%v err=%v", entry, matched, err)
+	}
 	reply, matched, err := plan.ProjectTextFact("mock.text", authorization, map[string]any{
 		"text": "reason", "principal": "operator-a", "room": "ops-room", "scope": "shared",
 		"message_ref": "mock-delivery:12345678", "reply_ref": "mock-delivery:87654321",
@@ -607,6 +614,12 @@ func TestChannelDeliveryReplyProjectionTelegram(t *testing.T) {
 	if err != nil || !matched || fact.MessageReference != `{"id":17}` || fact.ReplyToReference != "" {
 		t.Fatalf("unquoted Telegram fact = %#v matched=%v err=%v", fact, matched, err)
 	}
+	base["command_invocation"] = map[string]any{"reference": "inbox_abc123", "address": "SampleBot"}
+	fact, matched, err = plan.ProjectTextFact("inbound.telegram.text_message", authorization, base)
+	if err != nil || !matched || fact.EntryReference != "inbox_abc123" || fact.EntryAddress != "SampleBot" {
+		t.Fatalf("addressed Telegram entry fact = %#v matched=%v err=%v", fact, matched, err)
+	}
+	delete(base, "command_invocation")
 	base["reply_to_message_reference"] = json.Number("11")
 	fact, matched, err = plan.ProjectTextFact("inbound.telegram.text_message", authorization, base)
 	if err != nil || !matched || fact.ReplyToReference != `{"id":11}` {
@@ -1907,7 +1920,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				"conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref",
 			}},
 			"text": {Event: "mock.text", Fields: map[string]string{
-				"text": "event.text", "external_account_reference.principal": "event.principal", "conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref", "reply_to_message_reference": "event.reply_ref",
+				"text": "event.text", "external_account_reference.principal": "event.principal", "conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref", "reply_to_message_reference": "event.reply_ref", "entry_invocation": "event.native_entry",
 			}},
 		},
 	}
@@ -1936,10 +1949,15 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				schema = deliveryReference
 			case "text":
 				schema = text128
+			case "native_entry":
+				schema = mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{
+					"reference": mockStringSchema(1, 32, ""),
+					"address": mockStringSchema(5, 32, ""),
+				}, "reference")
 			default:
 				panic("missing mock trigger field schema for " + name)
 			}
-			fields[name] = packs.TriggerEventField{Schema: schema, Required: name != "reply_ref"}
+			fields[name] = packs.TriggerEventField{Schema: schema, Required: name != "reply_ref" && name != "native_entry"}
 		}
 		return fields
 	}
@@ -1948,7 +1966,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
 			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "scope", "message_ref")},
-			"mock.text":   {Name: "mock.text", Fields: triggerFields("text", "principal", "room", "scope", "message_ref", "reply_ref")},
+			"mock.text":   {Name: "mock.text", Fields: triggerFields("text", "principal", "room", "scope", "message_ref", "reply_ref", "native_entry")},
 		},
 	}
 	connector := packs.ConnectorPackDescriptor{
