@@ -29,7 +29,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 		label        string
 	}{
 		{event: "rules.selected", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["rules.selected"].rules[0]`, label: "rules-label"},
-		{event: "rules.no_match", context: handlerselection.ContextRules, disposition: handlerselection.DispositionNoMatch},
+		{event: "rules.fallback", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["rules.fallback"].rules[1]`, label: "unmatched-rules"},
 		{event: "rules.evaluation_failed", context: handlerselection.ContextRules, disposition: handlerselection.DispositionEvaluationFailed, semanticPath: `nodes["selection-node"].handlers["rules.evaluation_failed"].rules[0]`, label: "failed-rules"},
 		{event: "complete.selected", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["complete.selected"].on_complete[0]`, label: "complete-label"},
 		{event: "complete.no_match", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionNoMatch},

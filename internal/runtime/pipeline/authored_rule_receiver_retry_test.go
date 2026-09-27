@@ -38,7 +38,7 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 					"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
 					"entities.yaml": "test_entity: {}\n",
 					"events.yaml":   "source.evt: {}\n",
-					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - id: complete\n          condition: 'true'\n          advances_to: done\n",
+					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - id: complete\n          when: 'true'\n          advances_to: done\n        - id: unmatched\n          else: true\n",
 				})
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")
@@ -51,8 +51,8 @@ func TestAuthoredRuleReceiverPreparationRetryBothStores(t *testing.T) {
 				configurePipelineTestDeliveryOwner(t, pc)
 				pc.deliveryStore = observed
 				handler, found := pc.SemanticSource().ExecutableNodeEventHandler(node, "source.evt")
-				if !found || len(handler.Rules) != 1 || !handler.Rules[0].Authored() {
-					t.Fatalf("source lacks the single authored rule: found=%v handler=%#v", found, handler)
+				if !found || len(handler.Rules) != 2 || !handler.Rules[0].Authored() || !handler.Rules[1].Authored() || handler.Rules[1].Condition != "else" {
+					t.Fatalf("source lacks the authored predicate and fallback: found=%v handler=%#v", found, handler)
 				}
 				ref, qualified := handler.Rules[0].DeclarationIdentity()
 				if !qualified {

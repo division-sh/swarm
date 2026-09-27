@@ -2137,8 +2137,10 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
         - id: review
-          condition: "true"
-          advances_to: review`)
+          when: "true"
+          advances_to: review
+        - id: unmatched
+          else: true`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -2152,11 +2154,13 @@ func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testi
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
         - id: review
-          condition: "true"
+          when: "true"
           advances_to: review
         - id: invalid
-          condition: "true"
-          advances_to: bogus_state`)
+          when: "true"
+          advances_to: bogus_state
+        - id: unmatched
+          else: true`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

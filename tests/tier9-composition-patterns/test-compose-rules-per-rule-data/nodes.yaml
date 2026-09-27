@@ -6,7 +6,7 @@ resolver:
     conflict.submitted:
       rules:
         - id: keep_first
-          condition: "payload.strategy == 'keep_first'"
+          when: "payload.strategy == 'keep_first'"
           data_accumulation:
             writes:
               - source_field: value_a
@@ -17,7 +17,7 @@ resolver:
           emit:
             event: conflict.resolved
         - id: keep_best
-          condition: "payload.strategy == 'keep_best'"
+          when: "payload.strategy == 'keep_best'"
           data_accumulation:
             writes:
               - source_field: value_b
@@ -28,7 +28,7 @@ resolver:
           emit:
             event: conflict.resolved
         - id: merge
-          condition: "payload.strategy == 'merge'"
+          when: "payload.strategy == 'merge'"
           data_accumulation:
             writes:
               - source_field: value_a
@@ -40,3 +40,5 @@ resolver:
           advances_to: resolved
           emit:
             event: conflict.resolved
+        - id: unmatched
+          else: true
