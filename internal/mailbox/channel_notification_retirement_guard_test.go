@@ -1,8 +1,9 @@
-package conformance
+package mailbox
 
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -11,7 +12,11 @@ import (
 )
 
 func TestNoRetiredChannelCriticalNotifier(t *testing.T) {
-	root := conformanceRepoRoot(t)
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve retirement guard location")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	forbidden := []string{
 		"ListUnnotifiedCriticalMailboxItems",
 		"CriticalNotifier",
