@@ -83,6 +83,14 @@ func TestChannelNativeInboxForeignCommandsBlockReadinessE2E(t *testing.T) {
 	}
 }
 
+func TestChannelNativeInboxDelayedApplyDuringReconnectStartE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_delayed_apply")
+		})
+	}
+}
+
 func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -160,8 +168,16 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	isolateCLIAPIConfigEnv(t)
 	configureStandingLifecycleCredentials(t)
 	provider := &telegramapi.Double{}
+	var commandApplyArrived <-chan struct{}
+	var releaseCommandApply func()
+	if scenario == "inbox_delayed_apply" {
+		commandApplyArrived, releaseCommandApply = provider.PauseNextCommandApply()
+	}
 	telegram := httptest.NewServer(provider)
 	t.Cleanup(telegram.Close)
+	if releaseCommandApply != nil {
+		t.Cleanup(releaseCommandApply)
+	}
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	publicListener := reserveChannelOnboardingListener(t)
 	publicListen := publicListener.Addr().String()
@@ -248,6 +264,54 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 	}
 	runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", 1001, "private", 0)
+	if scenario == "inbox_delayed_apply" {
+		select {
+		case <-commandApplyArrived:
+		case <-time.After(15 * time.Second):
+			t.Fatal("native setting write did not launch")
+		}
+		var reconnect map[string]any
+		requireServedJSONRPCResult(t, endpoint+"/v1/rpc", "channel.onboarding_start", map[string]any{
+			"provider": "telegram", "verb": "reconnect", "save_proof": false,
+		}, &reconnect)
+		operation, _ := reconnect["operation"].(map[string]any)
+		if operation["phase"] != "awaiting_external_identity" {
+			t.Fatalf("reconnect did not admit an independent ceremony: %v", reconnect)
+		}
+		if writes := provider.CommandWrites(); len(writes) != 0 {
+			t.Fatalf("successor wrote over launched predecessor: %v", writes)
+		}
+		for index := 0; ; index++ {
+			delivery := provider.Delivery(index)
+			if delivery == nil {
+				break
+			}
+			if strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service") {
+				t.Fatalf("card delivered before native setting write settled: %v", delivery)
+			}
+		}
+		releaseCommandApply()
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			writes := provider.CommandWrites()
+			cardDelivered := false
+			for index := 0; ; index++ {
+				delivery := provider.Delivery(index)
+				if delivery == nil {
+					break
+				}
+				cardDelivered = cardDelivered || strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service")
+			}
+			if len(writes) == 1 && cardDelivered {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("delayed predecessor did not converge: writes=%v card=%v", writes, cardDelivered)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		return
+	}
 	if scenario == "inbox_install_loss" || scenario == "inbox_readback_failure" || scenario == "inbox_foreign_commands" {
 		time.Sleep(5500 * time.Millisecond)
 		wantWrites := 1
