@@ -136,6 +136,76 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	}
 }
 
+func TestChannelRenderPreservesEachCanonicalCardAnchor(t *testing.T) {
+	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 1,
+		ExternalAccountRef: "account", ConversationRef: "direct", ConversationScope: operatorchannel.ConversationScopeDirect}
+	runID, entityID := uuid.NewString(), uuid.NewString()
+	source, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operationID, err := decisioncard.NewHumanTaskOperationID(runID, "request-help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
+		Route: runtimeflowidentity.RouteForInstancePath("root"), FlowID: ".", EntityID: entityID,
+		Stage: "awaiting_review", StageActivationID: uuid.NewString(), Source: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	human, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
+		RequesterAgentID: "assistant", OperationID: operationID, Category: "approval",
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+		RequestEventID: uuid.NewString(), ActivityID: "provision", Decision: "approve",
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := decisioncard.FreezeSnapshot("review", "Review request",
+		map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+			"accept": {Verdict: "accept"},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, label, dispatch, effectHash string
+		anchor                            decisioncard.Anchor
+	}{
+		{name: "stage_gate", label: "Gate: . / awaiting_review", anchor: stage},
+		{name: "human_task", label: "Task: assistant / approval", anchor: human},
+		{name: "proposed_effect", label: "Effect: provision", anchor: effect, dispatch: "pending", effectHash: "sha256:effect"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			card, err := decisioncard.New(decisioncard.Card{
+				CardID: uuid.NewString(), RunID: runID, Anchor: tc.anchor, Snapshot: snapshot,
+				ExecutionMode: "live", BundleHash: "sha256:example", WorkflowVersion: "1",
+				EffectContentHash: tc.effectHash, CreatedAt: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			frozen, err := FreezeCard(card, 1, tc.dispatch, audience, DraftPrompt{})
+			if err != nil || !strings.Contains(frozen.FullText, tc.label) ||
+				len(frozen.Choices) != 1 || frozen.Choices[0].Verdict != "accept" {
+				t.Fatalf("frozen %s card = %#v, %v", tc.name, frozen, err)
+			}
+			decoded, err := Decode(frozen.Input, frozen.Hash)
+			if err != nil || decoded.FullText != frozen.FullText || decoded.Audience != audience {
+				t.Fatalf("readback %s card = %#v, %v", tc.name, decoded, err)
+			}
+		})
+	}
+}
+
 func TestChannelResponseFreezesRequestedAudienceAndContent(t *testing.T) {
 	audience := Audience{PrincipalID: uuid.NewString(), InterfaceKey: "mock-channel", DeliveryEpoch: 3,
 		ExternalAccountRef: "account", ConversationRef: "shared", ConversationScope: operatorchannel.ConversationScopeShared}
