@@ -24,6 +24,12 @@ func EnsureRenderActionsTx(ctx context.Context, tx *sql.Tx, renderID string, fro
 	if frozen.SourceKind == PlanSummary {
 		desired = append(desired, render.Action{Kind: "open_inbox", Label: "Open inbox"})
 	}
+	if frozen.SourceKind == PlanNotice && !frozen.NoticeAcknowledged {
+		desired = append(desired, render.Action{Kind: "acknowledge_notice", Label: "Acknowledge"})
+	}
+	if frozen.Page != nil && frozen.Page.Index+1 < frozen.Page.Count {
+		desired = append(desired, render.Action{Kind: "next_page", Label: "Next page"})
+	}
 	_, truncated, err := render.PresentationText(frozen)
 	if err != nil {
 		return nil, err
