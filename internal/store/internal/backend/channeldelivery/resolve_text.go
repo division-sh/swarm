@@ -70,7 +70,7 @@ func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text oper
 		return render.ResolvedNativeEntry{}, false, nil
 	}
 	query := `SELECT b.principal_id, b.interface_key, b.binding_revision, a.activation_id,
-		s.setting_id, s.generation, s.entry_command
+		s.setting_id, s.resource_slot_id, s.generation, s.entry_command
 		FROM operator_channel_bindings b
 		JOIN connected_channel_activations a ON a.interface_key=b.interface_key
 			AND a.principal_id=b.principal_id AND a.binding_revision=b.binding_revision
@@ -93,7 +93,7 @@ func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text oper
 			AND s.entry_command=? LIMIT 2`
 	if postgres {
 		query = `SELECT b.principal_id::text, b.interface_key, b.binding_revision, a.activation_id::text,
-			s.setting_id::text, s.generation, s.entry_command
+			s.setting_id::text, s.resource_slot_id, s.generation, s.entry_command
 			FROM operator_channel_bindings b
 			JOIN connected_channel_activations a ON a.interface_key=b.interface_key
 				AND a.principal_id=b.principal_id AND a.binding_revision=b.binding_revision
@@ -126,7 +126,7 @@ func ResolveCurrentNativeInboxEntryTx(ctx context.Context, tx *sql.Tx, text oper
 		return render.ResolvedNativeEntry{}, false, rows.Err()
 	}
 	if err := rows.Scan(&result.PrincipalID, &result.InterfaceKey, &result.BindingRevision,
-		&result.ActivationID, &result.SettingID, &result.SettingGeneration, &result.EntryReference); err != nil {
+		&result.ActivationID, &result.SettingID, &result.ResourceSlotID, &result.SettingGeneration, &result.EntryReference); err != nil {
 		return render.ResolvedNativeEntry{}, false, err
 	}
 	if rows.Next() {

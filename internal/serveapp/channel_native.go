@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -36,6 +39,72 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx contex
 		}
 	}
 	return nil
+}
+
+func (d *serveChannelDeliveryDispatcher) resolveNativeInboxEntry(ctx context.Context, text operatorchannel.InboundText) (runtimechanneldelivery.ResolvedNativeEntry, bool, error) {
+	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.ingress == nil || d.credentials == nil || d.now == nil {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox entry owners are unavailable")
+	}
+	entry, found, err := d.store.ResolveCurrentNativeInboxEntry(ctx, text)
+	if err != nil || !found {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, found, err
+	}
+	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, err
+	}
+	var selected channelonboarding.ConnectedChannelActivation
+	for _, activation := range activations {
+		if activation.ActivationID != entry.ActivationID {
+			continue
+		}
+		if selected.ActivationID != "" {
+			return runtimechanneldelivery.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox activation is duplicated")
+		}
+		selected = activation
+	}
+	if selected.ActivationID == "" || selected.PrincipalID != entry.PrincipalID ||
+		selected.Interface.Key() != entry.InterfaceKey || selected.BindingRevision != entry.BindingRevision ||
+		selected.Provider != text.Provider || selected.ConversationRef != text.ConversationRef {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+	}
+	registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
+		channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
+	if !current || !registration.Current || registration.Registration.SlotID != entry.ResourceSlotID {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+	}
+	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
+	if err != nil || !current {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, err
+	}
+	defer lease.Release()
+	var plan packs.OutboundBindingPlan
+	matched := false
+	for _, compiled := range lease.Activations() {
+		if compiled.Source != channelonboarding.ActivationSourceLearned ||
+			compiled.OnboardingOperationID != selected.OperationID || compiled.ActivationRevision != selected.Revision ||
+			!compiled.Coordinate.Matches(selected.Coordinate) {
+			continue
+		}
+		if matched {
+			return runtimechanneldelivery.ResolvedNativeEntry{}, false, fmt.Errorf("native inbox compiled activation is duplicated")
+		}
+		plan, matched = compiled.Plan, true
+	}
+	if !matched {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+	}
+	address, err := d.readNativeInboxAddress(ctx, plan, selected.CredentialAdmissions)
+	if err != nil {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, err
+	}
+	if text.ConversationScope == operatorchannel.ConversationScopeShared && text.EntryAddress == "" {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+	}
+	if text.EntryAddress != "" && !strings.EqualFold(text.EntryAddress, address) {
+		return runtimechanneldelivery.ResolvedNativeEntry{}, false, nil
+	}
+	return entry, true, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx context.Context, activation channelonboarding.ConnectedChannelActivation) error {
