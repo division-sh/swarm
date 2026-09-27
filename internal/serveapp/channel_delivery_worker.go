@@ -7,6 +7,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/mailbox"
 	runtimechanneldelivery "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -159,7 +161,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context.Context) error {
-	if d == nil || d.store == nil || d.cards == nil || d.mailbox == nil {
+	if d == nil || d.store == nil || d.cards == nil || d.mailbox == nil || d.proposedEffects == nil {
 		return fmt.Errorf("channel inbox response owners are unavailable")
 	}
 	cursor := ""
@@ -181,17 +183,49 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 			if !found {
 				continue
 			}
-			unread, err := d.mailbox.CountUnreadInformationalNotices(ctx)
+			page, err := apiv1.ListMailboxProjectionPage(ctx, apiv1.DecisionCardHandlerOptions{
+				Cards: d.cards, ProposedEffects: d.proposedEffects, Mailbox: d.mailbox,
+			}, decisioncard.StatusPending, "", 5)
 			if err != nil {
 				failures = errors.Join(failures, err)
 				continue
 			}
-			cards, next, err := d.cards.ListDecisionCards(ctx, decisioncard.ListOptions{Status: decisioncard.StatusPending, Limit: 5})
+			entries := make([]runtimechanneldelivery.InboxEntry, 0, len(page.Items))
+			for _, item := range page.Items {
+				projection, ok := item.(map[string]any)
+				if !ok {
+					err = fmt.Errorf("mailbox projection item is not tagged")
+					break
+				}
+				var entry runtimechanneldelivery.InboxEntry
+				switch projection["kind"] {
+				case decisioncard.KindNotice:
+					notice, ok := projection["notice"].(mailbox.V1Item)
+					if !ok {
+						err = fmt.Errorf("mailbox notice projection is not typed")
+						break
+					}
+					entry, err = runtimechanneldelivery.InboxNoticeEntry(notice)
+				case decisioncard.KindDecisionCard:
+					card, ok := projection["decision_card"].(decisioncard.ListItem)
+					if !ok {
+						err = fmt.Errorf("mailbox card projection is not typed")
+						break
+					}
+					entry, err = runtimechanneldelivery.InboxCardEntry(card)
+				default:
+					err = fmt.Errorf("mailbox projection item has unknown kind")
+				}
+				if err != nil {
+					break
+				}
+				entries = append(entries, entry)
+			}
 			if err != nil {
 				failures = errors.Join(failures, err)
 				continue
 			}
-			content, err := runtimechanneldelivery.InboxText(unread, cards, next != "")
+			content, err := runtimechanneldelivery.InboxText(page.UnreadInformationalNotices, entries, page.NextCursor != "")
 			if err != nil {
 				failures = errors.Join(failures, err)
 				continue
