@@ -426,7 +426,7 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 	}
 }
 
-func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerationGrant(t *testing.T) {
+func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	owner := testGatewayWorkOwner(t)
@@ -480,7 +480,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	if err != nil {
 		t.Fatalf("selected-contract declarations: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, selected)
+	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
 	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
 	topology, err := runtimeagenttopology.SelectedDeclarationAdmission(forkRunID, declarations)
 	if err != nil {
@@ -529,8 +529,19 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndRetiresGenerati
 	}
 	grantDone := runtime.generationGrant.Done()
 	cancel()
-	if err := runtime.Shutdown(); err != nil {
-		t.Fatalf("Shutdown: %v", err)
+	if err := runtime.Shutdown(); err == nil {
+		t.Fatal("injected grant retirement failure was hidden")
+	}
+	if prepared.retainedRuntime != runtime {
+		t.Fatal("failed post-adoption cleanup lost its preparation owner")
+	}
+	select {
+	case <-grantDone:
+		t.Fatal("failed retirement released the generation grant")
+	default:
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatalf("retry retained selected runtime cleanup: %v", err)
 	}
 	select {
 	case <-grantDone:

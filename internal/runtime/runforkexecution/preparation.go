@@ -49,6 +49,7 @@ type PreparedSelectedFork struct {
 	routeTopology           runfork.RunForkSelectedContractRouteTopology
 	model                   runfork.RunForkSelectedContractExecution
 	agentRuntime            selectedContractAgentRuntimePlan
+	retainedRuntime         *selectedContractAgentRuntime
 	readiness               runforkreadiness.Admission
 	deferredWorkAdmission   selectedContractDeferredWorkAdmission
 	dataPinOverrides        []durabledata.ExplicitPin
@@ -376,6 +377,13 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 	if err := p.operation.retireSelected(); err != nil {
 		p.closeErr = err
 		return err
+	}
+	if p.retainedRuntime != nil {
+		if err := p.retainedRuntime.Shutdown(); err != nil {
+			p.closeErr = err
+			return err
+		}
+		p.retainedRuntime = nil
 	}
 	if err := p.agentRuntime.releaseWorkspaceProjection(); err != nil {
 		p.closeErr = err

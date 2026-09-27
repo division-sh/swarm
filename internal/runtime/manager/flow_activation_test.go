@@ -953,8 +953,6 @@ func (s *flowActivationTestInstanceStore) BeginDynamicFlowRuntimeActivation(_ co
 		s.committedAttempts = make(map[string]bool)
 	}
 	s.activationAttempts[key] = attempt
-	item.TopologyReadyAt = time.Time{}
-	s.readiness[key] = item
 	return runtimepipeline.DynamicFlowRuntimeActivationAdmissionResult{Attempt: attempt, Acknowledged: true}, nil
 }
 
@@ -992,6 +990,14 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReadyFor
 }
 
 func (s *flowActivationTestInstanceStore) RetireDynamicFlowRuntimeActivationAttempt(_ context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.settleActivationAttempt(attempt, false)
+}
+
+func (s *flowActivationTestInstanceStore) AbandonDynamicFlowRuntimeActivationAttempt(_ context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	return s.settleActivationAttempt(attempt, true)
+}
+
+func (s *flowActivationTestInstanceStore) settleActivationAttempt(attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt, failed bool) error {
 	if s.retireAttempt != nil {
 		if err := s.retireAttempt(); err != nil {
 			return err
@@ -1019,6 +1025,11 @@ func (s *flowActivationTestInstanceStore) RetireDynamicFlowRuntimeActivationAtte
 	s.retiredAttemptIDs[attempt.ID()] = struct{}{}
 	delete(s.activationAttempts, key)
 	delete(s.committedAttempts, key)
+	if failed {
+		item := s.readiness[key]
+		item.TopologyReadyAt = time.Time{}
+		s.readiness[key] = item
+	}
 	return nil
 }
 

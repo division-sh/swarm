@@ -65,3 +65,10 @@ func (s *workflowInstanceStore) RetireDynamicFlowRuntimeActivationAttempt(ctx co
 	}
 	return s.readiness.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
+
+func (s *workflowInstanceStore) AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {
+	if s == nil || s.readiness == nil {
+		return fmt.Errorf("dynamic flow runtime readiness owner is required")
+	}
+	return s.readiness.AbandonDynamicFlowRuntimeActivationAttempt(ctx, attempt)
+}

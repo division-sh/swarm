@@ -21,6 +21,11 @@ type selectedFlowRouteRetirer interface {
 	RetireFlowInstanceRouteForAttempt(runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
 }
 
+type selectedFlowActivationRetirementStore interface {
+	RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.RunScopedFlowInstance) error
+	AbandonDynamicFlowRuntimeActivationAttempt(context.Context, runtimepipeline.DynamicFlowRuntimeActivationAttempt) error
+}
+
 type selectedFlowActivation struct {
 	attempt         runtimepipeline.DynamicFlowRuntimeActivationAttempt
 	identity        runtimeflowidentity.RunScopedFlowInstance
@@ -81,7 +86,7 @@ func completeSelectedContractFlowRoutes(ctx context.Context, workflow *runtimepi
 	return nil
 }
 
-func retireSelectedFlowActivations(ctx context.Context, bus selectedFlowRouteRetirer, workflow *runtimepipeline.PipelineCoordinator, activations []selectedFlowActivation) ([]selectedFlowActivation, error) {
+func retireSelectedFlowActivations(ctx context.Context, bus selectedFlowRouteRetirer, workflow selectedFlowActivationRetirementStore, activations []selectedFlowActivation) ([]selectedFlowActivation, error) {
 	var retained []selectedFlowActivation
 	var result error
 	for _, activation := range activations {
@@ -97,7 +102,7 @@ func retireSelectedFlowActivations(ctx context.Context, bus selectedFlowRouteRet
 			err = workflow.RetireInitialEntryTimerWakeups(ctx, activation.identity)
 		}
 		if err == nil {
-			err = workflow.RetireDynamicFlowRuntimeActivationAttempt(ctx, activation.attempt)
+			err = workflow.AbandonDynamicFlowRuntimeActivationAttempt(ctx, activation.attempt)
 		}
 		if err != nil {
 			result = errors.Join(result, err)
