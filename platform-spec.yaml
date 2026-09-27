@@ -640,8 +640,13 @@ contract_formats:
           Card creation evaluates context once and freezes the structured
           presentation snapshot, authored verdict/input schema, effective cadence,
           provenance, bundle/workflow identity, card_content_hash, and
-          decision_schema_hash. The raw top-level decision_id MUST already equal
-          its trimmed canonical spelling and MUST equal snapshot.decision before
+          decision_schema_hash. Each outcome's input_order freezes the exact authored
+          YAML field order or the explicit deterministic order supplied by a
+          programmatic producer. It must name each declared input exactly once;
+          missing, duplicate, or foreign names fail before card creation. The
+          order is part of snapshot content and card_content_hash but not the
+          acceptance-only decision_schema_hash. The raw top-level decision_id MUST
+          already equal its trimmed canonical spelling and MUST equal snapshot.decision before
           either hash or any persistence is acquired; deriving a canonical
           snapshot identity from a different public/persisted spelling is
           forbidden. decision_schema_hash is the versioned canonical semantic
