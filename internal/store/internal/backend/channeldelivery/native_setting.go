@@ -239,6 +239,27 @@ func RetireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 	return retireStaleNativeInboxConsumersTx(ctx, tx, postgres)
 }
 
+func MarkNativeInboxSettingUnavailableTx(ctx context.Context, tx *sql.Tx, settingID string, generation int64, postgres bool) error {
+	if tx == nil || uuid.Validate(settingID) != nil || generation < 1 {
+		return fmt.Errorf("native inbox unavailable transition requires exact setting generation")
+	}
+	query := `UPDATE channel_native_settings SET state='unavailable', updated_at=?
+		WHERE setting_id=? AND generation=? AND state IN ('planned','installed')`
+	if postgres {
+		query = `UPDATE channel_native_settings SET state='unavailable', updated_at=$1
+			WHERE setting_id=$2::uuid AND generation=$3 AND state IN ('planned','installed')`
+	}
+	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), settingID, generation)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("native inbox setting is not available for exact conflict transition: %w", err)
+	}
+	return nil
+}
+
 func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) error {
 	query := `UPDATE channel_native_setting_consumers SET state='retired', updated_at=?
 		WHERE state='current' AND NOT EXISTS (
