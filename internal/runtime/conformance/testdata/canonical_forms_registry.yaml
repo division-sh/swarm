@@ -754,7 +754,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 290
+  node_site_ceiling: 288
   off_owner_direct_decode_ceiling: 30
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -784,7 +784,7 @@ decode_bypasses:
     internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 10, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_flow.go: {family: mixed_wave_4_wave_5, node_sites: 27, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_handlers.go: {family: wave_4_node_handler, node_sites: 37, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 20, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 18, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 24, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 28, direct_decode_roots: 0}
     internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 12, direct_decode_roots: 0}

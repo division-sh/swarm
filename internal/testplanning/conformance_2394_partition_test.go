@@ -138,8 +138,9 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestNoRetiredHandlerActionInterpretersRejectsHostileRestoration",
 		"TestCanonicalFormsRegistryPinsHandlerActionRetirement",
 	}
-	// #2300 adds two census/ratchet roots without moving existing proof units.
-	want := []int{124, 14, 5, 1}
+	// #2300 adds two census/ratchet roots; the W4/W5 family correction adds
+	// one guard root without moving existing proof units.
+	want := []int{125, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -161,7 +162,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[0], generatedResultsProof); i == len(groups[0]) || groups[0][i] != generatedResultsProof {
 		t.Fatalf("general conformance partition omitted generated-results guard %s", generatedResultsProof)
 	}
-	for _, name := range []string{"TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses", "TestCanonicalFormsRegistryRejectsUnregisteredDecodeBypasses"} {
+	for _, name := range []string{"TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses", "TestCanonicalFormsRegistryRejectsUnregisteredDecodeBypasses", "TestDecodeBypassFamilyCorrectionRequiresUnchangedAgentWriteSite"} {
 		if i := sort.SearchStrings(groups[0], name); i == len(groups[0]) || groups[0][i] != name {
 			t.Fatalf("general conformance partition omitted #2300 census root %s", name)
 		}

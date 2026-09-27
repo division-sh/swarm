@@ -6,52 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
-
-// decodeExpressionValueNode is the authoring boundary for expression-bearing
-// values. Dynamic containers lower to one CEL value, so runtime consumers do
-// not acquire another interpretation of nested leaves.
-func decodeExpressionValueNode(node *yaml.Node) (ExpressionValue, error) {
-	if node == nil || node.Kind == 0 {
-		return ExpressionValue{}, nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if node.Tag == "!!str" || (node.Tag == "" && node.Style == yaml.DoubleQuotedStyle) {
-			return decodeInterpolatedScalar(node.Value)
-		}
-		return decodeLiteralExpressionNode(node)
-	case yaml.MappingNode:
-		if err := validateUniqueNormalizedMappingKeys(node, "expression value"); err != nil {
-			return ExpressionValue{}, err
-		}
-		if len(node.Content) == 2 {
-			switch node.Content[0].Value {
-			case "literal":
-				return decodeLiteralExpressionNode(node.Content[1])
-			case "cel", "expression", "ref", "kind":
-				return ExpressionValue{}, fmt.Errorf("retired expression value form %q; use ${...} or {literal: ...}", node.Content[0].Value)
-			}
-		}
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			if node.Content[i].Value == "kind" {
-				for j := 0; j+1 < len(node.Content); j += 2 {
-					switch node.Content[j].Value {
-					case "cel", "expression", "ref", "literal":
-						return ExpressionValue{}, fmt.Errorf("retired expression value kind form; use ${...} or {literal: ...}")
-					}
-				}
-			}
-		}
-		return decodeExpressionContainer(node)
-	case yaml.SequenceNode:
-		return decodeExpressionContainer(node)
-	default:
-		return ExpressionValue{}, fmt.Errorf("unsupported expression value yaml node kind %d", node.Kind)
-	}
-}
 
 func decodeInterpolatedScalar(value string) (ExpressionValue, error) {
 	parts, expressions, err := splitExpressionInterpolation(value)
@@ -128,64 +83,6 @@ func splitExpressionInterpolation(value string) ([]string, []string, error) {
 		offset = end + 1
 	}
 	return parts, expressions, nil
-}
-
-func decodeExpressionContainer(node *yaml.Node) (ExpressionValue, error) {
-	if node.Kind == yaml.SequenceNode {
-		items := make([]string, 0, len(node.Content))
-		literals := make([]any, 0, len(node.Content))
-		dynamic := false
-		for _, child := range node.Content {
-			value, err := decodeExpressionValueNode(child)
-			if err != nil {
-				return ExpressionValue{}, err
-			}
-			code, err := expressionValueCELSource(value)
-			if err != nil {
-				return ExpressionValue{}, err
-			}
-			items = append(items, code)
-			dynamic = dynamic || value.HasCELValue()
-			literals = append(literals, value.Literal)
-		}
-		if !dynamic {
-			return LiteralExpression(literals), nil
-		}
-		return CELExpression("[" + strings.Join(items, ", ") + "]"), nil
-	}
-	values := make(map[string]string, len(node.Content)/2)
-	literals := make(map[string]any, len(node.Content)/2)
-	dynamic := false
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i]
-		if key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
-			return ExpressionValue{}, fmt.Errorf("expression value object keys must be strings")
-		}
-		value, err := decodeExpressionValueNode(node.Content[i+1])
-		if err != nil {
-			return ExpressionValue{}, fmt.Errorf("expression value field %s: %w", key.Value, err)
-		}
-		code, err := expressionValueCELSource(value)
-		if err != nil {
-			return ExpressionValue{}, err
-		}
-		values[key.Value] = code
-		literals[key.Value] = value.Literal
-		dynamic = dynamic || value.HasCELValue()
-	}
-	if !dynamic {
-		return LiteralExpression(literals), nil
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	items := make([]string, 0, len(keys))
-	for _, key := range keys {
-		items = append(items, strconv.Quote(key)+": "+values[key])
-	}
-	return CELExpression("{" + strings.Join(items, ", ") + "}"), nil
 }
 
 func expressionValueCELSource(value ExpressionValue) (string, error) {
