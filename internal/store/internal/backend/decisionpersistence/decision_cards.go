@@ -843,9 +843,16 @@ func (s *DecisionSQLiteOwner) CancelInputTx(ctx context.Context, attempt *mutati
 }
 
 func loadDecisionCardDraft(ctx context.Context, db decisionCardSQL, id string, postgres bool) (decisioncard.InputDraft, error) {
+	return loadDecisionCardDraftWithLock(ctx, db, id, true, postgres)
+}
+
+func loadDecisionCardDraftWithLock(ctx context.Context, db decisionCardSQL, id string, lock, postgres bool) (decisioncard.InputDraft, error) {
 	query := `SELECT input_draft_id, run_id, card_id, principal_id, verdict, COALESCE(delivery_receipt_id, ''), status, expires_at, created_at, updated_at FROM decision_card_input_drafts WHERE input_draft_id = ?`
 	if postgres {
-		query = strings.Replace(query, "?", "$1", 1) + ` FOR UPDATE`
+		query = strings.Replace(query, "?", "$1", 1)
+		if lock {
+			query += ` FOR UPDATE`
+		}
 	}
 	var draft decisioncard.InputDraft
 	var expires, created, updated any

@@ -2,8 +2,10 @@ package serveapp
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -134,8 +136,11 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				if count := channelOnboardingCredentialCount(t, harness.credentialPath); count <= predecessorCredentialCount {
 					t.Fatalf("%s E2E-14 predecessor credentials were cleaned before process publication: count=%d predecessor=%d", backend, count, predecessorCredentialCount)
 				}
-				if registrations, deliveries := harness.provider.Counts(); registrations != 2 || deliveries != 1 {
-					t.Fatalf("%s E2E-14 effects before publication = %d/%d, want staged registrations 2 and predecessor confirmation 1", backend, registrations, deliveries)
+				if registrations, deliveries := harness.provider.Counts(); registrations != 2 || deliveries != 2 {
+					t.Fatalf("%s E2E-14 effects before publication = %d/%d, want staged registrations 2 and predecessor confirmation plus card 2", backend, registrations, deliveries)
+				}
+				if delivery := harness.provider.Delivery(1); delivery == nil || !strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service") {
+					t.Fatalf("%s E2E-14 predecessor card delivery = %v", backend, delivery)
 				}
 				requireChannelClaimDisposition(t, "E2E-14 predecessor callback before publication",
 					submitChannelOnboardingClaim(t, predecessorCallback, predecessorSigning, "SWARM-AAAAAAAAAAAAAAAA", 7215, "predecessor_before_publication"), "rejected_binding_claim")
@@ -200,10 +205,10 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 			}
 			wantRegistrations, wantDeliveries := 1, 1
 			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
-				wantRegistrations, wantDeliveries = 3, 2
+				wantRegistrations, wantDeliveries = 3, 3
 			}
 			if boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
-				wantRegistrations, wantDeliveries = 3, 2
+				wantRegistrations, wantDeliveries = 3, 4
 				afterRow := requireChannelOnboardingOperationRow(t, harness, responsibilityID)
 				assertChannelOnboardingIdentityPreserved(t, string(backend)+" E2E-14 restart", beforeRow, afterRow)
 				if afterRow.Activation == nil || afterRow.Activation.Revision != recoveredPublication.ActivationRevision || afterRow.Operation == nil ||
@@ -228,8 +233,28 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 					t.Fatalf("%s E2E-16 successor did not replace predecessor: predecessor=%#v successor=%#v", backend, predecessor, afterRow)
 				}
 			}
-			if registrations, deliveries := harness.provider.Counts(); registrations != wantRegistrations || deliveries != wantDeliveries {
-				t.Fatalf("%s %s provider effects = %d/%d, want %d/%d", backend, boundary, registrations, deliveries, wantRegistrations, wantDeliveries)
+			deadline := time.Now().Add(15 * time.Second)
+			for {
+				registrations, deliveries := harness.provider.Counts()
+				if registrations > wantRegistrations || deliveries > wantDeliveries || time.Now().After(deadline) {
+					t.Fatalf("%s %s provider effects = %d/%d, want %d/%d", backend, boundary, registrations, deliveries, wantRegistrations, wantDeliveries)
+				}
+				if registrations == wantRegistrations && deliveries == wantDeliveries {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if wantDeliveries >= 3 {
+				cards := 0
+				for index := 0; index < wantDeliveries; index++ {
+					if delivery := harness.provider.Delivery(index); delivery != nil && strings.HasPrefix(fmt.Sprint(delivery["text"]), "Retire service") {
+						cards++
+					}
+				}
+				wantCards := wantDeliveries - 2
+				if cards != wantCards {
+					t.Fatalf("%s %s delivered %d standing cards, want exactly %d", backend, boundary, cards, wantCards)
+				}
 			}
 			harness.stop(t)
 		})
@@ -264,8 +289,8 @@ func restartChannelOnboardingAtProcessPublicationBoundary(t *testing.T, backend 
 	if count := channelOnboardingCredentialCount(t, harness.credentialPath); count <= predecessorCredentialCount {
 		t.Fatalf("%s E2E-14 recovery cleaned predecessor before promotion: count=%d predecessor=%d", backend, count, predecessorCredentialCount)
 	}
-	if registrations, deliveries := harness.provider.Counts(); registrations != 3 || deliveries != 1 {
-		t.Fatalf("%s E2E-14 recovery effects before promotion=%d/%d, want exact startup renewal count 3 and predecessor confirmation count 1", backend, registrations, deliveries)
+	if registrations, deliveries := harness.provider.Counts(); registrations != 3 || deliveries != 2 {
+		t.Fatalf("%s E2E-14 recovery effects before promotion=%d/%d, want exact startup renewal count 3 and predecessor confirmation plus card count 2", backend, registrations, deliveries)
 	}
 	publicationBarrier.Release()
 	harness.process.waitForReadyLine()
