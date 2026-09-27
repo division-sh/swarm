@@ -75,6 +75,14 @@ func TestChannelNativeInboxReadbackFailureBlocksReadinessE2E(t *testing.T) {
 	}
 }
 
+func TestChannelNativeInboxForeignCommandsBlockReadinessE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_foreign_commands")
+		})
+	}
+}
+
 func TestChannelDeliveryVerdictAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -148,7 +156,7 @@ func (r telegramLongNoticeLLMRuntime) ContinueManagedSession(ctx context.Context
 
 func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario string) {
 	t.Helper()
-	nativeInboxScenario := scenario == "inbox" || scenario == "inbox_loss" || scenario == "inbox_install_loss" || scenario == "inbox_readback_failure"
+	nativeInboxScenario := scenario == "inbox" || scenario == "inbox_loss"
 	isolateCLIAPIConfigEnv(t)
 	configureStandingLifecycleCredentials(t)
 	provider := &telegramapi.Double{}
@@ -233,8 +241,28 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		provider.LoseNextCommandWriteAcknowledgment()
 	} else if scenario == "inbox_readback_failure" {
 		provider.FailCommandReadbackAfterWrite()
+	} else if scenario == "inbox_foreign_commands" {
+		if err := provider.SeedCommands("bot-token", map[string]any{"type": "chat", "chat_id": "1001"}, "",
+			[]map[string]any{{"command": "foreign", "description": "Foreign owner"}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", 1001, "private", 0)
+	if scenario == "inbox_install_loss" || scenario == "inbox_readback_failure" || scenario == "inbox_foreign_commands" {
+		time.Sleep(5500 * time.Millisecond)
+		wantWrites := 1
+		if scenario == "inbox_foreign_commands" {
+			wantWrites = 0
+		}
+		if writes := provider.CommandWrites(); len(writes) != wantWrites {
+			t.Fatalf("non-usable native setting caused %d writes, want %d: %v", len(writes), wantWrites, writes)
+		}
+		if delivery := provider.Delivery(1); delivery != nil {
+			reads, failures := provider.CommandReadbackCounts()
+			t.Fatalf("non-usable native setting admitted channel delivery: %v; readbacks=%d failures=%d writes=%v", delivery, reads, failures, provider.CommandWrites())
+		}
+		return
+	}
 	if scenario == "summary_open" || scenario == "summary_open_many" {
 		callbackURL, signing, _ := provider.Registration()
 		count := 1
@@ -267,17 +295,6 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-	}
-	if scenario == "inbox_install_loss" || scenario == "inbox_readback_failure" {
-		time.Sleep(5500 * time.Millisecond)
-		if writes := provider.CommandWrites(); len(writes) != 1 {
-			t.Fatalf("unknown native setting write caused %d writes, want one", len(writes))
-		}
-		if delivery := provider.Delivery(1); delivery != nil {
-			reads, failures := provider.CommandReadbackCounts()
-			t.Fatalf("unknown native setting write admitted channel delivery: %v; readbacks=%d failures=%d writes=%v", delivery, reads, failures, provider.CommandWrites())
-		}
-		return
 	}
 	if scenario == "inbox_loss" {
 		deadline := time.Now().Add(15 * time.Second)
