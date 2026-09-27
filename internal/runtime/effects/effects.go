@@ -47,6 +47,7 @@ const (
 	KindClaudeToolResultRelay Kind = "claude_tool_result_relay"
 	KindServeRegistration     Kind = "serve_registration"
 	KindChannelConfirmation   Kind = "channel_confirmation"
+	KindChannelDelivery       Kind = "channel_delivery"
 )
 
 type LifecycleToken struct {
@@ -191,6 +192,7 @@ var registrations = []Registration{
 	registration(KindHTTPToolTarget, EffectWriteOrUnknown, "authored_http_tool", "http", "internal/runtime/tools/executor_http.go", []string{"internal/runtime/tools/executor_http.go:execHTTPRequestOnce:http_do:1"}, "TestManagedToolEffectOutcomes"),
 	registration(KindServeRegistration, EffectWriteOrUnknown, "provider_registration", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestProviderRegistrationApplyEffectOutcomes"),
 	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelConfirmationEffectOutcomes"),
+	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelDeliveryEffectOutcomes"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes"),
 	registration(KindMCPHTTPRequest, EffectWriteOrUnknown, "mcp_tools_call_http", "http", "internal/runtime/mcp/client.go", []string{"internal/runtime/mcp/client.go:callHTTPServerWithCredentialKeyResolver:http_do:1"}, "TestManagedMCPEffectOutcomes"),
@@ -937,6 +939,31 @@ func BeginChannelConfirmation(ctx context.Context, request []byte, lineage map[s
 	return authorizedHandle(controller, attempt, err)
 }
 
+// BeginChannelDelivery admits one persisted render's first send. The selected
+// store checks the default, binding, activation, plan, and render again at launch.
+func BeginChannelDelivery(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
+	const adapter = "channel_delivery"
+	if err := admitExecutionMode(ctx, adapter); err != nil {
+		return nil, err
+	}
+	if _, differentOwner := DifferentOwnerFromContext(ctx); differentOwner {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "external_effect_owner_conflict", "external-effects", "authorize_channel_delivery", nil)
+	}
+	controller, ok := ControllerFromContext(ctx)
+	if !ok {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_channel_delivery", nil)
+	}
+	authority, ok := AuthorityFromContext(ctx)
+	if !ok || authority.Kind != AuthorityChannelDelivery {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_delivery_authority_missing", "external-effects", "authorize_channel_delivery", nil)
+	}
+	operationID := authority.ChannelDelivery.EffectOperationID
+	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
+		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request), Lineage: lineage,
+	})
+	return authorizedHandle(controller, attempt, err)
+}
+
 func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (managedcapabilities.Surface, error) {
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok || surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn || surface.HasMismatch() {
@@ -1412,6 +1439,10 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	} else if registration.Kind == KindChannelConfirmation {
 		if authority.Kind != AuthorityChannelConfirmation || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelConfirmation.EffectOperationID {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_confirmation_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		}
+	} else if registration.Kind == KindChannelDelivery {
+		if authority.Kind != AuthorityChannelDelivery || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelDelivery.EffectOperationID {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_delivery_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else {
 		if req.AgentFrame != nil {
