@@ -16,7 +16,7 @@ worker:
       emit:
         event: item.reported
         fields:
-          item_id: entity.item_id
-          batch_id: entity.batch_id
-          value: entity.value
+          item_id: ${entity.item_id}
+          batch_id: ${entity.batch_id}
+          value: ${entity.value}
       advances_to: complete

@@ -147,8 +147,8 @@ line_item.requested:
         emit:
           event: line_item.requested
           fields:
-            line_item_id: line_item
-            line_item_index: fan_out.index
+            line_item_id: ${line_item}
+            line_item_index: ${fan_out.index}
       advances_to: active
     ticket.closed:
       join:
