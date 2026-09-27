@@ -668,6 +668,21 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			_, addressInput, err := binding.PrepareOperation("identify_inbox_address", map[string]any{})
+			if err != nil || len(addressInput) != 0 {
+				t.Fatalf("native address input = %#v, %v", addressInput, err)
+			}
+			_, addressTool, err := binding.ConnectorOperation("identify_inbox_address")
+			if err != nil || addressTool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+				t.Fatalf("native address effect = %q, %v", addressTool.Effect(), err)
+			}
+			addressResult, err := binding.ProjectOperationOutput("identify_inbox_address", map[string]any{"address": "SwarmTestBot"})
+			if err != nil || addressResult["address_reference"] != "SwarmTestBot" {
+				t.Fatalf("native address projection = %#v, %v", addressResult, err)
+			}
+			if _, err := binding.ProjectOperationOutput("identify_inbox_address", map[string]any{}); err == nil {
+				t.Fatal("native address accepted missing provider readback")
+			}
 			commands := []any{map[string]any{"command": "inbox", "description": "Open inbox"}}
 			_, install, err := binding.PrepareOperation("install_inbox_entry", map[string]any{"commands": commands})
 			if err != nil {
