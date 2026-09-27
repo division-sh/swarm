@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,6 +186,11 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			if !current(authority) {
 				t.Fatal("succeeded channel activation rejected exact delivery")
 			}
+			foreignRender := authority
+			foreignRender.ChannelDelivery.RenderHash = "sha256:foreign"
+			if current(foreignRender) {
+				t.Fatal("foreign render admitted")
+			}
 			handle, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("message"), nil)
 			if err != nil {
 				t.Fatalf("authorize exact delivery: %v", err)
@@ -194,17 +200,6 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			}
 			if err := handle.MarkResponseObserved(effectCtx, map[string]any{"provider": "accepted"}); err != nil {
 				t.Fatalf("observe exact delivery: %v", err)
-			}
-			if err := handle.Succeed(effectCtx, map[string]any{"receipt": "opaque"}); err != nil {
-				t.Fatalf("settle exact delivery: %v", err)
-			}
-			if _, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("message"), nil); err == nil {
-				t.Fatal("settled delivery was authorized for redispatch")
-			}
-			foreignRender := authority
-			foreignRender.ChannelDelivery.RenderHash = "sha256:foreign"
-			if current(foreignRender) {
-				t.Fatal("foreign render admitted")
 			}
 			_, _, err = selected.UnbindOperatorChannel(ctx, operatorchannel.UnbindRequest{
 				OperationID: uuid.NewString(), PrincipalID: principal.ID, Interface: binding.Interface,
@@ -216,6 +211,23 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 			}
 			if current(authority) {
 				t.Fatal("retired default admitted predecessor delivery")
+			}
+			if err := handle.Succeed(effectCtx, map[string]any{"projected_output": map[string]any{"delivery_reference": map[string]any{"id": 91}}}); err != nil {
+				t.Fatalf("settle late exact delivery: %v", err)
+			}
+			query = `SELECT state, provider_reference FROM channel_delivery_receipts WHERE effect_operation_id=?`
+			if postgres {
+				query = `SELECT state, provider_reference FROM channel_delivery_receipts WHERE effect_operation_id=$1::uuid`
+			}
+			var receiptState, receiptJSON string
+			if err := db.QueryRowContext(ctx, query, effectOperationID).Scan(&receiptState, &receiptJSON); err != nil {
+				t.Fatal(err)
+			}
+			if receiptState != "sent" || !strings.Contains(receiptJSON, "delivery_reference") {
+				t.Fatalf("late receipt = %s %s", receiptState, receiptJSON)
+			}
+			if _, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("message"), nil); err == nil {
+				t.Fatal("retired settled delivery was authorized for redispatch")
 			}
 		})
 	}

@@ -14829,6 +14829,25 @@ platform_tables:
             UNIQUE (delivery_id, render_hash),
             INDEX idx_channel_delivery_render_delivery (delivery_id, created_at)
         );
+    channel_delivery_receipts:
+      description: >-
+        Immutable domain projection of one exact managed channel-delivery effect settlement. Known accepted output
+        carries the complete compiled provider-neutral delivery reference; uncertainty carries no invented reference.
+        The effect journal remains the launch/attempt authority. Receipt and plan state commit atomically with that
+        journal's terminal settlement, so restart never infers success from a missing receipt or resends uncertain work.
+        Historical receipts survive rebind and retirement but confer no current destination authority.
+      ddl: |
+        CREATE TABLE channel_delivery_receipts (
+            effect_operation_id UUID PRIMARY KEY REFERENCES runtime_external_effect_operations(operation_id),
+            attempt_id UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            delivery_id UUID NOT NULL REFERENCES channel_delivery_plans(delivery_id),
+            render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
+            state TEXT NOT NULL CHECK (state IN ('sent','uncertain')),
+            provider_reference JSONB,
+            settled_at TIMESTAMPTZ NOT NULL,
+            CHECK ((state = 'sent' AND provider_reference IS NOT NULL) OR (state = 'uncertain' AND provider_reference IS NULL)),
+            INDEX idx_channel_delivery_receipts_delivery (delivery_id, settled_at)
+        );
     channel_onboarding_operations:
       description: >-
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
