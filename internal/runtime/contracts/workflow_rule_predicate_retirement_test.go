@@ -78,6 +78,70 @@ func TestHandlerRulesWhenOwnsPolicyPredicateAndFallback(t *testing.T) {
 	}
 }
 
+func TestHandlerRulesWhenRejectsDefaultSentinel(t *testing.T) {
+	cases := map[string]string{
+		"list_lower_no_fallback":        "rules:\n  - when: else\n    emit: work.ready\n",
+		"list_upper_with_fallback":      "rules:\n  - when: ELSE\n    emit: work.ready\n  - else: true\n",
+		"list_whitespace_with_fallback": "rules:\n  - when: '  Else  '\n    emit: work.ready\n  - else: true\n",
+		"singleton":                     "rules:\n  when: else\n",
+		"keyed":                         "rules:\n  bad:\n    when: else\n  fallback:\n    else: true\n",
+		"alias":                         "bad: &bad {when: else}\nrules:\n  - *bad\n  - else: true\n",
+		"merge":                         "bad: &bad {when: else}\nrules:\n  - <<: *bad\n  - else: true\n",
+	}
+	for name, source := range cases {
+		t.Run(name, func(t *testing.T) {
+			var document yaml.Node
+			if err := yaml.Unmarshal([]byte(source), &document); err != nil {
+				t.Fatal(err)
+			}
+			root := document.Content[0]
+			var rules *yaml.Node
+			for i := 0; i+1 < len(root.Content); i += 2 {
+				if root.Content[i].Value == "rules" {
+					rules = root.Content[i+1]
+					break
+				}
+			}
+			if rules == nil {
+				t.Fatal("missing rules test fixture")
+			}
+			_, err := decodeHandlerRuleEntriesNode(rules, handlerRuleDecodeContextRules)
+			if err == nil {
+				t.Fatal("when default sentinel was admitted")
+			}
+			if name != "merge" && !strings.Contains(err.Error(), "when must be a CEL predicate") {
+				t.Fatalf("when sentinel error = %v, want typed predicate rejection", err)
+			}
+		})
+	}
+}
+
+func TestPolicySheetFallbackRequiresDefaultKind(t *testing.T) {
+	rules := []HandlerRuleEntry{
+		{Condition: "false", PolicyRow: PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}},
+		{Condition: "else"},
+	}
+	if err := validatePolicySheetRows(rules, handlerRuleDecodeContextRules); err == nil || !strings.Contains(err.Error(), "require an else/default row") {
+		t.Fatalf("untyped sentinel counted as fallback: %v", err)
+	}
+	rules[1].PolicyRow.Kind = PolicySheetRowKindDefault
+	if err := validatePolicySheetRows(rules, handlerRuleDecodeContextRules); err != nil {
+		t.Fatalf("typed default rejected: %v", err)
+	}
+}
+
+func TestBundleAdmissionRejectsWhenDefaultSentinel(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: rule-sentinel-proof\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "proof.requested: {}\n")
+	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  execution_type: system_node\n  event_handlers:\n    proof.requested:\n      rules:\n        - when: else\n        - else: true\n")
+	repoRoot := contractRepoRoot(t)
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "when must be a CEL predicate") {
+		t.Fatalf("sentinel bundle admission = %v, want predicate teaching rejection", err)
+	}
+}
+
 func TestRulePredicateContextsRemainDistinct(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte("on_complete:\n  - condition: payload.ready\n    advances_to: done\n"), &handler); err != nil {

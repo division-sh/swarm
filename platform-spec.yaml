@@ -3885,7 +3885,8 @@ handler_specification:
           accumulated.*, fan_out.*, and item.* are unavailable. entity.* reads use the pre-rule entity state;
           computed.* reads are turn-scoped values written earlier in the handler compute phase. `when` lowers to
           the internal Condition carrier with PolicyRow kind when, and uses ordinary selected-branch fields.
-          It cannot be combined with case, range, else, or default.
+          It cannot be combined with case, range, else, or default. The trimmed, case-insensitive `else`
+          sentinel is not a predicate and is rejected here; author `else: true` for a default row.
         case: >-
           object — first-class policy-sheet selection row for scalar or tuple dispatch. Shape is
           `{selector: <path>, equals: <scalar>}` or `{selectors: [<path>, ...], equals: [<scalar>, ...]}`. Selectors
@@ -3940,8 +3941,9 @@ handler_specification:
         stable_identity: Typed policy-sheet rows use canonical DeclarationIdentity. Moving a row is delete plus add; optional id is non-authoritative display text.
         lowering: Accepted selection rows lower before runtime execution into ordinary selected `HandlerRuleEntry` branches.
           Runtime must not contain a second switch/table/range interpreter.
-        default_requirement: A rules block containing typed policy-sheet rows must include an else/default selected branch
-          unless a later spec-promoted row type supplies a stronger exhaustiveness proof.
+        default_requirement: A rules block containing typed policy-sheet selection rows must include an authored
+          else/default selected branch whose admitted PolicyRow kind is default; Condition text alone is not
+          fallback evidence, unless a later spec-promoted row type supplies a stronger exhaustiveness proof.
         forbidden_authoring_surfaces:
           - "`handler.branch` — retired; fail closed"
           - "`handler.switch`, `handler.lookup`, `handler.threshold` — not standalone handler fields"
