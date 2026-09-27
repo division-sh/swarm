@@ -7,7 +7,7 @@ producer-node:
       emit:
         event: validation.requested
         fields:
-          candidate: payload.candidate
+          candidate: ${payload.candidate}
     validation.started:
       rules:
         - id: observe_validation_started

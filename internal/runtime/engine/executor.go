@@ -3173,28 +3173,13 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootJoin, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
 			return fmt.Errorf("data_accumulation target %s: unsupported target scope", target)
 		}
-		if write.Value.HasLiteralValue() {
-			op.Value = write.Value.Literal
-			if err := e.appendEntityMutation(frame, op); err != nil {
-				return fmt.Errorf("data_accumulation target %s: %w", target, err)
-			}
-			continue
-		}
-		if write.Value.HasRefValue() {
-			value, ok, err := evalExpressionValue(current, frame.state, write.Value, joinExpressionOptions(frame))
-			if err != nil || !ok {
-				return fmt.Errorf("data_accumulation target %s: reference %s unavailable: %v", target, write.Value.Ref, err)
-			}
-			op.Value = value
-			if err := e.appendEntityMutation(frame, op); err != nil {
-				return fmt.Errorf("data_accumulation target %s: %w", target, err)
-			}
-			continue
-		}
-		if write.Value.HasCELValue() {
-			value, err := evalWorkflowValueExpression(current, frame.state, write.Value.CEL, joinExpressionOptions(frame))
+		if !write.Value.IsZero() {
+			value, present, err := evalExpressionValue(current, frame.state, write.Value, joinExpressionOptions(frame))
 			if err != nil {
 				return fmt.Errorf("data_accumulation target %s: %w", target, err)
+			}
+			if !present {
+				return fmt.Errorf("data_accumulation target %s: value is absent", target)
 			}
 			op.Value = value
 			if err := e.appendEntityMutation(frame, op); err != nil {

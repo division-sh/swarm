@@ -12,6 +12,6 @@ processor:
       data_accumulation:
         writes:
           - target_field: counter
-            expression: entity.counter + 1
+            value: ${entity.counter + 1}
       sets_gate: g_processed
       advances_to: processed

@@ -7,4 +7,4 @@ worker-node:
       emit:
         event: work.completed
         fields:
-          work_id: payload.work_id
+          work_id: ${payload.work_id}

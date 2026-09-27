@@ -89,7 +89,7 @@ pins:
       data_accumulation:
         writes:
           - target_field: result
-            expression: payload.result
+            value: "${payload.result}"
       advances_to: done
 `,
 	}
@@ -146,7 +146,7 @@ pins:
     work.requested:
       data_accumulation:
         writes:
-          - {target_field: marker, expression: "'must-not-write'"}
+          - {target_field: marker, value: "${'must-not-write'}"}
       advances_to: done
 `,
 	}
@@ -177,7 +177,7 @@ connect:
     work.completed:
       emit:
         event: child.finished
-        fields: {result: {expression: payload.result}}
+        fields: {result: "${payload.result}"}
 `,
 		"sink/tail/schema.yaml": `name: tail
 stages:
@@ -196,7 +196,7 @@ pins:
       create_entity: true
       data_accumulation:
         writes:
-          - {target_field: result, expression: payload.result}
+          - {target_field: result, value: "${payload.result}"}
       advances_to: done
 `,
 	}
@@ -233,7 +233,7 @@ pins:
     work.completed:
       emit:
         event: child.finished
-        fields: {result: {expression: payload.result}}
+        fields: {result: "${payload.result}"}
 local:
   execution_type: system_node
   subscribes_to: [child.finished]
@@ -242,7 +242,7 @@ local:
       create_entity: true
       data_accumulation:
         writes:
-          - {target_field: result, expression: payload.result}
+          - {target_field: result, value: "${payload.result}"}
       advances_to: done
 `)
 	return root
@@ -260,7 +260,7 @@ func CopyReceiverEntitylessExternal(t testing.TB) string {
     work.completed:
       emit:
         event: child.finished
-        fields: {result: {expression: payload.result}}
+        fields: {result: "${payload.result}"}
 `)
 	return root
 }

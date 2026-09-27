@@ -56,7 +56,7 @@ pins:
       advances_to: pending
       data_accumulation:
         writes:
-          - {target_field: name, expression: payload.name}
+          - {target_field: name, value: "${payload.name}"}
     state.closed:
       advances_to: done
 `)

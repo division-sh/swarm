@@ -186,10 +186,10 @@ func evalWorkflowGateContext(expression runtimecontracts.ExpressionValue, route 
 	if expression.HasLiteralValue() {
 		return expression.Literal, nil
 	}
-	raw := strings.TrimSpace(expression.CEL)
-	if raw == "" {
-		raw = strings.TrimSpace(expression.Ref)
+	if !expression.HasCELValue() {
+		return nil, fmt.Errorf("unsupported gate context expression kind %q", expression.Kind)
 	}
+	raw := strings.TrimSpace(expression.CEL)
 	policy := map[string]any{}
 	if source != nil {
 		policy = workflowTimerPolicy(source, flowID)

@@ -108,8 +108,8 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 			event+":\n"+key+"  account_id: "+fieldType+"\n  score: text\n  decision: text\n")
 	}
 	applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"),
-		"          account_id: payload.account_id\n",
-		"          account_id: payload.account_id\n          score: payload.score\n          decision: payload.decision\n")
+		"          account_id: ${payload.account_id}\n",
+		"          account_id: ${payload.account_id}\n          score: ${payload.score}\n          decision: ${payload.decision}\n")
 	applyClosedReplacement(t, filepath.Join(root, "account", "entities.yaml"),
 		"    _unused_reason: receiver instance identity\n",
 		"    _unused_reason: receiver instance identity\n  score:\n    type: text\n  decision:\n    type: text\n")
@@ -260,7 +260,7 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: generated.random\n")
 	case CreateResolutionProducerCollision:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  candidate: text\n", "validation.requested:\n  candidate: text\n  validation_case_id: uuid\n")
-		applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"), "          candidate: payload.candidate\n", "          candidate: payload.candidate\n          validation_case_id: payload.candidate\n")
+		applyClosedReplacement(t, filepath.Join(root, "producer", "nodes.yaml"), "          candidate: ${payload.candidate}\n", "          candidate: ${payload.candidate}\n          validation_case_id: ${payload.candidate}\n")
 	case CreateResolutionSourceTypeMismatchWithoutCarryType:
 		if opts.Mint == CreateMintPayload {
 			applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: integer\n")

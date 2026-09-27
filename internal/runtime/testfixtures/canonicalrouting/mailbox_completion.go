@@ -134,7 +134,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/events.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
 	case "template":
 		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
-		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, expression: payload.case_id}\n")
+		applyClosedReplacement(t, filepath.Join(root, "observers/nodes.yaml"), "      create_entity: true\n", "      create_entity: true\n      data_accumulation:\n        writes:\n          - {target_field: case_id, value: \"${payload.case_id}\"}\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "mode: singleton", "mode: template\ninstance: case_id")
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "      - {event: observer.requested, source: external}", "      - {event: observer.requested, resolution: {mode: create}}")
 		applyClosedReplacement(t, filepath.Join(root, "observers/events.yaml"), "observer.requested:\n  seed: boolean\n", "")
@@ -151,7 +151,7 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
     observer.seed:
       emit:
         event: observer.requested
-        fields: {case_id: payload.case_id, seed: {literal: true}}
+        fields: {case_id: "${payload.case_id}", seed: {literal: true}}
 `,
 		} {
 			parent, err := os.ReadFile(filepath.Join(root, name))
@@ -173,11 +173,11 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 		requestRoot = "."
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.seed:\n  case_id: text\n", "observer.seed:\n  case_id: text\n  deadline_at: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "observer.requested:\n  case_id: text\n", "observer.requested:\n  case_id: text\n  deadline_at: text\n")
-		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "fields: {case_id: payload.case_id, seed: {literal: true}}", "fields: {case_id: payload.case_id, seed: {literal: true}, deadline_at: payload.deadline_at}")
+		applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "fields: {case_id: \"${payload.case_id}\", seed: {literal: true}}", "fields: {case_id: \"${payload.case_id}\", seed: {literal: true}, deadline_at: \"${payload.deadline_at}\"}")
 	} else {
 		applyClosedReplacement(t, filepath.Join(root, requestRoot, "events.yaml"), "observer.requested:\n  seed: boolean\n", "observer.requested:\n  seed: boolean\n  deadline_at: text\n")
 	}
-	applyClosedReplacement(t, filepath.Join(root, agentRoot, "nodes.yaml"), "fields: {seed: {literal: true}}", "fields: {seed: {literal: true}, deadline_at: payload.deadline_at}")
+	applyClosedReplacement(t, filepath.Join(root, agentRoot, "nodes.yaml"), "fields: {seed: {literal: true}}", "fields: {seed: {literal: true}, deadline_at: \"${payload.deadline_at}\"}")
 	applyClosedReplacement(t, filepath.Join(root, agentRoot, "mocks/observer.py"), `"description": "Review the observed work."`, `"description": "Review the observed work.", "deadline_at": frame["event"]["payload"]["deadline_at"]`)
 	return root
 }

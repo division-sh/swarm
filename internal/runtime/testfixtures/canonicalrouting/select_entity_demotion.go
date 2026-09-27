@@ -67,7 +67,7 @@ pins:
     deploy.requested:
       emit:
         event: deploy.done
-        fields: {vertical_id: payload.vertical_id}
+        fields: {vertical_id: "${payload.vertical_id}"}
       advances_to: done
 `)
 }

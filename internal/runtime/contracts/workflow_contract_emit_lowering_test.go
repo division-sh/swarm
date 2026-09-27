@@ -8,13 +8,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestLowerEmitSpecFieldsLowersFromAndBareNamespaceValues(t *testing.T) {
+func TestLowerEmitSpecFieldsLowersFromAndPreservesLiteralValues(t *testing.T) {
 	bundle := emitFieldLoweringTestBundle()
 	spec := EmitSpec{
 		Event: "account.bucketed",
 		From:  "entity",
 		Fields: map[string]ExpressionValue{
-			"interest_score": CELExpression("payload"),
+			"interest_score": LiteralExpression("payload"),
 			"tier":           CELExpression("payload.computed_tier"),
 		},
 	}
@@ -33,7 +33,9 @@ func TestLowerEmitSpecFieldsLowersFromAndBareNamespaceValues(t *testing.T) {
 	}
 	assertEmitCEL(t, lowered.Fields, "account_id", "entity.account_id")
 	assertEmitCEL(t, lowered.Fields, "bucket", "entity.bucket")
-	assertEmitCEL(t, lowered.Fields, "interest_score", "payload.interest_score")
+	if got := lowered.Fields["interest_score"]; !got.HasLiteralValue() || got.Literal != "payload" {
+		t.Fatalf("interest_score = %#v, want literal payload", got)
+	}
 	assertEmitCEL(t, lowered.Fields, "tier", "payload.computed_tier")
 }
 
@@ -44,7 +46,7 @@ func TestLowerEmitSpecFieldsExplicitFieldsWinAndOptionalsRemainExplicit(t *testi
 		From:  "entity",
 		Fields: map[string]ExpressionValue{
 			"bucket":         CELExpression(`"manual"`),
-			"interest_score": CELExpression("payload"),
+			"interest_score": LiteralExpression("payload"),
 		},
 	}
 
@@ -85,16 +87,6 @@ func TestLowerEmitSpecFieldsFailsClosed(t *testing.T) {
 				},
 			},
 			want: "emit.fields.extra is not declared",
-		},
-		{
-			name: "bare namespace missing same named field",
-			spec: EmitSpec{
-				Event: "account.bucketed",
-				Fields: map[string]ExpressionValue{
-					"tier": CELExpression("payload"),
-				},
-			},
-			want: "source payload does not declare same-named field tier",
 		},
 	}
 
