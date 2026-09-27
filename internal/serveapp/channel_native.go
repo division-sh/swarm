@@ -1,0 +1,216 @@
+package serveapp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packs"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
+)
+
+func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx context.Context) error {
+	if d == nil || d.native == nil || d.activations == nil || d.manager == nil || d.ingress == nil ||
+		d.effects == nil || d.credentials == nil || !d.posture.Valid() || d.runtimeInstanceID == "" || d.now == nil {
+		return fmt.Errorf("native inbox setting owners are unavailable")
+	}
+	if err := d.native.RetireStaleNativeInboxConsumers(ctx); err != nil {
+		return err
+	}
+	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, activation := range activations {
+		if err := d.reconcileNativeInboxActivation(ctx, activation); err != nil {
+			return fmt.Errorf("native inbox activation %s: %w", activation.ActivationID, err)
+		}
+	}
+	return nil
+}
+
+func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx context.Context, activation channelonboarding.ConnectedChannelActivation) error {
+	if activation.Coordinate.ContextPublicationGeneration > math.MaxInt64 {
+		return fmt.Errorf("native inbox publication generation exceeds selected-store range")
+	}
+	lease, current, err := d.manager.AcquireChannelActivationPublication(activation.Coordinate.BundleHash, activation.Coordinate.ContextPublicationGeneration)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return fmt.Errorf("native inbox publication is unavailable")
+	}
+	defer lease.Release()
+	var compiled channelonboarding.CompiledActivation
+	for _, candidate := range lease.Activations() {
+		if candidate.Source != channelonboarding.ActivationSourceLearned ||
+			candidate.OnboardingOperationID != activation.OperationID || candidate.ActivationRevision != activation.Revision ||
+			!candidate.Coordinate.Matches(activation.Coordinate) {
+			continue
+		}
+		if compiled.OnboardingOperationID != "" {
+			return fmt.Errorf("native inbox compiled activation is duplicated")
+		}
+		compiled = candidate
+	}
+	if compiled.OnboardingOperationID == "" {
+		return fmt.Errorf("native inbox compiled activation is not exact-current")
+	}
+	registration, found := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
+		channelonboarding.LearnedBindingID(activation.SlotKey), activation.TargetSelector, activation.Provider)
+	if !found || !registration.Current || registration.Registration.SlotID == "" ||
+		!registration.ActivationGeneration.Equal(lease.Generation()) {
+		return fmt.Errorf("native inbox physical registration is not exact-current")
+	}
+	contractHash, err := channelnative.EntryContractHash(activation.Coordinate.PlanGeneration)
+	if err != nil {
+		return err
+	}
+	setting, err := d.native.AttachNativeInboxSetting(ctx, channelnative.Admission{
+		Provider: activation.Provider, ResourceSlotID: registration.Registration.SlotID,
+		ConversationReference: activation.ConversationRef, PrincipalID: activation.PrincipalID,
+		InterfaceKey: activation.Interface.Key(), BindingRevision: activation.BindingRevision,
+		ActivationID: activation.ActivationID, ActivationRevision: activation.Revision,
+		ContextPublicationGeneration: int64(activation.Coordinate.ContextPublicationGeneration),
+		PackID:                       activation.Interface.ChannelPackID, PackVersion: activation.Interface.ChannelPackVersion,
+		PackManifestHash: activation.Interface.ChannelManifestHash,
+		PlanGeneration:   activation.Coordinate.PlanGeneration, EntryContractHash: contractHash,
+	})
+	if err != nil {
+		return err
+	}
+	if setting.State == "uncertain" || setting.State == "unavailable" || setting.State == "retired" {
+		return fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State)
+	}
+	observed, err := d.readNativeInboxCommands(ctx, compiled.Plan, activation.CredentialAdmissions)
+	if err != nil {
+		return err
+	}
+	desired, err := channelnative.DesiredCommands()
+	if err != nil {
+		return err
+	}
+	if setting.State == "installed" {
+		if bytes.Equal(observed, desired) {
+			return nil
+		}
+		if err := d.native.MarkNativeInboxSettingUnavailable(ctx, setting.SettingID, setting.Generation); err != nil {
+			return err
+		}
+		return fmt.Errorf("native inbox readback contradicts installed setting")
+	}
+	if setting.State != "planned" {
+		return fmt.Errorf("native inbox setting has unknown state %q", setting.State)
+	}
+	if !bytes.Equal(observed, []byte("[]")) {
+		if err := d.native.MarkNativeInboxSettingUnavailable(ctx, setting.SettingID, setting.Generation); err != nil {
+			return err
+		}
+		return fmt.Errorf("native inbox provider setting is already occupied")
+	}
+	return d.installNativeInboxCommands(ctx, activation, compiled.Plan, setting)
+}
+
+func (d *serveChannelDeliveryDispatcher) readNativeInboxCommands(ctx context.Context, plan packs.OutboundBindingPlan, admissions []channelonboarding.CredentialAdmission) ([]byte, error) {
+	_, input, err := plan.PrepareOperation("read_inbox_entry", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	toolID, tool, err := plan.ConnectorOperation("read_inbox_entry")
+	if err != nil {
+		return nil, err
+	}
+	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, admissions, tool)
+	if err != nil {
+		return nil, err
+	}
+	output, err := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).Read(ctx, toolID, tool, input, credentials)
+	if err != nil {
+		return nil, err
+	}
+	projected, err := plan.ProjectOperationOutput("read_inbox_entry", output)
+	if err != nil {
+		return nil, err
+	}
+	commands, ok := projected["commands"]
+	if !ok {
+		return nil, fmt.Errorf("native inbox readback omits commands")
+	}
+	return canonicaljson.Bytes(commands)
+}
+
+func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.Context, activation channelonboarding.ConnectedChannelActivation, plan packs.OutboundBindingPlan, setting channelnative.Setting) error {
+	desired, err := channelnative.DesiredCommands()
+	if err != nil {
+		return err
+	}
+	var commands []map[string]string
+	if err := json.Unmarshal(desired, &commands); err != nil {
+		return err
+	}
+	_, input, err := plan.PrepareOperation("install_inbox_entry", map[string]any{"commands": commands})
+	if err != nil {
+		return err
+	}
+	toolID, tool, err := plan.ConnectorOperation("install_inbox_entry")
+	if err != nil {
+		return err
+	}
+	if tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return fmt.Errorf("native inbox install is not a managed write")
+	}
+	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, activation.CredentialAdmissions, tool)
+	if err != nil {
+		return err
+	}
+	coordinate := activation.Coordinate
+	bridge := runtimeeffects.ChannelNativeSettingAuthority{
+		EffectOperationID: setting.InstallOperationID, SettingID: setting.SettingID,
+		SettingGeneration: setting.Generation, Provider: setting.Provider, ResourceSlotID: setting.ResourceSlotID,
+		ConversationRef: setting.ConversationRef, PrincipalID: setting.PrincipalID,
+		EntryContractHash: setting.EntryContractHash, PackID: activation.Interface.ChannelPackID,
+		PackVersion: activation.Interface.ChannelPackVersion, PackManifestHash: activation.Interface.ChannelManifestHash,
+		ActivationID: activation.ActivationID, ActivationRevision: activation.Revision, BindingRevision: activation.BindingRevision,
+		BundleHash: coordinate.BundleHash, BundleIdentity: coordinate.BundleIdentity,
+		PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
+		ContextPublicationGeneration: coordinate.ContextPublicationGeneration, PlanGeneration: coordinate.PlanGeneration,
+		TargetGeneration: coordinate.TargetGeneration,
+	}
+	now := d.now().UTC()
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityChannelNativeSetting, ID: setting.InstallOperationID,
+		ExecutionOwner: "channel-native-setting:" + d.runtimeInstanceID,
+		LeaseExpiresAt: now.Add(5 * time.Minute), FenceGeneration: coordinate.ContextPublicationGeneration,
+		ExecutionMode: runtimeeffects.ExecutionMode(d.posture.RootMode()), ChannelNativeSetting: bridge,
+	}
+	if !authority.Valid() {
+		return fmt.Errorf("native inbox effect authority is invalid")
+	}
+	effectCtx := runtimeeffects.WithExecutionMode(ctx, authority.ExecutionMode)
+	effectCtx = runtimeeffects.WithController(effectCtx, runtimeeffects.NewController(d.effects).WithExecutionPosture(d.posture))
+	effectCtx = runtimeeffects.WithAuthority(effectCtx, authority)
+	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(d.runtimeInstanceID, coordinate.BundleHash))
+	result, applyErr := (runtimeregistration.HTTPExecutor{Client: d.httpClient}).ApplyChannelNativeSetting(
+		effectCtx, toolID, tool, input, credentials, map[string]string{"setting_id": setting.SettingID, "setting_generation": fmt.Sprint(setting.Generation)},
+	)
+	if result.Pending == nil {
+		return applyErr
+	}
+	if applyErr != nil {
+		return fmt.Errorf("native inbox write acknowledgment is uncertain: %w", result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), nil, applyErr))
+	}
+	observed, readErr := d.readNativeInboxCommands(ctx, plan, activation.CredentialAdmissions)
+	if err := result.Pending.SettleNativeSettingReadback(context.WithoutCancel(ctx), observed, readErr); err != nil {
+		return err
+	}
+	return nil
+}
