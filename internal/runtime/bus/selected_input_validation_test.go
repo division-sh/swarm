@@ -75,6 +75,64 @@ func TestSelectedInputValidationExactEvidence(t *testing.T) {
 	}
 }
 
+func TestSelectedInputValidationBindsStoreProjectedPayload(t *testing.T) {
+	source := selectedInputTestSource(t)
+	runID := uuid.NewString()
+	original := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), "thing.created", "operator", "", []byte(`{"revision_id":"source"}`), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
+	var err error
+	original, err = eventtest.AdmitPayload(original, ".", "thing.created")
+	if err != nil {
+		t.Fatal(err)
+	}
+	validation, err := RevalidateSelectedInput(source, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validation.WithStoreProjectedPayload([]byte(`{"revision_id":`)); err == nil {
+		t.Fatal("invalid projected payload accepted")
+	}
+	projected := []byte(`{"revision_id":"fork"}`)
+	bound, err := validation.WithStoreProjectedPayload(projected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected[0] = '['
+	makeEvent := func(payload []byte) events.Event {
+		t.Helper()
+		lineage, err := events.NewSelectedForkLineage(uuid.NewString(), original.RunID(), original.ID(), "selected-owner", "", original.ExecutionMode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		event, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: events.EventFacts{
+			ID: uuid.NewString(), Type: original.Type(), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "selected-owner"}, Payload: payload,
+			CreatedAt: time.Now().UTC(), ExecutionMode: original.ExecutionMode(),
+		}, Lineage: lineage})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return event
+	}
+	valid := makeEvent([]byte(`{"revision_id":"fork"}`))
+	if _, err := bound.bind(context.Background(), valid, bound.bundleHash); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		validation SelectedInputValidation
+		event      events.Event
+	}{
+		{"unprojected", validation, valid},
+		{"source_payload", bound, makeEvent(original.Payload())},
+		{"wrong_projected_payload", bound, makeEvent([]byte(`{"revision_id":"other"}`))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := tc.validation.bind(context.Background(), tc.event, tc.validation.bundleHash); err == nil {
+				t.Fatal("selected input accepted payload outside its exact binding")
+			}
+		})
+	}
+}
+
 func TestSelectedInputValidationCannotWidenRecipientDisposition(t *testing.T) {
 	source := selectedInputTestSource(t)
 	runID := uuid.NewString()

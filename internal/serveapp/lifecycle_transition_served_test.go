@@ -21,69 +21,64 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 		for _, reordered := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/reordered_%t", backend, reordered), func(t *testing.T) {
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleSelectedCarriers(t, reordered))
-				for _, prefix := range []string{"", "child/", "sibling/", "child/nested/"} {
-					for _, handler := range []string{"first", "second"} {
-						for _, choice := range []string{"alpha", "beta"} {
-							t.Run(prefix+handler+"/"+choice, func(t *testing.T) {
-								key := prefix + handler + "/" + choice
-								seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": prefix + "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
-								recipients := []string{prefix}
-								// The root public input explicitly admits all four same-name
-								// external input pins; scoped HTTP inputs select one flow.
-								if prefix == "" {
-									recipients = []string{"", "child/", "sibling/", "child/nested/"}
+				for _, handler := range []string{"first", "second"} {
+					for _, choice := range []string{"alpha", "beta"} {
+						t.Run(handler+"/"+choice, func(t *testing.T) {
+							key := handler + "/" + choice
+							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": key + "/seed"})
+							// One root input reaches all four flows through explicit
+							// connections; it grants no private API endpoint.
+							recipients := []string{"", "child/", "sibling/", "child/nested/"}
+							for _, recipient := range recipients {
+								requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "waiting")
+							}
+							params := map[string]any{"event_name": "work." + handler, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"choice": choice}, "idempotency_key": key}
+							selected := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+							for _, recipient := range recipients {
+								requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
+							}
+							waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
+							for _, recipient := range recipients {
+								entityID := requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
+								history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
+								if len(history) != 2 {
+									t.Fatalf("history=%#v", history)
 								}
-								for _, recipient := range recipients {
-									requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "waiting")
+								record := history[0]
+								flow := strings.TrimSuffix(recipient, "/")
+								if flow == "" {
+									flow = "."
 								}
-								params := map[string]any{"event_name": prefix + "work." + handler, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"choice": choice}, "idempotency_key": key}
-								selected := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-								for _, recipient := range recipients {
-									requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
+								guards := []string{handler + "_choice", handler + "_nonempty"}
+								selection := record.Evidence.RuleSelection()
+								index := 0
+								if choice == "beta" {
+									index = 1
 								}
-								waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, seed.RunID)
-								for _, recipient := range recipients {
-									entityID := requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
-									history := readLifecycleTransitionHistory(t, rt, seed.RunID, entityID)
-									if len(history) != 2 {
-										t.Fatalf("history=%#v", history)
-									}
-									record := history[0]
-									flow := strings.TrimSuffix(recipient, "/")
-									if flow == "" {
-										flow = "."
-									}
-									guards := []string{handler + "_choice", handler + "_nonempty"}
-									selection := record.Evidence.RuleSelection()
-									index := 0
-									if choice == "beta" {
-										index = 1
-									}
-									path := fmt.Sprintf("nodes[\"controller\"].handlers[%q].rules[%d]", "work."+handler, index)
-									if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.FlowID() != flow || selection.Ref().Flow().String() != flow || selection.Ref().Family() != "handler_rule" || selection.DisplayLabel() != choice || selection.Ref().SemanticPath() != path || !reflect.DeepEqual(record.GuardsEvaluated, guards) || !reflect.DeepEqual(record.Evidence.GuardsEvaluated(), guards) {
-										t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
-									}
-									var entity operatorread.OperatorEntityFull
-									requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
-									if entity.Fields["result"] != recipient+handler+"/"+choice {
-										t.Fatalf("wrong public output: %#v", entity)
-									}
-									requireLifecycleEventCount(t, rt, seed.RunID, recipient+"work.completed", 1)
+								path := fmt.Sprintf("nodes[\"controller\"].handlers[%q].rules[%d]", "work."+handler, index)
+								if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.FlowID() != flow || selection.Ref().Flow().String() != flow || selection.Ref().Family() != "handler_rule" || selection.DisplayLabel() != choice || selection.Ref().SemanticPath() != path || !reflect.DeepEqual(record.GuardsEvaluated, guards) || !reflect.DeepEqual(record.Evidence.GuardsEvaluated(), guards) {
+									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 								}
-								var entities int
-								if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&entities); err != nil {
-									t.Fatal(err)
+								var entity operatorread.OperatorEntityFull
+								requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
+								if entity.Fields["result"] != recipient+handler+"/"+choice {
+									t.Fatalf("wrong public output: %#v", entity)
 								}
-								if entities != len(recipients) {
-									t.Fatalf("public input recipient mismatch: %d entity rows, want %d", entities, len(recipients))
-								}
-								before := lifecycleStoredSnapshot(t, rt, seed.RunID)
-								duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-								if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
-									t.Fatal("duplicate changed selected transition")
-								}
-							})
-						}
+								requireLifecycleEventCount(t, rt, seed.RunID, recipient+"work.completed", 1)
+							}
+							var entities int
+							if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&entities); err != nil {
+								t.Fatal(err)
+							}
+							if entities != len(recipients) {
+								t.Fatalf("public input recipient mismatch: %d entity rows, want %d", entities, len(recipients))
+							}
+							before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+							duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+							if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+								t.Fatal("duplicate changed selected transition")
+							}
+						})
 					}
 				}
 			})

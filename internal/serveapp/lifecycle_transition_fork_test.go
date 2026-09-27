@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -33,14 +32,15 @@ func TestServedCompiledFrozenGateForkControlRefusalOnBothStores(t *testing.T) {
 	runLifecycleRootForkPolicy(t, true)
 }
 
-func TestServedCompiledAbsentSourceLoopForkUnexpectedRevisionOnBothStores(t *testing.T) {
+func TestServedCompiledRootLoopForkProjectsRevisionOnBothStores(t *testing.T) {
 	runLifecycleRootForkPolicy(t, false)
 }
 
 func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleForkSource(t, gate))
+			root := canonicalrouting.CopyLifecycleForkSource(t, gate)
+			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-seed"})
 			stage := "waiting"
 			if gate {
@@ -77,7 +77,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if gate {
 				requireLifecycleFrozenGateControlRefusal(t, rt, seed.RunID, parentCard, fork.ForkRunID)
 			} else {
-				requireLifecycleAbsentSourceUnexpectedRevision(t, rt, seed.RunID, entityID, frontier.EventID, fork.ForkRunID)
+				requireLifecycleRootLoopForkRevision(t, rt, seed.RunID, entityID, frontier.EventID, fork.ForkRunID)
 			}
 			childBefore := lifecycleStoredSnapshot(t, rt, fork.ForkRunID)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
@@ -197,14 +197,14 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	requireLifecycleEventCount(t, rt, parentRun, "work.completed", 0)
 }
 
-func requireLifecycleAbsentSourceUnexpectedRevision(t *testing.T, rt servedControlProofRuntime, parentRun, parentEntity, frontierID, runID string) {
+func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRuntime, parentRun, parentEntity, frontierID, runID string) {
 	t.Helper()
-	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "drafting")
+	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "review")
 	parent := readLifecycleStoredLoop(t, rt, parentRun, parentEntity)
 	child := readLifecycleStoredLoop(t, rt, runID, entity)
 	if child.ActivationID == parent.ActivationID || child.RevisionID == parent.RevisionID ||
 		child.Attempt != parent.Attempt || child.MaxAttempts != parent.MaxAttempts ||
-		child.CurrentStage != parent.CurrentStage || child.Status != parent.Status ||
+		parent.CurrentStage != "drafting" || child.CurrentStage != "review" || child.Status != parent.Status ||
 		child.CloseReason != parent.CloseReason || child.LoopID != parent.LoopID || child.RevisionField != parent.RevisionField {
 		t.Fatalf("fork loop identity/business facts: parent=%#v child=%#v", parent, child)
 	}
@@ -219,39 +219,29 @@ func requireLifecycleAbsentSourceUnexpectedRevision(t *testing.T, rt servedContr
 	if err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_id=$2`, parentRun, frontierID).Scan(&original); err != nil {
 		t.Fatal(err)
 	}
-	if copied != original {
-		t.Fatalf("opaque payload rewritten: original=%s child=%s", original, copied)
-	}
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(copied), &payload); err != nil {
+	var sourcePayload, childPayload map[string]any
+	if err := json.Unmarshal([]byte(original), &sourcePayload); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(payload, map[string]any{"revision_id": parent.RevisionID}) {
-		t.Fatalf("unexpected opaque payload: %#v", payload)
+	if err := json.Unmarshal([]byte(copied), &childPayload); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(sourcePayload, map[string]any{"revision_id": parent.RevisionID}) ||
+		!reflect.DeepEqual(childPayload, map[string]any{"revision_id": child.RevisionID}) {
+		t.Fatalf("root-declared revision did not project: source=%#v child=%#v", sourcePayload, childPayload)
 	}
 	for run, event := range map[string]string{parentRun: frontierID, runID: childEvent} {
 		source := readForkReceiverProducerEvidence(t, rt, run, event).Source
-		if source.Kind() != events.RoutingSourceAbsent {
-			t.Fatalf("invented source: %#v", source)
+		if source.Kind() != events.RoutingSourceRoot {
+			t.Fatalf("root input source changed: %#v", source)
 		}
 	}
-	var status, reason, rawFailure string
-	if err := rt.DB.QueryRow(`SELECT status,reason_code,CAST(failure AS TEXT) FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, runID, childEvent).Scan(&status, &reason, &rawFailure); err != nil {
+	var status string
+	if err := rt.DB.QueryRow(`SELECT status FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, runID, childEvent).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	var failure failures.Envelope
-	if err := json.Unmarshal([]byte(rawFailure), &failure); err != nil {
-		t.Fatal(err)
-	}
-	if status != "dead_letter" || reason != "handler_terminal_failure" || failure.Class != failures.ClassUnexpectedArrival ||
-		failure.Detail.Code != "loop_revision_unexpected" || failure.Retryable || !failure.Deterministic ||
-		failure.Detail.Attributes["supplied_revision_id"] != parent.RevisionID || failure.Detail.Attributes["current_revision_id"] != child.RevisionID {
-		t.Fatalf("wrong terminal delivery: %s/%s %s", status, reason, rawFailure)
-	}
-	for _, record := range readLifecycleTransitionHistory(t, rt, runID, entity) {
-		if record.To == "review" || record.To == "done" {
-			t.Fatalf("unexpected revision advanced child: %#v", record)
-		}
+	if status != "delivered" {
+		t.Fatalf("projected root input delivery = %s, want delivered", status)
 	}
 	for _, event := range []string{"loop.close", "work.completed"} {
 		requireLifecycleEventCount(t, rt, runID, event, 0)

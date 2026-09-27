@@ -739,7 +739,11 @@ contract_formats:
         An admitted absent-source external frontier supplies no producer-owned
         generation meaning. Fork projection preserves its opaque payload without
         inferring ownership from the target, receiver, field name or matching
-        value. A retained parent revision outside the fresh child activation's
+        value. A public root input with recorded root routing provenance is not
+        absent-source: its original-artifact declaration may establish generation
+        meaning, and selected execution binds the replay guard to the exact
+        store-projected payload after rechecking the source publication evidence.
+        A retained parent revision outside the fresh child activation's
         lineage is platform.unexpected_arrival / loop_revision_unexpected,
         nonretryable, not a stale revision of that child activation. Executing
         that rejected delivery may persist its event, receipt and failure
