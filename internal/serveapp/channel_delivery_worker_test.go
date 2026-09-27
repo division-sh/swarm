@@ -42,16 +42,34 @@ func (*channelDeliveryWorkerStore) CurrentChannelDeliveryActivationID(context.Co
 
 func (*channelDeliveryWorkerStore) ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]runtimechanneldelivery.Candidate, error) {
 	return []runtimechanneldelivery.Candidate{
-		{DeliveryID: "sent", State: "sent", CurrentReceiptID: "receipt"},
+		{DeliveryID: "sent", State: "sent", CurrentRenderID: "render", CurrentReceiptID: "receipt"},
 		{DeliveryID: "uncertain", State: "uncertain"},
-		{DeliveryID: "editing", State: "rendered", CurrentReceiptID: "receipt"},
+		{DeliveryID: "editing", State: "rendered", CurrentRenderID: "render", CurrentReceiptID: "receipt"},
 	}, nil
+}
+
+func (*channelDeliveryWorkerStore) FreezeAndPersistChannelRender(_ context.Context, deliveryID string) (runtimechanneldelivery.PreparedRender, error) {
+	return runtimechanneldelivery.PreparedRender{DeliveryID: deliveryID, RenderID: "render"}, nil
+}
+
+func (s *channelDeliveryWorkerStore) GetCurrentChannelDeliveryPlan(_ context.Context, deliveryID string) (runtimechanneldelivery.Candidate, bool, error) {
+	plans, _ := s.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
+	for _, plan := range plans {
+		if plan.DeliveryID == deliveryID {
+			return plan, true, nil
+		}
+	}
+	return runtimechanneldelivery.Candidate{}, false, nil
+}
+
+func (*channelDeliveryWorkerStore) GetCurrentChannelSentReceipt(_ context.Context, deliveryID, operationID string) (runtimechanneldelivery.SentReceipt, bool, error) {
+	return runtimechanneldelivery.SentReceipt{DeliveryID: deliveryID, OperationID: operationID, RenderID: "render", DeliveryReference: map[string]any{"id": 1}}, true, nil
 }
 
 func TestChannelDeliveryReconciliationPlansOpenCardsWithoutResending(t *testing.T) {
 	selected := &channelDeliveryWorkerStore{}
 	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{}}
-	if err := d.reconcileInitialDeliveries(context.Background()); err != nil {
+	if err := d.reconcileDeliveries(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"pending-a", "pending-b", "deferred-c"}
