@@ -32,6 +32,25 @@ type mailboxProjectionListResult struct {
 	UnreadInformationalNotices int    `json:"unread_informational_notices"`
 }
 
+// MailboxProjectionPage is the same mixed notice/card page returned by the
+// authenticated mailbox.list API. Channel readback consumes this projection
+// only after its own provider and current-binding admission.
+type MailboxProjectionPage = mailboxProjectionListResult
+
+func ListMailboxProjectionPage(ctx context.Context, opts DecisionCardHandlerOptions, status, cursor string, limit int) (MailboxProjectionPage, error) {
+	result, err := listMailboxProjection(ctx, Request{Params: map[string]any{
+		"status": status, "cursor": cursor, "limit": limit,
+	}}, opts)
+	if err != nil {
+		return MailboxProjectionPage{}, err
+	}
+	page, ok := result.(MailboxProjectionPage)
+	if !ok {
+		return MailboxProjectionPage{}, fmt.Errorf("mailbox list returned a noncanonical page")
+	}
+	return page, nil
+}
+
 type mailboxProjectionCursor struct {
 	Notice string `json:"notice,omitempty"`
 	Card   string `json:"card,omitempty"`
