@@ -62,6 +62,45 @@ func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 	return nil
 }
 
+// RequireNoticeActionTx is the selected-store admission for a notice callback.
+// It must run before completion replay and again in the notice write transaction.
+func RequireNoticeActionTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
+	principalID, noticeID string, postgres bool) (string, error) {
+	if uuid.Validate(principalID) != nil || uuid.Validate(noticeID) != nil {
+		return "", fmt.Errorf("channel notice acknowledgment identity is incomplete")
+	}
+	if err := LockPrincipalTx(ctx, tx, principalID, postgres); err != nil {
+		return "", err
+	}
+	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
+	if err != nil {
+		return "", err
+	}
+	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+	if err != nil {
+		return "", err
+	}
+	if !found || !resolved.CurrentRender || resolved.SourceKind != PlanNotice ||
+		resolved.SourceID != noticeID || resolved.PrincipalID != principalID ||
+		resolved.Action.Kind != "acknowledge_notice" || resolved.Action.Token != action.Token {
+		return "", fmt.Errorf("channel action is not current notice authority")
+	}
+	if state == "settled" {
+		query := `SELECT disposition FROM operator_channel_action_intents WHERE publication_id=?`
+		if postgres {
+			query = `SELECT disposition FROM operator_channel_action_intents WHERE publication_id=$1::uuid`
+		}
+		var disposition string
+		if err := tx.QueryRowContext(ctx, query, action.PublicationID).Scan(&disposition); err != nil {
+			return "", err
+		}
+		if disposition != string(render.ActionApplied) {
+			return "", fmt.Errorf("channel notice action settled with a different disposition")
+		}
+	}
+	return state, nil
+}
+
 func resolveActionFactTx(ctx context.Context, tx interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, fact operatorchannel.ActionFact, postgres, mutation bool) (render.ResolvedAction, bool, error) {

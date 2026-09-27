@@ -14933,14 +14933,18 @@ platform_tables:
         A response plan is a separate, inbound-publication-owned readback responsibility.
         It freezes its complete presentation in the render ledger and targets only the
         current authenticated conversation that requested it, which need not be the default.
-        Opening the inbox is not acknowledgment, a verdict, or resend consent. Planning is
+        A native entry or summary Open inbox action traverses the canonical mixed mailbox
+        cursor to completion before freezing one readback. View full and Next page derive
+        deterministic content only from the original immutable render, with each admitted
+        tap owning its own response plan. Opening the inbox is not acknowledgment, a verdict,
+        or resend consent. Planning is
         not evidence that a provider write was launched, accepted, or acknowledged by a human.
       ddl: |
         CREATE TABLE channel_delivery_plans (
             delivery_id UUID PRIMARY KEY,
             source_kind TEXT NOT NULL CHECK (source_kind IN ('notice','card','summary','response')),
             source_id UUID NOT NULL,
-            entry_activation_id UUID,
+            request_activation_id UUID,
             summary_count BIGINT CHECK (summary_count > 0),
             principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
             interface_key TEXT NOT NULL REFERENCES operator_channel_bindings(interface_key),
@@ -14954,7 +14958,7 @@ platform_tables:
             current_receipt_operation_id UUID,
             created_at TIMESTAMPTZ NOT NULL,
             CHECK ((source_kind = 'summary' AND summary_count IS NOT NULL) OR (source_kind <> 'summary' AND summary_count IS NULL)),
-            CHECK ((source_kind = 'response' AND entry_activation_id IS NOT NULL) OR (source_kind <> 'response' AND entry_activation_id IS NULL)),
+            CHECK ((source_kind = 'response' AND request_activation_id IS NOT NULL) OR (source_kind <> 'response' AND request_activation_id IS NULL)),
             UNIQUE (source_kind, source_id, interface_key, delivery_epoch),
             INDEX idx_channel_delivery_plan_source (source_kind, source_id),
             INDEX idx_channel_delivery_plan_pending (state, created_at)
@@ -15007,17 +15011,21 @@ platform_tables:
     channel_delivery_actions:
       description: >-
         Immutable opaque callbacks for one exact frozen channel render. The selected store mints
-        one stable token per ordered verdict or navigation control in the render transaction;
+        one stable token per ordered verdict, notice acknowledgment, or navigation control in the render transaction;
         duplicate preparation reads back the same tokens. Tokens do not grant authority alone:
         authenticated provider facts must still match current principal, binding, destination,
-        receipt, render and canonical card state before any mutation. Historical tokens remain
-        evidence but cannot mutate a successor render or destination.
+        receipt, render and canonical card or notice state before any mutation. Notice
+        acknowledgment consumes the canonical principal-scoped mailbox completion transaction,
+        independently of the provider callback acknowledgment. The acknowledged notice is
+        re-rendered without its mutation control and every current receipt is edited from
+        that canonical state. Historical tokens remain evidence but cannot mutate a
+        successor render or destination.
       ddl: |
         CREATE TABLE channel_delivery_actions (
             action_token UUID PRIMARY KEY,
             render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
             action_position INTEGER NOT NULL CHECK (action_position > 0),
-            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox')),
+            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice')),
             verdict TEXT,
             label TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL,
@@ -15262,7 +15270,7 @@ platform_tables:
             fact JSONB NOT NULL,
             provider_authorization TEXT NOT NULL,
             state TEXT NOT NULL CHECK (state IN ('pending','settled')),
-            disposition TEXT CHECK (disposition IN ('applied','input_started','stale','rejected','unsupported')),
+            disposition TEXT CHECK (disposition IN ('applied','input_started','navigation','stale','rejected','unsupported')),
             recorded_at TIMESTAMPTZ NOT NULL,
             settled_at TIMESTAMPTZ,
             CHECK ((state = 'pending' AND disposition IS NULL AND settled_at IS NULL) OR (state = 'settled' AND disposition IS NOT NULL AND settled_at IS NOT NULL)),
