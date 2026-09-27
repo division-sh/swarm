@@ -311,6 +311,7 @@ units:
     run: '^(TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores|TestEventPublishCanonicalClassAndProvenanceReadbackParity)$'
     required_children:
       TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores: [sqlite, postgres]
+      TestEventPublishCanonicalClassAndProvenanceReadbackParity: [sqlite, postgres]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
