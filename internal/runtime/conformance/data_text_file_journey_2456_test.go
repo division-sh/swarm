@@ -553,12 +553,40 @@ func textFileWireCaptureProxy2456(t *testing.T, target *httptest.Server) (*httpt
 		var request struct {
 			Method string `json:"method"`
 		}
+		dropCommittedResponse := false
 		if json.Unmarshal(wire, &request) == nil && request.Method == "run.start" {
 			mu.Lock()
 			if first == nil {
 				first = bytes.Clone(wire)
+				dropCommittedResponse = true
 			}
 			mu.Unlock()
+		}
+		if dropCommittedResponse {
+			forward, err := http.NewRequestWithContext(r.Context(), r.Method, target.URL+r.URL.RequestURI(), bytes.NewReader(wire))
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			forward.Header = r.Header.Clone()
+			response, err := http.DefaultClient.Do(forward)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			_, copyErr := io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+			if copyErr != nil {
+				http.Error(w, copyErr.Error(), http.StatusBadGateway)
+				return
+			}
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("drop committed response: %v", err)
+				return
+			}
+			connection.Close()
+			return
 		}
 		textFileForwardRPC2456(w, r, target, wire)
 	}))
@@ -704,7 +732,10 @@ func TestDataTextFile2456FreshProcessBindingAndExactWireBothStores(t *testing.T)
 			original := textFileVersion2456(t, f, rows)
 			runID := uuid.NewString()
 			args := []string{"run", "start", "--connect", proxy.URL, "--bundle-hash", f.runtime.sourceArtifactFact.BundleHash(), "--run-id", runID, "--data", "root.ready.body=" + path, "--no-follow"}
-			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo, args...), runID)
+			lost := textFileSwarmProcess2456(f.ctx, binary, repo, args...)
+			if lost.err == nil {
+				t.Fatalf("first CLI received a response that the proxy was required to drop: stdout=%s stderr=%s", lost.stdout, lost.stderr)
+			}
 			wire := capturedWire()
 			if len(wire) == 0 {
 				t.Fatal("real CLI run.start wire was not captured")
