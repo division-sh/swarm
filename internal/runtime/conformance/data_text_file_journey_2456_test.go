@@ -762,6 +762,24 @@ func TestDataTextFile2456FreshProcessBindingAndExactWireBothStores(t *testing.T)
 			if len(exactAgain.Error) != 0 || !bytes.Equal(exactAgain.Result, exact.Result) {
 				t.Fatalf("changed host file altered immutable exact-wire replay: before=%+v after=%+v", exact, exactAgain)
 			}
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			newRunID := uuid.NewString()
+			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo,
+				"run", "start", "--connect", server.URL, "--bundle-hash", binding.BundleHash,
+				"--run-id", newRunID, "--data", "root.ready.body="+path, "--no-follow"), newRunID)
+			assertTextFileRun2456(t, f, server, newRunID, original, rows)
+			if newRunID == runID || textFileRequestBinding2456(t, server, newRunID).RequestHash == binding.RequestHash {
+				t.Fatal("new run ID reused the old permanent operation")
+			}
+			var versionCount int
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM resource_versions WHERE version_id=$1`, string(original.VersionID)).Scan(&versionCount); err != nil {
+				t.Fatal(err)
+			}
+			if versionCount != 1 {
+				t.Fatalf("equal content reminted the same semantic version %d times", versionCount)
+			}
 		})
 	}
 }
@@ -806,6 +824,19 @@ func TestDataTextFile2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 			if changed.VersionID == version.VersionID {
 				t.Fatal("new import did not move @head")
 			}
+			beforeExplicitPin := textFileSnapshot2456(t, f, pinRunID)
+			conflictingPinArgs := append([]string(nil), pinArgs...)
+			for index := range conflictingPinArgs {
+				if conflictingPinArgs[index] == "root.ready@head" {
+					conflictingPinArgs[index] = "root.ready@" + string(changed.VersionID)
+				}
+			}
+			if conflict := textFileSwarmProcess2456(f.ctx, binary, repo, conflictingPinArgs...); conflict.err == nil {
+				t.Fatalf("explicit conflicting pin replay succeeded: stdout=%s stderr=%s", conflict.stdout, conflict.stderr)
+			}
+			if after := textFileSnapshot2456(t, f, pinRunID); after != beforeExplicitPin {
+				t.Fatalf("explicit conflicting pin mutated durable state: before=%+v after=%+v", beforeExplicitPin, after)
+			}
 			oldRuntime, oldSource := f.runtime, f.source
 			manifestPath := filepath.Join(root, "manifest.yaml")
 			manifest, err := os.ReadFile(manifestPath)
@@ -838,6 +869,14 @@ func TestDataTextFile2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 				t.Fatalf("default switch unexpectedly moved resource head: import=%+v pin=%+v", beforeImport, beforePin)
 			}
 			importArgs[3], pinArgs[3] = server.URL, server.URL
+			conflictingBundleArgs := append([]string(nil), importArgs...)
+			conflictingBundleArgs = append(conflictingBundleArgs, "--bundle-hash", fact.BundleHash())
+			if conflict := textFileSwarmProcess2456(f.ctx, binary, repo, conflictingBundleArgs...); conflict.err == nil {
+				t.Fatalf("explicit conflicting bundle replay succeeded: stdout=%s stderr=%s", conflict.stdout, conflict.stderr)
+			}
+			if after := textFileSnapshot2456(t, f, importRunID); after != beforeImport {
+				t.Fatalf("explicit conflicting bundle mutated durable state: before=%+v after=%+v", beforeImport, after)
+			}
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo, importArgs...), importRunID)
 			assertTextFileProcessRun2456(t, textFileSwarmProcess2456(f.ctx, binary, repo, pinArgs...), pinRunID)
 			if after := textFileSnapshot2456(t, f, importRunID); after != beforeImport {
