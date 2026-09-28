@@ -58,9 +58,9 @@ func testCompletionSessionBlockers(t *testing.T, fixture runLifecycleCandidatePa
 				sessionRunID = seedCompletionBlockerRun(t, fixture, ctx)
 			}
 			err := insertCompletionBlockerSession(t, fixture, ctx, sessionRunID, test.holder, test.expiry)
-			if test.name == "malformed_expiry" && fixture.postgres {
+			if test.name == "holder_only" || test.name == "expiry_only" || (test.name == "malformed_expiry" && fixture.postgres) {
 				if err == nil {
-					t.Fatal("PostgreSQL accepted malformed typed session expiry")
+					t.Fatalf("accepted malformed session lease %s", test.name)
 				}
 				return
 			}
@@ -274,24 +274,28 @@ func insertCompletionBlockerSession(
 ) error {
 	t.Helper()
 	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(runID, "completion-matrix-agent", semanticRunFixtureFlow))
+	var grant any
+	if holder != nil {
+		grant = uuid.NewString()
+	}
 	query := `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
-			lease_holder, lease_expires_at, status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'authored', ?, ?, 'active')`
+			lease_holder, lease_grant_id, lease_expires_at, status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, 'authored', ?, ?, ?, 'active')`
 	args := []any{
 		uuid.NewString(), runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		holder, expiry,
+		holder, grant, expiry,
 	}
 	if fixture.postgres {
 		query = `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
-				lease_holder, lease_expires_at, status
-			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', $10, $11, 'active')`
+				lease_holder, lease_grant_id, lease_expires_at, status
+			) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', $10, $11, $12, 'active')`
 	}
 	_, err := fixture.db.ExecContext(ctx, query, args...)
 	return err

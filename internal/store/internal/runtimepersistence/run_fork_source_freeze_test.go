@@ -313,12 +313,14 @@ func seedRunForkFreezeSessionAuthority(t *testing.T, ctx context.Context, db *sq
 	sessionID := uuid.NewString()
 	seedRunForkSessionProjection(t, db, lineage.SourceRunID, agentID, sessionID, "active", now)
 	leaseHolder := any(nil)
+	leaseGrant := any(nil)
 	leaseExpiry := any(nil)
 	if live {
 		leaseHolder = "freeze-worker"
+		leaseGrant = uuid.NewString()
 		leaseExpiry = now.Add(time.Minute)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE agent_sessions SET lease_holder = $2, lease_expires_at = $3 WHERE session_id = $1::uuid`, sessionID, leaseHolder, leaseExpiry); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE agent_sessions SET lease_holder = $2, lease_grant_id = $3, lease_expires_at = $4 WHERE session_id = $1::uuid`, sessionID, leaseHolder, leaseGrant, leaseExpiry); err != nil {
 		t.Fatal(err)
 	}
 }
