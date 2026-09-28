@@ -259,6 +259,10 @@ type CommittedAgentReadinessFinalizer interface {
 	FinalizeCommittedAgentReadiness(context.Context, events.Event, []events.DeliveryRoute) error
 }
 
+// ErrCommittedAgentRouteTransition means the exact route has a live launch or
+// retirement owner that will signal its lifecycle transition.
+var ErrCommittedAgentRouteTransition = errors.New("committed agent route is transitioning")
+
 type CommittedAgentReadinessFinalizerFunc func(context.Context, events.Event, []events.DeliveryRoute) error
 
 func (fn CommittedAgentReadinessFinalizerFunc) FinalizeCommittedAgentReadiness(ctx context.Context, event events.Event, routes []events.DeliveryRoute) error {

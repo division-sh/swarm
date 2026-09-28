@@ -132,6 +132,7 @@ func (eb *EventBus) receiverRouteContext(parent context.Context, evt events.Even
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(parent)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(parent)
 	ctx, cleanup := eventreceiver.NewContext(context.Background())
+	ctx = worklifetime.CarryAcceptedLease(ctx, parent)
 	if hasOwner {
 		ctx = worklifetime.WithOccurrence(ctx, owner)
 	}

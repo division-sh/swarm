@@ -2361,6 +2361,15 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	})
 }
 
+func beginAcceptedRuntimeWork(owner worklifetime.Occurrence, ctx context.Context) (*worklifetime.Lease, error) {
+	if accepted, ok := owner.(interface {
+		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+	}); ok {
+		return accepted.BeginAcceptedDescendant(ctx)
+	}
+	return owner.Begin(ctx)
+}
+
 type runtimeWorkAdmissionContextKey struct{}
 
 type runtimeWorkAdmission struct {

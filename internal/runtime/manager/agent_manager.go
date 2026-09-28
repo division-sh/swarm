@@ -476,11 +476,25 @@ func (am *AgentManager) registerExecutableAgentLifecycle(
 	if err != nil {
 		return executableAgentReadiness{}, err
 	}
-	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, agent, admission, topology); err != nil {
+	var transitionCell *agentLifecycleCell
+	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, agent, admission, topology, &transitionCell); err != nil {
 		return executableAgentReadiness{}, err
 	}
+	defer am.completeCommittedRouteTransition(transitionCell)
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
 	return am.ensureExecutableAgentLifecycle(ctx, identity)
+}
+
+func (am *AgentManager) completeCommittedRouteTransition(cell *agentLifecycleCell) {
+	c := am.lifecycle
+	c.mu.Lock()
+	if cell != nil && cell.routeTransitions > 0 {
+		cell.routeTransitions--
+	}
+	c.mu.Unlock()
+	if c.routes != nil {
+		c.routes.SignalDeliveryContinuations()
+	}
 }
 
 func (am *AgentManager) ensureExecutableAgentLifecycle(ctx context.Context, identity runtimeagentidentity.Identity) (executableAgentReadiness, error) {

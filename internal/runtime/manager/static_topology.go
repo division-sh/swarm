@@ -13,6 +13,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	semanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -78,6 +79,9 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 	var admission runtimeagenttopology.Admission
 	seen := make(map[runtimeagentidentity.Identity]struct{}, len(routes))
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if !route.Recipient.IsAgent() {
 			continue
 		}
@@ -92,12 +96,22 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 			continue
 		}
 		seen[identity] = struct{}{}
-		if _, readyErr := am.lifecycle.committedRouteReadinessByIdentity(identity); readyErr == nil {
-			continue
+		state, readiness, err := am.lifecycle.committedRouteStateByIdentity(identity)
+		if err != nil {
+			return err
 		}
-		if _, exists := am.lifecycle.executionSnapshotByIdentity(identity); exists {
+		switch state {
+		case committedRouteReady:
+			continue
+		case committedRouteLaunching, committedRouteRetiring:
+			return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
+		case committedRouteUnavailable:
+			return fmt.Errorf("committed agent %s is unavailable in lifecycle phase %s", identity.Description(), readiness.State.Phase)
+		case committedRouteExistingExecution:
 			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
-				return fmt.Errorf("finalize committed agent %s: %w", identity.Description(), err)
+				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -126,7 +140,9 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 		blueprint, static := staticByPlan[plan.Normalize()]
 		if !static {
 			if _, err := am.ensureExecutableAgentLifecycle(ctx, identity); err != nil {
-				return fmt.Errorf("committed non-static agent %s has no executable lifecycle: %w", identity.Description(), err)
+				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -144,14 +160,36 @@ func (am *AgentManager) FinalizeCommittedAgentReadiness(ctx context.Context, eve
 		}
 		if err := am.spawnAgentInternal(ctx, record, true); err != nil {
 			if !errors.Is(err, ErrAgentAlreadyExists) {
-				return fmt.Errorf("materialize committed static agent %s: %w", identity.Description(), err)
+				if err := am.committedRouteFinalizeError(ctx, identity, err); err != nil {
+					return err
+				}
+				continue
 			}
 			if _, readyErr := am.ensureExecutableAgentLifecycle(ctx, identity); readyErr != nil {
-				return fmt.Errorf("finalize concurrently materialized static agent %s: %w", identity.Description(), readyErr)
+				if err := am.committedRouteFinalizeError(ctx, identity, readyErr); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func (am *AgentManager) committedRouteFinalizeError(ctx context.Context, identity runtimeagentidentity.Identity, cause error) error {
+	state, _, err := am.lifecycle.committedRouteStateByIdentity(identity)
+	var failure *runtimefailures.Error
+	retirementConflict := errors.As(cause, &failure) && failure.Failure.Detail.Code == "agent_retirement_pending"
+	if retirementConflict && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if retirementConflict && err == nil && state == committedRouteReady {
+		return nil
+	}
+	if err == nil && (state == committedRouteLaunching || state == committedRouteRetiring) &&
+		(retirementConflict || errors.Is(cause, ErrAgentNotFound)) {
+		return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
+	}
+	return fmt.Errorf("finalize committed agent %s: %w", identity.Description(), errors.Join(cause, err))
 }
 
 // PrepareStaticTopologyForStartup settles predecessor effect authority and

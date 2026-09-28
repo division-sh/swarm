@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -50,10 +51,11 @@ type synchronizationRequest struct {
 }
 
 type dispatchJob struct {
-	deliveryID string
-	event      events.Event
-	route      events.DeliveryRoute
-	lease      *worklifetime.Lease
+	deliveryID  string
+	event       events.Event
+	route       events.DeliveryRoute
+	lease       *worklifetime.Lease
+	wakeVersion uint64
 }
 
 // Coordinator is the one execution-generation owner for executable
@@ -73,6 +75,7 @@ type Coordinator struct {
 	started       bool
 	retired       bool
 	wake          chan struct{}
+	wakeVersion   atomic.Uint64
 	sync          chan synchronizationRequest
 	done          chan struct{}
 	cancel        context.CancelFunc
@@ -305,6 +308,7 @@ func (c *Coordinator) Signal() {
 	if c == nil {
 		return
 	}
+	c.wakeVersion.Add(1)
 	select {
 	case c.wake <- struct{}{}:
 	default:
@@ -629,8 +633,9 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 			if job.lease.Context().Err() != nil && ordinaryCoordinatorStop(job.lease.Context(), err, true) {
 				err = nil
 			}
+			deferred := err == nil && result.Disposition() == DispatchDeferred
 			err = errors.Join(err, job.lease.Done())
-			c.completeDispatch(job.deliveryID, err)
+			c.completeDispatchWithWake(job.deliveryID, err, deferred, job.wakeVersion)
 			if err != nil {
 				return
 			}
@@ -639,12 +644,17 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 }
 
 func (c *Coordinator) completeDispatch(deliveryID string, err error) {
+	c.completeDispatchWithWake(deliveryID, err, false, 0)
+}
+
+func (c *Coordinator) completeDispatchWithWake(deliveryID string, err error, deferred bool, wakeVersion uint64) {
 	c.mu.Lock()
 	delete(c.reserved, deliveryID)
 	if err != nil {
 		c.workerFailure = errors.Join(c.workerFailure, err)
 	}
-	wake := err != nil || (c.rescanNeeded && len(c.reserved) <= dispatchCapacity/2)
+	wake := err != nil || (c.rescanNeeded && len(c.reserved) <= dispatchCapacity/2) ||
+		(deferred && c.wakeVersion.Load() != wakeVersion)
 	if wake {
 		c.rescanNeeded = false
 	}
@@ -675,7 +685,7 @@ func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.Continu
 		return fmt.Errorf("admit delivery continuation dispatch %s: %w", item.DeliveryID, err)
 	}
 	c.reserved[item.DeliveryID] = struct{}{}
-	c.jobs <- dispatchJob{deliveryID: item.DeliveryID, event: item.Event, route: item.Snapshot.Route, lease: lease}
+	c.jobs <- dispatchJob{deliveryID: item.DeliveryID, event: item.Event, route: item.Snapshot.Route, lease: lease, wakeVersion: c.wakeVersion.Load()}
 	return nil
 }
 

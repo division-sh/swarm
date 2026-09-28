@@ -564,6 +564,29 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 	}
 }
 
+func TestDeferredDispatchRechecksSignalConsumedBeforeCarrierReturn(t *testing.T) {
+	c := &Coordinator{
+		wake:     make(chan struct{}, 1),
+		reserved: map[string]struct{}{"delivery-1": {}},
+	}
+	scheduledVersion := c.wakeVersion.Load()
+	c.Signal()
+	<-c.wake // The scanner observed the route change while the job was reserved.
+	c.completeDispatchWithWake("delivery-1", nil, true, scheduledVersion)
+	select {
+	case <-c.wake:
+	default:
+		t.Fatal("route change before carrier return lost its rescan")
+	}
+	c.reserved["delivery-1"] = struct{}{}
+	c.completeDispatchWithWake("delivery-1", nil, true, c.wakeVersion.Load())
+	select {
+	case <-c.wake:
+		t.Fatal("unchanged route lifecycle spun a deferred delivery")
+	default:
+	}
+}
+
 func TestCoordinatorCanDispatchIndependentDeliveriesToOneTargetTogether(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()

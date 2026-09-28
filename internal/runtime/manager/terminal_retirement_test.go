@@ -173,6 +173,8 @@ type terminalRetirementRouteProbe struct {
 	fence  func(runtimeeffects.LifecycleToken)
 }
 
+func (*terminalRetirementRouteProbe) SignalDeliveryContinuations() {}
+
 func (p *terminalRetirementRouteProbe) FenceAgentRoute(token runtimeeffects.LifecycleToken) {
 	if p.fence != nil {
 		p.fence(token)

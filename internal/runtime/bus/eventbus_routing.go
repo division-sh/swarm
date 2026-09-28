@@ -870,17 +870,9 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	if eb.workOwner == nil {
 		return runtimedeliverycontinuation.Fatal(errors.New("delivery continuation requires a runtime work owner"))
 	}
-	var work *worklifetime.Lease
-	var err error
-	if owner, ok := eb.workOwner.(interface {
-		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
-	}); ok {
-		work, err = owner.BeginAcceptedDescendant(ctx)
-	} else {
-		work, err = eb.workOwner.Begin(ctx)
-	}
+	work, err := beginAcceptedRuntimeWork(eb.workOwner, ctx)
 	if err != nil {
-		return runtimedeliverycontinuation.Fatal(err)
+		return runtimedeliverycontinuation.Fatal(fmt.Errorf("admit accepted continuation work: %w", err))
 	}
 	defer func() {
 		if closeErr := work.Done(); closeErr != nil {
@@ -890,7 +882,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	ctx = bindWorkContext(ctx, work, eb.workOwner)
 	ctx, scope, closeDispatch, err := eb.beginDeliveryDispatch(ctx, evt, []events.DeliveryRoute{route})
 	if err != nil {
-		return runtimedeliverycontinuation.Fatal(err)
+		return runtimedeliverycontinuation.Fatal(fmt.Errorf("acquire exact delivery carrier: %w", err))
 	}
 	defer func() {
 		if err := closeDispatch(); err != nil {
@@ -909,12 +901,12 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	}
 	ctx, err = eb.admitSourceArtifactFact(ctx)
 	if err != nil {
-		return runtimedeliverycontinuation.Fatal(err)
+		return runtimedeliverycontinuation.Fatal(fmt.Errorf("admit continuation source fact: %w", err))
 	}
 	var standingLease *worklifetime.Lease
 	ctx, standingLease, err = eb.bindClaimedRunWork(ctx, evt)
 	if err != nil {
-		return runtimedeliverycontinuation.Fatal(err)
+		return runtimedeliverycontinuation.Fatal(fmt.Errorf("bind continuation run work: %w", err))
 	}
 	if standingLease != nil {
 		defer func() {
@@ -937,16 +929,19 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	}
 	if route.Recipient.IsAgent() {
 		if err := eb.finalizeCommittedAgentReadiness(ctx, evt, []events.DeliveryRoute{route}); err != nil {
+			if errors.Is(err, ErrCommittedAgentRouteTransition) {
+				return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeAgentRouteLifecycle)
+			}
 			return runtimedeliverycontinuation.Fatal(err)
 		}
 	}
 	projection, err := eb.receiverProjection(ctx, route.Context)
 	if err != nil {
-		return runtimedeliverycontinuation.Fatal(err)
+		return runtimedeliverycontinuation.Fatal(fmt.Errorf("project continuation receiver: %w", err))
 	}
 	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(ctx, projection, evt)
 	if err != nil {
-		return runtimedeliverycontinuation.Fatal(err)
+		return runtimedeliverycontinuation.Fatal(fmt.Errorf("admit continuation receiver: %w", err))
 	}
 	defer func() {
 		if closeErr := closeReceiver(); closeErr != nil {
@@ -1003,6 +998,9 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	}
 	if dispatch.complete() {
 		return runtimedeliverycontinuation.Transferred()
+	}
+	if dispatch.cause != nil && ctx.Err() != nil && dispatch.cause == ctx.Err() {
+		return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeCarrierReturn)
 	}
 	failure := eb.logAuthoritativeDeliveryIncomplete(
 		ctx, evt, dispatch.expected, dispatch.delivered, dispatch.missing, dispatch.timedOut, dispatch.cause,

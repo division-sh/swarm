@@ -58,18 +58,19 @@ func newRuntimeLifecycleTransition(kind runtimeLifecycleTransitionKind) *runtime
 }
 
 type agentLifecycleCell struct {
-	identity       runtimeagentidentity.Identity
-	opMu           sync.Mutex
-	epoch          int64
-	generation     uint64
-	phase          AgentLifecyclePhase
-	configRevision string
-	runMode        AgentRunMode
-	topology       runtimeagenttopology.Admission
-	processBinding ProcessExecutionBinding
-	execution      *agentExecutionProjection
-	retirement     *agentRetirement
-	terminalSet    *terminalFlowRetirement
+	identity         runtimeagentidentity.Identity
+	opMu             sync.Mutex
+	epoch            int64
+	generation       uint64
+	phase            AgentLifecyclePhase
+	configRevision   string
+	runMode          AgentRunMode
+	topology         runtimeagenttopology.Admission
+	processBinding   ProcessExecutionBinding
+	execution        *agentExecutionProjection
+	routeTransitions int
+	retirement       *agentRetirement
+	terminalSet      *terminalFlowRetirement
 }
 
 type agentExecutionProjection struct {
@@ -105,6 +106,7 @@ type AgentRouteBus interface {
 	PrepareAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation
 	FenceAgentRoute(runtimeeffects.LifecycleToken)
 	RemoveAgentRoute(runtimeeffects.LifecycleToken)
+	SignalDeliveryContinuations()
 }
 
 type agentExecutionSnapshot struct {
@@ -163,39 +165,89 @@ func (c *agentLifecycleCoordinator) executableReadinessByIdentity(identity runti
 	}
 }
 
-// committedRouteReadinessByIdentity observes an already executable occurrence
-// without requesting lifecycle mutation authority. Source-set transitions still
-// fence delivery admission; this observation only lets EventBus retain work for
-// an exact route that was executable before the transition began.
-func (c *agentLifecycleCoordinator) committedRouteReadinessByIdentity(identity runtimeagentidentity.Identity) (executableAgentReadiness, error) {
+type committedRouteState uint8
+
+const (
+	committedRouteAbsent committedRouteState = iota
+	committedRouteReady
+	committedRouteExistingExecution
+	committedRouteMaterializable
+	committedRouteLaunching
+	committedRouteRetiring
+	committedRouteUnavailable
+)
+
+// committedRouteStateByIdentity classifies the lifecycle cell, not just its
+// executable projection. Only a registered cell without execution is eligible
+// for first materialization; retirement retains its own exact progress owner.
+func (c *agentLifecycleCoordinator) committedRouteStateByIdentity(identity runtimeagentidentity.Identity) (committedRouteState, executableAgentReadiness, error) {
 	if c == nil {
-		return executableAgentReadiness{}, errors.New("agent lifecycle coordinator is required")
+		return committedRouteUnavailable, executableAgentReadiness{}, errors.New("agent lifecycle coordinator is required")
 	}
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return executableAgentReadiness{}, err
+		return committedRouteUnavailable, executableAgentReadiness{}, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cell := c.cells[identity]
-	if cell == nil || cell.execution == nil || cell.execution.agent == nil {
-		return executableAgentReadiness{}, fmt.Errorf("agent %s has no executable lifecycle projection", identity.Description())
+	if cell == nil {
+		return committedRouteAbsent, executableAgentReadiness{}, nil
 	}
 	state := lifecycleStateFromCell(cell)
+	if cell.routeTransitions > 0 && c.routes != nil &&
+		cell.phase != AgentLifecycleFailed && cell.phase != AgentLifecycleTerminated && cell.phase != AgentLifecycleDraining {
+		return committedRouteLaunching, executableAgentReadiness{State: state}, nil
+	}
+	if cell.retirement != nil || cell.terminalSet != nil {
+		if cell.terminalSet != nil && cell.terminalSet.completed {
+			return committedRouteUnavailable, executableAgentReadiness{State: state}, nil
+		}
+		if cell.retirement != nil && cell.retirement.failure == nil && cell.retirement.joinErr == nil && cell.retirement.token.Valid() && c.routes != nil {
+			return committedRouteRetiring, executableAgentReadiness{State: state}, nil
+		}
+		if cell.retirement == nil && cell.terminalSet != nil && cell.execution != nil &&
+			cell.execution.routeToken.Valid() && c.routes != nil {
+			return committedRouteRetiring, executableAgentReadiness{State: state}, nil
+		}
+		return committedRouteUnavailable, executableAgentReadiness{State: state}, nil
+	}
+	if cell.phase == AgentLifecycleFailed || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleDraining {
+		return committedRouteUnavailable, executableAgentReadiness{State: state}, nil
+	}
+	if cell.execution == nil || cell.execution.agent == nil {
+		if cell.phase == AgentLifecycleRegistered {
+			return committedRouteMaterializable, executableAgentReadiness{State: state}, nil
+		}
+		return committedRouteUnavailable, executableAgentReadiness{State: state}, nil
+	}
 	switch c.phase {
 	case runtimeLifecycleStopped:
-		if !executionPreparedBeforeRunLocked(cell) {
-			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not an exact pre-run preparation")
+		if executionPreparedBeforeRunLocked(cell) {
+			return committedRouteReady, executableAgentReadiness{Kind: executableAgentPreparedBeforeRun, State: state}, nil
 		}
-		return executableAgentReadiness{Kind: executableAgentPreparedBeforeRun, State: state}, nil
 	case runtimeLifecycleRunning:
-		if !c.executionRunnableCurrentOccurrenceLocked(cell) {
-			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not reachable in the current manager occurrence")
+		if c.executionRunnableCurrentOccurrenceLocked(cell) {
+			return committedRouteReady, executableAgentReadiness{Kind: executableAgentRunnableCurrentOccurrence, State: state}, nil
 		}
-		return executableAgentReadiness{Kind: executableAgentRunnableCurrentOccurrence, State: state}, nil
-	default:
-		return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "manager lifecycle does not admit executable readiness")
 	}
+	return committedRouteExistingExecution, executableAgentReadiness{State: state}, nil
+}
+
+// committedRouteReadinessByIdentity observes an already executable occurrence
+// without requesting lifecycle mutation authority.
+func (c *agentLifecycleCoordinator) committedRouteReadinessByIdentity(identity runtimeagentidentity.Identity) (executableAgentReadiness, error) {
+	kind, readiness, err := c.committedRouteStateByIdentity(identity)
+	if err != nil {
+		return executableAgentReadiness{}, err
+	}
+	if kind == committedRouteReady {
+		return readiness, nil
+	}
+	c.mu.Lock()
+	phase := c.phase
+	c.mu.Unlock()
+	return executableAgentReadiness{}, executableReadinessError(identity, phase, readiness.State, "route is not executable")
 }
 
 func lifecycleStateFromCell(cell *agentLifecycleCell) AgentLifecycleState {
@@ -809,7 +861,7 @@ func lifecycleMutationExecutionAuthority(store AgentLifecyclePersistence, previo
 }
 
 func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec PersistedAgent, persist bool, agent Agent, admission semanticview.FlowOwnedAgentSubscriptionAdmission) error {
-	return c.registerExecutionWithTopology(ctx, rec, persist, agent, admission, rec.Topology)
+	return c.registerExecutionWithTopology(ctx, rec, persist, agent, admission, rec.Topology, nil)
 }
 
 func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
@@ -819,6 +871,7 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	agent Agent,
 	admission semanticview.FlowOwnedAgentSubscriptionAdmission,
 	topology runtimeagenttopology.Admission,
+	readinessOwner **agentLifecycleCell,
 ) error {
 	if c == nil {
 		return fmt.Errorf("agent lifecycle coordinator is required")
@@ -966,6 +1019,11 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 		identity: identity, epoch: epoch, generation: generation, phase: phase,
 		configRevision: revision, runMode: mode, topology: topology,
 		processBinding: processBinding, execution: execution,
+	}
+	if readinessOwner != nil {
+		cell := c.cells[identity]
+		cell.routeTransitions++
+		*readinessOwner = cell
 	}
 	return nil
 }

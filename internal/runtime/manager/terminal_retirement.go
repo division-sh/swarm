@@ -102,6 +102,7 @@ type agentRetirement struct {
 	settled   <-chan struct{}
 	leases    <-chan struct{}
 	failure   error
+	joinErr   error
 }
 
 type agentTerminalCommit struct {
@@ -130,6 +131,7 @@ type terminalFlowRetirement struct {
 	trigger     string
 	members     []terminalFlowMember
 	retirements []*agentRetirement
+	completed   bool
 }
 
 func (c *agentLifecycleCoordinator) fenceTerminalFlow(plan terminalFlowInstanceSideEffectPlan) (*terminalFlowRetirement, error) {
@@ -254,20 +256,24 @@ func (am *AgentManager) launchTerminalFlowCompletion(lease *worklifetime.Lease, 
 			if recovered := recover(); recovered != nil {
 				result = errors.Join(result, fmt.Errorf("terminal flow completion panic: %v", recovered))
 			}
+			am.lifecycle.mu.Lock()
+			set.completed = true
+			if result == nil {
+				for _, member := range set.members {
+					if member.cell.terminalSet == set {
+						member.cell.terminalSet = nil
+					}
+				}
+			}
+			am.lifecycle.mu.Unlock()
+			if am.lifecycle.routes != nil {
+				am.lifecycle.routes.SignalDeliveryContinuations()
+			}
 			am.lifecycle.recordTerminalCompletion(result)
 			am.lifecycle.recordLifecycleDiagnosticFailure(diagnosticErr)
 			am.lifecycle.recordTerminalCompletion(lease.Done())
 		}()
 		result = errors.Join(result, am.completeTerminalRetirements(context.WithoutCancel(lease.Context()), set.retirements))
-		if result == nil {
-			am.lifecycle.mu.Lock()
-			for _, member := range set.members {
-				if member.cell.terminalSet == set {
-					member.cell.terminalSet = nil
-				}
-			}
-			am.lifecycle.mu.Unlock()
-		}
 		diagnosticErr = am.projectLifecycleDiagnostics(context.WithoutCancel(lease.Context()))
 	}()
 }
@@ -349,8 +355,13 @@ func (c *agentLifecycleCoordinator) joinAgentRetirement(retirement *agentRetirem
 		<-retirement.settled
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return errors.Join(routeErr, retirement.failure, retirement.execution.settlementErr)
+	retirement.joinErr = errors.Join(routeErr, retirement.failure, retirement.execution.settlementErr)
+	result := retirement.joinErr
+	c.mu.Unlock()
+	if result != nil && c.routes != nil {
+		c.routes.SignalDeliveryContinuations()
+	}
+	return result
 }
 
 func (c *agentLifecycleCoordinator) removeRetiredAgentRoute(token runtimeeffects.LifecycleToken) (result error) {
@@ -370,15 +381,19 @@ func (c *agentLifecycleCoordinator) finishAgentRetirement(retirement *agentRetir
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	cell := retirement.cell
 	if cell.retirement != retirement {
+		c.mu.Unlock()
 		return
 	}
 	if cell.execution == retirement.execution {
 		cell.execution = nil
 	}
 	cell.retirement = nil
+	c.mu.Unlock()
+	if c.routes != nil {
+		c.routes.SignalDeliveryContinuations()
+	}
 }
 
 // completeTerminalRetirements is called only by a separately admitted Manager
