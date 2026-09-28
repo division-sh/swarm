@@ -74,6 +74,7 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 			phase = mutationPhaseRetryAttempt
 		}
 		current = mutationOperation{label: label, phase: phase, attempt: busyAttempts + 1}
+		permitStarted := time.Now()
 		if err := b.acquireMutation(attemptCtx, current); err != nil {
 			cancelAttempt()
 			if callerErr := ctx.Err(); callerErr != nil {
@@ -84,9 +85,10 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 			}
 			return false, err
 		}
+		permitWait := time.Since(permitStarted)
 		committed, err := func() (bool, error) {
 			defer b.releaseMutation()
-			return b.runTransactionOnceOutcome(attemptCtx, nil, operation)
+			return b.runTransactionOnceOutcome(attemptCtx, nil, permitWait, operation)
 		}()
 		attemptErr := attemptCtx.Err()
 		cancelAttempt()
@@ -244,20 +246,23 @@ func waitMutationBackoff(ctx context.Context, deadline time.Time, delay time.Dur
 }
 
 func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (err error) {
-	_, err = b.runTransactionOnceOutcome(ctx, opts, operation)
+	_, err = b.runTransactionOnceOutcome(ctx, opts, 0, operation)
 	return err
 }
 
-func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
 		return false, err
 	}
+	poolWait := time.Since(poolStarted)
 	var tx *sql.Tx
 	discard := false
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
 	defer func() {
+		cleanupStarted := time.Now()
 		var cleanupErr error
 		if tx != nil {
 			probe.RollbackAttempted()
@@ -278,8 +283,11 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 			slog.Error("sqlite transaction cleanup failed", "error", cleanupErr)
 			err = &transactionTerminationError{errors.Join(err, cleanupErr)}
 		}
+		probe.RecordCleanup(time.Since(cleanupStarted))
 	}()
+	beginStarted := time.Now()
 	tx, err = conn.BeginTx(ctx, opts)
+	probe.RecordAdmission(permitWait, poolWait, time.Since(beginStarted))
 	if err != nil {
 		discard = true
 		return false, err

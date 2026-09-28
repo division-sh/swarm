@@ -14,6 +14,7 @@ func TestMutationPhaseReceiptsFollowTransactionOwner(t *testing.T) {
 	}
 	defer restore()
 	attempt := slot.Begin(false, false)
+	attempt.RecordAdmission(2*time.Millisecond, 3*time.Millisecond, 4*time.Millisecond)
 	attempt.Begun()
 	ctx := WithAttempt(context.Background(), attempt)
 	for _, phase := range []MutationPhase{MutationFence, MutationDomain, MutationFinalize} {
@@ -25,12 +26,15 @@ func TestMutationPhaseReceiptsFollowTransactionOwner(t *testing.T) {
 	attempt.BeforeCommit()
 	time.Sleep(time.Millisecond)
 	attempt.Committed()
+	attempt.RecordCleanup(5 * time.Millisecond)
 	attempt.Finish(nil)
 	got := collector.Snapshot().ByOperation[DeliveryClaim]
 	if got.Mutation.FenceCalls != 1 || got.Mutation.FenceDuration < time.Millisecond ||
 		got.Mutation.DomainCalls != 1 || got.Mutation.DomainDuration < time.Millisecond ||
 		got.Mutation.FinalizeCalls != 1 || got.Mutation.FinalizeDuration < time.Millisecond ||
-		got.CommitDuration < time.Millisecond {
+		got.CommitDuration < time.Millisecond ||
+		got.PermitWait != 2*time.Millisecond || got.PoolWait != 3*time.Millisecond ||
+		got.BeginDuration != 4*time.Millisecond || got.CleanupDuration != 5*time.Millisecond {
 		t.Fatalf("mutation phase receipt = %+v", got)
 	}
 	BeginMutationPhase(context.Background(), MutationFence).End()

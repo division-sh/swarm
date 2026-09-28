@@ -1,5 +1,7 @@
 package transactiontest
 
+import "time"
+
 type ActivePhase string
 
 const (
@@ -26,6 +28,9 @@ type ActiveClass struct {
 // CommitFailed is called after an unsuccessful physical Commit return, before
 // the owner discards the connection or cleans up its retained session.
 func (a *Attempt) CommitFailed() {
+	if a != nil && !a.commitStarted.IsZero() {
+		a.commitDuration = time.Since(a.commitStarted)
+	}
 	a.reclassify(PhaseCommitFailureCleanup)
 }
 

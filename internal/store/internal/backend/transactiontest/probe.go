@@ -52,6 +52,9 @@ type Options struct {
 }
 
 type Counts struct {
+	// Durations are summed wall time across attempts; concurrent spans overlap.
+	// PermitWait applies to SQLite writers. PoolWait excludes failed pool
+	// acquisitions; retained PostgreSQL sessions already own their connection.
 	BeginAttempts    uint64
 	Begun            uint64
 	ReadCommits      uint64
@@ -63,7 +66,12 @@ type Counts struct {
 	CleanupFailures  uint64
 	DelayedCommits   uint64
 	InjectedDelay    time.Duration
+	DelayDuration    time.Duration
+	PermitWait       time.Duration
+	PoolWait         time.Duration
+	BeginDuration    time.Duration
 	CommitDuration   time.Duration
+	CleanupDuration  time.Duration
 	Mutation         MutationCounts
 	Revision         RevisionCounts
 	FirstCommitAt    time.Time
@@ -144,6 +152,8 @@ type Attempt struct {
 	readOnly, retained                                      bool
 	begun, commitAttempted, acknowledged, rollbackAttempted bool
 	delay                                                   time.Duration
+	delayDuration                                           time.Duration
+	permitWait, poolWait, beginDuration, cleanupDuration    time.Duration
 	committedAt                                             time.Time
 	commitStarted                                           time.Time
 	commitDuration                                          time.Duration
@@ -201,6 +211,20 @@ func (a *Attempt) Begun() {
 	}
 }
 
+func (a *Attempt) RecordAdmission(permitWait, poolWait, beginDuration time.Duration) {
+	if a != nil {
+		a.permitWait = permitWait
+		a.poolWait = poolWait
+		a.beginDuration = beginDuration
+	}
+}
+
+func (a *Attempt) RecordCleanup(duration time.Duration) {
+	if a != nil {
+		a.cleanupDuration = duration
+	}
+}
+
 // BeforeCommit is called only after the transaction owner's existing final
 // admission checks. The delay represents commit transport cost, not a new
 // command clock or admission point; the owner still performs the real Commit.
@@ -216,7 +240,9 @@ func (a *Attempt) BeforeCommit() {
 	if apply && options.Delay > 0 {
 		a.delay = options.Delay
 		a.reclassify(PhaseCommitDelay)
+		started := time.Now()
 		time.Sleep(a.delay)
+		a.delayDuration = time.Since(started)
 	}
 	a.commitAttempted = true
 	a.commitStarted = time.Now()
@@ -255,6 +281,11 @@ func (a *Attempt) Finish(finalErr error) {
 		counts.Revision.add(revision)
 		counts.Mutation.add(mutation)
 		counts.CommitDuration += a.commitDuration
+		counts.DelayDuration += a.delayDuration
+		counts.PermitWait += a.permitWait
+		counts.PoolWait += a.poolWait
+		counts.BeginDuration += a.beginDuration
+		counts.CleanupDuration += a.cleanupDuration
 		counts.BeginAttempts++
 		if a.begun {
 			counts.Begun++

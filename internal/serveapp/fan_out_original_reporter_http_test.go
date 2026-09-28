@@ -83,6 +83,17 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			t.Logf("eight-row real-consumer commits: total_writes=%d delivery_claims=%d workflow_mutations=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, claims, mutations, candidateWrites,
 				receipt.ByOperation[storetest.TransactionDeliveryContinuationScan].ReadCommits,
 				receipt.ByOperation[storetest.TransactionDeliveryContinuationObserve].ReadCommits)
+			for _, operation := range []storetest.TransactionOperation{
+				storetest.TransactionDeliveryClaim,
+				storetest.TransactionWorkflowMutation,
+				storetest.TransactionRunCompletionCandidate,
+			} {
+				counts := receipt.ByOperation[operation]
+				t.Logf("transaction phases %s: commits=%d permit=%s pool=%s begin=%s fence=%s domain=%s finalize=%s delay=%s commit=%s cleanup=%s",
+					operation, counts.WriteCommits, counts.PermitWait, counts.PoolWait, counts.BeginDuration,
+					counts.Mutation.FenceDuration, counts.Mutation.DomainDuration, counts.Mutation.FinalizeDuration,
+					counts.DelayDuration, counts.CommitDuration, counts.CleanupDuration)
+			}
 		})
 	}
 }
