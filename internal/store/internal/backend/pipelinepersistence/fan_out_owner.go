@@ -837,14 +837,8 @@ func commitFanOutChunk(
 			intent.ClaimOwner, intent.LeaseExpiresAt = "", time.Time{}
 			result.Intent = intent
 			if status == fanoutobligation.StatusClosed {
-				needed, err := candidateWriter.SettlementNeedsCompletionTx(txctx, tx, command.Claim.Key.RunID)
-				if err != nil {
+				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.Claim.Key.RunID, nil); err != nil {
 					return err
-				}
-				if needed {
-					if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.Claim.Key.RunID, nil); err != nil {
-						return err
-					}
 				}
 			}
 			return nil

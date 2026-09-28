@@ -93,6 +93,10 @@ type SQLiteRuntimeStore struct {
 	runLifecycleCandidates *storerunhandoff.CandidateCoordinator
 }
 
+// SQLite admits one write transaction at a time; two continuation dispatchers
+// keep independent routes moving without flooding publication writes.
+func (*SQLiteRuntimeStore) DeliveryContinuationWorkerLimit() int { return 2 }
+
 var _ SchemaBootstrapper = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.EventStore = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*SQLiteRuntimeStore)(nil)

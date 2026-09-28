@@ -48,18 +48,8 @@ func settlePipelineMemberTx(ctx context.Context, attempt *mutationprotocol.Attem
 		return err
 	}
 	if runID != "" {
-		var needed bool
-		if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			var err error
-			needed, err = candidates.SettlementNeedsCompletionTx(ctx, tx, runID)
+		if _, err := attempt.RequestCompletion(ctx, candidates, runID, nil); err != nil {
 			return err
-		}); err != nil {
-			return err
-		}
-		if needed {
-			if _, err := attempt.RequestCompletion(ctx, candidates, runID, nil); err != nil {
-				return err
-			}
 		}
 	}
 	if !disposition.Successful() {

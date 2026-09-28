@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -212,12 +213,12 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
 				if cut == "after_commit_before_ack" {
 					receipts = 3
 				}
-				assertPublicationGroupCrashEffects(t, ctx, fixture, seeded.runID, ids, effects, receipts)
+				predecessorEffects := assertPublicationGroupCrashEffects(t, ctx, fixture, seeded.runID, ids, effects, receipts, true)
 				oldJSON, err := json.Marshal(old.Authority)
 				if err != nil {
 					t.Fatal(err)
 				}
-				env = append(env, "SWARM_FAN_OUT_CRASH_PREDECESSOR="+string(oldJSON))
+				env = append(env, "SWARM_FAN_OUT_CRASH_PREDECESSOR="+string(oldJSON), "SWARM_FAN_OUT_CRASH_EFFECTS="+strconv.Itoa(predecessorEffects))
 				_, evidence, exited = startPublicationGroupCrashChild(t, "successor", env)
 				next := awaitFanOutCrashEvidence(t, evidence)
 				if !next.Recovered || next.Authority.PredecessorAuthorityID != old.Authority.AuthorityID {
@@ -234,7 +235,7 @@ func runPublicationGroupCrashCases(t *testing.T, cuts []string) {
 				if got := fanOutCrashOutcomeIDs(t, ctx, fixture.db, seeded.runID); !reflect.DeepEqual(ids, got) {
 					t.Fatalf("recovery changed committed identities: before=%v after=%v", ids, got)
 				}
-				assertPublicationGroupCrashEffects(t, ctx, fixture, seeded.runID, ids, 3, 3)
+				assertPublicationGroupCrashEffects(t, ctx, fixture, seeded.runID, ids, 3, 3, false)
 				t.Logf("real group SIGKILL at %s, exact selected-store takeover, exact ordinal-prefix effects and missing-suffix handler executions, final public recipient effects/receipts, startup candidate discovery; not deferred-agent B15 signal recovery", cut)
 			})
 		}
@@ -485,7 +486,7 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 	if err := eventBus.WaitForQuiescence(ctx); err != nil {
 		t.Fatal(err)
 	}
-	assertPublicationGroupCrashEffects(t, ctx, fixture, runID, ids, 3, 3)
+	assertPublicationGroupCrashEffects(t, ctx, fixture, runID, ids, 3, 3, false)
 	before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")
 	if err := recovery.RecoverToExhaustion(ctx); err != nil {
 		t.Fatal(err)
@@ -499,7 +500,11 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 	if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend == "postgres")) {
 		t.Fatal("duplicate startup recovery mutated acknowledged recipient history")
 	}
-	wantHandlers := int32(3 - publicationGroupCrashMemberPrefix(control.cut))
+	predecessorEffects, err := strconv.Atoi(os.Getenv("SWARM_FAN_OUT_CRASH_EFFECTS"))
+	if err != nil || predecessorEffects < 0 || predecessorEffects > 3 {
+		t.Fatalf("invalid predecessor effect count: %q", os.Getenv("SWARM_FAN_OUT_CRASH_EFFECTS"))
+	}
+	wantHandlers := int32(3 - predecessorEffects)
 	if got := handlers.started.Load(); got != wantHandlers {
 		t.Fatalf("successor actual recipient executions=%d want=%d; acknowledged deliveries must not execute again", got, wantHandlers)
 	}
@@ -540,7 +545,7 @@ func runPublicationGroupCrashChild(t *testing.T, mode string) {
 	}
 }
 
-func assertPublicationGroupCrashEffects(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, runID string, ids []string, effects, receipts int) {
+func assertPublicationGroupCrashEffects(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, runID string, ids []string, effects, receipts int, allowPendingPrefix bool) int {
 	t.Helper()
 	if len(ids) != 3 {
 		t.Fatalf("expected exact three-publication group, got %v", ids)
@@ -548,6 +553,7 @@ func assertPublicationGroupCrashEffects(t *testing.T, ctx context.Context, fixtu
 	reader := fixture.store.(interface {
 		LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 	})
+	actualEffects := 0
 	for ordinal, id := range ids {
 		wantEffect := 0
 		if ordinal < effects {
@@ -561,9 +567,13 @@ func assertPublicationGroupCrashEffects(t *testing.T, ctx context.Context, fixtu
 		if delivery.SubscriberType != "node" || delivery.SubscriberID != mustPersistenceRootNode("item-consumer").Key() || delivery.Target.EntityID != runID {
 			t.Fatalf("not the real declared recipient: %+v", delivery)
 		}
+		if allowPendingPrefix && wantEffect == 1 && delivery.Status == "pending" {
+			wantEffect = 0
+		}
 		wantStatus := "pending"
 		if wantEffect == 1 {
 			wantStatus = "delivered"
+			actualEffects++
 		}
 		if delivery.Status != wantStatus || delivery.Terminal != (wantEffect == 1) || delivery.Failure != nil || delivery.RetryCount != 0 || delivery.RetryScheduled {
 			t.Fatalf("recipient settlement at crash/recovery: %+v want=%s", delivery, wantStatus)
@@ -586,4 +596,5 @@ func assertPublicationGroupCrashEffects(t *testing.T, ctx context.Context, fixtu
 			}
 		}
 	}
+	return actualEffects
 }

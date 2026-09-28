@@ -72,6 +72,7 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 	if admission, ok := runtimeWorkAdmissionFromContext(parent); ok && admission.owner == projection.occurrence {
 		var closeContext func()
 		ctx, closeContext = eventreceiver.NewContext(admission.context)
+		ctx = worklifetime.CarryAcceptedLease(ctx, admission.context)
 		closeReceiver = func() error {
 			closeContext()
 			return nil

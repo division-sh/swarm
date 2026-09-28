@@ -867,6 +867,27 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	if _, err := route.Identity(); err != nil {
 		return runtimedeliverycontinuation.Fatal(err)
 	}
+	if eb.workOwner == nil {
+		return runtimedeliverycontinuation.Fatal(errors.New("delivery continuation requires a runtime work owner"))
+	}
+	var work *worklifetime.Lease
+	var err error
+	if owner, ok := eb.workOwner.(interface {
+		BeginAcceptedDescendant(context.Context) (*worklifetime.Lease, error)
+	}); ok {
+		work, err = owner.BeginAcceptedDescendant(ctx)
+	} else {
+		work, err = eb.workOwner.Begin(ctx)
+	}
+	if err != nil {
+		return runtimedeliverycontinuation.Fatal(err)
+	}
+	defer func() {
+		if closeErr := work.Done(); closeErr != nil {
+			result = runtimedeliverycontinuation.Fatal(errors.Join(result.Failure(), closeErr))
+		}
+	}()
+	ctx = bindWorkContext(ctx, work, eb.workOwner)
 	ctx, scope, closeDispatch, err := eb.beginDeliveryDispatch(ctx, evt, []events.DeliveryRoute{route})
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(err)

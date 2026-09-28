@@ -63,6 +63,22 @@ type Lease struct {
 
 type acceptedLeaseContextKey struct{}
 
+// CarryAcceptedLease transfers only the opaque work admission into a rebuilt
+// receiver context. The destination owner still checks the lease's gate.
+func CarryAcceptedLease(dst, admitted context.Context) context.Context {
+	if dst == nil {
+		dst = context.Background()
+	}
+	if admitted == nil {
+		return dst
+	}
+	lease, _ := admitted.Value(acceptedLeaseContextKey{}).(*Lease)
+	if lease == nil {
+		return dst
+	}
+	return context.WithValue(dst, acceptedLeaseContextKey{}, lease)
+}
+
 func (g *gate) begin(parent context.Context) (*Lease, error) {
 	return g.beginClass(parent, true)
 }

@@ -29,6 +29,10 @@ const (
 	TransactionFanOutObservation            = transactiontest.FanOutObservation
 	TransactionDeliveryContinuationScan     = transactiontest.DeliveryContinuationScan
 	TransactionDeliveryContinuationObserve  = transactiontest.DeliveryContinuationObserve
+	TransactionDeliveryClaim                = transactiontest.DeliveryClaim
+	TransactionDeliveryRenew                = transactiontest.DeliveryRenew
+	TransactionDeliverySettle               = transactiontest.DeliverySettle
+	TransactionWorkflowMutation             = transactiontest.WorkflowMutation
 	TransactionFanOutRetry                  = transactiontest.FanOutRetry
 	TransactionFanOutBlock                  = transactiontest.FanOutBlock
 	TransactionFanOutRelease                = transactiontest.FanOutRelease

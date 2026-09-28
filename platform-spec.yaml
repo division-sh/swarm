@@ -36975,6 +36975,14 @@ process_local_work_lifetime_authority:
       read's lease. Neither query retry nor SQLSTATE-based error suppression is permitted.
     delivery_continuation: The exact opaque continuation capability is attached to the EventDelivery before enqueue. One scoped carrier guard retains the exact EventDelivery or raw continuation across every Manager and Pipeline exit and resolves the capability exactly once through one atomic typed operation. The only successful resolutions are returned to the same coordinator, consumed into a fenced execution attempt, or terminal-fenced because terminal settlement won the race. Terminal claim outcomes fence the exact continuation before returning rather than consuming the carrier, so direct dispatch reports terminal evidence rather than a fabricated transfer or deferral. Resolution errors remain visible and fence the owning generation; carriers never poll, sleep, retry the capability, or infer success. Retry settlement returns a fresh retry-scheduled snapshot to that coordinator before attempt completion. A current agent delivery that authors its own flow-terminal event retains its exact lifecycle generation while the route is fenced and the accepted carrier finishes; the loop finalizer publishes terminal lifecycle authority only after that carrier settles. Duplicate resolution and cross-authority transfer fail closed. Coordinator retirement rejects new carriers and attempt admission, but an already accepted exact carrier must still return to its predecessor or resolve an existing terminal fence before process-local joins can finish; that cleanup cannot acquire, wake or mutate a successor.
     coordinator: The normal runtime-generation coordinator begins under the runtime occurrence before readiness, enumerates its exact persisted authority to explicit bounded-cursor exhaustion, and is joined before runtime/store teardown. After startup publishes restored routes, one event-driven synchronization through that same coordinator returns the exact scan/dispatch result before readiness. Dispatch results are closed over transferred, already held by another proven exact owner, terminally settled, deferred under an exact named live agent-route/internal-subscription/carrier-return wake owner, and fatal. A fatal scan or dispatch result atomically retires the coordinator, rejects every later handoff/acquire/retain admission, closes runtime admission, and cancels the serving generation; a runtime cannot remain ready after losing its only continuation owner. A materializing node cannot defer behind topology created only by its own execution. Successor authority activation uses selected-store time to make predecessor open attempts immediately reclaimable through the ordinary fenced claim path. Canonical route, topology, authentication, carrier-return, and durable due-time lifecycle changes signal the coordinator; no free-form blockage interpreter, fixed scan/dispatch retry, manual backlog API, process-global retry registry, or successor-barrier reuse exists.
+    concurrent_dispatch: >
+      The coordinator may dispatch independent durable continuations concurrently through a
+      bounded worker pool. The selected store may lower that operational bound to respect its
+      write-admission capacity; the bound cannot change exact claim election, eligibility,
+      delivery identity, acknowledgment, replay, or terminal disposition. A queued dispatch
+      carries its accepted runtime-occurrence lease into the receiver, so a runtime fence
+      rejects new work but does not strand an already accepted route. Retirement cancels and
+      joins every active worker and releases every unstarted queued lease before store teardown.
     acquisition: >
       The existing normal-generation coordinator owns one atomic election for each exact delivery.
       Its closed result is an acquired opaque capability, another proven carrier/attempt owner,
@@ -37185,7 +37193,9 @@ durable_pipeline_processing_obligation_authority:
         handoffs cover every executable recipient, and no event-wide decision remains,
         the selected-store group may acknowledge the publication and atomically make those routes executable for
         the existing durable delivery-continuation owner. This transfers downstream execution out of the finite
-        issuance turn without treating the delivery as settled; an acknowledged later chunk may issue while an
+        issuance turn without treating the delivery as settled; the pipeline receipt acknowledges durable handoff,
+        not recipient execution. The public delivery remains pending until its own terminal settlement. An
+        acknowledged later chunk may issue while an
         earlier consumer is still executing. Receiver activation and readiness prerequisites precede transfer.
         The continuation's exact generation, delivery claim and runtime occurrence own execution and shutdown join.
         A queued continuation dispatch holds a transient occurrence from scheduling until dispatch completes or

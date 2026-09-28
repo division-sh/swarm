@@ -152,6 +152,13 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 	if err := validateClosedReceiverContext(receiver.Context, evt); err != nil {
 		t.Fatal(err)
 	}
+	descendant, err := owner.BeginAcceptedDescendant(receiver.Context)
+	if err != nil {
+		t.Fatalf("accepted receiver lost its work admission after fence: %v", err)
+	}
+	if err := descendant.Done(); err != nil {
+		t.Fatalf("complete accepted receiver descendant: %v", err)
+	}
 	if err := closeReceiver(); err != nil {
 		t.Fatalf("close accepted receiver dispatch: %v", err)
 	}

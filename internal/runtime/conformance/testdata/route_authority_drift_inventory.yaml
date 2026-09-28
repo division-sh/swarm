@@ -973,6 +973,16 @@ seam_families:
       the #1495 typed route-intent producer model. #1494 guards their use and
       #1495 removes broad raw string producer helper entry points for EventBus
       RoutePlan production.
+  - id: fan_out_publication_route_plan_consumer
+    layer: route_plan_authority
+    classification: valid_consumer
+    paths:
+      - internal/runtime/bus/fan_out_publication_group.go
+      - internal/runtime/bus/fan_out_publication_group_test.go
+    search_dimensions: [route_plan_source_reason]
+    notes: >
+      The finite fan-out handoff checks typed RoutePlanLiveRecipient evidence
+      against persisted delivery routes. It does not derive a new route.
   - id: durable_delivery_authority_writers
     layer: durable_delivery_authority
     classification: canonical_owner

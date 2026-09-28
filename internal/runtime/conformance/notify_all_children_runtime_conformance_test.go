@@ -155,6 +155,7 @@ type notifyAllChildrenRuntimeOptions struct {
 	nestedPublications     *nestedPublicationLifetime
 	testLifecycleProbe     runtimelifecycleprobe.Observer
 	deliveryLifecycle      runtimedelivery.Store
+	deferContinuationStart bool
 }
 
 type notifyAllChildrenGenericScheduleLogger struct {
@@ -1788,6 +1789,24 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-b"},
 			})
+			if err := runtime.bus.WaitForQuiescence(testAuthorActivityContextForBundle(ctx, runtime.sourceArtifactFact)); err != nil {
+				t.Fatalf("drain old runtime before restart: %v", err)
+			}
+			runtime.fanOutServing.Close()
+			oldContinuations, ok := runtime.bus.DeliveryContinuationOwner().(*runtimedeliverycontinuation.Coordinator)
+			if !ok {
+				t.Fatal("old runtime lacks its delivery continuation owner")
+			}
+			if err := oldContinuations.Retire(ctx); err != nil {
+				t.Fatalf("retire old delivery continuations: %v", err)
+			}
+			if err := runtime.manager.Shutdown(); err != nil {
+				t.Fatalf("shut down old agent manager: %v", err)
+			}
+			runtime.workOwner.Retire()
+			if _, err := runtime.workOwner.RetireAndWait(ctx); err != nil {
+				t.Fatalf("join old runtime generation: %v", err)
+			}
 
 			originalA := items["acct-a"]
 			deleteNotifyAllChildrenPipelineReceipt(t, ctx, backend, db, originalA)
@@ -1813,7 +1832,9 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 			)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
-			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
+			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{
+				processTopology: processTopology, deferContinuationStart: true,
+			})
 			restartCtx := testAuthorActivityContextForBundle(ctx, restarted.sourceArtifactFact)
 			startup, err := restarted.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(restartCtx, restarted.sourceArtifactFact, true)
 			if err != nil {
@@ -2187,8 +2208,10 @@ func newNotifyAllChildrenRuntime(
 	if err := eventBus.SetDeliveryContinuationOwner(continuations); err != nil {
 		t.Fatalf("bind notify-all-children delivery continuations: %v", err)
 	}
-	if err := continuations.Start(continuationCtx); err != nil {
-		t.Fatalf("start notify-all-children delivery continuations: %v", err)
+	if !opts.deferContinuationStart {
+		if err := continuations.Start(continuationCtx); err != nil {
+			t.Fatalf("start notify-all-children delivery continuations: %v", err)
+		}
 	}
 	t.Cleanup(func() {
 		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

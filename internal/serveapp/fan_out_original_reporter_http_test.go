@@ -75,10 +75,12 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			waitIssue2394ReporterDiagnosis(t, rt, runID, len(rows))
 			receipt := transactions.Snapshot()
 			candidateWrites := receipt.ByOperation[storetest.TransactionRunCompletionCandidate].WriteCommits
-			if candidateWrites >= uint64(len(rows)) || receipt.Total.Failed != 0 {
-				t.Fatalf("completion work did not coalesce across eight real consumers: candidates=%d receipt=%+v", candidateWrites, receipt)
+			claims := receipt.ByOperation[storetest.TransactionDeliveryClaim].WriteCommits
+			mutations := receipt.ByOperation[storetest.TransactionWorkflowMutation].WriteCommits
+			if claims != uint64(len(rows)+1) || mutations != uint64(len(rows)+1) || candidateWrites == 0 || receipt.Total.Failed != 0 {
+				t.Fatalf("eight real consumers lost exact claim/mutation/candidate accounting: claims=%d mutations=%d candidates=%d receipt=%+v", claims, mutations, candidateWrites, receipt)
 			}
-			t.Logf("eight-row real-consumer commits: total_writes=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, candidateWrites,
+			t.Logf("eight-row real-consumer commits: total_writes=%d delivery_claims=%d workflow_mutations=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, claims, mutations, candidateWrites,
 				receipt.ByOperation[storetest.TransactionDeliveryContinuationScan].ReadCommits,
 				receipt.ByOperation[storetest.TransactionDeliveryContinuationObserve].ReadCommits)
 		})

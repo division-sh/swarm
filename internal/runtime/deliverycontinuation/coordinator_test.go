@@ -41,6 +41,37 @@ type coordinatorTestStore struct {
 	batchSizes   []int
 }
 
+type limitedCoordinatorTestStore struct {
+	*coordinatorTestStore
+	limit int
+}
+
+func (s *limitedCoordinatorTestStore) DeliveryContinuationWorkerLimit() int { return s.limit }
+
+func TestCoordinatorUsesSelectedStoreWorkerLimit(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	dispatcher := &coordinatorTestDispatcher{}
+	for _, tc := range []struct {
+		limit int
+		valid bool
+	}{
+		{limit: 2, valid: true},
+		{limit: 0},
+		{limit: dispatchWorkers + 1},
+	} {
+		store := &limitedCoordinatorTestStore{coordinatorTestStore: &coordinatorTestStore{}, limit: tc.limit}
+		coordinator, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+		if tc.valid {
+			if err != nil || coordinator.workerLimit != tc.limit {
+				t.Fatalf("worker limit %d: coordinator=%+v err=%v", tc.limit, coordinator, err)
+			}
+		} else if err == nil {
+			t.Fatalf("invalid worker limit %d was admitted", tc.limit)
+		}
+	}
+}
+
 type coordinatorTestRestarts map[string]runtimepipeline.StandingRestartDispositionKind
 
 func (s coordinatorTestRestarts) StandingRunRestartDisposition(_ context.Context, runID string) (runtimepipeline.StandingRestartDisposition, error) {
@@ -464,6 +495,12 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		for len(c.jobs) > 0 {
+			job := <-c.jobs
+			_ = job.lease.Done()
+		}
+	}()
 	if _, _, err := c.scan(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
@@ -519,6 +556,41 @@ func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
 		t.Fatal("skipped first-page work was not rearmed at refill capacity")
 	}
 	for len(c.jobs) > 0 {
+		job := <-c.jobs
+		if err := job.lease.Done(); err != nil {
+			t.Fatal(err)
+		}
+		c.completeDispatch(job.deliveryID, nil)
+	}
+}
+
+func TestCoordinatorCanDispatchIndependentDeliveriesToOneTargetTogether(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	route := coordinatorTestAgentRoute(t, "same-target")
+	c, err := New(&coordinatorTestStore{}, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := make([]runtimedelivery.ContinuationItem, 2)
+	for i := range items {
+		event := coordinatorTestEvent(fmt.Sprintf("same-target-%d", i))
+		id, err := runtimedelivery.DeliveryID(event.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items[i] = runtimedelivery.ContinuationItem{
+			DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired,
+			Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Status: runtimedelivery.StatusPending, Authority: authority},
+		}
+		if err := c.schedule(context.Background(), items[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(c.jobs) != 2 || len(c.reserved) != 2 {
+		t.Fatalf("same target deliveries did not admit independently: jobs=%d reserved=%d", len(c.jobs), len(c.reserved))
+	}
+	for range items {
 		job := <-c.jobs
 		if err := job.lease.Done(); err != nil {
 			t.Fatal(err)

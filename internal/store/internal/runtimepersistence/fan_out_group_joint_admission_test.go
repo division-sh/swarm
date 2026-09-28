@@ -118,8 +118,8 @@ func TestFanOutPublicationGroupJointAdmissionFreshnessBothStores(t *testing.T) {
 				revisions := countP16RunRevisions(t, f.db, f.seed.runID)
 				out, err = f.group.Settle(f.ctx, f.members)
 				requireB10Acknowledged(t, out, err, nil)
-				if countP16RunRevisions(t, f.db, f.seed.runID) != revisions+1 || f.sink.submits != 1 {
-					t.Fatal("restored exact claims did not settle in one revision/handoff")
+				if got := countP16RunRevisions(t, f.db, f.seed.runID); got != revisions+1 || f.sink.submits != 1 {
+					t.Fatalf("restored exact claims did not settle in one revision/handoff: revisions=%d want=%d sink=%+v", got, revisions+1, f.sink)
 				}
 				f.requireObservation(t, pipelineobligation.PublicationSettlementSatisfied)
 			})

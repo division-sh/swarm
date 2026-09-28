@@ -42,16 +42,19 @@ type nestedServingReceipt struct {
 
 type nestedServingProbe struct {
 	*pipeline.PipelineCoordinator
-	mu           sync.Mutex
-	counts       nestedServingCounts
-	holdNext     bool
-	closing      bool
-	held         chan nestedServingReceipt
-	receipts     chan nestedServingReceipt
-	release      chan struct{}
-	once         sync.Once
-	publications nestedPublicationLifetime
-	rejection    *nestedPreparedRejection
+	mu                sync.Mutex
+	counts            nestedServingCounts
+	holdNext          bool
+	closing           bool
+	held              chan nestedServingReceipt
+	receipts          chan nestedServingReceipt
+	release           chan struct{}
+	once              sync.Once
+	publications      nestedPublicationLifetime
+	rejection         *nestedPreparedRejection
+	accountTurns      int
+	pauseAccountTurn  int
+	accountTurnPaused chan struct{}
 }
 
 func newNestedServingProbe(t *testing.T) *nestedServingProbe {
@@ -109,6 +112,21 @@ func (p *nestedServingProbe) ReportFanOutServingError(ctx context.Context, err e
 }
 
 func (p *nestedServingProbe) ServeFanOutCandidate(ctx context.Context, owner pipeline.FanOutObligationOwner, key fanoutobligation.IntentKey) (pipeline.FanOutTurnResult, error) {
+	p.mu.Lock()
+	pause := false
+	if key.ElementRef.FlowPath == "account" {
+		p.accountTurns++
+		pause = p.accountTurns == p.pauseAccountTurn
+	}
+	p.mu.Unlock()
+	if pause {
+		p.accountTurnPaused <- struct{}{}
+		select {
+		case <-ctx.Done():
+			return pipeline.FanOutTurnResult{}, ctx.Err()
+		case <-p.release:
+		}
+	}
 	if p.rejection != nil {
 		p.rejection.beforeTurn(ctx)
 	}
