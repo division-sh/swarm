@@ -189,7 +189,7 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 						}
 					})
 					var acquireErr error
-					predecessor, acquireErr = store.Acquire(testAuthorActivityContext(), identity, "retry-worker")
+					predecessor, acquireErr = store.Acquire(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), identity, "retry-worker")
 					if acquireErr != nil {
 						t.Fatal(acquireErr)
 					}

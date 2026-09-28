@@ -48,7 +48,7 @@ func TestSessionReleaseOutcomeAcknowledgesPostcommitHandoffErrorBothStores(t *te
 				t.Fatal(err)
 			}
 			defer registration.Release()
-			lease := &runtimesessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder}
+			lease := &runtimesessions.Lease{SessionID: fixture.sessionID, GrantID: fixture.grantID, Identity: identity, LockOwner: fixture.leaseHolder}
 			result, err := store.ReleaseOutcome(ctx, lease)
 			if !result.Acknowledged || !errors.Is(err, injected) || submits != 1 {
 				t.Fatalf("release result=%+v err=%v submissions=%d", result, err, submits)

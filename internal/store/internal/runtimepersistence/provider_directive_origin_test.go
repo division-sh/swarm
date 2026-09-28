@@ -265,6 +265,9 @@ func providerDirectiveBaseContext(t *testing.T, fixture completionSettlementFixt
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), fixture.authority.ExecutionMode)
 	controller := runtimeeffects.NewCompletionController(fixture.store, fixture.store, fixture.store, nil).WithExecutionPosture(executionposture.Live)
 	ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, fixture.authority), controller)
+	if fixture.authority.Target.Memory.Enabled {
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: fixture.sessionID, GrantID: fixture.grantID, LockOwner: fixture.leaseHolder})
+	}
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-directive:"+operation)
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
 	return runtimecorrelation.WithInboundEvent(ctx, event)
