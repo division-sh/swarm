@@ -155,7 +155,6 @@ type notifyAllChildrenRuntimeOptions struct {
 	nestedPublications     *nestedPublicationLifetime
 	testLifecycleProbe     runtimelifecycleprobe.Observer
 	deliveryLifecycle      runtimedelivery.Store
-	durableContinuations   bool
 }
 
 type notifyAllChildrenGenericScheduleLogger struct {
@@ -587,9 +586,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				NumericReporterSink:     true,
 				RegistrationUUIDField:   true,
 			})
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
-				durableContinuations: true,
-			})
+			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
 
 			validRunID := uuid.NewString()
 			validCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), validRunID)
@@ -2173,35 +2170,33 @@ func newNotifyAllChildrenRuntime(
 	}, backend))
 	eventBus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
 	grant := opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact), manager, source, sourceArtifactFact, generationLifecycle)
-	if opts.durableContinuations {
-		authority, err := eventBus.DeliveryAuthority()
-		if err != nil {
-			t.Fatalf("load notify-all-children delivery authority: %v", err)
-		}
-		ctx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
-		if err := backend.ActivateDeliveryAuthority(ctx, authority); err != nil {
-			t.Fatalf("activate notify-all-children delivery authority: %v", err)
-		}
-		continuations, err := runtimedeliverycontinuation.New(backend, backend, authority, workOwner, eventBus, func(_ context.Context, reportErr error) {
-			t.Errorf("notify-all-children delivery continuation failed: %v", reportErr)
-		})
-		if err != nil {
-			t.Fatalf("construct notify-all-children delivery continuations: %v", err)
-		}
-		if err := eventBus.SetDeliveryContinuationOwner(continuations); err != nil {
-			t.Fatalf("bind notify-all-children delivery continuations: %v", err)
-		}
-		if err := continuations.Start(ctx); err != nil {
-			t.Fatalf("start notify-all-children delivery continuations: %v", err)
-		}
-		t.Cleanup(func() {
-			retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := continuations.Retire(retireCtx); err != nil {
-				t.Errorf("retire notify-all-children delivery continuations: %v", err)
-			}
-		})
+	authority, err := eventBus.DeliveryAuthority()
+	if err != nil {
+		t.Fatalf("load notify-all-children delivery authority: %v", err)
 	}
+	continuationCtx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	if err := backend.ActivateDeliveryAuthority(continuationCtx, authority); err != nil {
+		t.Fatalf("activate notify-all-children delivery authority: %v", err)
+	}
+	continuations, err := runtimedeliverycontinuation.New(backend, backend, authority, workOwner, eventBus, func(_ context.Context, reportErr error) {
+		t.Errorf("notify-all-children delivery continuation failed: %v", reportErr)
+	})
+	if err != nil {
+		t.Fatalf("construct notify-all-children delivery continuations: %v", err)
+	}
+	if err := eventBus.SetDeliveryContinuationOwner(continuations); err != nil {
+		t.Fatalf("bind notify-all-children delivery continuations: %v", err)
+	}
+	if err := continuations.Start(continuationCtx); err != nil {
+		t.Fatalf("start notify-all-children delivery continuations: %v", err)
+	}
+	t.Cleanup(func() {
+		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := continuations.Retire(retireCtx); err != nil {
+			t.Errorf("retire notify-all-children delivery continuations: %v", err)
+		}
+	})
 	var fanOutExecutor runtimestartupownership.FanOutExecutor = coordinator
 	if opts.fanOutExecutor != nil {
 		fanOutExecutor = opts.fanOutExecutor(coordinator)
@@ -2608,6 +2603,13 @@ func waitNotifyAllChildrenRuntimeWithin(t *testing.T, runtime notifyAllChildrenR
 	defer ticker.Stop()
 	for {
 		if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
+			readCtx, stopRead := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), 5*time.Second)
+			if summary, readErr := runtime.selected.FanOutRunSummary(readCtx, runID, time.Now().UTC()); readErr == nil {
+				t.Logf("quiescence failure durable fan-out summary=%#v active_work=%d", summary, runtime.workOwner.ActiveCount())
+			} else {
+				t.Logf("quiescence failure durable summary unavailable: %v active_work=%d", readErr, runtime.workOwner.ActiveCount())
+			}
+			stopRead()
 			t.Fatalf("WaitForQuiescence: %v", err)
 		}
 		summary, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
@@ -2658,9 +2660,6 @@ func waitNotifyAllChildrenFanOutCursor(t *testing.T, runtime notifyAllChildrenRu
 		}
 		if total == cardinality && cursor == cardinality && owed == 0 {
 			observed := time.Now()
-			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
-				t.Fatalf("wait fan-out EventBus settlement: %v", err)
-			}
 			logNotifyAllChildrenFanOutWork(t, db, runID)
 			return observed
 		}

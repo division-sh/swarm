@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	scanPageSize    = 200
-	dispatchWorkers = 4
+	scanPageSize     = 200
+	dispatchWorkers  = 4
+	dispatchCapacity = 8
 )
 
 var errCoordinatorRetired = errors.New("delivery continuation coordinator is retired")
@@ -136,7 +137,7 @@ func newCoordinator(
 		store: store, restarts: restarts, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
 		entries: make(map[string]entry), reserved: make(map[string]struct{}),
 		wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
-		jobs: make(chan dispatchJob, dispatchWorkers),
+		jobs: make(chan dispatchJob, dispatchCapacity),
 	}, nil
 }
 
@@ -635,7 +636,7 @@ func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.Continu
 	if _, exists := c.reserved[item.DeliveryID]; exists {
 		return nil
 	}
-	if len(c.reserved) == dispatchWorkers {
+	if len(c.reserved) == dispatchCapacity {
 		c.rescanNeeded = true
 		return nil
 	}
