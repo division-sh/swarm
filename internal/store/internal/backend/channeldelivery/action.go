@@ -4,11 +4,114 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/google/uuid"
 )
+
+// AdvanceCardActionPageTx moves one verified tap to the next immutable page
+// and settles that tap atomically with the selected plan pointer.
+func AdvanceCardActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
+	expected render.ResolvedAction, postgres bool) error {
+	if tx == nil || expected.SourceKind != PlanCard || expected.Action.Kind != "more_controls" ||
+		expected.Action.Token != action.Token {
+		return fmt.Errorf("card action page requires an exact verified control")
+	}
+	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
+		return err
+	}
+	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
+	if err != nil {
+		return err
+	}
+	if state != "pending" {
+		return fmt.Errorf("card action page tap is already settled")
+	}
+	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+	if err != nil {
+		return err
+	}
+	if !found || !resolved.CurrentRender || resolved != expected {
+		return fmt.Errorf("card action page tap is no longer current")
+	}
+	plan, found, err := LoadCurrentPlan(ctx, tx, resolved.DeliveryID, postgres)
+	if err != nil {
+		return err
+	}
+	if !found || plan.SourceKind != PlanCard || plan.State != "sent" ||
+		plan.CurrentRenderID != resolved.RenderID || plan.CurrentReceiptID != resolved.ReceiptOperationID {
+		return fmt.Errorf("card action page has no exact sent plan")
+	}
+	stored, found, err := LoadRender(ctx, tx, resolved.RenderID, postgres)
+	if err != nil {
+		return err
+	}
+	if !found || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.ActionPage == nil ||
+		stored.Frozen.ActionPage.Index != plan.ActionPageIndex ||
+		stored.Frozen.ActionPage.Capacity != plan.ActionCapacity {
+		return fmt.Errorf("card action page contradicts current frozen render")
+	}
+	pages, err := render.ActionPageCount(stored.Frozen)
+	if err != nil {
+		return err
+	}
+	if pages < 2 || plan.ActionPageIndex == math.MaxInt64 {
+		return fmt.Errorf("card has no additional controls")
+	}
+	next := plan.ActionPageIndex + 1
+	query := `UPDATE channel_delivery_plans SET action_page_index=?
+		WHERE delivery_id=? AND current_render_id=? AND current_receipt_operation_id=?
+		AND action_page_index=? AND state='sent'`
+	if postgres {
+		query = `UPDATE channel_delivery_plans SET action_page_index=$1
+			WHERE delivery_id=$2::uuid AND current_render_id=$3::uuid AND current_receipt_operation_id=$4::uuid
+			AND action_page_index=$5 AND state='sent'`
+	}
+	result, err := tx.ExecContext(ctx, query, next, plan.DeliveryID, plan.CurrentRenderID, plan.CurrentReceiptID, plan.ActionPageIndex)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("card action page changed before navigation")
+	}
+	plan.ActionPageIndex = next
+	frozen, err := FreezeCurrentSourceTx(ctx, tx, plan, postgres)
+	if err != nil {
+		return err
+	}
+	renderID, _, err := PersistRenderTx(ctx, tx, plan.DeliveryID, frozen, postgres)
+	if err != nil {
+		return err
+	}
+	if _, err := EnsureRenderActionsTx(ctx, tx, renderID, frozen, postgres); err != nil {
+		return err
+	}
+	query = `UPDATE operator_channel_action_intents SET state='settled', disposition='navigation', settled_at=?
+		WHERE publication_id=? AND state='pending'`
+	if postgres {
+		query = `UPDATE operator_channel_action_intents SET state='settled', disposition='navigation', settled_at=$1
+			WHERE publication_id=$2::uuid AND state='pending'`
+	}
+	result, err = tx.ExecContext(ctx, query, time.Now().UTC(), action.PublicationID)
+	if err != nil {
+		return err
+	}
+	rows, err = result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("card action page intent did not settle with navigation")
+	}
+	return nil
+}
 
 func EnsureRenderActionsTx(ctx context.Context, tx *sql.Tx, renderID string, frozen render.Frozen, postgres bool) ([]render.Action, error) {
 	if tx == nil || uuid.Validate(renderID) != nil {
@@ -135,6 +238,25 @@ func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
 	}
 	if truncated {
 		desired = append(desired, render.Action{Kind: "view_full", Label: "View full"})
+	}
+	if page := frozen.ActionPage; page != nil {
+		if len(desired) > page.Capacity {
+			pageSize := page.Capacity - 1
+			pages, err := render.ActionPageCount(frozen)
+			if err != nil {
+				return nil, err
+			}
+			start := (page.Index % pages) * pageSize
+			end := start + pageSize
+			if end > len(desired) {
+				end = len(desired)
+			}
+			if start >= end {
+				return nil, fmt.Errorf("channel action page has no controls")
+			}
+			paged := append([]render.Action(nil), desired[start:end]...)
+			desired = append(paged, render.Action{Kind: "more_controls", Label: "More choices"})
+		}
 	}
 	return desired, nil
 }
