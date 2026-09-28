@@ -47,6 +47,19 @@ func PlanChangedCardTx(ctx context.Context, tx *sql.Tx, sequence int64, cardID s
 	if _, err := PlanOpenCardTx(ctx, tx, cardID, postgres); err != nil {
 		return err
 	}
+	query = `UPDATE channel_delivery_plans SET action_page_index=0
+		WHERE source_kind='card' AND source_id=? AND action_page_index<>0
+		AND EXISTS (SELECT 1 FROM channel_delivery_renders r
+			WHERE r.render_id=channel_delivery_plans.current_render_id AND r.source_revision<?)`
+	if postgres {
+		query = `UPDATE channel_delivery_plans SET action_page_index=0
+			WHERE source_kind='card' AND source_id=$1::uuid AND action_page_index<>0
+			AND EXISTS (SELECT 1 FROM channel_delivery_renders r
+				WHERE r.render_id=channel_delivery_plans.current_render_id AND r.source_revision<$2)`
+	}
+	if _, err := tx.ExecContext(ctx, query, cardID, sequence); err != nil {
+		return err
+	}
 	query = `UPDATE channel_delivery_defaults SET card_change_cursor=? WHERE singleton_id=1 AND state='current' AND card_change_cursor < ?`
 	if postgres {
 		query = `UPDATE channel_delivery_defaults SET card_change_cursor=$1 WHERE singleton_id=1 AND state='current' AND card_change_cursor < $2`
