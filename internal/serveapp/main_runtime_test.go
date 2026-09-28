@@ -8324,8 +8324,8 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if report.HasBlockers() {
 		t.Fatalf("stale local gateway URL env produced blockers, want warnings only:\n%#v", report)
 	}
-	if len(report.CapabilitySubjects) != 19 {
-		t.Fatalf("%s capability subjects = %#v, want eight triggers, ten connector actions, and one channel", wantMode, report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 21 {
+		t.Fatalf("%s capability subjects = %#v, want eight triggers, twelve connector actions, and one channel", wantMode, report.CapabilitySubjects)
 	}
 }
 
