@@ -125,7 +125,7 @@ func TestGuardRejectedSettlementSurvivesContinuationCleanupFailureBothStores(t *
 			}
 			injected := errors.New("injected continuation cleanup failure")
 			pc.deliveryRuntime = releaseFailureWorkflowRuntime{WorkflowDeliveryRuntime: pc.deliveryRuntime, failure: injected}
-			handled, outcome, err := pc.handleEventResultWithEmissionPlan(withWorkflowNodeDeliveryRoute(ctx, route), evt, nil, false)
+			handled, outcome, err := pc.handleEventResultWithEmissionPlan(withWorkflowNodeDeliveryRoute(ctx, route), evt, nil)
 			if handled || !outcome.Committed || !errors.Is(err, injected) {
 				t.Fatalf("handled=%t outcome=%+v error=%v, want guard rejection with acknowledged delivery and cleanup diagnostic", handled, outcome, err)
 			}

@@ -561,7 +561,7 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	emissions := &pipelineEmissionPlan{}
-	handled, outcome, err := pc.handleEventResultWithEmissionPlan(ctx, evt, emissions, exactDeliveryBoundary)
+	handled, outcome, err := pc.handleEventResultWithEmissionPlan(ctx, evt, emissions)
 	emitted := emissions.immutableEvents()
 	if outcome.Committed {
 		return !consume && !exactDeliveryBoundary, emitted, outcome, err
@@ -617,10 +617,10 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 }
 
 func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
-	return pc.handleEventResultWithEmissionPlan(ctx, evt, nil, false)
+	return pc.handleEventResultWithEmissionPlan(ctx, evt, nil)
 }
 
-func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan, exactDeliveryBoundary bool) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
+func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() == activityRequestEventType {
 		return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, emissions)
 	}
@@ -630,9 +630,6 @@ func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Con
 	}
 	if err == nil {
 		return handled, runtimepipelineobligation.Continue(), nil
-	}
-	if exactDeliveryBoundary {
-		return handled, runtimepipelineobligation.Continue(), err
 	}
 	failure := runtimefailures.Normalize(err, runtimeWorkflowID, "execute_handler")
 	return handled, runtimepipelineobligation.DeadLetterExecution("handler_terminal_failure", &failure), nil
@@ -949,7 +946,7 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 	}
 	if snapshot.Status == runtimedelivery.StatusDeadLetter {
 		pc.recordWorkflowHandlerFailure(a.statusCtx, a.event, a.node.Key(), a.executionErr)
-		if _, exact := workflowNodeDeliveryRoute(a.ctx); exact || a.recoveryClaim {
+		if a.recoveryClaim {
 			return true, settlementErr, probeErr
 		}
 		return true, errors.Join(a.executionErr, settlementErr), probeErr
