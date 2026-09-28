@@ -28,6 +28,14 @@ func TestChannelDeliveryInboundDispositionE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryPagedCardActionsE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "action_pages")
+		})
+	}
+}
+
 func TestChannelDeliveryNoticeFirstE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -276,6 +284,25 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		t.Cleanup(releaseCommandApply)
 	}
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
+	if scenario == "action_pages" {
+		schemaPath := filepath.Join(sourceRoot, "telegram-ingress", "schema.yaml")
+		raw, err := os.ReadFile(schemaPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var extra strings.Builder
+		for index := 1; index <= 9; index++ {
+			fmt.Fprintf(&extra, "        choice%02d:\n          advances_to: done\n", index)
+		}
+		modified := strings.Replace(string(raw), "        retire:\n          advances_to: done",
+			extra.String()+"        retire:\n          advances_to: done", 1)
+		if modified == string(raw) {
+			t.Fatal("standing Telegram fixture lacked the expected decision outcomes")
+		}
+		if err := os.WriteFile(schemaPath, []byte(modified), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if scenario == "draft_chooser" || scenario == "quoted_two" {
 		sourceRoot = writeMixedStandingTelegramServeFixture(t, telegram.URL)
 	}
@@ -558,6 +585,10 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		provider.LoseNextDeliveryAcknowledgment()
 	}
 	callbackURL, signing, _ := provider.Registration()
+	if scenario == "action_pages" {
+		proveChannelPagedCardActions(t, provider, callbackURL, signing)
+		return
+	}
 	update := map[string]any{
 		"update_id": time.Now().UnixMilli(),
 		"message": map[string]any{
@@ -761,6 +792,108 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%s flow did not answer %q; deliveries=%v acknowledgments=%v edits=%v", scenario, inputText, provider.Delivery(1), provider.Acknowledgments(), provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func proveChannelPagedCardActions(t *testing.T, provider *telegramapi.Double, callbackURL, signing string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	var card map[string]any
+	for card == nil {
+		card = provider.Delivery(1)
+		if card != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("oversized card was not delivered: edits=%v", provider.Edits())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	controls := func(message map[string]any) (map[string]string, int) {
+		t.Helper()
+		markup, _ := message["reply_markup"].(map[string]any)
+		rows, _ := markup["inline_keyboard"].([]any)
+		found := make(map[string]string)
+		for _, raw := range rows {
+			row, _ := raw.([]any)
+			for _, item := range row {
+				button, _ := item.(map[string]any)
+				found[fmt.Sprint(button["text"])] = fmt.Sprint(button["callback_data"])
+			}
+		}
+		return found, len(rows)
+	}
+	first, firstRows := controls(card)
+	if firstRows != 8 || first["More choices"] == "" || first["choice01"] == "" {
+		t.Fatalf("first action page was not selected to Telegram capacity: %v", card)
+	}
+	sequence := int64(0)
+	tap := func(token string) {
+		t.Helper()
+		sequence++
+		if admitted := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
+			"update_id": time.Now().UnixMilli() + sequence*1000,
+			"callback_query": map[string]any{
+				"id": fmt.Sprintf("paged-card-%d", sequence), "from": map[string]any{"id": 7000},
+				"message": map[string]any{"message_id": 2, "chat": map[string]any{"id": 1001, "type": "private"}},
+				"data":    token,
+			},
+		}); len(admitted) != 0 {
+			t.Fatalf("card control escaped to business events: %v", admitted)
+		}
+	}
+	waitEdit := func(after int) map[string]any {
+		t.Helper()
+		for {
+			edits := provider.Edits()
+			if len(edits) > after {
+				edit := edits[after]
+				if fmt.Sprint(edit["message_id"]) != "2" {
+					t.Fatalf("action page changed the wrong message: %v", edit)
+				}
+				return edit
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("card action page did not edit its receipt: %v", edits)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	before := len(provider.Edits())
+	tap(first["More choices"])
+	secondEdit := waitEdit(before)
+	second, secondRows := controls(secondEdit)
+	if secondRows != 4 || second["retire"] == "" || second["More choices"] == "" || second["choice01"] != "" {
+		t.Fatalf("later action page did not expose remaining choices: %v", secondEdit)
+	}
+	tap(first["choice01"])
+	time.Sleep(200 * time.Millisecond)
+	if edits := provider.Edits(); len(edits) != before+1 {
+		t.Fatalf("stale first-page verdict mutated the card: %v", edits)
+	}
+	tap(second["More choices"])
+	thirdEdit := waitEdit(before + 1)
+	third, thirdRows := controls(thirdEdit)
+	if thirdRows != 8 || third["More choices"] == first["More choices"] || third["choice01"] == first["choice01"] {
+		t.Fatalf("revisited first page revived old callback tokens: %v", thirdEdit)
+	}
+	tap(third["More choices"])
+	fourthEdit := waitEdit(before + 2)
+	fourth, fourthRows := controls(fourthEdit)
+	if fourthRows != 4 || fourth["retire"] == second["retire"] {
+		t.Fatalf("revisited later page revived old callback tokens: %v", fourthEdit)
+	}
+	tap(fourth["retire"])
+	for {
+		for _, edit := range provider.Edits() {
+			if strings.Contains(fmt.Sprint(edit["text"]), "Decision: retire") {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("later-page verdict did not decide card: edits=%v", provider.Edits())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

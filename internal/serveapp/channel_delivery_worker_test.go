@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,6 +51,9 @@ type channelDeliveryWorkerStore struct {
 	changeCursor   int64
 	changed        []string
 	failOnSequence int64
+	freezeFailure  string
+	freezes        []string
+	readReceipts   []string
 }
 
 func (s *channelDeliveryWorkerStore) PlanOpenChannelCard(_ context.Context, cardID string) (bool, error) {
@@ -82,7 +86,11 @@ func (*channelDeliveryWorkerStore) ListCurrentChannelDeliveryPlans(context.Conte
 	}, nil
 }
 
-func (*channelDeliveryWorkerStore) FreezeAndPersistChannelRender(_ context.Context, deliveryID string) (runtimechanneldelivery.PreparedRender, error) {
+func (s *channelDeliveryWorkerStore) FreezeAndPersistChannelRender(_ context.Context, deliveryID string, _ int) (runtimechanneldelivery.PreparedRender, error) {
+	s.freezes = append(s.freezes, deliveryID)
+	if deliveryID == s.freezeFailure {
+		return runtimechanneldelivery.PreparedRender{}, fmt.Errorf("injected plan-local failure")
+	}
 	return runtimechanneldelivery.PreparedRender{DeliveryID: deliveryID, RenderID: "render"}, nil
 }
 
@@ -96,7 +104,8 @@ func (s *channelDeliveryWorkerStore) GetCurrentChannelDeliveryPlan(_ context.Con
 	return runtimechanneldelivery.Candidate{}, false, nil
 }
 
-func (*channelDeliveryWorkerStore) GetCurrentChannelSentReceipt(_ context.Context, deliveryID, operationID string) (runtimechanneldelivery.SentReceipt, bool, error) {
+func (s *channelDeliveryWorkerStore) GetCurrentChannelSentReceipt(_ context.Context, deliveryID, operationID string) (runtimechanneldelivery.SentReceipt, bool, error) {
+	s.readReceipts = append(s.readReceipts, deliveryID)
 	return runtimechanneldelivery.SentReceipt{DeliveryID: deliveryID, OperationID: operationID, RenderID: "render", DeliveryReference: map[string]any{"id": 1}}, true, nil
 }
 
@@ -109,6 +118,19 @@ func TestChannelDeliveryReconciliationPlansOpenCardsWithoutResending(t *testing.
 	want := []string{"pending-a", "pending-b", "deferred-c"}
 	if !reflect.DeepEqual(selected.planned, want) {
 		t.Fatalf("planned cards = %v, want %v", selected.planned, want)
+	}
+}
+
+func TestChannelDeliveryReconciliationContinuesAfterPlanLocalFailure(t *testing.T) {
+	selected := &channelDeliveryWorkerStore{freezeFailure: "sent"}
+	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{}}
+	err := d.reconcileDeliveries(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "freeze channel delivery sent") {
+		t.Fatalf("first plan failure was not reported: %v", err)
+	}
+	if !reflect.DeepEqual(selected.freezes, []string{"sent", "editing"}) ||
+		!reflect.DeepEqual(selected.readReceipts, []string{"editing"}) {
+		t.Fatalf("later plan was starved by earlier failure: freezes=%v receipts=%v", selected.freezes, selected.readReceipts)
 	}
 }
 

@@ -136,7 +136,8 @@ type Store interface {
 	GetCurrentChannelDeliveryPlan(context.Context, string) (Candidate, bool, error)
 	GetCurrentChannelSentReceipt(context.Context, string, string) (SentReceipt, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
-	FreezeAndPersistChannelRender(context.Context, string) (PreparedRender, error)
+	FreezeAndPersistChannelRender(context.Context, string, int) (PreparedRender, error)
+	AdvanceChannelCardActionPage(context.Context, operatorchannel.InboundAction, ResolvedAction) error
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
 	SettleUnappliedChannelAction(context.Context, operatorchannel.InboundAction, ActionDisposition) error
