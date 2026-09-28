@@ -277,7 +277,7 @@ func CopyReceiverEntitylessUnrouted(t testing.TB) string {
     work.completed:
       emit:
         event: child.finished
-        fields: {result: {expression: payload.result}}
+        fields: {result: "${payload.result}"}
 `)
 	return root
 }

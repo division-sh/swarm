@@ -84,14 +84,9 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			t.Fatalf("register data run catalog: %v", err)
 		}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
-		}
-		// The EventBus test fixture admits its empty semantic projection first; the
-		// exact catalog admission above must remain the declaration authority.
-		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
-			t.Fatalf("restore exact data run catalog: %v", err)
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
 
@@ -523,14 +518,11 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("register amended catalog: %v", err)
 			}
 			amendedSource := semanticview.Wrap(amendedBundle)
-			amendedBus, err := newScopedAPITestEventBus(t, fixture.primary, runtimebus.EventBusOptions{
+			amendedBus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &amended, runtimebus.EventBusOptions{
 				ContractBundle: amendedSource, SourceArtifactFact: mustAPITestSourceArtifactFact(amendedBundleHash),
 			})
 			if err != nil {
 				t.Fatalf("new amended data EventBus: %v", err)
-			}
-			if _, err := fixture.primary.EnsureSourceArtifactWithData(ctx, amendedBundle.SourceArtifact, amended); err != nil {
-				t.Fatalf("restore amended catalog: %v", err)
 			}
 			amendedHandler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, amendedBus, amendedSource)
 			mismatchRunID := uuid.NewString()
@@ -655,11 +647,8 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 			t.Fatal(err)
 		}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
 		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
@@ -741,11 +730,8 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 			t.Fatal(err)
 		}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
 		publish := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
@@ -784,11 +770,8 @@ func TestFailedFusedRunRejectsTypedRevisionAndCoordinatedContextCorruptionAcross
 			t.Fatal(err)
 		}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
 		publish := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
@@ -911,11 +894,8 @@ func TestSuccessfulFusedRunRequiresExactSourceCommitAggregateAcrossSelectedStore
 			t.Fatal(err)
 		}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
 		publish := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
@@ -972,11 +952,8 @@ func TestDataShowPinCursorSurvivesConcurrentRunCreationAcrossSelectedStores(t *t
 			t.Fatal(err)
 		}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
 			t.Fatal(err)
 		}
 		publish := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
@@ -1104,7 +1081,7 @@ func TestFusedRunBindingRejectsCorruptCanonicalSourceEvaluationAcrossSelectedSto
 			t.Fatal(err)
 		}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		bus, err := newScopedAPITestEventBusWithDataCatalog(t, fixture.primary, &catalog, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatal(err)
 		}
