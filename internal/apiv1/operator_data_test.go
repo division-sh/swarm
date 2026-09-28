@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,7 @@ var dataProbeBundleHash = dataProbeSourceArtifact.BundleHash()
 
 type dataRuntimeProbeStore struct {
 	declaration durabledata.Declaration
+	importShape durabledata.ImportShape
 	version     durabledata.Version
 	pruneResult durabledata.PruneOperationResult
 	prunePins   []durabledata.Pin
@@ -84,6 +86,39 @@ type dataRuntimeProbeStore struct {
 	summaries   []durabledata.DeclarationSummary
 	showCalls   int
 	now         time.Time
+}
+
+func (s *dataRuntimeProbeStore) GetDeclarationImportShape(context.Context, string, durabledata.DeclarationRef) (durabledata.ImportShape, error) {
+	if s.importShape.BundleHash == "" {
+		return durabledata.ImportShape{}, durabledata.NewDomainError(durabledata.CodeDeclarationMissing, "import shape unavailable in probe")
+	}
+	return s.importShape, nil
+}
+
+func TestDataShowImportShapeRequiresExactImmutableBinding(t *testing.T) {
+	store := newDataRuntimeProbeStore(t)
+	store.importShape = durabledata.ImportShape{
+		BundleHash: dataProbeBundleHash, Declaration: store.declaration.Ref,
+		SchemaDigest: store.declaration.SchemaDigest, BusinessKey: "slug",
+		Fields: []durabledata.ImportShapeField{{Name: "slug", Required: true, Text: true}},
+	}
+	params := map[string]any{
+		"view": "import_shape", "bundle_hash": dataProbeBundleHash,
+		"declaration": dataProbeDeclarationParams(), "schema_digest": string(store.declaration.SchemaDigest),
+	}
+	got, err := executeDataShow(context.Background(), Request{Method: "data.show", Params: params}, store)
+	if err != nil || !reflect.DeepEqual(got, store.importShape) {
+		t.Fatalf("exact import shape=%#v, %v", got, err)
+	}
+	params["schema_digest"] = "resource-schema-v1:sha256:" + strings.Repeat("0", 64)
+	if _, err := executeDataShow(context.Background(), Request{Method: "data.show", Params: params}, store); err == nil {
+		t.Fatal("wrong declaration digest was admitted")
+	}
+	params["schema_digest"] = string(store.declaration.SchemaDigest)
+	store.importShape.Fields[0].Name = ""
+	if _, err := executeDataShow(context.Background(), Request{Method: "data.show", Params: params}, store); err == nil {
+		t.Fatal("contradictory selected-store shape was admitted")
+	}
 }
 
 type hostileDataRuntimeProbeStore struct {
@@ -972,6 +1007,15 @@ func dataHTTPProbeCatalog(t *testing.T) (durabledata.Catalog, durabledata.Declar
 		{
 			Name: "score.observed", Ref: keylessRef,
 			SchemaDigest: keyless.Manifest.SchemaDigest, CanonicalSchema: keyless.CanonicalSchema,
+		},
+	}, ImportShapes: []durabledata.ImportShape{
+		{
+			BundleHash: dataProbeBundleHash, Declaration: keylessRef, SchemaDigest: keyless.Manifest.SchemaDigest,
+			Fields: []durabledata.ImportShapeField{{Name: "label", Required: true, Text: true}},
+		},
+		{
+			BundleHash: dataProbeBundleHash, Declaration: ref, SchemaDigest: compiled.Manifest.SchemaDigest, BusinessKey: "slug",
+			Fields: []durabledata.ImportShapeField{{Name: "slug", Required: true, Text: true}},
 		},
 	}}, ref
 }

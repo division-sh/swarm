@@ -15,6 +15,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -154,24 +155,37 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			if catalog.BundleHash != opts.SourceArtifactFact.BundleHash() {
 				return nil, fmt.Errorf("API test data catalog %s does not match selected source %s", catalog.BundleHash, opts.SourceArtifactFact.BundleHash())
 			}
-		} else if opts.ContractBundle != nil {
-			for _, declaration := range opts.ContractBundle.DurableDataDeclarations() {
-				catalog.Declarations = append(catalog.Declarations, durabledata.Declaration{
-					Name: declaration.Name, Ref: declaration.Ref, OwnerFlowID: declaration.OwnerFlowID,
-					BusinessKey:  declaration.BusinessKey,
-					SchemaDigest: declaration.SchemaDigest, CanonicalSchema: append([]byte(nil), declaration.CanonicalSchema...),
-				})
-			}
 		}
 		artifact := authorActivityTestSourceArtifact
 		if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle.SourceArtifact != nil {
+			if exactCatalog == nil {
+				var err error
+				catalog, err = runtimecontracts.BuildDurableDataCatalog(bundle)
+				if err != nil {
+					return nil, fmt.Errorf("build API test bundle data catalog: %w", err)
+				}
+			}
 			artifact = bundle.SourceArtifact
+		} else if opts.ContractBundle != nil && len(opts.ContractBundle.DurableDataDeclarations()) != 0 {
+			return nil, fmt.Errorf("API test data declarations require an admitted compiled bundle")
 		}
 		if artifact.BundleHash() != opts.SourceArtifactFact.BundleHash() {
 			return nil, fmt.Errorf("API test source artifact %s does not match selected source %s", artifact.BundleHash(), opts.SourceArtifactFact.BundleHash())
 		}
-		if _, err := registrar.EnsureSourceArtifactWithData(context.Background(), artifact, catalog); err != nil {
-			return nil, fmt.Errorf("ensure API test source artifact/data catalog: %w", err)
+		register := true
+		if reader, ok := eventStore.(interface {
+			ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
+		}); ok {
+			existing, err := reader.ListDataDeclarationSummaries(context.Background(), catalog.BundleHash)
+			if err != nil {
+				return nil, fmt.Errorf("read API test source artifact/data catalog: %w", err)
+			}
+			register = len(existing) == 0
+		}
+		if register {
+			if _, err := registrar.EnsureSourceArtifactWithData(context.Background(), artifact, catalog); err != nil {
+				return nil, fmt.Errorf("ensure API test source artifact/data catalog: %w", err)
+			}
 		}
 	}
 	if opts.WorkOwner == nil {

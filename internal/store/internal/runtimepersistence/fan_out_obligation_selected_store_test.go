@@ -1803,6 +1803,11 @@ func TestPinnedResourceVersionRequiresPinAndRejectsHandlerRemapBothStores(t *tes
 			}
 			catalog := durabledata.Catalog{BundleHash: fixture.bundleHash, Declarations: []durabledata.Declaration{{
 				Name: "fanout.items", Ref: ref, BusinessKey: "slug", SchemaDigest: compiled.Manifest.SchemaDigest, CanonicalSchema: compiled.CanonicalSchema,
+			}}, ImportShapes: []durabledata.ImportShape{{
+				BundleHash: fixture.bundleHash, Declaration: ref, SchemaDigest: compiled.Manifest.SchemaDigest, BusinessKey: "slug",
+				Fields: []durabledata.ImportShapeField{
+					{Name: "score", Required: true}, {Name: "slug", Required: true, Text: true},
+				},
 			}}}
 			if _, err := owner.EnsureSourceArtifactWithData(ctx, fixture.artifact, catalog); err != nil {
 				t.Fatalf("register resource fan-out catalog: %v", err)

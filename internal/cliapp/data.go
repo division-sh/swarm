@@ -67,14 +67,19 @@ func newDataCommand(opts rootCommandOptions) *cobra.Command {
 func newDataImportCommand(root rootCommandOptions) *cobra.Command {
 	opts := dataImportOptions{dataCommandOptions: dataCommandOptions{apiOptions: root}}
 	cmd := &cobra.Command{
-		Use:   "import <qualified-or-unambiguous-name> <file.jsonl>",
-		Short: "Validate or atomically import one complete JSONL data version.",
-		Args:  argcount.ExactArgs(2),
+		Use:   "import <qualified-or-unambiguous-name> <file.jsonl|field=path> [field=path ...]",
+		Short: "Validate or atomically import one complete data version.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 2 {
+				return argcount.NewDiagnostic(cmd, args, argcount.Rule{Exact: 2})
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			return runDataImportCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0], args[1])
+			return runDataImportCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, args[0], args[1:]...)
 		},
 	}
 	cmd.Flags().BoolVar(&opts.checkOnly, "check", false, "Validate and record the durable outcome without importing")
@@ -86,7 +91,7 @@ func newDataImportCommand(root rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataImportOptions, selector, path string) error {
+func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataImportOptions, selector string, operands ...string) error {
 	id, err := canonicalCLIUUID("--source-invocation-id", opts.sourceInvocationID)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
@@ -95,9 +100,8 @@ func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataI
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	input, err := readBoundedDataFile(opts.apiOptions.invocationRoot.Resolve(path))
-	if err != nil {
-		return returnCLIValidationError(errOut, err)
+	if len(operands) == 0 {
+		return returnCLIValidationError(errOut, fmt.Errorf("data import requires a JSONL path or field=path assignments"))
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
@@ -110,6 +114,27 @@ func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataI
 	declaration, err := resolveDataDeclaration(ctx, client, bundleHash, selector)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
+	}
+	var input []byte
+	if len(operands) == 1 && !strings.Contains(operands[0], "=") {
+		input, err = readBoundedDataFile(opts.apiOptions.invocationRoot.Resolve(operands[0]))
+	} else {
+		assignments := make([]fileAssignment, 0, len(operands))
+		for _, raw := range operands {
+			field, path, ok := strings.Cut(raw, "=")
+			if !ok || field == "" || path == "" {
+				return returnCLIValidationError(errOut, fmt.Errorf("data import requires field=path for every file assignment"))
+			}
+			assignments = append(assignments, fileAssignment{Field: field, Path: path})
+		}
+		shape, shapeErr := loadFileImportShape(ctx, client, bundleHash, declaration)
+		if shapeErr != nil {
+			return returnCLIAPIError(errOut, shapeErr, dataAPIErrorClassifier())
+		}
+		input, err = lowerFileAssignments(opts.apiOptions.invocationRoot, dataDeclarationLabel(declaration), shape, assignments)
+	}
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
 	}
 	method := dataImportMethod
 	if opts.checkOnly {
@@ -409,43 +434,100 @@ func resolveDataDeclarationFromList(bundleHash, selector string, declarations []
 	return durabledata.DeclarationSummary{}, fmt.Errorf("data name %q is not declared in bundle %s; candidates: %s", selector, bundleHash, strings.Join(candidates, ", "))
 }
 
-func buildRunDataEnvelope(ctx context.Context, root InvocationRoot, client *cliAPIClient, bundleHash, runID string, imports, pins []string) (map[string]any, error) {
+func buildRunDataEnvelope(ctx context.Context, root InvocationRoot, client *cliAPIClient, bundleHash, runID string, imports, pins []string, replay ...*durabledata.RunCreationRequestBinding) (map[string]any, error) {
 	if len(imports) == 0 && len(pins) == 0 {
 		return nil, nil
+	}
+	var binding *durabledata.RunCreationRequestBinding
+	if len(replay) > 0 {
+		binding = replay[0]
 	}
 	declarations, err := listDataDeclarations(ctx, client, bundleHash)
 	if err != nil {
 		return nil, err
 	}
-	selected := make(map[string]string, len(imports)+len(pins))
-	importItems := make([]any, 0, len(imports))
-	for _, raw := range imports {
-		name, path, ok := strings.Cut(raw, "=")
-		if !ok || strings.TrimSpace(name) == "" || strings.TrimSpace(path) == "" {
-			return nil, fmt.Errorf("--data must be name=file.jsonl")
-		}
-		declaration, err := resolveDataDeclarationFromList(bundleHash, name, declarations)
-		if err != nil {
-			return nil, err
-		}
-		key := declaration.Declaration.Key()
-		if prior := selected[key]; prior != "" {
-			return nil, fmt.Errorf("data declaration %s is selected by both %s and --data", dataDeclarationLabel(declaration), prior)
-		}
-		input, err := readBoundedDataFile(root.Resolve(path))
-		if err != nil {
-			return nil, err
-		}
-		selected[key] = "--data"
-		childID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.cli.fused-data.v1\x00"+runID+"\x00"+key)).String()
-		importItems = append(importItems, map[string]any{
-			"source_invocation_id": childID,
-			"declaration":          declaration.Declaration,
-			"expected_head":        declaration.Head,
-			"input":                map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString(input)},
-		})
+	type importGroup struct {
+		declaration durabledata.DeclarationSummary
+		jsonlPath   string
+		fields      []fileAssignment
 	}
-	pinItems := make([]any, 0, len(pins))
+	groups := make(map[string]*importGroup, len(imports))
+	shapes := make(map[string]fileImportShape)
+	eligible := func(summary durabledata.DeclarationSummary, field string) (bool, error) {
+		key := summary.Declaration.Key()
+		shape, found := shapes[key]
+		if !found {
+			var err error
+			shape, err = loadFileImportShape(ctx, client, bundleHash, summary)
+			if err != nil {
+				return false, err
+			}
+			shapes[key] = shape
+		}
+		entry, ok := shape.Fields[field]
+		return ok && entry.Text && field != shape.BusinessKey, nil
+	}
+	for _, raw := range imports {
+		operand, err := resolveRunDataOperand(raw, declarations, eligible)
+		if err != nil {
+			return nil, err
+		}
+		key := operand.Declaration.Declaration.Key()
+		group := groups[key]
+		if group == nil {
+			group = &importGroup{declaration: operand.Declaration}
+			groups[key] = group
+		}
+		if operand.Field == "" {
+			if group.jsonlPath != "" || len(group.fields) != 0 {
+				return nil, fmt.Errorf("data declaration %s is selected by conflicting JSONL and field operands", dataDeclarationLabel(group.declaration))
+			}
+			group.jsonlPath = operand.Path
+		} else {
+			if group.jsonlPath != "" {
+				return nil, fmt.Errorf("data declaration %s is selected by conflicting JSONL and field operands", dataDeclarationLabel(group.declaration))
+			}
+			group.fields = append(group.fields, fileAssignment{Field: operand.Field, Path: operand.Path})
+		}
+	}
+	groupKeys := make([]string, 0, len(groups))
+	for key := range groups {
+		groupKeys = append(groupKeys, key)
+	}
+	sort.Slice(groupKeys, func(i, j int) bool {
+		return durabledata.CompareDeclarationRef(groups[groupKeys[i]].declaration.Declaration, groups[groupKeys[j]].declaration.Declaration) < 0
+	})
+	if binding != nil {
+		if len(groupKeys) != len(binding.Imports) {
+			return nil, fmt.Errorf("run %s import set contradicts its permanent request", runID)
+		}
+		for index, key := range groupKeys {
+			original := binding.Imports[index]
+			current := groups[key].declaration
+			if current.Declaration != original.Declaration || current.SchemaDigest != original.SchemaDigest {
+				return nil, fmt.Errorf("run %s import %s contradicts its permanent schema binding", runID, dataDeclarationLabel(current))
+			}
+		}
+	}
+	for _, key := range groupKeys {
+		group := groups[key]
+		if len(group.fields) == 0 {
+			continue
+		}
+		shape := shapes[key]
+		if _, _, err := validateFileAssignments(dataDeclarationLabel(group.declaration), shape, group.fields); err != nil {
+			return nil, err
+		}
+	}
+	selected := make(map[string]string, len(imports)+len(pins))
+	for _, key := range groupKeys {
+		selected[key] = "--data"
+	}
+	type selectedPin struct {
+		declaration durabledata.DeclarationSummary
+		selector    string
+	}
+	pinsByKey := make(map[string]selectedPin, len(pins))
 	for _, raw := range pins {
 		name, versionSelector, err := splitDataVersionSelector(raw, false)
 		if err != nil {
@@ -459,14 +541,82 @@ func buildRunDataEnvelope(ctx context.Context, root InvocationRoot, client *cliA
 		if prior := selected[key]; prior != "" {
 			return nil, fmt.Errorf("data declaration %s is selected by both %s and --pin", dataDeclarationLabel(declaration), prior)
 		}
-		version, err := resolveDataVersion(ctx, client, declaration.Declaration, versionSelector, true)
+		if _, repeated := pinsByKey[key]; repeated {
+			return nil, fmt.Errorf("data declaration %s is selected by repeated --pin flags", dataDeclarationLabel(declaration))
+		}
+		pinsByKey[key] = selectedPin{declaration: declaration, selector: versionSelector}
+	}
+	importItems := make([]any, 0, len(groupKeys))
+	var importBytes int
+	for _, key := range groupKeys {
+		group := groups[key]
+		var input []byte
+		if group.jsonlPath != "" {
+			input, err = readBoundedDataFile(root.Resolve(group.jsonlPath))
+		} else {
+			shape, found := shapes[key]
+			if !found {
+				shape, err = loadFileImportShape(ctx, client, bundleHash, group.declaration)
+				if err != nil {
+					return nil, err
+				}
+			}
+			input, err = lowerFileAssignments(root, dataDeclarationLabel(group.declaration), shape, group.fields)
+		}
 		if err != nil {
 			return nil, err
 		}
-		selected[key] = "--pin"
-		pinItems = append(pinItems, map[string]any{"declaration": declaration.Declaration, "version_id": version.VersionID})
+		importBytes += len(input)
+		if importBytes > durabledata.MaxDecodedImportBytes {
+			return nil, fmt.Errorf("fused data imports have %d decoded bytes across %d declarations; aggregate limit is %d bytes", importBytes, len(groupKeys), durabledata.MaxDecodedImportBytes)
+		}
+		childID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.cli.fused-data.v1\x00"+runID+"\x00"+key)).String()
+		importItems = append(importItems, map[string]any{
+			"source_invocation_id": childID,
+			"declaration":          group.declaration.Declaration,
+			"expected_head":        group.declaration.Head,
+			"input":                map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString(input)},
+		})
 	}
-	return map[string]any{"imports": importItems, "pins": pinItems}, nil
+	pinKeys := make([]string, 0, len(pinsByKey))
+	for key := range pinsByKey {
+		pinKeys = append(pinKeys, key)
+	}
+	sort.Slice(pinKeys, func(i, j int) bool {
+		return durabledata.CompareDeclarationRef(pinsByKey[pinKeys[i]].declaration.Declaration, pinsByKey[pinKeys[j]].declaration.Declaration) < 0
+	})
+	pinItems := make([]any, 0, len(pinKeys))
+	headPins := make(map[string]bool, len(pinKeys))
+	for _, key := range pinKeys {
+		pin := pinsByKey[key]
+		headPins[key] = pin.selector == "head"
+		var versionID durabledata.VersionID
+		if binding != nil && pin.selector == "head" {
+			for _, original := range binding.Pins {
+				if original.Declaration == pin.declaration.Declaration {
+					versionID = original.VersionID
+					break
+				}
+			}
+			if versionID == "" {
+				return nil, fmt.Errorf("run %s original request has no pin for %s", runID, dataDeclarationLabel(pin.declaration))
+			}
+		} else {
+			version, err := resolveDataVersion(ctx, client, pin.declaration.Declaration, pin.selector, true)
+			if err != nil {
+				return nil, err
+			}
+			versionID = version.VersionID
+		}
+		pinItems = append(pinItems, map[string]any{"declaration": pin.declaration.Declaration, "version_id": versionID})
+	}
+	envelope := map[string]any{"imports": importItems, "pins": pinItems}
+	if binding != nil {
+		if err := rebindRunDataEnvelope(envelope, *binding, headPins); err != nil {
+			return nil, err
+		}
+	}
+	return envelope, nil
 }
 
 func dataDeclarationLabel(declaration durabledata.DeclarationSummary) string {

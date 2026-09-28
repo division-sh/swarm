@@ -294,7 +294,7 @@ store_parity:
         - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_ids: [resource-data-surface, served-run-start-deployment-feed]}
       required_ports: [data, dataAccess]
       runtime_deps: [ToolEntityStore, DataAccessStore]
-      platform_tables: [resource_bundle_declarations, resource_declarations, resource_head_history, resource_heads, resource_prune_invocations, resource_prune_pin_evidence, resource_run_creation_child_evaluations, resource_run_creation_child_reservations, resource_run_creation_operations, resource_source_invocations, resource_version_pins, resource_version_provenance, resource_versions, bundle_static_data]
+      platform_tables: [resource_bundle_declarations, resource_bundle_import_shapes, resource_declarations, resource_head_history, resource_heads, resource_prune_invocations, resource_prune_pin_evidence, resource_run_creation_child_evaluations, resource_run_creation_child_reservations, resource_run_creation_operations, resource_source_invocations, resource_version_pins, resource_version_provenance, resource_versions, bundle_static_data]
       public_methods: [data.check, data.import, data.prune, data.show, run.start]
     - id: source_artifact
       semantic_owners: [internal/sourceartifact.AdmittedSourceArtifact, internal/store/selected source artifact writer and reader, internal/runtime/startuprecovery]

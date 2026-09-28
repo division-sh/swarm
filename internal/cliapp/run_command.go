@@ -230,7 +230,7 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 	}
 
 	var payload map[string]any
-	if strings.TrimSpace(opts.eventName) != "" {
+	if strings.TrimSpace(opts.eventName) != "" && len(opts.dataImports) == 0 && len(opts.dataPins) == 0 {
 		payload, err = loadRunCommandPayload(root.Resolve(opts.payloadPath))
 		if err != nil {
 			writeCLIAPIError(errOut, err)
@@ -633,24 +633,56 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	params := map[string]any{}
 	if strings.TrimSpace(opts.eventName) != "" {
 		params["event_name"] = strings.TrimSpace(opts.eventName)
-		params["payload"] = payload
-	}
-	if bundleHash := strings.TrimSpace(opts.bundleHash); bundleHash != "" {
-		params["bundle_hash"] = bundleHash
-	} else if bundleHash := strings.TrimSpace(health.Bundle.BundleHash); bundleHash != "" {
-		params["bundle_hash"] = bundleHash
 	}
 	runID := strings.TrimSpace(opts.runID)
-	if len(opts.dataImports) > 0 || len(opts.dataPins) > 0 {
+	dataRequested := len(opts.dataImports) > 0 || len(opts.dataPins) > 0
+	if dataRequested {
 		if runID == "" {
 			runID = uuid.NewString()
 		}
-		bundleHash, _ := params["bundle_hash"].(string)
-		data, err := buildRunDataEnvelope(ctx, root, client, bundleHash, runID, opts.dataImports, opts.dataPins)
+	}
+	var binding *durabledata.RunCreationRequestBinding
+	if dataRequested && strings.TrimSpace(opts.runID) != "" {
+		var err error
+		binding, err = loadRunCreationRequestBinding(ctx, client, runID)
+		if err != nil {
+			return runStartResult{}, err
+		}
+		if binding != nil && (binding.EventID != "") != (strings.TrimSpace(opts.eventName) != "") {
+			return runStartResult{}, fmt.Errorf("run %s event initiation contradicts its permanent request", runID)
+		}
+	}
+	bundleHash := strings.TrimSpace(opts.bundleHash)
+	if bundleHash == "" {
+		bundleHash = strings.TrimSpace(health.Bundle.BundleHash)
+	}
+	if binding != nil {
+		if explicit := strings.TrimSpace(opts.bundleHash); explicit != "" && explicit != binding.BundleHash {
+			return runStartResult{}, fmt.Errorf("run %s explicit bundle %s contradicts its permanent request", runID, explicit)
+		}
+		bundleHash = binding.BundleHash
+	}
+	if bundleHash != "" {
+		params["bundle_hash"] = bundleHash
+	}
+	var data map[string]any
+	if dataRequested {
+		var err error
+		data, err = buildRunDataEnvelope(ctx, root, client, bundleHash, runID, opts.dataImports, opts.dataPins, binding)
 		if err != nil {
 			return runStartResult{}, err
 		}
 		params["data"] = data
+	}
+	if strings.TrimSpace(opts.eventName) != "" {
+		if payload == nil {
+			var err error
+			payload, err = loadRunCommandPayload(root.Resolve(opts.payloadPath))
+			if err != nil {
+				return runStartResult{}, err
+			}
+		}
+		params["payload"] = payload
 	}
 	if runID != "" {
 		params["run_id"] = runID
@@ -660,7 +692,39 @@ func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPICli
 	}
 	var result runStartResult
 	if err := client.call(ctx, runCommandMethodStart, params, &result); err != nil {
-		return runStartResult{}, err
+		if !dataRequested || binding != nil || strings.TrimSpace(opts.runID) == "" || !isRunCreationInvocationConflict(err) {
+			return runStartResult{}, err
+		}
+		recovered, readErr := loadRunCreationRequestBinding(ctx, client, runID)
+		if readErr != nil {
+			return runStartResult{}, readErr
+		}
+		if recovered == nil {
+			return runStartResult{}, err
+		}
+		if explicit := strings.TrimSpace(opts.bundleHash); explicit != "" && explicit != recovered.BundleHash {
+			return runStartResult{}, fmt.Errorf("run %s explicit bundle %s contradicts its permanent request", runID, explicit)
+		}
+		if bundleHash != recovered.BundleHash {
+			return runStartResult{}, fmt.Errorf("run %s selected bundle changed while its file input was materialized; retry from a fresh invocation", runID)
+		}
+		if (recovered.EventID != "") != (strings.TrimSpace(opts.eventName) != "") {
+			return runStartResult{}, fmt.Errorf("run %s event initiation contradicts its permanent request", runID)
+		}
+		if err := validateRunDataBindingSchemas(ctx, client, *recovered); err != nil {
+			return runStartResult{}, err
+		}
+		headPins, resolveErr := resolveHeadPinRefs(ctx, client, recovered.BundleHash, opts.dataPins)
+		if resolveErr != nil {
+			return runStartResult{}, resolveErr
+		}
+		if rebindErr := rebindRunDataEnvelope(data, *recovered, headPins); rebindErr != nil {
+			return runStartResult{}, rebindErr
+		}
+		params["bundle_hash"] = recovered.BundleHash
+		if retryErr := client.call(ctx, runCommandMethodStart, params, &result); retryErr != nil {
+			return runStartResult{}, retryErr
+		}
 	}
 	if err := validateRunStartResult(result); err != nil {
 		return runStartResult{}, err

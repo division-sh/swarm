@@ -77,6 +77,16 @@ func RegisterCatalogTx(o *Owner, ctx context.Context, tx *sql.Tx, catalog runtim
 	if err := validateCatalog(catalog); err != nil {
 		return err
 	}
+	var existingDeclarations, existingShapes int
+	if err := tx.QueryRowContext(ctx, o.query(`SELECT COUNT(*) FROM resource_bundle_declarations WHERE bundle_hash = %s`, 1), catalog.BundleHash).Scan(&existingDeclarations); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, o.query(`SELECT COUNT(*) FROM resource_bundle_import_shapes WHERE bundle_hash = %s`, 1), catalog.BundleHash).Scan(&existingShapes); err != nil {
+		return err
+	}
+	if existingShapes != existingDeclarations || (existingDeclarations != 0 && existingDeclarations != len(catalog.Declarations)) {
+		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "bundle %s has incomplete immutable import-shape catalog", catalog.BundleHash)
+	}
 	for _, declaration := range catalog.Declarations {
 		if err := o.registerDeclaration(ctx, tx, catalog.BundleHash, declaration, now.UTC().Truncate(time.Microsecond)); err != nil {
 			return err
@@ -84,6 +94,13 @@ func RegisterCatalogTx(o *Owner, ctx context.Context, tx *sql.Tx, catalog runtim
 	}
 	for _, item := range catalog.StaticData {
 		if err := o.registerStaticData(ctx, tx, item, now.UTC().Truncate(time.Microsecond)); err != nil {
+			return err
+		}
+	}
+	if len(catalog.ImportShapes) != 0 {
+		if err := RegisterImportShapeCatalogTx(o, ctx, tx, runtimedata.ImportShapeCatalog{
+			BundleHash: catalog.BundleHash, Shapes: catalog.ImportShapes,
+		}, now); err != nil {
 			return err
 		}
 	}
@@ -125,6 +142,32 @@ func validateCatalog(catalog runtimedata.Catalog) error {
 			return fmt.Errorf("bundle repeats resource name %s in package %s", declaration.Name, declaration.Ref.FlowPath)
 		}
 		seenNames[nameKey] = struct{}{}
+	}
+	if len(catalog.ImportShapes) != len(catalog.Declarations) {
+		return fmt.Errorf("import shapes must cover every exact bundle declaration")
+	}
+	shapes := runtimedata.ImportShapeCatalog{BundleHash: catalog.BundleHash, Shapes: catalog.ImportShapes}
+	if err := shapes.Validate(); err != nil {
+		return err
+	}
+	for _, shape := range shapes.Shapes {
+		found := false
+		for _, declaration := range catalog.Declarations {
+			if declaration.Ref != shape.Declaration {
+				continue
+			}
+			if declaration.SchemaDigest != shape.SchemaDigest || declaration.BusinessKey != shape.BusinessKey {
+				return fmt.Errorf("import shape %s contradicts declaration identity", shape.Declaration.Key())
+			}
+			if err := validateImportShapeAgainstSchema(shape, declaration.CanonicalSchema); err != nil {
+				return err
+			}
+			found = true
+			break
+		}
+		if !found {
+			return fmt.Errorf("import shape %s lacks an exact declaration", shape.Declaration.Key())
+		}
 	}
 	seenStatic := map[runtimedata.StaticDataID]struct{}{}
 	for _, item := range catalog.StaticData {

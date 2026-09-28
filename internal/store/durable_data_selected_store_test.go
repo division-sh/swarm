@@ -49,6 +49,29 @@ type durableDataSelectedStore interface {
 	LoadDataPruneOperationPins(context.Context, string) ([]durabledata.Pin, error)
 }
 
+func TestDurableDataSelectedStoreRejectsUnshapedDeclarationCatalog(t *testing.T) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+		ctx := context.Background()
+		catalog, ref := durableDataTestCatalog(t)
+		withoutShapes := catalog
+		withoutShapes.ImportShapes = nil
+		if err := registerDurableDataTestCatalog(ctx, selected, withoutShapes); err == nil || !strings.Contains(err.Error(), "import shapes must cover") {
+			t.Fatalf("unshaped catalog registration = %v, want strict refusal", err)
+		}
+		summaries, err := selected.ListDataDeclarationSummaries(ctx, testDataBundle)
+		if err != nil || len(summaries) != 0 {
+			t.Fatalf("unshaped catalog left declaration facts = %#v, %v", summaries, err)
+		}
+		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+			t.Fatalf("complete catalog after refusal: %v", err)
+		}
+		summaries, err = selected.ListDataDeclarationSummaries(ctx, testDataBundle)
+		if err != nil || len(summaries) != 1 || summaries[0].Declaration != ref {
+			t.Fatalf("complete catalog summaries = %#v, %v", summaries, err)
+		}
+	})
+}
+
 func forEachDurableDataStore(t *testing.T, run func(*testing.T, durableDataSelectedStore, *sql.DB)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
@@ -1855,6 +1878,12 @@ func durableDataTestCatalog(t *testing.T) (durabledata.Catalog, durabledata.Decl
 			Name: "score.available", Ref: ref, BusinessKey: "slug",
 			SchemaDigest: compiled.Manifest.SchemaDigest, CanonicalSchema: compiled.CanonicalSchema,
 		}},
+		ImportShapes: []durabledata.ImportShape{{
+			BundleHash: testDataBundle, Declaration: ref, SchemaDigest: compiled.Manifest.SchemaDigest, BusinessKey: "slug",
+			Fields: []durabledata.ImportShapeField{
+				{Name: "score", Required: true}, {Name: "slug", Required: true, Text: true},
+			},
+		}},
 	}, ref
 }
 
@@ -1881,6 +1910,12 @@ func durableDataKeylessTestCatalog(t *testing.T) (durabledata.Catalog, durableda
 		Declarations: []durabledata.Declaration{{
 			Name: "score.observed", Ref: ref,
 			SchemaDigest: compiled.Manifest.SchemaDigest, CanonicalSchema: compiled.CanonicalSchema,
+		}},
+		ImportShapes: []durabledata.ImportShape{{
+			BundleHash: testDataBundle, Declaration: ref, SchemaDigest: compiled.Manifest.SchemaDigest,
+			Fields: []durabledata.ImportShapeField{
+				{Name: "label", Required: true, Text: true}, {Name: "score", Required: true},
+			},
 		}},
 	}, ref
 }
