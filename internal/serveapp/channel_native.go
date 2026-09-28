@@ -158,7 +158,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 	if err != nil {
 		return err
 	}
-	if setting.State == "uncertain" || setting.State == "unavailable" || setting.State == "retired" {
+	if setting.State == "uncertain" || setting.State == "unavailable" {
 		return fmt.Errorf("native inbox setting is %s and needs administrative recovery", setting.State)
 	}
 	if _, err := d.readNativeInboxAddress(ctx, compiled.Plan, activation.CredentialAdmissions); err != nil {
@@ -180,6 +180,16 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx cont
 			return err
 		}
 		return fmt.Errorf("native inbox readback contradicts installed setting")
+	}
+	if setting.State == "retired" {
+		matched, err := d.native.ConfirmRetiredNativeInboxSettingReadback(ctx, setting.SettingID, setting.Generation, observed)
+		if err != nil {
+			return err
+		}
+		if !matched {
+			return fmt.Errorf("native inbox readback contradicts retired setting")
+		}
+		return nil
 	}
 	if setting.State != "planned" {
 		return fmt.Errorf("native inbox setting has unknown state %q", setting.State)

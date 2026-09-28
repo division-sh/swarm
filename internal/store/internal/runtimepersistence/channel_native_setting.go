@@ -65,6 +65,38 @@ func (s *SQLiteRuntimeStore) RetireStaleNativeInboxConsumers(ctx context.Context
 	})
 }
 
+func (s *PostgresStore) ConfirmRetiredNativeInboxSettingReadback(ctx context.Context, settingID string, generation int64, observed []byte) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, fmt.Errorf("postgres native inbox setting store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	var matched bool
+	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		matched, err = channeldelivery.ConfirmRetiredNativeInboxSettingReadbackTx(txctx, tx, settingID, generation, observed, true)
+		return err
+	})
+	return matched, err
+}
+
+func (s *SQLiteRuntimeStore) ConfirmRetiredNativeInboxSettingReadback(ctx context.Context, settingID string, generation int64, observed []byte) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, fmt.Errorf("sqlite native inbox setting store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	var matched bool
+	err := s.backend.RunTransaction(ctx, "confirm retired native inbox readback", func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		matched, err = channeldelivery.ConfirmRetiredNativeInboxSettingReadbackTx(txctx, tx, settingID, generation, observed, false)
+		return err
+	})
+	return matched, err
+}
+
 func (s *PostgresStore) MarkNativeInboxSettingUnavailable(ctx context.Context, settingID string, generation int64) error {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("postgres native inbox setting store is unavailable")
