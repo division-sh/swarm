@@ -119,25 +119,26 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 	if route.Normalized().Recipient.Empty() {
 		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
+	if err := authority.Validate(); err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
+	if _, err := route.Identity(); err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {
 		var claimed runtimedelivery.ClaimResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			transactiontest.Mark(txctx, transactiontest.DeliveryClaim)
-			snapshot, err := postgresDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
+			runID, err := postgresDeliveryAdapter.RunIDExact(txctx, tx, event, route)
 			if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 				return err
 			}
 			if err == nil {
-				if err := runstate.RequirePostgresActiveTx(txctx, tx, snapshot.RunID); err != nil {
+				if err := runstate.RequirePostgresActiveTx(txctx, tx, runID); err != nil {
 					return err
 				}
 			}
-			claimed, err = s.receiverAdapter.ClaimExactResult(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
-			if err == nil && claimed.Disposition == runtimedelivery.ClaimAcquired {
-				claimed.Renewal.Snapshot, err = postgresDeliveryAdapter.RenewClaim(txctx, attempt, claimed.Claimed.Claim, runtimedelivery.DefaultLeaseTTL)
-				claimed.Snapshot = claimed.Renewal.Snapshot
-				claimed.Claimed.Snapshot = claimed.Renewal.Snapshot
-			}
+			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 			return err
 		})
 		return claimed, err
@@ -152,25 +153,26 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 	if route.Normalized().Recipient.Empty() {
 		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
+	if err := authority.Validate(); err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
+	if _, err := route.Identity(); err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite claim delivery", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {
 		var claimed runtimedelivery.ClaimResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			transactiontest.Mark(txctx, transactiontest.DeliveryClaim)
-			snapshot, err := sqliteDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
+			runID, err := sqliteDeliveryAdapter.RunIDExact(txctx, tx, event, route)
 			if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 				return err
 			}
 			if err == nil {
-				if err := runstate.RequireSQLiteActiveTx(txctx, tx, snapshot.RunID); err != nil {
+				if err := runstate.RequireSQLiteActiveTx(txctx, tx, runID); err != nil {
 					return err
 				}
 			}
-			claimed, err = s.receiverAdapter.ClaimExactResult(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
-			if err == nil && claimed.Disposition == runtimedelivery.ClaimAcquired {
-				claimed.Renewal.Snapshot, err = sqliteDeliveryAdapter.RenewClaim(txctx, attempt, claimed.Claimed.Claim, runtimedelivery.DefaultLeaseTTL)
-				claimed.Snapshot = claimed.Renewal.Snapshot
-				claimed.Claimed.Snapshot = claimed.Renewal.Snapshot
-			}
+			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, runtimedelivery.DefaultLeaseTTL)
 			return err
 		})
 		return claimed, err
@@ -193,28 +195,14 @@ func (s *DeliveryPostgresOwner) ScanDeliveryContinuations(ctx context.Context, a
 		if err != nil {
 			return err
 		}
-		for i := range page.Items {
-			if page.Items[i].Disposition == runtimedelivery.ClaimAbsent || page.Items[i].Disposition == runtimedelivery.ClaimInvariantInvalid {
-				continue
-			}
-			record, found, err := eventrecordpostgres.Load(txctx, tx, page.Items[i].Snapshot.EventID)
-			if err != nil {
-				return err
-			}
-			if !found {
-				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
-				page.Items[i].Invariant = fmt.Errorf("delivery event %s is absent", page.Items[i].Snapshot.EventID)
-				continue
-			}
-			admitted, err := record.Decode()
-			if err != nil {
-				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
-				page.Items[i].Invariant = err
-				continue
-			}
-			page.Items[i].Event = admitted.Event()
-		}
-		return nil
+		return hydrateContinuationEvents(txctx, tx, &page,
+			func(ctx context.Context, tx *sql.Tx, ids []string) ([]eventrecord.Record, error) {
+				return eventrecordpostgres.LoadMany(ctx, tx, ids)
+			},
+			func(ctx context.Context, tx *sql.Tx, id string) (eventrecord.Record, bool, error) {
+				return eventrecordpostgres.Load(ctx, tx, id)
+			},
+		)
 	})
 	return page, err
 }
@@ -231,30 +219,96 @@ func (s *DeliverySQLiteOwner) ScanDeliveryContinuations(ctx context.Context, aut
 		if err != nil {
 			return err
 		}
-		for i := range page.Items {
-			if page.Items[i].Disposition == runtimedelivery.ClaimAbsent || page.Items[i].Disposition == runtimedelivery.ClaimInvariantInvalid {
-				continue
-			}
-			record, found, err := eventrecordsqlite.Load(txctx, tx, page.Items[i].Snapshot.EventID)
-			if err != nil {
-				return err
-			}
-			if !found {
-				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
-				page.Items[i].Invariant = fmt.Errorf("delivery event %s is absent", page.Items[i].Snapshot.EventID)
-				continue
-			}
-			admitted, err := record.Decode()
-			if err != nil {
-				page.Items[i].Disposition = runtimedelivery.ClaimInvariantInvalid
-				page.Items[i].Invariant = err
-				continue
-			}
-			page.Items[i].Event = admitted.Event()
-		}
-		return nil
+		return hydrateContinuationEvents(txctx, tx, &page,
+			func(ctx context.Context, tx *sql.Tx, ids []string) ([]eventrecord.Record, error) {
+				return eventrecordsqlite.LoadMany(ctx, tx, ids)
+			},
+			func(ctx context.Context, tx *sql.Tx, id string) (eventrecord.Record, bool, error) {
+				return eventrecordsqlite.Load(ctx, tx, id)
+			},
+		)
 	})
 	return page, err
+}
+
+func hydrateContinuationEvents(
+	ctx context.Context,
+	tx *sql.Tx,
+	page *runtimedelivery.ContinuationPage,
+	loadMany func(context.Context, *sql.Tx, []string) ([]eventrecord.Record, error),
+	loadOne func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error),
+) error {
+	ids := make([]string, 0, len(page.Items))
+	seen := make(map[string]struct{}, len(page.Items))
+	for _, item := range page.Items {
+		if item.Disposition == runtimedelivery.ClaimAbsent || item.Disposition == runtimedelivery.ClaimInvariantInvalid {
+			continue
+		}
+		id := item.Snapshot.EventID
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	records, err := loadMany(ctx, tx, ids)
+	if errors.Is(err, eventrecord.ErrMissing) {
+		return hydrateContinuationEventsIndividually(ctx, tx, page, loadOne)
+	}
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]eventrecord.Record, len(records))
+	for _, record := range records {
+		byID[record.EventID] = record
+	}
+	for i := range page.Items {
+		item := &page.Items[i]
+		if item.Disposition == runtimedelivery.ClaimAbsent || item.Disposition == runtimedelivery.ClaimInvariantInvalid {
+			continue
+		}
+		admitted, err := byID[item.Snapshot.EventID].Decode()
+		if err != nil {
+			item.Disposition = runtimedelivery.ClaimInvariantInvalid
+			item.Invariant = err
+			continue
+		}
+		item.Event = admitted.Event()
+	}
+	return nil
+}
+
+func hydrateContinuationEventsIndividually(
+	ctx context.Context,
+	tx *sql.Tx,
+	page *runtimedelivery.ContinuationPage,
+	loadOne func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error),
+) error {
+	for i := range page.Items {
+		item := &page.Items[i]
+		if item.Disposition == runtimedelivery.ClaimAbsent || item.Disposition == runtimedelivery.ClaimInvariantInvalid {
+			continue
+		}
+		record, found, err := loadOne(ctx, tx, item.Snapshot.EventID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			item.Disposition = runtimedelivery.ClaimInvariantInvalid
+			item.Invariant = fmt.Errorf("delivery event %s is absent", item.Snapshot.EventID)
+			continue
+		}
+		admitted, err := record.Decode()
+		if err != nil {
+			item.Disposition = runtimedelivery.ClaimInvariantInvalid
+			item.Invariant = err
+			continue
+		}
+		item.Event = admitted.Event()
+	}
+	return nil
 }
 
 func (s *DeliveryPostgresOwner) ObserveDeliveryContinuation(

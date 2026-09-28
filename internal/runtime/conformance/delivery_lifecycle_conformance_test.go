@@ -71,6 +71,22 @@ func claimDeliveryResult(
 	return selected.ClaimDelivery(ctx, snapshot.Authority, event, route)
 }
 
+func assertClaimRenewalReadback(t *testing.T, ctx context.Context, selected runtimedelivery.Store, deliveryID string, result runtimedelivery.ClaimResult) {
+	t.Helper()
+	persisted, err := selected.Snapshot(ctx, deliveryID)
+	if err != nil {
+		t.Fatalf("read renewed delivery %s: %v", deliveryID, err)
+	}
+	// Reclaimability is derived from each read's clock, not persisted claim state.
+	persisted.ClaimReclaimable = result.Snapshot.ClaimReclaimable
+	if !result.Acknowledged || !result.Renewal.Acknowledged ||
+		!reflect.DeepEqual(result.Snapshot, persisted) ||
+		!reflect.DeepEqual(result.Claimed.Snapshot, persisted) ||
+		!reflect.DeepEqual(result.Renewal.Snapshot, persisted) {
+		t.Fatalf("renewed claim receipt diverges from readback: result=%+v persisted=%+v", result, persisted)
+	}
+}
+
 func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 	for _, backend := range deliveryLifecycleConformanceBackends(t) {
 		backend := backend
@@ -226,12 +242,13 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				payload := json.RawMessage("{\n  \"numeric\": 1.0, \"ordered\": {\"b\": 2, \"a\": 1}\n}")
 				event := deliveryLifecycleEventWithPayload("continuation-payload-"+backend.name, payload)
 				route := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "continuation-payload")
+				sibling := deliveryLifecycleConformanceRoute(t, event.RunID(), "agent", "continuation-payload-sibling")
 				storetest.CommitSemanticEventWithInitialFacts(
 					t,
 					ctx,
 					backend.selected,
 					event,
-					[]events.DeliveryRoute{route},
+					[]events.DeliveryRoute{route, sibling},
 					runtimepipelineobligation.ScopeSubscribed,
 					storetest.AcknowledgedPipelineDisposition(),
 				)
@@ -252,21 +269,22 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("scan delivery continuations after restart: %v", err)
 				}
-				var restored *runtimedelivery.ContinuationItem
-				for i := range page.Items {
-					if page.Items[i].DeliveryID == deliveryID {
-						restored = &page.Items[i]
-						break
+				siblingID, err := runtimedelivery.DeliveryID(event.ID(), sibling)
+				if err != nil {
+					t.Fatal(err)
+				}
+				found := make(map[string]bool)
+				for _, item := range page.Items {
+					if item.DeliveryID != deliveryID && item.DeliveryID != siblingID {
+						continue
 					}
+					if item.Disposition != runtimedelivery.ClaimAcquired || !bytes.Equal(item.Event.Payload(), payload) {
+						t.Fatalf("continuation %s = %#v, want acquired with exact payload bytes", item.DeliveryID, item)
+					}
+					found[item.DeliveryID] = true
 				}
-				if restored == nil {
-					t.Fatalf("continuation page = %#v, want delivery %s", page, deliveryID)
-				}
-				if restored.Disposition != runtimedelivery.ClaimAcquired {
-					t.Fatalf("continuation disposition = %s, want acquired", restored.Disposition)
-				}
-				if !bytes.Equal(restored.Event.Payload(), payload) {
-					t.Fatalf("continuation payload = %q, want exact admitted bytes %q", restored.Event.Payload(), payload)
+				if !found[deliveryID] || !found[siblingID] {
+					t.Fatalf("continuation page = %#v, want both deliveries for event %s", page, event.ID())
 				}
 			})
 
@@ -380,6 +398,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil || acquired.Disposition != runtimedelivery.ClaimAcquired {
 					t.Fatalf("pending claim = %#v, err=%v", acquired, err)
 				}
+				assertClaimRenewalReadback(t, ctx, backend.store, pendingID, acquired)
 				busy, err := backend.restart.ClaimDelivery(ctx, pending.Authority, pendingEvent, pendingRoute)
 				if err != nil || busy.Disposition != runtimedelivery.ClaimBusy {
 					t.Fatalf("busy claim = %#v, err=%v", busy, err)
@@ -390,6 +409,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					reclaimed.Previous != runtimedelivery.ClaimReclaimable {
 					t.Fatalf("reclaim claim = %#v, err=%v", reclaimed, err)
 				}
+				assertClaimRenewalReadback(t, ctx, backend.restart, pendingID, reclaimed)
 				reclaimedObligation, ok := reclaimed.Acquired()
 				if !ok {
 					t.Fatalf("reclaim result has no exact claim: %#v", reclaimed)

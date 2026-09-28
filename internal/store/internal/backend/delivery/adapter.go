@@ -346,11 +346,19 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, attempt
 
 func (a *Adapter) ClaimExactResult(ctx context.Context, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (ClaimResult, error) {
-		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL)
+		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL, false)
 	})
 }
 
-func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
+// ClaimExactResultWithRenewal extends only a claim acquired in this same
+// transaction, before any other writer can change its persisted authority.
+func (a *Adapter) ClaimExactResultWithRenewal(ctx context.Context, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (ClaimResult, error) {
+		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL, true)
+	})
+}
+
+func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration, renew bool) (ClaimResult, error) {
 	if tx == nil {
 		return ClaimResult{}, fmt.Errorf("delivery claim transaction is required")
 	}
@@ -442,11 +450,21 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 	if err != nil {
 		return ClaimResult{}, err
 	}
+	var renewal ClaimCommit
+	if renew {
+		updated, err := a.renewAcquiredClaim(ctx, tx, attempt, claimed, leaseTTL)
+		if err != nil {
+			return ClaimResult{}, err
+		}
+		claimed.Snapshot = updated
+		renewal.Snapshot = updated
+	}
 	return ClaimResult{
 		Disposition: ClaimAcquired,
 		Previous:    previous,
 		Snapshot:    claimed.Snapshot,
 		Claimed:     claimed,
+		Renewal:     renewal,
 	}, nil
 }
 
@@ -551,6 +569,14 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 	if len(refs) > limit {
 		refs = refs[:limit]
 	}
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ids = append(ids, ref.id)
+	}
+	records, invalid, err := a.loadContinuationRecords(ctx, tx, ids)
+	if err != nil {
+		return ContinuationPage{}, err
+	}
 	now, err := a.databaseNow(ctx, tx)
 	if err != nil {
 		return ContinuationPage{}, err
@@ -558,20 +584,17 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 	page.Items = make([]ContinuationItem, 0, len(refs))
 	for _, ref := range refs {
 		item := ContinuationItem{DeliveryID: ref.id}
-		record, loadErr := a.loadByID(ctx, tx, ref.id, false)
-		if errors.Is(loadErr, ErrNotFound) {
+		record, found := records[ref.id]
+		if !found && invalid[ref.id] == nil {
 			item.Disposition = ClaimAbsent
 			page.Items = append(page.Items, item)
 			continue
 		}
-		if errors.Is(loadErr, ErrConflict) {
+		if loadErr := invalid[ref.id]; loadErr != nil {
 			item.Disposition = ClaimInvariantInvalid
 			item.Invariant = loadErr
 			page.Items = append(page.Items, item)
 			continue
-		}
-		if loadErr != nil {
-			return ContinuationPage{}, loadErr
 		}
 		item.Snapshot = snapshotAt(record, now)
 		if !record.Authority.Equal(authority) {
@@ -591,6 +614,69 @@ func (a *Adapter) ScanContinuations(ctx context.Context, tx *sql.Tx, authority E
 		page.Next = cursor
 	}
 	return page, nil
+}
+
+type continuationRecordScanner struct {
+	rows *sql.Rows
+	id   *string
+}
+
+func (s continuationRecordScanner) Scan(dest ...any) error {
+	fields := make([]any, 0, len(dest)+1)
+	fields = append(fields, s.id)
+	fields = append(fields, dest...)
+	return s.rows.Scan(fields...)
+}
+
+func (a *Adapter) loadContinuationRecords(ctx context.Context, tx *sql.Tx, ids []string) (map[string]deliveryRecord, map[string]error, error) {
+	records := make(map[string]deliveryRecord, len(ids))
+	invalid := make(map[string]error)
+	if len(ids) == 0 {
+		return records, invalid, nil
+	}
+	args := make([]any, len(ids))
+	placeholders := make([]string, len(ids))
+	for index, id := range ids {
+		if _, err := uuid.Parse(strings.TrimSpace(id)); err != nil {
+			return nil, nil, fmt.Errorf("delivery id: %w", err)
+		}
+		args[index] = id
+		if a.dialect == DialectPostgres {
+			placeholders[index] = fmt.Sprintf("$%d::uuid", index+1)
+		} else {
+			placeholders[index] = "?"
+		}
+	}
+	query := a.selectRecordWithPrefix("d.delivery_id AS scan_id, ") + ` WHERE d.delivery_id IN (` + strings.Join(placeholders, ",") + `)`
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load delivery continuation page: %w", err)
+	}
+	for rows.Next() {
+		var id string
+		record, scanErr := a.scanRecord(continuationRecordScanner{rows: rows, id: &id})
+		if scanErr != nil && !errors.Is(scanErr, ErrConflict) {
+			_ = rows.Close()
+			return nil, nil, scanErr
+		}
+		if _, duplicate := records[id]; duplicate || invalid[id] != nil {
+			_ = rows.Close()
+			return nil, nil, fmt.Errorf("%w: duplicate delivery continuation %s", ErrConflict, id)
+		}
+		if scanErr != nil {
+			invalid[id] = scanErr
+		} else {
+			records[id] = record
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, nil, fmt.Errorf("read delivery continuation page: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, fmt.Errorf("close delivery continuation page: %w", err)
+	}
+	return records, invalid, nil
 }
 
 func (a *Adapter) ObserveContinuation(
@@ -796,6 +882,25 @@ func (a *Adapter) SnapshotExact(ctx context.Context, q queryer, event events.Eve
 	return a.Snapshot(ctx, q, deliveryID)
 }
 
+func (a *Adapter) RunIDExact(ctx context.Context, q queryer, event events.Event, route events.DeliveryRoute) (string, error) {
+	deliveryID, err := DeliveryID(event.ID(), route)
+	if err != nil {
+		return "", err
+	}
+	query := `SELECT d.run_id::text FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id WHERE d.delivery_id = $1::uuid`
+	if a.dialect == DialectSQLite {
+		query = `SELECT d.run_id FROM event_deliveries d JOIN events e ON e.event_id = d.event_id AND e.run_id = d.run_id WHERE d.delivery_id = ?`
+	}
+	var runID string
+	if err := q.QueryRowContext(ctx, query, deliveryID).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("read delivery run identity: %w", err)
+	}
+	return runID, nil
+}
+
 func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = DefaultLeaseTTL
@@ -961,17 +1066,53 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery claim renewal requires a current claim")
 	}
-	if leaseTTL <= 0 {
-		leaseTTL = DefaultLeaseTTL
-	}
 	_, now, err := a.requireCurrentClaim(ctx, tx, claim)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if _, err := a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL); err != nil {
+		return Snapshot{}, err
+	}
+	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
+	return updated.Snapshot, err
+}
+
+// The acquired row and its authority were just checked under this transaction's
+// locks. Only the exact conditional lease update remains necessary here.
+func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claimed ClaimedObligation, leaseTTL time.Duration) (Snapshot, error) {
+	claim := claimed.Claim
+	snapshot := claimed.Snapshot
+	if claim.Validate() != nil || snapshot.Status != StatusInProgress || snapshot.DeliveryID != claim.DeliveryID() ||
+		snapshot.RunID != claim.RunID() || snapshot.ClaimVersion != claim.Version() ||
+		events.EncodeDeliveryRouteIdentity(snapshot.RouteIdentity) != claim.RouteIdentity() ||
+		snapshot.SubscriberClass != claim.SubscriberClass() || snapshot.SubscriberID != claim.SubscriberID() {
+		return Snapshot{}, fmt.Errorf("%w: newly acquired delivery claim does not match its snapshot", ErrConflict)
+	}
+	now, err := a.databaseNow(ctx, tx)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !snapshot.ClaimExpiresAt.After(now) {
+		return Snapshot{}, fmt.Errorf("%w: newly acquired delivery claim expired before renewal", ErrConflict)
+	}
+	expiresAt, err := a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.ClaimExpiresAt = expiresAt
+	snapshot.UpdatedAt = now
+	snapshot.ClaimReclaimable = false
+	return snapshot, nil
+}
+
+func (a *Adapter) renewClaimWrite(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, now time.Time, leaseTTL time.Duration) (time.Time, error) {
+	if leaseTTL <= 0 {
+		leaseTTL = DefaultLeaseTTL
+	}
 	expiresAt := now.Add(leaseTTL)
 	if a.dialect == DialectPostgres {
 		// Keep both mutation fences, including the dependency that a lost
-		// attempt must not update the delivery. Admission and readback stay separate.
+		// attempt must not update the delivery.
 		var attempts, deliveries int
 		err := tx.QueryRowContext(ctx, `
 			WITH renewed_attempt AS (
@@ -991,13 +1132,13 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 			SELECT (SELECT COUNT(*) FROM renewed_attempt), (SELECT COUNT(*) FROM renewed_delivery)
 		`, expiresAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken(), now).Scan(&attempts, &deliveries)
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("renew delivery claim: %w", err)
+			return time.Time{}, fmt.Errorf("renew delivery claim: %w", err)
 		}
 		if attempts != 1 {
-			return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost claim", ErrConflict)
+			return time.Time{}, fmt.Errorf("%w: delivery claim renewal lost claim", ErrConflict)
 		}
 		if deliveries != 1 {
-			return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
+			return time.Time{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
 		}
 	} else {
 		query := `
@@ -1007,10 +1148,10 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 			  AND open_marker = TRUE AND lease_expires_at > ?`
 		result, err := tx.ExecContext(ctx, query, expiresAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken(), now)
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("renew delivery claim: %w", err)
+			return time.Time{}, fmt.Errorf("renew delivery claim: %w", err)
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost claim", ErrConflict)
+			return time.Time{}, fmt.Errorf("%w: delivery claim renewal lost claim", ErrConflict)
 		}
 		deliveryQuery := `
 			UPDATE event_deliveries
@@ -1019,17 +1160,16 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 			  AND current_attempt_version = ? AND current_attempt_open = TRUE`
 		deliveryResult, err := tx.ExecContext(ctx, deliveryQuery, now, claim.DeliveryID(), claim.Version(), claim.Version())
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("record delivery claim renewal time: %w", err)
+			return time.Time{}, fmt.Errorf("record delivery claim renewal time: %w", err)
 		}
 		if rows, _ := deliveryResult.RowsAffected(); rows != 1 {
-			return Snapshot{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
+			return time.Time{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
 		}
 	}
 	if err := attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
-		return Snapshot{}, err
+		return time.Time{}, err
 	}
-	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
-	return updated.Snapshot, err
+	return expiresAt, nil
 }
 
 func (a *Adapter) SettleSuccess(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, sideEffects []string, duration time.Duration, selection handlerselection.HandlerRuleSelectionFact) (Snapshot, error) {
@@ -2669,10 +2809,12 @@ func (a *Adapter) loadByEventAndRoute(ctx context.Context, q interface {
 	return a.scanRecord(q.QueryRowContext(ctx, query, strings.TrimSpace(eventID), events.EncodeDeliveryRouteIdentity(identity)))
 }
 
-func (a *Adapter) selectRecord() string {
+func (a *Adapter) selectRecord() string { return a.selectRecordWithPrefix("") }
+
+func (a *Adapter) selectRecordWithPrefix(prefix string) string {
 	if a.dialect == DialectSQLite {
 		return `
-			SELECT d.delivery_id, d.event_id, d.run_id, d.route_identity,
+			SELECT ` + prefix + `d.delivery_id, d.event_id, d.run_id, d.route_identity,
 				d.subscriber_type, d.subscriber_id,
 				d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 				d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
@@ -2696,7 +2838,7 @@ func (a *Adapter) selectRecord() string {
 			LEFT JOIN event_delivery_handler_rule_selections s ON s.delivery_id = d.delivery_id`
 	}
 	return `
-		SELECT d.delivery_id::text, d.event_id::text, d.run_id::text, d.route_identity,
+		SELECT ` + prefix + `d.delivery_id::text, d.event_id::text, d.run_id::text, d.route_identity,
 			d.subscriber_type, d.subscriber_id,
 			d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 			d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
