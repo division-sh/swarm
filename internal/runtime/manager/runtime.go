@@ -1439,10 +1439,27 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	topology *runtimeagenttopology.Admission,
 	expected *runtimeactors.AgentConfig,
 ) (replaceExecutionResult, error) {
+	if am.lifecycle.routes != nil {
+		defer am.lifecycle.routes.SignalDeliveryContinuations()
+	}
 	am.lifecycle.sourceSetPublishMu.RLock()
 	defer am.lifecycle.sourceSetPublishMu.RUnlock()
 	am.lifecycle.executionPublishMu.Lock()
 	defer am.lifecycle.executionPublishMu.Unlock()
+	identity = identity.Normalize()
+	am.lifecycle.mu.Lock()
+	transitionCell := am.lifecycle.cells[identity]
+	if transitionCell != nil && am.lifecycle.routes != nil {
+		transitionCell.routeTransitions++
+	}
+	am.lifecycle.mu.Unlock()
+	defer func() {
+		if transitionCell != nil && am.lifecycle.routes != nil {
+			am.lifecycle.mu.Lock()
+			transitionCell.routeTransitions--
+			am.lifecycle.mu.Unlock()
+		}
+	}()
 	cell, err := am.lifecycle.lockIdentityOperation(identity)
 	if err != nil {
 		return replaceExecutionResult{}, err

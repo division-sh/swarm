@@ -144,6 +144,16 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 	if err := owner.Fence(); err != nil {
 		t.Fatalf("fence receiver owner: %v", err)
 	}
+	readLease, err := beginAcceptedRuntimeWork(owner, acceptedCtx)
+	if err != nil {
+		t.Fatalf("accepted run-origin read after fence: %v", err)
+	}
+	if err := readLease.Done(); err != nil {
+		t.Fatalf("complete accepted run-origin read: %v", err)
+	}
+	if _, err := beginAcceptedRuntimeWork(owner, context.Background()); err != worklifetime.ErrAdmissionFenced {
+		t.Fatalf("unrelated run-origin read after fence = %v", err)
+	}
 
 	receiver, closeReceiver, err := eventBus.beginReceiverDispatch(executionCtx, projection, evt)
 	if err != nil {

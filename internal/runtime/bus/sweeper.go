@@ -463,7 +463,7 @@ func (eb *EventBus) bindClaimedRunWork(
 	if readOwner == nil {
 		return ctx, nil, errors.New("pipeline recovery reads require a process work occurrence")
 	}
-	readLease, err := readOwner.Begin(ctx)
+	readLease, err := beginAcceptedRuntimeWork(readOwner, ctx)
 	if err != nil {
 		return ctx, nil, err
 	}

@@ -2,17 +2,167 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence(t *testing.T) {
+	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-state")
+	c := newAgentLifecycleCoordinator(nil, nil, newProjectionTestBus(), nil, nil)
+	c.phase = runtimeLifecycleRunning
+	c.runMode = AgentRunModeStandard
+	c.runCtx = context.Background()
+	token := lifecycleToken(identity, 1, 1)
+	cell := &agentLifecycleCell{
+		identity: identity, epoch: 1, generation: 1,
+		phase: AgentLifecycleRegistered, runMode: AgentRunModeStandard,
+	}
+	c.cells[identity] = cell
+	assertState := func(want committedRouteState) {
+		t.Helper()
+		got, _, err := c.committedRouteStateByIdentity(identity)
+		if err != nil || got != want {
+			t.Fatalf("committed route state = %d, err=%v; want %d", got, err, want)
+		}
+	}
+	assertState(committedRouteMaterializable)
+	cell.phase = AgentLifecycleRunning
+	cell.execution = &agentExecutionProjection{
+		agent: &projectionTestAgent{id: "test-agent"}, token: token,
+		generationCtx: context.Background(), loopDone: make(chan struct{}),
+		loopSettled: make(chan struct{}), stopAfterAccepted: make(chan struct{}),
+	}
+	cell.routeTransitions = 1
+	assertState(committedRouteLaunching)
+	cell.execution.routeToken = token
+	cell.execution.route = make(chan *worklifetime.EventDelivery)
+	cell.routeTransitions = 0
+	assertState(committedRouteReady)
+	cell.retirement = &agentRetirement{token: token}
+	assertState(committedRouteRetiring)
+	cell.retirement.token = runtimeeffects.LifecycleToken{}
+	assertState(committedRouteUnavailable)
+	cell.routeTransitions = 1
+	assertState(committedRouteLaunching)
+	cell.routeTransitions = 0
+	cell.retirement.token = token
+	cell.retirement.joinErr = errors.New("retirement settlement failed")
+	assertState(committedRouteUnavailable)
+	cell.retirement = nil
+	cell.terminalSet = &terminalFlowRetirement{}
+	assertState(committedRouteRetiring)
+	cell.terminalSet.completed = true
+	assertState(committedRouteUnavailable)
+	cell.terminalSet = nil
+	cell.phase = AgentLifecycleFailed
+	assertState(committedRouteUnavailable)
+	cell.phase = AgentLifecycleTerminated
+	assertState(committedRouteUnavailable)
+	delete(c.cells, identity)
+	assertState(committedRouteAbsent)
+}
+
+func TestCommittedRouteTransitionCompletionDoesNotReleaseSuccessor(t *testing.T) {
+	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-successor")
+	bus := newProjectionTestBus()
+	c := newAgentLifecycleCoordinator(nil, nil, bus, nil, nil)
+	c.phase = runtimeLifecycleRunning
+	predecessor := &agentLifecycleCell{identity: identity, routeTransitions: 1}
+	successor := &agentLifecycleCell{identity: identity, routeTransitions: 1}
+	c.cells[identity] = successor
+	am := &AgentManager{lifecycle: c}
+	am.completeCommittedRouteTransition(predecessor)
+	if predecessor.routeTransitions != 0 || successor.routeTransitions != 1 {
+		t.Fatalf("transition counts predecessor=%d successor=%d, want 0 and 1", predecessor.routeTransitions, successor.routeTransitions)
+	}
+	if got := bus.signals.Load(); got != 1 {
+		t.Fatalf("transition completion signals = %d, want 1", got)
+	}
+}
+
+func TestCommittedRouteRetirementCompletionSignalsAfterStateClears(t *testing.T) {
+	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-retirement")
+	bus := newProjectionTestBus()
+	c := newAgentLifecycleCoordinator(nil, nil, bus, nil, nil)
+	execution := &agentExecutionProjection{}
+	cell := &agentLifecycleCell{identity: identity, phase: AgentLifecycleTerminated, execution: execution}
+	retirement := &agentRetirement{cell: cell, execution: execution}
+	cell.retirement = retirement
+	c.cells[identity] = cell
+	c.finishAgentRetirement(retirement)
+	if cell.retirement != nil || cell.execution != nil {
+		t.Fatalf("retirement completion left live projection: %#v", cell)
+	}
+	if got := bus.signals.Load(); got != 1 {
+		t.Fatalf("retirement completion signals = %d, want 1", got)
+	}
+}
+
+func TestCommittedRouteLaunchHasLivePublicationOwner(t *testing.T) {
+	bus := newProjectionTestBus()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var publishOnce sync.Once
+	var releaseOnce sync.Once
+	releasePublication := func() { releaseOnce.Do(func() { close(release) }) }
+	bus.beforePublish = func() {
+		publishOnce.Do(func() {
+			close(entered)
+			<-release
+		})
+	}
+	defer releasePublication()
+	am := newProjectionTestManager(t, bus, (&projectionTestFactory{}).Build)
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
+	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancelRun()
+		if err := am.ShutdownWithOptions(ShutdownOptions{Grace: time.Second}); err != nil {
+			t.Errorf("shutdown manager: %v", err)
+		}
+	})
+	identity := runtimeagentidentitytest.RootRuntime(t, "launching-agent", "committed-route-launch")
+	cfg := managerTestAgentConfig(models.AgentConfig{
+		ExecutionMode: "live", ID: "launching-agent", Identity: identity,
+		Subscriptions: []string{"test.old"},
+	})
+	result := make(chan error, 1)
+	go func() { result <- spawnManagerTestAgent(am, cfg) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("route publication did not reach the barrier")
+	}
+	state, _, err := am.lifecycle.committedRouteStateByIdentity(identity)
+	if err != nil || state != committedRouteLaunching {
+		t.Fatalf("held publication state = %d, err=%v; want launching", state, err)
+	}
+	signalsBeforeRelease := bus.signals.Load()
+	releasePublication()
+	if err := <-result; err != nil {
+		t.Fatalf("complete route publication: %v", err)
+	}
+	state, _, err = am.lifecycle.committedRouteStateByIdentity(identity)
+	if err != nil || state != committedRouteReady {
+		t.Fatalf("published route state = %d, err=%v; want ready", state, err)
+	}
+	if got := bus.signals.Load(); got <= signalsBeforeRelease {
+		t.Fatalf("publication completion signals = %d, want more than %d", got, signalsBeforeRelease)
+	}
+}
 
 func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.T) {
 	for _, mode := range []struct {
@@ -396,7 +546,7 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("admit persisted subscriptions: %v", err)
 	}
-	if err := restarted.lifecycle.registerExecutionWithTopology(ctx, rec, false, agent, admission, rec.Topology); err != nil {
+	if err := restarted.lifecycle.registerExecutionWithTopology(ctx, rec, false, agent, admission, rec.Topology, nil); err != nil {
 		t.Fatalf("seed registered/stopped projection: %v", err)
 	}
 	if err := restarted.verifyDynamicFlowAgents(ctx, testActivationFlowIdentity(req), persisted, rec.Topology); err == nil || !strings.Contains(err.Error(), "agent_execution_not_ready") {

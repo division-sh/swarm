@@ -6475,7 +6475,19 @@ engine:
           No callback, string matching, retry or second lifecycle owner may reinterpret that result.
           Runtime shutdown fences and joins autonomous continuation dispatch before manager teardown invalidates
           the committed-readiness dependency used by dispatch. Already accepted route carriers keep their existing
-          drain authority. The shared shutdown grace remains a reporting/escalation budget: expiration does not
+          drain authority. Committed agent readiness classifies the lifecycle cell as absent, materializable,
+          executable, existing but not executable, launching, retiring or unavailable; a missing executable
+          projection is not proof of a missing identity. Only an exact live launch or retirement owner may defer
+          an acquired delivery behind the agent-route lifecycle wake. That owner signals after route readiness or
+          failed publication settles, and
+          the continuation coordinator rechecks a signal that arrived after scheduling but before a deferred carrier
+          returned. Failed and terminal cells do not gain a transient retry or static rematerialization. A rebuilt
+          route receiver context carries only its live accepted work lease; a shutdown fence rejects unrelated or
+          settled work but does not turn the accepted carrier's route admission into new work. An exact cancellation
+          of the dispatch context returns the unqueued carrier instead of reporting target failure; independent
+          admission, store and cleanup errors remain fatal. Retirement completion, including failed settlement,
+          signals the coordinator; failed retirement becomes unavailable rather than waiting for a nonexistent
+          progress owner. The shared shutdown grace remains a reporting/escalation budget: expiration does not
           permit manager destruction while dispatch still owns that dependency or detach unjoined work.
           PreparedStartup releases execution but does not own composed abort. Its caller owns cleanup on every
           failed release, including cancellation. Standalone Runtime.Start synchronously cleans up its runtime.

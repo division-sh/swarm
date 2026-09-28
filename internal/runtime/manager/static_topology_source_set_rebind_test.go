@@ -626,7 +626,7 @@ func TestPrepareDurableTopologySourceSetRebindSerializesDurableRegistration(t *t
 	go func() {
 		close(started)
 		result <- fixture.manager.lifecycle.registerExecutionWithTopology(
-			context.Background(), rec, true, reconfigureTestAgent{id: rec.Config.ID}, admission, topology,
+			context.Background(), rec, true, reconfigureTestAgent{id: rec.Config.ID}, admission, topology, nil,
 		)
 	}()
 	<-started

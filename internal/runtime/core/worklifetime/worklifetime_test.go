@@ -136,6 +136,59 @@ func TestRuntimeOccurrenceFencedDescendantRequiresLiveSameOwnerLease(t *testing.
 	}
 }
 
+func TestFencedRuntimeRouteCarriesOnlyLiveAcceptedWork(t *testing.T) {
+	process := NewProcess()
+	owner, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "route-owner", BundleHash: "bundle-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := owner.NewRoute(context.Background(), RouteIdentity{
+		RuntimeEpoch: 1,
+		Agent:        agentidentitytest.RootRuntime(t, "agent-1", "route-owner"),
+		Generation:   1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := owner.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.PersistedProjectionForProducer(
+		uuid.NewString(), events.EventType("message.received"), eventtest.Producer(events.EventProducerPlatform, "test"), "",
+		[]byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	if err := owner.Fence(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := route.NewEventDelivery(context.Background(), event); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("unrelated delivery after fence = %v", err)
+	}
+	carried := CarryAcceptedLease(WithOccurrence(context.Background(), owner), accepted.Context())
+	delivery, err := route.NewEventDelivery(carried, event)
+	if err != nil {
+		t.Fatalf("accepted route delivery after fence: %v", err)
+	}
+	if err := delivery.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if err := accepted.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := route.NewEventDelivery(carried, event); !errors.Is(err, ErrAdmissionFenced) {
+		t.Fatalf("settled accepted lease reopened route admission: %v", err)
+	}
+	if err := route.RetireAndWait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.RetireAndWait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeAndManagerLeasesRetainExactProcessOwner(t *testing.T) {
 	process := NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), RuntimeIdentity{

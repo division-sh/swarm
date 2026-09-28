@@ -1019,7 +1019,7 @@ func (r *RouteOccurrence) Begin(ctx context.Context) (*Lease, error) {
 	if r == nil {
 		return nil, errors.New("route occurrence is required")
 	}
-	parent, err := r.owner.Begin(ctx)
+	parent, err := beginRouteParent(r.owner, ctx)
 	if err != nil {
 		return nil, err
 	}

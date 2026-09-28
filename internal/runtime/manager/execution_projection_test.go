@@ -38,6 +38,7 @@ type projectionTestRoute struct {
 
 type projectionTestBus struct {
 	mu            sync.Mutex
+	signals       atomic.Int64
 	routes        map[string]projectionTestRoute
 	history       map[string][]projectionTestRoute
 	removed       []runtimeeffects.LifecycleToken
@@ -207,6 +208,7 @@ func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToke
 	return prepared.Deliveries()
 }
 func (b *projectionTestBus) FenceAgentRoute(runtimeeffects.LifecycleToken) {}
+func (b *projectionTestBus) SignalDeliveryContinuations()                  { b.signals.Add(1) }
 func (b *projectionTestBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	b.mu.Lock()
 	b.removed = append(b.removed, token)

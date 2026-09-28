@@ -313,7 +313,7 @@ func (r *RouteOccurrence) newEventDelivery(ctx context.Context, event events.Eve
 	if !ok || contextOwner == nil || contextOwner == r.owner {
 		return newEventDelivery(ctx, event, route, r.owner, r.Begin)
 	}
-	companion, err := contextOwner.Begin(ctx)
+	companion, err := beginRouteParent(contextOwner, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -325,6 +325,15 @@ func (r *RouteOccurrence) newEventDelivery(ctx context.Context, event events.Eve
 	delivery.companion = companion
 	delivery.ctx = WithOccurrence(delivery.ctx, contextOwner)
 	return delivery, nil
+}
+
+func beginRouteParent(owner Occurrence, ctx context.Context) (*Lease, error) {
+	if accepted, ok := owner.(interface {
+		BeginAcceptedDescendant(context.Context) (*Lease, error)
+	}); ok {
+		return accepted.BeginAcceptedDescendant(ctx)
+	}
+	return owner.Begin(ctx)
 }
 
 func (s *StandingOccurrence) NewEventDelivery(ctx context.Context, event events.Event) (*EventDelivery, error) {
