@@ -11,30 +11,30 @@ import (
 // Double implements the Telegram API operations used by connected-channel
 // onboarding and records every externally visible effect.
 type Double struct {
-	mu                           sync.Mutex
-	callbackURL                  string
-	signingSecret                string
-	registrations                map[string]registration
-	resourceIDs                  map[string]int64
-	commands                     map[string][]map[string]any
-	commandWrites                []map[string]any
-	commandReadbacks             int
-	commandReadbackFailures      int
-	registrationRequests         []map[string]any
-	deliveries                   []map[string]any
-	edits                        []map[string]any
-	acknowledgments              []map[string]any
-	rejectNextCredential         bool
-	loseNextRegistrationResponse bool
-	loseNextDeliveryResponse     bool
-	loseNextEditResponse         bool
-	loseNextAckResponse          bool
-	loseNextCommandWriteResponse bool
+	mu                            sync.Mutex
+	callbackURL                   string
+	signingSecret                 string
+	registrations                 map[string]registration
+	resourceIDs                   map[string]int64
+	commands                      map[string][]map[string]any
+	commandWrites                 []map[string]any
+	commandReadbacks              int
+	commandReadbackFailures       int
+	registrationRequests          []map[string]any
+	deliveries                    []map[string]any
+	edits                         []map[string]any
+	acknowledgments               []map[string]any
+	rejectNextCredential          bool
+	loseNextRegistrationResponse  bool
+	loseNextDeliveryResponse      bool
+	loseNextEditResponse          bool
+	loseNextAckResponse           bool
+	loseNextCommandWriteResponse  bool
 	failCommandReadbackAfterWrite bool
-	registrationResponseBarrier  *responseBarrier
-	deliveryResponseBarrier      *responseBarrier
-	editResponseBarrier          *responseBarrier
-	commandApplyBarrier          *responseBarrier
+	registrationResponseBarrier   *responseBarrier
+	deliveryResponseBarrier       *responseBarrier
+	editResponseBarrier           *responseBarrier
+	commandApplyBarrier           *responseBarrier
 }
 
 type registration struct {
