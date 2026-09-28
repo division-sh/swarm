@@ -146,6 +146,16 @@ func TestFileRowLoweringRefusesContradictoryShapesAndPaths(t *testing.T) {
 
 func TestFileRowLoweringEmptyDirectoryAndEscapingBound(t *testing.T) {
 	root := mustInvocationRootForTest(t.TempDir())
+	writeFileImportTestFile(t, root.Resolve("empty.txt"), "")
+	keyless := fileImportShape{Fields: map[string]fileImportField{"body": {Text: true}}}
+	emptyFile, err := lowerFileAssignments(root, "profile", keyless, []fileAssignment{{"body", "empty.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyRows := decodeFileImportTestRows(t, emptyFile)
+	if len(emptyRows) != 1 || emptyRows[0]["body"] != "" {
+		t.Fatalf("empty file must be one empty-string row, got %#v", emptyRows)
+	}
 	if err := os.Mkdir(root.Resolve("empty"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +165,6 @@ func TestFileRowLoweringEmptyDirectoryAndEscapingBound(t *testing.T) {
 		t.Fatalf("empty directory = %q, %v", got, err)
 	}
 	writeFileImportTestFile(t, root.Resolve("nul.txt"), strings.Repeat("\x00", 125000))
-	keyless := fileImportShape{Fields: map[string]fileImportField{"body": {Text: true}}}
 	if _, err := lowerFileAssignments(root, "profile", keyless, []fileAssignment{{"body", "nul.txt"}}); err == nil || !strings.Contains(err.Error(), "decoded import limit") {
 		t.Fatalf("escaped-size error = %v", err)
 	}
