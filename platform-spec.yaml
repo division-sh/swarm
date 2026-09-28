@@ -6481,7 +6481,11 @@ engine:
           an acquired delivery behind the agent-route lifecycle wake. That owner signals after route readiness or
           failed publication settles, and
           the continuation coordinator rechecks a signal that arrived after scheduling but before a deferred carrier
-          returned. Failed and terminal cells do not gain a transient retry or static rematerialization. A rebuilt
+          returned. Only an external lifecycle-owner transition advances progress evidence; an internal rescan or
+          freed-capacity notification cannot manufacture progress for another deferred delivery. Joined readiness
+          errors defer only when every branch is the expected transition or its owning cancellation; independent
+          admission, store, and cleanup failures remain fatal at both Manager and EventBus boundaries. Failed and
+          terminal cells do not gain a transient retry or static rematerialization. A rebuilt
           route receiver context carries only its live accepted work lease; a shutdown fence rejects unrelated or
           settled work but does not turn the accepted carrier's route admission into new work. An exact cancellation
           of the dispatch context returns the unqueued carrier instead of reporting target failure; independent

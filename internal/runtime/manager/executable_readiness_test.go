@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -71,6 +73,84 @@ func TestCommittedRouteStateSeparatesLaunchRetirementAndAbsence(t *testing.T) {
 	assertState(committedRouteUnavailable)
 	delete(c.cells, identity)
 	assertState(committedRouteAbsent)
+}
+
+func TestCommittedRouteFinalizationPreservesIndependentFailures(t *testing.T) {
+	identity := runtimeagentidentitytest.RootRuntime(t, "test-agent", "committed-route-errors")
+	c := newAgentLifecycleCoordinator(nil, nil, newProjectionTestBus(), nil, nil)
+	c.phase = runtimeLifecycleRunning
+	cell := &agentLifecycleCell{identity: identity, phase: AgentLifecycleRegistered, routeTransitions: 1}
+	c.cells[identity] = cell
+	am := &AgentManager{lifecycle: c}
+	retirement := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_retirement_pending", "agent-lifecycle", "lifecycle_mutation", nil)
+	independent := errors.New("independent cleanup failed")
+
+	for _, canceled := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(context.Background())
+		if canceled {
+			cancel()
+		}
+		pure := am.committedRouteFinalizeError(ctx, identity, retirement)
+		if canceled {
+			if !errors.Is(pure, context.Canceled) {
+				t.Errorf("canceled transition = %v, want owning cancellation", pure)
+			}
+			owned := am.committedRouteFinalizeError(ctx, identity, errors.Join(retirement, context.Canceled))
+			if !errors.Is(owned, context.Canceled) {
+				t.Errorf("owning cancellation and transition = %v, want cancellation", owned)
+			}
+		} else if !errors.Is(pure, runtimebus.ErrCommittedAgentRouteTransition) {
+			t.Errorf("launching transition = %v, want transient route marker", pure)
+		}
+		for _, cause := range []error{errors.Join(retirement, independent), errors.Join(ErrAgentNotFound, independent), errors.Join(retirement, context.Canceled, independent)} {
+			got := am.committedRouteFinalizeError(ctx, identity, cause)
+			if !errors.Is(got, independent) || errors.Is(got, runtimebus.ErrCommittedAgentRouteTransition) {
+				t.Errorf("canceled=%t cause=%v lost independent failure: %v", canceled, cause, got)
+			}
+		}
+		cancel()
+	}
+	if got := am.committedRouteFinalizeError(context.Background(), identity, ErrAgentNotFound); !errors.Is(got, runtimebus.ErrCommittedAgentRouteTransition) {
+		t.Fatalf("pure launching not-found = %v, want transient route marker", got)
+	}
+
+	cell.routeTransitions = 0
+	cell.phase = AgentLifecycleRunning
+	cell.epoch, cell.generation = 1, 1
+	cell.runMode = AgentRunModeStandard
+	c.runMode = AgentRunModeStandard
+	c.runCtx = context.Background()
+	token := lifecycleToken(identity, cell.epoch, cell.generation)
+	cell.execution = &agentExecutionProjection{
+		agent: &projectionTestAgent{id: "test-agent"}, token: token, routeToken: token,
+		generationCtx: context.Background(), loopDone: make(chan struct{}),
+		loopSettled: make(chan struct{}), stopAfterAccepted: make(chan struct{}),
+		route: make(chan *worklifetime.EventDelivery),
+	}
+	if state, _, err := c.committedRouteStateByIdentity(identity); err != nil || state != committedRouteReady {
+		t.Fatalf("ready fixture classified as state %d: %v", state, err)
+	}
+	if got := am.committedRouteFinalizeError(context.Background(), identity, retirement); got != nil {
+		t.Fatalf("settled ready transition = %v, want nil", got)
+	}
+	if got := am.committedRouteFinalizeError(context.Background(), identity, errors.Join(retirement, independent)); !errors.Is(got, independent) {
+		t.Fatalf("ready route lost independent failure: %v", got)
+	}
+	cell.retirement = &agentRetirement{token: token}
+	if state, _, err := c.committedRouteStateByIdentity(identity); err != nil || state != committedRouteRetiring {
+		t.Fatalf("retiring fixture classified as state %d: %v", state, err)
+	}
+	if got := am.committedRouteFinalizeError(context.Background(), identity, retirement); !errors.Is(got, runtimebus.ErrCommittedAgentRouteTransition) {
+		t.Fatalf("pure retirement = %v, want transient route marker", got)
+	}
+	if got := am.committedRouteFinalizeError(context.Background(), identity, errors.Join(retirement, independent)); !errors.Is(got, independent) {
+		t.Fatalf("retiring route lost independent failure: %v", got)
+	}
+	cell.retirement = nil
+	cell.phase = AgentLifecycleFailed
+	if got := am.committedRouteFinalizeError(context.Background(), identity, retirement); errors.Is(got, runtimebus.ErrCommittedAgentRouteTransition) {
+		t.Fatalf("failed agent became transient: %v", got)
+	}
 }
 
 func TestCommittedRouteTransitionCompletionDoesNotReleaseSuccessor(t *testing.T) {

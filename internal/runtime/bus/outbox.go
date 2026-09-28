@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
@@ -559,25 +560,9 @@ func (d engineDispatcher) dispatchCommittedInterceptorPublications(ctx context.C
 // A transferred handoff owns incomplete live delivery, but never an independent
 // error joined by claim release, receiver cleanup, or another interceptor.
 func onlyAuthoritativeDeliveryIncomplete(err error) bool {
-	if err == errAuthoritativeDeliveryIncomplete {
-		return true
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		children := joined.Unwrap()
-		if len(children) == 0 {
-			return false
-		}
-		for _, child := range children {
-			if !onlyAuthoritativeDeliveryIncomplete(child) {
-				return false
-			}
-		}
-		return true
-	}
-	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
-		return onlyAuthoritativeDeliveryIncomplete(wrapped.Unwrap())
-	}
-	return false
+	return runtimefailures.OnlyBranches(err, func(branch error) bool {
+		return branch == errAuthoritativeDeliveryIncomplete
+	})
 }
 
 func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (result pendingOutboxDispatch, err error) {

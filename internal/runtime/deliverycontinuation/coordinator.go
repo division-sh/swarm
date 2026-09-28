@@ -225,7 +225,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 		defer func() { c.finish(runCtx, cancel, lease, runErr, true) }()
 		runErr = c.run(runCtx, next, wake)
 	}()
-	c.Signal()
+	c.notify()
 	return nil
 }
 
@@ -309,6 +309,10 @@ func (c *Coordinator) Signal() {
 		return
 	}
 	c.wakeVersion.Add(1)
+	c.notify()
+}
+
+func (c *Coordinator) notify() {
 	select {
 	case c.wake <- struct{}{}:
 	default:
@@ -660,7 +664,7 @@ func (c *Coordinator) completeDispatchWithWake(deliveryID string, err error, def
 	}
 	c.mu.Unlock()
 	if wake {
-		c.Signal()
+		c.notify()
 	}
 }
 

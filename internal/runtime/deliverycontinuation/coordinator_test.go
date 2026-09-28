@@ -573,6 +573,9 @@ func TestDeferredDispatchRechecksSignalConsumedBeforeCarrierReturn(t *testing.T)
 	c.Signal()
 	<-c.wake // The scanner observed the route change while the job was reserved.
 	c.completeDispatchWithWake("delivery-1", nil, true, scheduledVersion)
+	if got := c.wakeVersion.Load(); got != scheduledVersion+1 {
+		t.Fatalf("internal catch-up advanced progress version to %d", got)
+	}
 	select {
 	case <-c.wake:
 	default:
@@ -584,6 +587,49 @@ func TestDeferredDispatchRechecksSignalConsumedBeforeCarrierReturn(t *testing.T)
 	case <-c.wake:
 		t.Fatal("unchanged route lifecycle spun a deferred delivery")
 	default:
+	}
+}
+
+func TestDeferredJobsCannotManufactureEachOthersProgress(t *testing.T) {
+	c := &Coordinator{wake: make(chan struct{}, 1), reserved: map[string]struct{}{"first": {}, "second": {}}}
+	initial := c.wakeVersion.Load()
+	c.Signal()
+	<-c.wake
+
+	c.completeDispatchWithWake("first", nil, true, initial)
+	select {
+	case <-c.wake:
+	default:
+		t.Fatal("first deferred job lost the external signal before return")
+	}
+	if got := c.wakeVersion.Load(); got != initial+1 {
+		t.Fatalf("first catch-up invented progress version %d", got)
+	}
+	// The scanner can reserve the first job while its peer is still returning.
+	c.reserved["first"] = struct{}{}
+	firstRescheduled := c.wakeVersion.Load()
+	c.completeDispatchWithWake("second", nil, true, initial)
+	select {
+	case <-c.wake:
+	default:
+		t.Fatal("second deferred job lost the external signal before return")
+	}
+	if got := c.wakeVersion.Load(); got != initial+1 {
+		t.Fatalf("second catch-up invented progress version %d", got)
+	}
+	c.reserved["second"] = struct{}{}
+	c.completeDispatchWithWake("first", nil, true, firstRescheduled)
+	c.completeDispatchWithWake("second", nil, true, c.wakeVersion.Load())
+	select {
+	case <-c.wake:
+		t.Fatal("deferred jobs kept each other awake without another owner transition")
+	default:
+	}
+	c.Signal()
+	select {
+	case <-c.wake:
+	default:
+		t.Fatal("later genuine lifecycle progress did not wake deferred jobs")
 	}
 }
 

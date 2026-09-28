@@ -99,6 +99,32 @@ func (e *Error) Unwrap() error {
 	return e.cause
 }
 
+// OnlyBranches permits an expected outcome only when every error branch is
+// accounted for. A matching branch in errors.Join cannot hide another failure.
+func OnlyBranches(err error, allowed func(error) bool) bool {
+	if err == nil || allowed == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		branches := joined.Unwrap()
+		if len(branches) == 0 {
+			return false
+		}
+		for _, branch := range branches {
+			if !OnlyBranches(branch, allowed) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		if cause := wrapped.Unwrap(); cause != nil {
+			return OnlyBranches(cause, allowed)
+		}
+	}
+	return allowed(err)
+}
+
 var detailCodePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 var classOrder = []Class{
