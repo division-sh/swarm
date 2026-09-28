@@ -25,6 +25,7 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -184,7 +185,7 @@ func (*closedReceiverManagedLLM) ProviderContract() llm.ProviderContract {
 	return llm.AnthropicAPIProviderContract()
 }
 
-func (*closedReceiverManagedLLM) PersistConversationSnapshot(context.Context, *llm.Session) error {
+func (*closedReceiverManagedLLM) PersistConversationSnapshot(context.Context, *sessions.Lease, *llm.Session) error {
 	return nil
 }
 
