@@ -289,6 +289,9 @@ func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *test
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan: %v", err)
 	}
+	if capacity, err := binding.ActionCapacity(); err != nil || capacity != 8 {
+		t.Fatalf("Telegram selected action capacity = %d, %v", capacity, err)
+	}
 	if subject, err := plan.CapabilitySubject(); err != nil || subject.Kind != packs.SubjectChannelPack || subject.Status != packs.StatusAvailable {
 		t.Fatalf("channel pack subject = %#v, err=%v", subject, err)
 	}
@@ -592,6 +595,9 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	binding, err := packs.NewOutboundBindingPlan("mock_ops", plan, map[string]any{"queue": "queue-a"}, nil)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlan(mock): %v", err)
+	}
+	if capacity, err := binding.ActionCapacity(); err != nil || capacity != 2 {
+		t.Fatalf("mock selected action capacity = %d, %v", capacity, err)
 	}
 	_, prepared, err := binding.PrepareOperation("acknowledge_interaction", map[string]any{
 		"interaction_reference": map[string]any{"cursor": "cursor-a"},
