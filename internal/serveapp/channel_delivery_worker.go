@@ -53,25 +53,37 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 		return nil
 	}
 	cursor := ""
+	var failures error
 	for {
 		plans, err := d.store.ListCurrentChannelDeliveryPlans(ctx, cursor, 200)
 		if err != nil {
-			return err
+			return errors.Join(failures, err)
 		}
 		for _, candidate := range plans {
 			if candidate.State == "uncertain" || candidate.State == "retired" {
 				continue
 			}
 			if candidate.State != "planned" && candidate.State != "rendered" && candidate.State != "sent" {
-				return fmt.Errorf("channel delivery %s has unsupported state %q", candidate.DeliveryID, candidate.State)
+				failures = errors.Join(failures, fmt.Errorf("channel delivery %s has unsupported state %q", candidate.DeliveryID, candidate.State))
+				continue
 			}
-			prepared, err := d.store.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID)
+			capacity := 0
+			if candidate.SourceKind == "card" {
+				capacity, err = d.selectedActionCapacity(ctx, candidate)
+				if err != nil {
+					failures = errors.Join(failures, fmt.Errorf("select channel delivery %s action capacity: %w", candidate.DeliveryID, err))
+					continue
+				}
+			}
+			prepared, err := d.store.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, capacity)
 			if err != nil {
-				return fmt.Errorf("freeze channel delivery %s: %w", candidate.DeliveryID, err)
+				failures = errors.Join(failures, fmt.Errorf("freeze channel delivery %s: %w", candidate.DeliveryID, err))
+				continue
 			}
 			current, found, err := d.store.GetCurrentChannelDeliveryPlan(ctx, candidate.DeliveryID)
 			if err != nil {
-				return err
+				failures = errors.Join(failures, fmt.Errorf("read channel delivery %s: %w", candidate.DeliveryID, err))
+				continue
 			}
 			if !found || current.CurrentRenderID != prepared.RenderID {
 				continue
@@ -81,25 +93,28 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 					continue
 				}
 				if err := d.dispatchInitial(ctx, current, prepared); err != nil {
-					return fmt.Errorf("dispatch channel delivery %s: %w", candidate.DeliveryID, err)
+					failures = errors.Join(failures, fmt.Errorf("dispatch channel delivery %s: %w", candidate.DeliveryID, err))
 				}
 				continue
 			}
 			receipt, found, err := d.store.GetCurrentChannelSentReceipt(ctx, candidate.DeliveryID, current.CurrentReceiptID)
 			if err != nil {
-				return fmt.Errorf("read channel delivery receipt %s: %w", current.CurrentReceiptID, err)
+				failures = errors.Join(failures, fmt.Errorf("read channel delivery receipt %s: %w", current.CurrentReceiptID, err))
+				continue
 			}
 			if !found {
-				return fmt.Errorf("current channel delivery receipt %s is absent", current.CurrentReceiptID)
+				failures = errors.Join(failures, fmt.Errorf("current channel delivery receipt %s is absent", current.CurrentReceiptID))
+				continue
 			}
 			if receipt.RenderID == prepared.RenderID {
 				continue
 			}
 			if current.State != "rendered" {
-				return fmt.Errorf("channel delivery %s has a changed render outside edit state", candidate.DeliveryID)
+				failures = errors.Join(failures, fmt.Errorf("channel delivery %s has a changed render outside edit state", candidate.DeliveryID))
+				continue
 			}
 			if err := d.dispatchEdit(ctx, current, prepared, receipt); err != nil {
-				return fmt.Errorf("edit channel delivery %s: %w", candidate.DeliveryID, err)
+				failures = errors.Join(failures, fmt.Errorf("edit channel delivery %s: %w", candidate.DeliveryID, err))
 			}
 		}
 		if len(plans) < 200 {
@@ -107,11 +122,11 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 		}
 		last := plans[len(plans)-1].DeliveryID
 		if last == cursor {
-			return fmt.Errorf("channel delivery pagination did not advance")
+			return errors.Join(failures, fmt.Errorf("channel delivery pagination did not advance"))
 		}
 		cursor = last
 	}
-	return nil
+	return failures
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileCardChanges(ctx context.Context) error {
@@ -177,6 +192,12 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 				}
 				if err != nil {
 					failures = errors.Join(failures, fmt.Errorf("plan channel navigation %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
+			if resolved.SourceKind == "card" && resolved.Action.Kind == "more_controls" {
+				if err := d.store.AdvanceChannelCardActionPage(ctx, intent.Fact, resolved); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("advance channel card controls %s: %w", intent.PublicationID, err))
 				}
 				continue
 			}
