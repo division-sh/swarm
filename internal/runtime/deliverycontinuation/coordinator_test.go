@@ -3,6 +3,8 @@ package deliverycontinuation
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +38,7 @@ type coordinatorTestStore struct {
 
 	observations map[string]runtimedelivery.ContinuationObservation
 	observeErr   error
+	batchSizes   []int
 }
 
 type coordinatorTestRestarts map[string]runtimepipeline.StandingRestartDispositionKind
@@ -102,6 +105,66 @@ func (s *coordinatorTestStore) ObserveDeliveryContinuation(
 	return runtimedelivery.ContinuationObservation{
 		DeliveryID: deliveryID, Disposition: runtimedelivery.ClaimAcquired,
 	}, nil
+}
+
+func (s *coordinatorTestStore) ObserveDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	s.mu.Lock()
+	s.batchSizes = append(s.batchSizes, len(deliveryIDs))
+	s.mu.Unlock()
+	observations := make([]runtimedelivery.ContinuationObservation, 0, len(deliveryIDs))
+	for _, deliveryID := range deliveryIDs {
+		observation, err := s.ObserveDeliveryContinuation(ctx, authority, deliveryID)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observation)
+	}
+	return observations, nil
+}
+
+func TestCoordinatorReconcilesMissingEntriesInBoundedExactBatches(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	store := &coordinatorTestStore{observations: make(map[string]runtimedelivery.ContinuationObservation)}
+	c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 2*runtimedelivery.MaxContinuationObservationBatch + 2 {
+		id := fmt.Sprintf("terminal-%03d", i)
+		c.entries[id] = entry{state: ownershipAttempt}
+		store.observations[id] = runtimedelivery.ContinuationObservation{DeliveryID: id, Disposition: runtimedelivery.ClaimTerminal}
+	}
+	if _, _, err := c.reconcileHeld(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.batchSizes, []int{runtimedelivery.MaxContinuationObservationBatch, runtimedelivery.MaxContinuationObservationBatch, 2}) {
+		t.Fatalf("missing entries were not read in bounded batches: %v", store.batchSizes)
+	}
+	for id, current := range c.entries {
+		if current.state != ownershipTerminal {
+			t.Fatalf("%s retained nonterminal state %d", id, current.state)
+		}
+	}
+}
+
+func TestCoordinatorRejectsMismatchedBatchedObservationIdentity(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	store := &coordinatorTestStore{observations: map[string]runtimedelivery.ContinuationObservation{
+		"expected": {DeliveryID: "other", Disposition: runtimedelivery.ClaimTerminal},
+	}}
+	c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.entries["expected"] = entry{state: ownershipAttempt}
+	if _, _, err := c.reconcileHeld(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "returned identity") {
+		t.Fatalf("mismatched batch identity was accepted: %v", err)
+	}
+	if c.entries["expected"].state != ownershipAttempt {
+		t.Fatal("mismatched observation changed local ownership")
+	}
 }
 
 type coordinatorTestDispatcher struct {
@@ -315,6 +378,153 @@ func TestCoordinatorHeldDispatchDoesNotBlockIndependentDelivery(t *testing.T) {
 		t.Fatal("retirement did not join the held worker")
 	}
 	close(held)
+}
+
+func TestCoordinatorQueuedDispatchOwnsQuiescenceUntilJoined(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	route := coordinatorTestAgentRoute(t, "agent-a")
+	items := make([]runtimedelivery.ContinuationItem, dispatchWorkers+1)
+	observations := make(map[string]runtimedelivery.ContinuationObservation, len(items))
+	for i := range items {
+		event := coordinatorTestEvent(fmt.Sprintf("queued-%d", i))
+		id, err := runtimedelivery.DeliveryID(event.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items[i] = runtimedelivery.ContinuationItem{
+			DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired,
+			Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Status: runtimedelivery.StatusPending, Authority: authority},
+		}
+		observations[id] = runtimedelivery.ContinuationObservation{DeliveryID: id, Disposition: runtimedelivery.ClaimTerminal}
+	}
+	store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{{Items: items, Exhausted: true}}, observations: observations}
+	started := make(chan struct{}, len(items))
+	release := make(chan struct{})
+	dispatcher := electionDispatcher(func(context.Context, events.Event, events.DeliveryRoute) DispatchResult {
+		started <- struct{}{}
+		<-release
+		return TerminallySettled()
+	})
+	c, err := New(store, coordinatorTestRestarts{}, authority, owner, dispatcher, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for range dispatchWorkers {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("dispatch workers did not start")
+		}
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := owner.WaitForQuiescence(waitCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("queued delivery escaped runtime quiescence: %v", err)
+	}
+	close(release)
+	joined, cancelJoin := context.WithTimeout(context.Background(), time.Second)
+	defer cancelJoin()
+	if err := owner.WaitForQuiescence(joined); err != nil {
+		t.Fatalf("dispatched and queued deliveries did not join: %v", err)
+	}
+	if err := c.Retire(joined); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoordinatorCapacityBoundedScanResumesNextPage(t *testing.T) {
+	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
+	defer cleanup()
+	route := coordinatorTestAgentRoute(t, "agent-a")
+	items := make([]runtimedelivery.ContinuationItem, dispatchCapacity+2)
+	for i := range items {
+		event := coordinatorTestEvent(fmt.Sprintf("page-%d", i))
+		id, err := runtimedelivery.DeliveryID(event.ID(), route)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items[i] = runtimedelivery.ContinuationItem{
+			DeliveryID: id, Event: event, Disposition: runtimedelivery.ClaimAcquired,
+			Snapshot: runtimedelivery.Snapshot{DeliveryID: id, Route: route, Status: runtimedelivery.StatusPending, Authority: authority},
+		}
+	}
+	cursor, err := runtimedelivery.AdmitContinuationCursor("test-authority", time.Now(), items[dispatchCapacity].DeliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &coordinatorTestStore{pages: []runtimedelivery.ContinuationPage{
+		{Items: items[:dispatchCapacity+1], Next: cursor, Exhausted: false},
+		{Items: items[dispatchCapacity+1:], Exhausted: true},
+	}}
+	c, err := New(store, coordinatorTestRestarts{}, authority, owner, &coordinatorTestDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.scan(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if store.scanCalls() != 1 || len(c.reserved) != dispatchCapacity || c.scanCursor != cursor {
+		t.Fatalf("full capacity must defer page two: scans=%d reserved=%d cursor=%+v", store.scanCalls(), len(c.reserved), c.scanCursor)
+	}
+	for range dispatchCapacity/2 - 1 {
+		job := <-c.jobs
+		if err := job.lease.Done(); err != nil {
+			t.Fatal(err)
+		}
+		c.completeDispatch(job.deliveryID, nil)
+	}
+	select {
+	case <-c.wake:
+		t.Fatal("control lane rescanned before the reservation window could refill")
+	default:
+	}
+	refill := <-c.jobs
+	if err := refill.lease.Done(); err != nil {
+		t.Fatal(err)
+	}
+	c.completeDispatch(refill.deliveryID, nil)
+	select {
+	case <-c.wake:
+	default:
+		t.Fatal("half-empty reservation window did not wake the control lane")
+	}
+	next, wake, err := c.scan(context.Background(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.scanCalls() != 2 || len(c.reserved) != dispatchCapacity/2+1 {
+		t.Fatalf("freed slot did not resume page two: scans=%d reserved=%d", store.scanCalls(), len(c.reserved))
+	}
+	if wake || next != 0 || !c.rescanNeeded {
+		t.Fatalf("skipped first-page work was not held for the next refill: wake=%v next=%s rescan=%v", wake, next, c.rescanNeeded)
+	}
+	if _, _, _, started := c.scanCursor.Position(); started {
+		t.Fatal("completed scan retained an obsolete cursor")
+	}
+	if _, scheduled := c.reserved[items[dispatchCapacity+1].DeliveryID]; !scheduled {
+		t.Fatal("later durable page was starved by the first page")
+	}
+	job := <-c.jobs
+	if err := job.lease.Done(); err != nil {
+		t.Fatal(err)
+	}
+	c.completeDispatch(job.deliveryID, nil)
+	select {
+	case <-c.wake:
+	default:
+		t.Fatal("skipped first-page work was not rearmed at refill capacity")
+	}
+	for len(c.jobs) > 0 {
+		job := <-c.jobs
+		if err := job.lease.Done(); err != nil {
+			t.Fatal(err)
+		}
+		c.completeDispatch(job.deliveryID, nil)
+	}
 }
 
 func TestCoordinatorParksNonExecutableStandingDelivery(t *testing.T) {

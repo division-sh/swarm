@@ -35,7 +35,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			source := loadCanonicalRoutingSource(t, b17MixedNestedSource(t))
 			probe := newNestedServingProbe(t)
-			childGate := newNestedChildHandlerGate(t, "account.task.requested")
+			childGate := newNestedChildHandlerGateCount(t, "account.task.requested", 2)
 			rt, db := b17MixedNestedRuntime(t, backend, source, probe, childGate)
 			t.Cleanup(func() {
 				if t.Failed() {
@@ -67,6 +67,9 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			assertNotifyAllChildrenItemSequence(t, parents, accounts)
 			probe.releaseHeld()
 			signal := childGate.wait(t)
+			for range 1 {
+				childGate.wait(t)
+			}
 			reader := nestedPublicReader(t, rt.selected)
 			deadline := time.Now().Add(5 * time.Second)
 			var status string
@@ -91,21 +94,21 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 				}
 				b17RequirePipelineReceipt(t, ctx, db, parent.ID, 1)
 			}
-			b17RequirePipelineReceipt(t, ctx, db, signal.EventID, 0)
+			b17RequirePipelineReceipt(t, ctx, db, signal.EventID, 1)
 			child, err := reader.LoadOperatorEvent(ctx, signal.EventID)
 			if err != nil || len(child.Deliveries) != 1 || child.Deliveries[0].Terminal || child.NoDelivery != nil {
 				t.Fatalf("held real grandchild was prematurely settled: %+v err=%v", child, err)
 			}
 			counts := probe.snapshot()
-			if counts.Active != 1 || counts.PeakActive != 1 || counts.Started != before.Started+2 || counts.Carriers != 2 {
+			if counts.Active != 0 || counts.PeakActive != 1 || counts.Started != before.Started+3 || counts.Returned != counts.Started || counts.Carriers != 0 {
 				t.Fatalf("nested mixed execution escaped the sole serving permit: %+v", counts)
 			}
 			var intents, owed int
 			if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cardinality-cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &owed); err != nil {
 				t.Fatal(err)
 			}
-			if intents != 4 || owed != 2 {
-				t.Fatalf("nested sibling backlog changed while one real handler is held: intents=%d owed=%d", intents, owed)
+			if intents != 4 || owed != 0 {
+				t.Fatalf("nested issuance did not finish while real handlers remain held: intents=%d owed=%d", intents, owed)
 			}
 			var nextTask string
 			if err := db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND source_event_id=(SELECT source_event_id FROM events WHERE event_id=$2) AND event_name=(SELECT event_name FROM events WHERE event_id=$2) AND event_id<>$2`, runID, signal.EventID).Scan(&nextTask); err != nil {
@@ -254,7 +257,7 @@ func (p *b17NestedBoundary) Intercept(ctx context.Context, event events.Event) (
 	if p.calls.Add(1) != 1 {
 		return false, nil, pipelineobligation.Continue(), fmt.Errorf("duplicate exact nested node dispatch")
 	}
-	var prior, current, handoffs int
+	var prior, current, handoffs, currentHandoffs int
 	err := p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline' AND outcome='success'`, p.predecessor).Scan(&prior)
 	if err == nil {
 		err = p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, p.current).Scan(&current)
@@ -262,8 +265,11 @@ func (p *b17NestedBoundary) Intercept(ctx context.Context, event events.Event) (
 	if err == nil {
 		err = p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND continuation_handoff_at IS NOT NULL`, p.predecessor).Scan(&handoffs)
 	}
-	if err == nil && (prior != 1 || current != 0 || handoffs != 1) {
-		err = fmt.Errorf("nested boundary: exact prior receipt=%d handoffs=%d, still-executing current receipts=%d", prior, handoffs, current)
+	if err == nil {
+		err = p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND continuation_handoff_at IS NOT NULL`, p.current).Scan(&currentHandoffs)
+	}
+	if err == nil && (prior != 1 || current != 1 || handoffs != 1 || currentHandoffs != 1) {
+		err = fmt.Errorf("nested boundary: predecessor receipt=%d handoff=%d, current receipt=%d handoff=%d", prior, handoffs, current, currentHandoffs)
 	}
 	select {
 	case p.observed <- err:

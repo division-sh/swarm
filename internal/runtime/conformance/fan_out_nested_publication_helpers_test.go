@@ -28,6 +28,8 @@ type nestedPublicationLifetime struct {
 	peak, acquired, released, returned                                int
 	err                                                               error
 	groupPrepared, groupSeals, groupFinalized, groupDispatched        int
+	groupAcknowledgmentLost                                           int
+	dispatchFailure                                                   error
 	batchCalls, batchResults, batchErrors, batchRowErrors             int
 	batchErrorPlans, batchEmptyResults                                int
 	prepareDuration, sealDuration, finalizeDuration, dispatchDuration time.Duration
@@ -219,6 +221,11 @@ func (b *nestedPublicationBus) DispatchFanOutPublications(ctx context.Context, g
 		entry.dispatched = true
 		p.live[id] = entry
 		p.groupDispatched++
+	}
+	if failure := p.dispatchFailure; failure != nil {
+		p.dispatchFailure = nil
+		p.groupAcknowledgmentLost += len(publications)
+		return failure
 	}
 	return nil
 }

@@ -252,6 +252,18 @@ func (s *runtimeShutdownDeliveryStore) ObserveDeliveryContinuation(
 	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
 }
 
+func (s *runtimeShutdownDeliveryStore) ObserveDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	observations := make([]runtimedelivery.ContinuationObservation, 0, len(deliveryIDs))
+	for _, deliveryID := range deliveryIDs {
+		observation, err := s.ObserveDeliveryContinuation(ctx, authority, deliveryID)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observation)
+	}
+	return observations, nil
+}
+
 func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(context.Context, *eventfixture.Attempt) error) error {
 	return eventfixture.RunMutation(ctx, s.db, authoractivityfixture.DialectSQLite, fn).Err()
 }

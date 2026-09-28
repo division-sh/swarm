@@ -10,7 +10,125 @@ import (
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
+
+// SettlementNeedsCompletionTx omits a candidate only when another delivery
+// still blocks completion and no live fan-out barrier can advance. The run lock
+// serializes this proof with other settlement requests.
+func (s *RunLifecyclePostgresOwner) SettlementNeedsCompletionTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	if s == nil || s.delivery == nil || s.pipeline == nil || tx == nil {
+		return false, errors.New("run completion delivery proof requires bound owners and transaction")
+	}
+	var state string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid FOR UPDATE`, runID).Scan(&state); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
+		return false, err
+	}
+	parsed, err := runtimerunlifecycle.ParseState(state)
+	if err != nil {
+		return false, err
+	}
+	if parsed != runtimerunlifecycle.StateRunning {
+		return true, nil
+	}
+	barriers, err := s.pipeline.SummarizeFanOutDeliveryBarriersRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	if barriers.Armed != 0 || barriers.ClosedPending != 0 {
+		return true, nil
+	}
+	delivery, err := s.delivery.SummarizeRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	if err := delivery.Validate(); err != nil {
+		return false, err
+	}
+	if !delivery.Settled() {
+		return false, nil
+	}
+	pipeline, err := s.pipeline.SummarizeRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	if err := pipeline.Validate(); err != nil {
+		return false, err
+	}
+	if pipeline.HasOpenWork() {
+		return false, nil
+	}
+	var selectedNow time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&selectedNow); err != nil {
+		return false, err
+	}
+	fanOut, err := s.pipeline.SummarizeFanOutRunTx(ctx, tx, runID, selectedNow)
+	if err != nil {
+		return false, err
+	}
+	if err := fanOut.Validate(); err != nil {
+		return false, err
+	}
+	return fanOut.Open == 0 && fanOut.Blocked == 0 && fanOut.Owed == 0 && fanOut.Unsettled == 0, nil
+}
+
+func (s *RunLifecycleSQLiteOwner) SettlementNeedsCompletionTx(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
+	if s == nil || s.delivery == nil || s.pipeline == nil || tx == nil {
+		return false, errors.New("run completion delivery proof requires bound owners and transaction")
+	}
+	var state string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=?`, runID).Scan(&state); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
+		return false, err
+	}
+	parsed, err := runtimerunlifecycle.ParseState(state)
+	if err != nil {
+		return false, err
+	}
+	if parsed != runtimerunlifecycle.StateRunning {
+		return true, nil
+	}
+	barriers, err := s.pipeline.SummarizeFanOutDeliveryBarriersRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	if barriers.Armed != 0 || barriers.ClosedPending != 0 {
+		return true, nil
+	}
+	delivery, err := s.delivery.SummarizeRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	if err := delivery.Validate(); err != nil {
+		return false, err
+	}
+	if !delivery.Settled() {
+		return false, nil
+	}
+	pipeline, err := s.pipeline.SummarizeRunTx(ctx, tx, runID)
+	if err != nil {
+		return false, err
+	}
+	if err := pipeline.Validate(); err != nil {
+		return false, err
+	}
+	if pipeline.HasOpenWork() {
+		return false, nil
+	}
+	fanOut, err := s.pipeline.SummarizeFanOutRunTx(ctx, tx, runID, s.now())
+	if err != nil {
+		return false, err
+	}
+	if err := fanOut.Validate(); err != nil {
+		return false, err
+	}
+	return fanOut.Open == 0 && fanOut.Blocked == 0 && fanOut.Owed == 0 && fanOut.Unsettled == 0, nil
+}
 
 func (s *RunLifecyclePostgresOwner) RegisterCompletionCandidateSink(
 	ctx context.Context,
@@ -445,6 +563,7 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CompletionResult, error) {
+		transactiontest.Mark(txctx, transactiontest.RunCompletionCandidate)
 		var outcome runtimerunlifecycle.CompletionResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
 			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog)
@@ -472,6 +591,7 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite execute run completion candidate", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimerunlifecycle.CompletionResult, error) {
+		transactiontest.Mark(txctx, transactiontest.RunCompletionCandidate)
 		var outcome runtimerunlifecycle.CompletionResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) (err error) {
 			outcome, err = s.executeCompletionCandidateTx(txctx, tx, attempt, candidate, catalog)

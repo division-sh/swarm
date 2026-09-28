@@ -59,6 +59,17 @@ func (s *drainReadStore) ObserveDeliveryContinuation(ctx context.Context, _ runt
 	return runtimedelivery.ContinuationObservation{DeliveryID: id, Disposition: runtimedelivery.ClaimDeferred}, s.read(ctx, "held")
 }
 
+func (s *drainReadStore) ObserveDeliveryContinuations(ctx context.Context, _ runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	if err := s.read(ctx, "held"); err != nil {
+		return nil, err
+	}
+	observations := make([]runtimedelivery.ContinuationObservation, 0, len(deliveryIDs))
+	for _, deliveryID := range deliveryIDs {
+		observations = append(observations, runtimedelivery.ContinuationObservation{DeliveryID: deliveryID, Disposition: runtimedelivery.ClaimDeferred})
+	}
+	return observations, nil
+}
+
 func (s *drainReadStore) StandingRunRestartDisposition(ctx context.Context, _ string) (runtimepipeline.StandingRestartDisposition, error) {
 	return runtimepipeline.StandingRestartDisposition{}, s.read(ctx, "standing")
 }

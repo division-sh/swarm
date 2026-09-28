@@ -43,6 +43,7 @@ profiles:
       - catalog-required-verify
       - local-catalog-smoke
       - local-generated-fanout-fixture
+      - local-fanout-handoff-ack-loss
       - local-api-matrix-registry
       - local-api-routing-canaries
       - local-routing-reporter
@@ -306,6 +307,14 @@ units:
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
+  local-fanout-handoff-ack-loss:
+    packages: [github.com/division-sh/swarm/internal/runtime/conformance]
+    run: '^TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores$'
+    required_children:
+      TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores: [sqlite, postgres]
+    count_mode: count-1
+    environment_id: local-postgres-gateway-empty-v1
+    budget_class: full
   local-api-matrix-registry:
     packages: [github.com/division-sh/swarm/internal/apiv1]
     run: '^TestPublicSurfaceBackendMatrixCoversSelectedBackendRows$'
@@ -323,16 +332,17 @@ units:
     budget_class: full
   local-routing-reporter:
     packages: [github.com/division-sh/swarm/internal/serveapp]
-    run: '^TestIssue2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores)$'
+    run: '^TestIssue2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores|ServedReporterTransactionCensusBothStores)$'
     required_children:
       TestIssue2394ServedFanOutSupportedSurfacesBothStores: [sqlite, postgres]
       TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores: [sqlite/run.start, sqlite/event.publish, postgres/run.start, postgres/event.publish]
+      TestIssue2394ServedReporterTransactionCensusBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
   local-delivery-continuation:
     packages: [github.com/division-sh/swarm/internal/runtime/deliverycontinuation]
-    run: '^TestCoordinator(HeldDispatchDoesNotBlockIndependentDelivery|RetirementCancellationIsNotReportedAsExecutionFailure|StopsAfterFatalDispatchWithoutPolling)$'
+    run: '^TestCoordinator(HeldDispatchDoesNotBlockIndependentDelivery|QueuedDispatchOwnsQuiescenceUntilJoined|CapacityBoundedScanResumesNextPage|ReconcilesMissingEntriesInBoundedExactBatches|RejectsMismatchedBatchedObservationIdentity|RetirementCancellationIsNotReportedAsExecutionFailure|StopsAfterFatalDispatchWithoutPolling)$'
     count_mode: count-1
     environment_id: local-postgres-gateway-empty-v1
     budget_class: full
@@ -741,7 +751,7 @@ units:
   serveapp-i-reporter:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestIssue2394ServedOriginalReporter.*$'
+    run: '^TestIssue2394Served(OriginalReporter.*|ReporterTransactionCensusBothStores)$'
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

@@ -690,7 +690,7 @@ func commitFanOutChunk(
 	postgres bool,
 	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error)) mutationprotocol.Result[runtimepipeline.CommittedFanOutChunk],
 	observeNow func() time.Time,
-	candidateWriter mutationprotocol.CandidateWriter,
+	candidateWriter completionCandidateWriter,
 	command runtimepipeline.FanOutChunkCommand,
 ) (runtimepipeline.CommittedFanOutChunk, error) {
 	if err := command.Validate(); err != nil {
@@ -837,8 +837,14 @@ func commitFanOutChunk(
 			intent.ClaimOwner, intent.LeaseExpiresAt = "", time.Time{}
 			result.Intent = intent
 			if status == fanoutobligation.StatusClosed {
-				if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.Claim.Key.RunID, nil); err != nil {
+				needed, err := candidateWriter.SettlementNeedsCompletionTx(txctx, tx, command.Claim.Key.RunID)
+				if err != nil {
 					return err
+				}
+				if needed {
+					if _, err := attempt.RequestCompletion(txctx, candidateWriter, command.Claim.Key.RunID, nil); err != nil {
+						return err
+					}
 				}
 			}
 			return nil

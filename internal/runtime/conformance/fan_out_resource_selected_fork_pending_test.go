@@ -105,7 +105,7 @@ func (g *selectedDeploymentClaimGate) ClaimDelivery(ctx context.Context, authori
 func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			gate := &selectedDeploymentClaimGate{}
+			gate := &selectedDeploymentClaimGate{entered: make(chan string, 16)}
 			gate.held.Store(true)
 			settled := make(chan string, 16)
 			f := selectedDeploymentResourceFixtureWithDelivery(t, backend, "singleton", nil, func(store runtimedelivery.Store) runtimedelivery.Store {
@@ -137,6 +137,14 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 					matched = eventID == pointEventID
 				case <-waitCtx.Done():
 					t.Fatalf("R3b pipeline receipt/handoff did not commit at T: %v", waitCtx.Err())
+				}
+			}
+			for matched := false; !matched; {
+				select {
+				case eventID := <-gate.entered:
+					matched = eventID == pointEventID
+				case <-waitCtx.Done():
+					t.Fatalf("R3b receiver claim did not reach the held gate at T: %v", waitCtx.Err())
 				}
 			}
 			var deliveryID, deliveryStatus string

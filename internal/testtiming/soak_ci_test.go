@@ -52,6 +52,7 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 			if profile == testplanning.ProfileLocal {
 				allowed := map[string]string{
 					"local-generated-fanout-fixture": "^TestFanOutSemanticProofFixtureAdmitsExactProducerSites$",
+					"local-fanout-handoff-ack-loss":  "^TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores$",
 				}
 				if len(units) != len(allowed) {
 					t.Fatalf("local conformance canaries = %+v, want %d exact units", units, len(allowed))
@@ -67,7 +68,7 @@ func TestMandatorySoakCompleteDisjointPartitionAllProfiles(t *testing.T) {
 						reporter = &plan.Units[i]
 					}
 				}
-				if reporter == nil || !slices.Equal(reporter.Packages, []string{"github.com/division-sh/swarm/internal/serveapp"}) || reporter.Run != "^TestIssue2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores)$" || reporter.Skip != "" || reporter.CountMode != "count-1" || !slices.Equal(reporter.RequiredChildren["TestIssue2394ServedFanOutSupportedSurfacesBothStores"], []string{"sqlite", "postgres"}) || !slices.Equal(reporter.RequiredChildren["TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores"], []string{"sqlite/run.start", "sqlite/event.publish", "postgres/run.start", "postgres/event.publish"}) {
+				if reporter == nil || !slices.Equal(reporter.Packages, []string{"github.com/division-sh/swarm/internal/serveapp"}) || reporter.Run != "^TestIssue2394(ServedFanOutSupportedSurfacesBothStores|HeldReporterConsumerKeepsRunUnreadyBothStores|ServedReporterTransactionCensusBothStores)$" || reporter.Skip != "" || reporter.CountMode != "count-1" || !slices.Equal(reporter.RequiredChildren["TestIssue2394ServedFanOutSupportedSurfacesBothStores"], []string{"sqlite", "postgres"}) || !slices.Equal(reporter.RequiredChildren["TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores"], []string{"sqlite/run.start", "sqlite/event.publish", "postgres/run.start", "postgres/event.publish"}) || !slices.Equal(reporter.RequiredChildren["TestIssue2394ServedReporterTransactionCensusBothStores"], []string{"sqlite", "postgres"}) {
 					t.Fatalf("local reporter must remain exact two-store served canary: %+v", reporter)
 				}
 				return

@@ -719,6 +719,8 @@ type ContinuationObservation struct {
 	Invariant   error
 }
 
+const MaxContinuationObservationBatch = 64
+
 type RecoveryRunInventory struct {
 	RunID      string
 	Pending    int
@@ -888,6 +890,7 @@ type Store interface {
 	ClaimDelivery(context.Context, ExecutionAuthority, events.Event, events.DeliveryRoute) (ClaimResult, error)
 	ScanDeliveryContinuations(context.Context, ExecutionAuthority, ContinuationCursor, int) (ContinuationPage, error)
 	ObserveDeliveryContinuation(context.Context, ExecutionAuthority, string) (ContinuationObservation, error)
+	ObserveDeliveryContinuations(context.Context, ExecutionAuthority, []string) ([]ContinuationObservation, error)
 	RenewClaim(context.Context, Claim) (ClaimCommit, error)
 	BindAgentSession(context.Context, Claim, string) (ClaimCommit, error)
 	SettleSuccess(context.Context, Claim, []string, time.Duration, HandlerRuleSelectionFact) (Snapshot, error)

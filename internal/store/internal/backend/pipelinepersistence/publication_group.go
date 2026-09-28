@@ -806,7 +806,7 @@ func (g *publicationGroup) Settle(ctx context.Context, requests []pipelineobliga
 	return out, err
 }
 
-func (g *publicationGroup) candidatesAndClock() (mutationprotocol.CandidateWriter, func() time.Time) {
+func (g *publicationGroup) candidatesAndClock() (completionCandidateWriter, func() time.Time) {
 	if g.postgres != nil {
 		return g.postgres.RunLifecyclePostgresOwner, func() time.Time { return time.Now().UTC() }
 	}

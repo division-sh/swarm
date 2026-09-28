@@ -19,6 +19,8 @@ const (
 	FanOutProducer               Operation = "fan_out_producer"
 	FanOutLoad                   Operation = "fan_out_load"
 	FanOutObservation            Operation = "fan_out_observation"
+	DeliveryContinuationScan     Operation = "delivery_continuation_scan"
+	DeliveryContinuationObserve  Operation = "delivery_continuation_observe"
 	FanOutRetry                  Operation = "fan_out_retry"
 	FanOutBlock                  Operation = "fan_out_block"
 	FanOutRelease                Operation = "fan_out_release"
@@ -29,6 +31,7 @@ const (
 	PipelineLoad                 Operation = "pipeline_load"
 	RunExecutionInspection       Operation = "run_execution_inspection"
 	SourceSetLoad                Operation = "source_set_load"
+	RunCompletionCandidate       Operation = "run_completion_candidate"
 )
 
 type DelayScope string

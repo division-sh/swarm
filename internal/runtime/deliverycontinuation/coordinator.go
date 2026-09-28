@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -14,8 +15,8 @@ import (
 )
 
 const (
-	scanPageSize     = 200
-	dispatchWorkers  = 4
+	scanPageSize     = 32
+	dispatchWorkers  = 2
 	dispatchCapacity = 8
 )
 
@@ -52,6 +53,7 @@ type dispatchJob struct {
 	deliveryID string
 	event      events.Event
 	route      events.DeliveryRoute
+	lease      *worklifetime.Lease
 }
 
 // Coordinator is the one execution-generation owner for executable
@@ -79,6 +81,9 @@ type Coordinator struct {
 	jobs          chan dispatchJob
 	workers       sync.WaitGroup
 	rescanNeeded  bool
+	scanCursor    runtimedelivery.ContinuationCursor
+	scanSeen      map[string]struct{}
+	scanSkipped   bool
 }
 
 func New(
@@ -185,7 +190,7 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	for range dispatchWorkers {
 		go c.dispatch(runCtx)
 	}
-	next, wake, err := c.scan(runCtx)
+	next, wake, err := c.scan(runCtx, true)
 	if err != nil {
 		return c.finish(runCtx, cancel, lease, fmt.Errorf("enumerate delivery continuations before readiness: %w", err), false)
 	}
@@ -462,7 +467,7 @@ func (c *Coordinator) run(ctx context.Context, next time.Duration, wake bool) er
 			timer.Stop()
 			timer = nil
 		}
-		next, wake, err = c.scan(ctx)
+		next, wake, err = c.scan(ctx, synchronized != nil)
 		if err == nil {
 			c.mu.Lock()
 			if c.retired {
@@ -495,9 +500,22 @@ func (c *Coordinator) finish(ctx context.Context, cancel context.CancelFunc, lea
 	retired := c.retired
 	c.retired = true
 	c.mu.Unlock()
-	canceledAsOrdinary := ordinaryCoordinatorStop(ctx, err, retired)
 	cancel()
 	c.workers.Wait()
+	for {
+		select {
+		case job := <-c.jobs:
+			if job.lease != nil {
+				if doneErr := job.lease.Done(); doneErr != nil {
+					err = errors.Join(err, doneErr)
+				}
+			}
+		default:
+			goto drained
+		}
+	}
+drained:
+	canceledAsOrdinary := ordinaryCoordinatorStop(ctx, err, retired)
 	c.mu.Lock()
 	workerFailure := c.workerFailure
 	c.mu.Unlock()
@@ -581,7 +599,7 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 			return
 		case job := <-c.jobs:
 			if ctx.Err() != nil {
-				c.completeDispatch(job.deliveryID, nil)
+				c.completeDispatch(job.deliveryID, job.lease.Done())
 				return
 			}
 			result := c.dispatcher.DispatchDeliveryContinuation(ctx, job.event, job.route)
@@ -602,6 +620,7 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 			if ctx.Err() != nil && ordinaryCoordinatorStop(ctx, err, true) {
 				err = nil
 			}
+			err = errors.Join(err, job.lease.Done())
 			c.completeDispatch(job.deliveryID, err)
 			if err != nil {
 				return
@@ -616,8 +635,10 @@ func (c *Coordinator) completeDispatch(deliveryID string, err error) {
 	if err != nil {
 		c.workerFailure = errors.Join(c.workerFailure, err)
 	}
-	wake := err != nil || c.rescanNeeded
-	c.rescanNeeded = false
+	wake := err != nil || (c.rescanNeeded && len(c.reserved) <= dispatchCapacity/2)
+	if wake {
+		c.rescanNeeded = false
+	}
 	c.mu.Unlock()
 	if wake {
 		c.Signal()
@@ -640,16 +661,26 @@ func (c *Coordinator) schedule(ctx context.Context, item runtimedelivery.Continu
 		c.rescanNeeded = true
 		return nil
 	}
+	lease, err := c.workOwner.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("admit delivery continuation dispatch %s: %w", item.DeliveryID, err)
+	}
 	c.reserved[item.DeliveryID] = struct{}{}
-	c.jobs <- dispatchJob{deliveryID: item.DeliveryID, event: item.Event, route: item.Snapshot.Route}
+	c.jobs <- dispatchJob{deliveryID: item.DeliveryID, event: item.Event, route: item.Snapshot.Route, lease: lease}
 	return nil
 }
 
-func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
+func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration, bool, error) {
 	var cursor runtimedelivery.ContinuationCursor
 	var next time.Duration
 	var wake bool
 	seen := make(map[string]struct{})
+	if !exhaustive {
+		cursor = c.scanCursor
+		for deliveryID := range c.scanSeen {
+			seen[deliveryID] = struct{}{}
+		}
+	}
 	for {
 		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
@@ -716,8 +747,26 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 		if page.Exhausted {
 			break
 		}
+		if !exhaustive && c.deferRemainderAtCapacity() {
+			c.scanCursor = page.Next
+			c.scanSeen = seen
+			c.scanSkipped = true
+			return next, wake, nil
+		}
 		cursor = page.Next
 	}
+	if !exhaustive && c.scanSkipped {
+		c.mu.Lock()
+		if len(c.reserved) <= dispatchCapacity/2 {
+			next, wake = earlierWake(next, wake, 0)
+		} else {
+			c.rescanNeeded = true
+		}
+		c.mu.Unlock()
+	}
+	c.scanCursor = runtimedelivery.ContinuationCursor{}
+	c.scanSeen = nil
+	c.scanSkipped = false
 	reconcileNext, reconcileWake, err := c.reconcileHeld(ctx, seen)
 	if err != nil {
 		return 0, false, err
@@ -726,6 +775,16 @@ func (c *Coordinator) scan(ctx context.Context) (time.Duration, bool, error) {
 		next, wake = earlierWake(next, wake, reconcileNext)
 	}
 	return next, wake, nil
+}
+
+func (c *Coordinator) deferRemainderAtCapacity() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.reserved) < dispatchCapacity {
+		return false
+	}
+	c.rescanNeeded = true
+	return true
 }
 
 func (c *Coordinator) observe(deliveryID string) error {
@@ -777,41 +836,58 @@ func (c *Coordinator) heldEntries() map[string]entry {
 func (c *Coordinator) reconcileHeld(ctx context.Context, seen map[string]struct{}) (time.Duration, bool, error) {
 	var next time.Duration
 	var wake bool
-	for deliveryID, observed := range c.heldEntries() {
+	held := c.heldEntries()
+	missing := make([]string, 0, len(held))
+	for deliveryID := range held {
 		if _, current := seen[deliveryID]; current {
 			continue
 		}
+		missing = append(missing, deliveryID)
+	}
+	slices.Sort(missing)
+	for start := 0; start < len(missing); start += runtimedelivery.MaxContinuationObservationBatch {
+		end := min(start+runtimedelivery.MaxContinuationObservationBatch, len(missing))
+		batch := missing[start:end]
 		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
 		}
-		observation, err := c.store.ObserveDeliveryContinuation(context.WithoutCancel(ctx), c.authority, deliveryID)
+		observations, err := c.store.ObserveDeliveryContinuations(context.WithoutCancel(ctx), c.authority, batch)
 		if err != nil {
 			return 0, false, err
 		}
 		if err := c.scanStopError(ctx); err != nil {
 			return 0, false, err
 		}
-		if after, ok := observation.Wake.After(); ok {
-			next, wake = earlierWake(next, wake, after)
+		if len(observations) != len(batch) {
+			return 0, false, fmt.Errorf("delivery continuation observation batch returned %d entries for %d identities", len(observations), len(batch))
 		}
-		switch observation.Disposition {
-		case runtimedelivery.ClaimTerminal:
-			if err := c.releaseTerminal(deliveryID); err != nil {
-				return 0, false, err
+		for i, observation := range observations {
+			deliveryID := batch[i]
+			if observation.DeliveryID != deliveryID {
+				return 0, false, fmt.Errorf("delivery continuation observation %s returned identity %s", deliveryID, observation.DeliveryID)
 			}
-		case runtimedelivery.ClaimAcquired, runtimedelivery.ClaimReclaimable:
-			if c.reclaimAttempt(deliveryID, observed) {
-				next, wake = earlierWake(next, wake, 0)
+			if after, ok := observation.Wake.After(); ok {
+				next, wake = earlierWake(next, wake, after)
 			}
-		case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
-		case runtimedelivery.ClaimWrongAuthority:
-			return 0, false, fmt.Errorf("continuation %s crossed execution authority", deliveryID)
-		case runtimedelivery.ClaimAbsent:
-			return 0, false, fmt.Errorf("continuation %s has no durable delivery", deliveryID)
-		case runtimedelivery.ClaimInvariantInvalid:
-			return 0, false, fmt.Errorf("continuation %s violates durable invariant: %w", deliveryID, observation.Invariant)
-		default:
-			return 0, false, fmt.Errorf("continuation %s has unknown disposition %q", deliveryID, observation.Disposition)
+			switch observation.Disposition {
+			case runtimedelivery.ClaimTerminal:
+				if err := c.releaseTerminal(deliveryID); err != nil {
+					return 0, false, err
+				}
+			case runtimedelivery.ClaimAcquired, runtimedelivery.ClaimReclaimable:
+				if c.reclaimAttempt(deliveryID, held[deliveryID]) {
+					next, wake = earlierWake(next, wake, 0)
+				}
+			case runtimedelivery.ClaimDeferred, runtimedelivery.ClaimBusy:
+			case runtimedelivery.ClaimWrongAuthority:
+				return 0, false, fmt.Errorf("continuation %s crossed execution authority", deliveryID)
+			case runtimedelivery.ClaimAbsent:
+				return 0, false, fmt.Errorf("continuation %s has no durable delivery", deliveryID)
+			case runtimedelivery.ClaimInvariantInvalid:
+				return 0, false, fmt.Errorf("continuation %s violates durable invariant: %w", deliveryID, observation.Invariant)
+			default:
+				return 0, false, fmt.Errorf("continuation %s has unknown disposition %q", deliveryID, observation.Disposition)
+			}
 		}
 	}
 	return next, wake, nil
