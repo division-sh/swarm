@@ -15110,6 +15110,12 @@ platform_tables:
         may have several compatible activation consumers. Unknown launched writes remain durable
         and block overlapping successor writes and usable readiness, even if a later readback
         happens to match. Retirement is local only and never deletes a remote command.
+        A compatible current successor may reclaim a locally retired generation only when its
+        original install has settled, its retained readback hash matches the exact desired
+        commands, and a fresh provider readback still matches. This reuses the same command
+        without a new write; a mismatch becomes unavailable, while an uncertain predecessor
+        remains non-usable. An incompatible or never-installed retired setting cannot borrow
+        that readback or entry authority.
         Successfully recording an uncertain setting outcome is not successful installation:
         delivery readiness requires the exact acknowledged write and successful readback,
         and readback failure or mismatch remains non-usable.
