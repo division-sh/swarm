@@ -14939,6 +14939,12 @@ platform_tables:
         previously used destination. The first verified connection also freezes one bounded
         count-only summary of older pending notices; those notices are never planned individually.
         A response plan is a separate, inbound-publication-owned readback responsibility.
+        A card plan pins the compiled channel's finite action capacity before its first render.
+        When all controls do not fit, one immutable action page is visible at a time and a
+        More choices control cycles through every page on the same card receipt. The selected
+        page visit is durable and monotonic even when visible choices cycle, and a canonical
+        card change resets it before a new render. Every visit has a distinct frozen render;
+        old-page action tokens never regain current mutation authority.
         It freezes its complete presentation in the render ledger and targets only the
         current authenticated conversation that requested it, which need not be the default.
         A native entry or summary Open inbox action traverses the canonical mixed mailbox
@@ -14968,6 +14974,8 @@ platform_tables:
             state TEXT NOT NULL CHECK (state IN ('planned','rendered','sent','uncertain','retired')),
             current_render_id UUID,
             current_receipt_operation_id UUID,
+            action_capacity BIGINT NOT NULL DEFAULT 0 CHECK (action_capacity >= 0),
+            action_page_index BIGINT NOT NULL DEFAULT 0 CHECK (action_page_index >= 0),
             resend_generation BIGINT NOT NULL DEFAULT 0 CHECK (resend_generation >= 0),
             resend_of_delivery_id UUID REFERENCES channel_delivery_plans(delivery_id),
             resend_action_publication_id UUID UNIQUE,
@@ -15048,7 +15056,7 @@ platform_tables:
             action_token UUID PRIMARY KEY,
             render_id UUID NOT NULL REFERENCES channel_delivery_renders(render_id),
             action_position INTEGER NOT NULL CHECK (action_position > 0),
-            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice','cancel_input','skip_input','select_draft','next_draft_page','resend','next_recovery_page')),
+            action_kind TEXT NOT NULL CHECK (action_kind IN ('verdict','view_full','open_inbox','next_page','acknowledge_notice','cancel_input','skip_input','select_draft','next_draft_page','resend','next_recovery_page','more_controls')),
             verdict TEXT,
             label TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL,

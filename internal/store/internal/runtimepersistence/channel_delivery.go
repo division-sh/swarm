@@ -426,6 +426,18 @@ func (s *PostgresStore) PlanChannelActionResponse(ctx context.Context, action op
 	return deliveryID, err
 }
 
+func (s *PostgresStore) AdvanceChannelCardActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("postgres channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.AdvanceCardActionPageTx(txctx, tx, action, resolved, true)
+	})
+}
+
 func (s *PostgresStore) PlanManualChannelResend(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) (string, error) {
 	if s == nil || s.backend == nil {
 		return "", fmt.Errorf("postgres manual channel resend store is unavailable")
@@ -838,6 +850,18 @@ func (s *SQLiteRuntimeStore) PlanChannelActionResponse(ctx context.Context, acti
 	return deliveryID, err
 }
 
+func (s *SQLiteRuntimeStore) AdvanceChannelCardActionPage(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("sqlite channel delivery store is unavailable")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, "advance channel card action page", func(txctx context.Context, tx *sql.Tx) error {
+		return channeldelivery.AdvanceCardActionPageTx(txctx, tx, action, resolved, false)
+	})
+}
+
 func (s *SQLiteRuntimeStore) PlanManualChannelResend(ctx context.Context, action operatorchannel.InboundAction, resolved render.ResolvedAction) (string, error) {
 	if s == nil || s.backend == nil {
 		return "", fmt.Errorf("sqlite manual channel resend store is unavailable")
@@ -899,7 +923,7 @@ func (s *SQLiteRuntimeStore) PlanChangedChannelCard(ctx context.Context, sequenc
 	})
 }
 
-func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string) (render.PreparedRender, error) {
+func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string, capacity int) (render.PreparedRender, error) {
 	if s == nil || s.backend == nil {
 		return render.PreparedRender{}, fmt.Errorf("postgres channel delivery store is unavailable")
 	}
@@ -909,13 +933,13 @@ func (s *PostgresStore) FreezeAndPersistChannelRender(ctx context.Context, deliv
 	var stored render.PreparedRender
 	err := s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, true)
+		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, capacity, true)
 		return err
 	})
 	return stored, err
 }
 
-func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string) (render.PreparedRender, error) {
+func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, deliveryID string, capacity int) (render.PreparedRender, error) {
 	if s == nil || s.backend == nil {
 		return render.PreparedRender{}, fmt.Errorf("sqlite channel delivery store is unavailable")
 	}
@@ -925,19 +949,27 @@ func (s *SQLiteRuntimeStore) FreezeAndPersistChannelRender(ctx context.Context, 
 	var stored render.PreparedRender
 	err := s.backend.RunTransaction(ctx, "freeze channel delivery render", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, false)
+		stored, err = freezeAndPersistChannelRenderTx(txctx, tx, deliveryID, capacity, false)
 		return err
 	})
 	return stored, err
 }
 
-func freezeAndPersistChannelRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, postgres bool) (render.PreparedRender, error) {
+func freezeAndPersistChannelRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, capacity int, postgres bool) (render.PreparedRender, error) {
+	if capacity > 0 {
+		if err := channeldelivery.SetActionCapacityTx(ctx, tx, deliveryID, capacity, postgres); err != nil {
+			return render.PreparedRender{}, err
+		}
+	}
 	plan, found, err := channeldelivery.LoadPlan(ctx, tx, deliveryID, postgres)
 	if err != nil {
 		return render.PreparedRender{}, err
 	}
 	if !found {
 		return render.PreparedRender{}, fmt.Errorf("channel delivery plan %s is missing", deliveryID)
+	}
+	if plan.SourceKind == channeldelivery.PlanCard && plan.ActionCapacity == 0 {
+		return render.PreparedRender{}, fmt.Errorf("channel card lacks selected action capacity")
 	}
 	var frozen render.Frozen
 	frozen, err = channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
