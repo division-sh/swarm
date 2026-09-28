@@ -799,6 +799,7 @@ func (*sqliteFlowActivationBus) PrepareAgentRoute(
 
 func (*sqliteFlowActivationBus) FenceAgentRoute(runtimeeffects.LifecycleToken)  {}
 func (*sqliteFlowActivationBus) RemoveAgentRoute(runtimeeffects.LifecycleToken) {}
+func (*sqliteFlowActivationBus) SignalDeliveryContinuations()                   {}
 
 func (b *sqliteFlowActivationBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.mu.Lock()
