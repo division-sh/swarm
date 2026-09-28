@@ -30,6 +30,14 @@ func BuildDurableDataCatalog(bundle *WorkflowContractBundle) (durabledata.Catalo
 			SchemaDigest: declaration.SchemaDigest, CanonicalSchema: append([]byte(nil), declaration.CanonicalSchema...),
 		})
 	}
+	shapeCatalog, err := BuildDurableDataImportShapeCatalog(bundle)
+	if err != nil {
+		return durabledata.Catalog{}, err
+	}
+	if shapeCatalog.BundleHash != catalog.BundleHash || len(shapeCatalog.Shapes) != len(catalog.Declarations) {
+		return durabledata.Catalog{}, fmt.Errorf("compiled import shapes do not cover exact bundle declarations")
+	}
+	catalog.ImportShapes = shapeCatalog.Shapes
 	if bundle.SourceArtifact == nil {
 		return durabledata.Catalog{}, fmt.Errorf("workflow contract bundle has no admitted source artifact")
 	}
@@ -91,6 +99,64 @@ func BuildDurableDataCatalog(bundle *WorkflowContractBundle) (durabledata.Catalo
 		})
 	}
 	return catalog, nil
+}
+
+// BuildDurableDataImportShapeCatalog projects typed file-import eligibility
+// from the same admitted compiled events as the ordinary declaration catalog.
+func BuildDurableDataImportShapeCatalog(bundle *WorkflowContractBundle) (durabledata.ImportShapeCatalog, error) {
+	if bundle == nil {
+		return durabledata.ImportShapeCatalog{}, fmt.Errorf("workflow contract bundle is required")
+	}
+	bundleHash, err := BundleHash(bundle)
+	if err != nil {
+		return durabledata.ImportShapeCatalog{}, err
+	}
+	compiled, err := bundle.CompiledEventSchemas()
+	if err != nil {
+		return durabledata.ImportShapeCatalog{}, err
+	}
+	catalog := durabledata.ImportShapeCatalog{BundleHash: bundleHash}
+	for _, event := range compiled {
+		declaration, ok := bundle.DurableDataDeclarationByName(event.FlowPath(), event.EventName())
+		if !ok {
+			return durabledata.ImportShapeCatalog{}, fmt.Errorf("compiled event %s:%s has no durable data declaration", event.FlowPath(), event.EventName())
+		}
+		structural, ok := event.StructuralType()
+		if !ok || (structural.Kind != CatalogTypeObject && !(structural.Kind == CatalogTypeDynamic && len(event.Fields()) == 0)) {
+			return durabledata.ImportShapeCatalog{}, fmt.Errorf("compiled event %s:%s has no top-level object shape", event.FlowPath(), event.EventName())
+		}
+		shape := durabledata.ImportShape{
+			BundleHash: bundleHash, Declaration: declaration.Ref,
+			SchemaDigest: declaration.SchemaDigest, BusinessKey: declaration.BusinessKey,
+		}
+		types := bundle.ResolvedTypeCatalogForFlow(event.FlowPath())
+		for _, field := range structural.Fields {
+			shape.Fields = append(shape.Fields, durabledata.ImportShapeField{
+				Name: field.Name, Required: !field.IsOptional, Text: compiledFileTextField(field, types),
+			})
+		}
+		sort.Slice(shape.Fields, func(i, j int) bool { return shape.Fields[i].Name < shape.Fields[j].Name })
+		if err := shape.Validate(); err != nil {
+			return durabledata.ImportShapeCatalog{}, err
+		}
+		catalog.Shapes = append(catalog.Shapes, shape)
+	}
+	if err := catalog.Validate(); err != nil {
+		return durabledata.ImportShapeCatalog{}, err
+	}
+	return catalog, nil
+}
+
+func compiledFileTextField(field ResolvedCatalogField, types TypeCatalogDocument) bool {
+	if field.Type.Kind != CatalogTypeText {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(eventTypeName(types, field.TypeRef))) {
+	case "text", "string":
+		return true
+	default:
+		return false
+	}
 }
 
 func staticDataEntryOwner(bundle *WorkflowContractBundle, label string) (string, string, bool) {

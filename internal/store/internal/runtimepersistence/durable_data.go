@@ -98,6 +98,14 @@ func (s *SQLiteRuntimeStore) ListDataDeclarationSummaries(ctx context.Context, b
 	return s.durableDataOwner.ListDeclarationSummaries(ctx, bundleHash)
 }
 
+func (s *PostgresStore) GetDeclarationImportShape(ctx context.Context, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.ImportShape, error) {
+	return s.durableDataOwner.GetDeclarationImportShape(ctx, bundleHash, ref)
+}
+
+func (s *SQLiteRuntimeStore) GetDeclarationImportShape(ctx context.Context, bundleHash string, ref runtimedata.DeclarationRef) (runtimedata.ImportShape, error) {
+	return s.durableDataOwner.GetDeclarationImportShape(ctx, bundleHash, ref)
+}
+
 func (s *PostgresStore) ListDataVersionSummaries(ctx context.Context, ref runtimedata.DeclarationRef, afterSequence uint64, limit int) ([]runtimedata.VersionSummary, error) {
 	return s.durableDataOwner.ListVersionSummaries(ctx, ref, afterSequence, limit)
 }

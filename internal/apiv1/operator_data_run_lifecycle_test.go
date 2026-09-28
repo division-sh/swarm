@@ -41,6 +41,7 @@ type dataRunLifecycleStore interface {
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
 	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
+	GetDeclarationImportShape(context.Context, string, durabledata.DeclarationRef) (durabledata.ImportShape, error)
 	ListDataVersionSummaries(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.VersionSummary, error)
 	ResolveDataVersionSummary(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, error)
 	ResolveDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error)
@@ -73,6 +74,125 @@ func forEachDataRunLifecycleStore(t *testing.T, run func(*testing.T, dataRunLife
 		primary := storetest.AdmitPostgresRuntimeStore(t, db)
 		reconstructed := storetest.AdmitPostgresRuntimeStore(t, db)
 		run(t, dataRunLifecycleFixture{primary: primary, reconstructed: reconstructed, db: db})
+	})
+}
+
+func TestRunCreationRequestBindingAcrossSelectedStores(t *testing.T) {
+	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
+		ctx := context.Background()
+		catalog, scanRef, scoreRef := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
+		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
+			t.Fatal(err)
+		}
+		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		bus, err := newScopedAPITestEventBus(t, fixture.primary, runStartTestEventBusOptions(source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, catalog); err != nil {
+			t.Fatal(err)
+		}
+		handler := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
+		showBinding := func(runID string) durabledata.RunCreationRequestBinding {
+			t.Helper()
+			result, err := executeDataShowOperation(ctx, map[string]any{
+				"view": "operation", "detail": "request_binding",
+				"operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
+			}, fixture.reconstructed)
+			if err != nil {
+				t.Fatalf("show request binding: %v", err)
+			}
+			binding, ok := result.(durabledata.RunCreationRequestBinding)
+			if !ok {
+				t.Fatalf("request binding type = %T", result)
+			}
+			return binding
+		}
+
+		runID := uuid.NewString()
+		sourceID := uuid.NewString()
+		input := []byte("{\"topic\":\"private-payload\"}\n")
+		data := map[string]any{"imports": []any{dataRunFusedImport(sourceID, scanRef, durabledata.AbsentHead(), input)}, "pins": []any{}}
+		if response := rpcCall(t, handler, dataRunEventPublishBody(runID, uuid.NewString(), data)); response.Error != nil {
+			t.Fatalf("create fused run: %#v", response.Error)
+		}
+		binding := showBinding(runID)
+		stored, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
+		if err != nil || stored.RequestBinding == nil || stored.RequestBinding.RequestHash != binding.RequestHash {
+			t.Fatalf("selected-store binding = %#v, %v", stored.RequestBinding, err)
+		}
+		if binding.RunID != runID || binding.BundleHash != runStartTestBundleHash || len(binding.Imports) != 1 ||
+			binding.Imports[0].SourceInvocationID != sourceID || binding.Imports[0].Declaration != scanRef ||
+			binding.Imports[0].ExpectedHead != durabledata.AbsentHead() || len(binding.Pins) != 0 {
+			t.Fatalf("created request binding = %#v", binding)
+		}
+		sourceReceipt, err := fixture.reconstructed.LoadDataSourceOperation(ctx, sourceID)
+		if err != nil || binding.Imports[0].SchemaDigest != sourceReceipt.Result.SchemaDigest {
+			t.Fatalf("created request schema = %q, source = %#v, %v", binding.Imports[0].SchemaDigest, sourceReceipt.Result.SchemaDigest, err)
+		}
+		var storedHash string
+		query := "SELECT request_hash FROM resource_run_creation_operations WHERE run_id = ?"
+		if _, ok := fixture.primary.(*store.PostgresStore); ok {
+			query = "SELECT request_hash FROM resource_run_creation_operations WHERE run_id = $1"
+		}
+		if err := fixture.db.QueryRowContext(ctx, query, runID).Scan(&storedHash); err != nil || binding.RequestHash != storedHash {
+			t.Fatalf("binding hash = %q, stored = %q, error = %v", binding.RequestHash, storedHash, err)
+		}
+		raw, err := json.Marshal(binding)
+		if err != nil || strings.Contains(string(raw), "private-payload") || strings.Contains(string(raw), "actor") || strings.Contains(string(raw), "initial_event") {
+			t.Fatalf("request binding leaks payload: %s, %v", raw, err)
+		}
+
+		rejectedID := uuid.NewString()
+		missingA := durabledata.VersionID("resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		missingB := durabledata.VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+		rejectedData := map[string]any{"imports": []any{}, "pins": []any{
+			map[string]any{"declaration": dataRunDeclaration(scanRef), "version_id": missingA},
+			map[string]any{"declaration": dataRunDeclaration(scoreRef), "version_id": missingB},
+		}}
+		response := rpcCall(t, handler, dataRunEventPublishBody(rejectedID, uuid.NewString(), rejectedData))
+		if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeRunDataRejected) {
+			t.Fatalf("two-pin rejection = %#v", response)
+		}
+		rejected := showBinding(rejectedID)
+		if rejected.RunID != rejectedID || rejected.BundleHash != runStartTestBundleHash || len(rejected.Pins) != 2 ||
+			rejected.Pins[0].Declaration != scanRef || rejected.Pins[0].VersionID != missingA ||
+			rejected.Pins[1].Declaration != scoreRef || rejected.Pins[1].VersionID != missingB {
+			t.Fatalf("rejected request binding = %#v", rejected)
+		}
+		receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, rejectedID)
+		if err != nil || receipt.Summary.Outcome != "data_rejected" || len(receipt.Evidence.RunBinding) != 0 || receipt.Summary.PinCount != 0 {
+			t.Fatalf("rejected public receipt = %#v, %v", receipt, err)
+		}
+		if _, err := executeDataShowOperation(ctx, map[string]any{
+			"view": "operation", "detail": "request_binding", "page": map[string]any{"limit": 1},
+			"operation_ref": map[string]any{"kind": "run_creation", "run_id": rejectedID},
+		}, fixture.reconstructed); err == nil {
+			t.Fatal("request binding accepted a page")
+		}
+		missingID := uuid.NewString()
+		_, err = executeDataShowOperation(ctx, map[string]any{
+			"view": "operation", "detail": "request_binding",
+			"operation_ref": map[string]any{"kind": "run_creation", "run_id": missingID},
+		}, fixture.reconstructed)
+		var appErr *ApplicationError
+		if !errors.As(err, &appErr) || appErr.Code != string(durabledata.CodeOperationMissing) {
+			t.Fatalf("missing binding error = %v, want %s", err, durabledata.CodeOperationMissing)
+		}
+		update := "UPDATE resource_run_creation_operations SET request_hash = ? WHERE run_id = ?"
+		if _, ok := fixture.primary.(*store.PostgresStore); ok {
+			update = "UPDATE resource_run_creation_operations SET request_hash = $1 WHERE run_id = $2"
+		}
+		if _, err := fixture.db.ExecContext(ctx, update, "resource-run-creation-request-v1:sha256:"+strings.Repeat("f", 64), rejectedID); err != nil {
+			t.Fatalf("corrupt retained hash: %v", err)
+		}
+		_, err = executeDataShowOperation(ctx, map[string]any{
+			"view": "operation", "detail": "request_binding",
+			"operation_ref": map[string]any{"kind": "run_creation", "run_id": rejectedID},
+		}, fixture.reconstructed)
+		if !errors.As(err, &appErr) || appErr.Code != string(durabledata.CodeIntegrity) {
+			t.Fatalf("corrupt binding error = %v, want %s", err, durabledata.CodeIntegrity)
+		}
 	})
 }
 
@@ -256,6 +376,18 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				parent.Summary.Rejection.Code != durabledata.RunCreationRejectionFusedValidation ||
 				len(parent.Evidence.ChildEvaluations) != 2 || parent.Summary.PinCount != 0 {
 				t.Fatalf("failed fused parent = %#v, %v", parent, err)
+			}
+			readback, err := executeDataShowOperation(ctx, map[string]any{
+				"view": "operation", "detail": "request_binding",
+				"operation_ref": map[string]any{"kind": "run_creation", "run_id": runID},
+			}, fixture.reconstructed)
+			if err != nil {
+				t.Fatalf("failed fused request binding: %v", err)
+			}
+			request := readback.(durabledata.RunCreationRequestBinding)
+			if len(request.Imports) != 2 || request.Imports[0].SchemaDigest != parent.Evidence.ChildEvaluations[0].SchemaDigest ||
+				request.Imports[1].SchemaDigest != parent.Evidence.ChildEvaluations[1].SchemaDigest {
+				t.Fatalf("failed fused request schema binding = %#v", request)
 			}
 			if _, err := fixture.reconstructed.LoadDataSourceOperation(ctx, readySourceID); err == nil {
 				t.Fatal("failed-parent ready child became a standalone source receipt")
@@ -452,7 +584,13 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				t.Fatal("fork pin owner accepted duplicate overrides")
 			}
 
-			missingCatalog := durabledata.Catalog{BundleHash: dataRunMissingBundleHash, Declarations: []durabledata.Declaration{catalog.Declarations[1]}}
+			missingShape := catalog.ImportShapes[1]
+			missingShape.BundleHash = dataRunMissingBundleHash
+			missingCatalog := durabledata.Catalog{
+				BundleHash:   dataRunMissingBundleHash,
+				Declarations: []durabledata.Declaration{catalog.Declarations[1]},
+				ImportShapes: []durabledata.ImportShape{missingShape},
+			}
 			if err := registerDataRunLifecycleCatalog(ctx, fixture.primary, missingCatalog); err != nil {
 				t.Fatalf("register target catalog without source pin declaration: %v", err)
 			}
@@ -1268,9 +1406,22 @@ func dataRunLifecycleCatalog(t *testing.T, bundleHash string, amended bool) (dur
 	if len(defects) != 0 {
 		t.Fatalf("compile score schema: %#v", defects)
 	}
+	scanFields := []durabledata.ImportShapeField{{Name: "topic", Required: true, Text: true}}
+	if amended {
+		scanFields = append([]durabledata.ImportShapeField{{Name: "stage", Required: true, Text: true}}, scanFields...)
+	}
 	return durabledata.Catalog{BundleHash: bundleHash, Declarations: []durabledata.Declaration{
 		{Name: scanRef.EventName, Ref: scanRef, SchemaDigest: scan.Manifest.SchemaDigest, CanonicalSchema: scan.CanonicalSchema},
 		{Name: scoreRef.EventName, Ref: scoreRef, BusinessKey: "label", SchemaDigest: score.Manifest.SchemaDigest, CanonicalSchema: score.CanonicalSchema},
+	}, ImportShapes: []durabledata.ImportShape{
+		{
+			BundleHash: bundleHash, Declaration: scanRef, SchemaDigest: scan.Manifest.SchemaDigest,
+			Fields: scanFields,
+		},
+		{
+			BundleHash: bundleHash, Declaration: scoreRef, SchemaDigest: score.Manifest.SchemaDigest, BusinessKey: "label",
+			Fields: []durabledata.ImportShapeField{{Name: "label", Required: true, Text: true}},
+		},
 	}}, scanRef, scoreRef
 }
 

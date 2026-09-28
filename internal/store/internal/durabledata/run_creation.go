@@ -441,10 +441,16 @@ func (o *Owner) LoadRunCreationOperation(ctx context.Context, runID string) (run
 		if !found {
 			return runtimedata.NewDomainError(runtimedata.CodeOperationMissing, "run creation operation %s does not exist", runID)
 		}
-		record, _, err = o.validateStoredRunCreationReceipt(txctx, tx, runID, stored, true)
+		var command runtimedata.RunCreationCommand
+		record, command, err = o.validateStoredRunCreationReceipt(txctx, tx, runID, stored, true)
 		if err != nil {
 			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s evidence is contradictory: %v", runID, err)
 		}
+		binding, err := runtimedata.BindRunCreationRequest(command, record)
+		if err != nil {
+			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s request binding is contradictory: %v", runID, err)
+		}
+		record.RequestBinding = &binding
 		return nil
 	})
 	return record, err

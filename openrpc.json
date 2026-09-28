@@ -4961,7 +4961,7 @@
     },
     {
       "name": "data.show",
-      "description": "Bounded typed readback for declarations, immutable versions, rows, canonical export chunks, provenance, pins, head history, and permanent source/prune/run-creation operation evidence. Every non-singleton view requires an explicit bounded page and every cursor is query-bound.\n",
+      "description": "Bounded typed readback for declarations, exact compiled import shapes, immutable versions, rows, canonical export chunks, provenance, pins, head history, and permanent source/prune/run-creation operation evidence, including the payload-free run-creation request binding. Every non-singleton view requires an explicit bounded page and every cursor is query-bound.\n",
       "params": [
         {
           "name": "view",
@@ -4969,6 +4969,7 @@
           "schema": {
             "enum": [
               "declarations",
+              "import_shape",
               "versions",
               "version",
               "rows",
@@ -4994,6 +4995,13 @@
           "required": false,
           "schema": {
             "$ref": "#/components/schemas/DataDeclarationRef"
+          }
+        },
+        {
+          "name": "schema_digest",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
           }
         },
         {
@@ -5029,6 +5037,7 @@
               "delta_changed",
               "pins",
               "run_binding",
+              "request_binding",
               "child_evaluations",
               "child_defects"
             ],
@@ -16561,6 +16570,54 @@
         ],
         "type": "object"
       },
+      "DataImportShape": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "business_key": {
+            "type": "string"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "text": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "required",
+                "text"
+              ],
+              "type": "object"
+            },
+            "maxItems": 1024,
+            "type": "array"
+          },
+          "schema_digest": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
+          }
+        },
+        "required": [
+          "bundle_hash",
+          "declaration",
+          "schema_digest",
+          "fields"
+        ],
+        "type": "object"
+      },
       "DataInput": {
         "additionalProperties": false,
         "properties": {
@@ -17300,10 +17357,77 @@
           }
         ]
       },
+      "DataRunCreationRequestBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "event_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "imports": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "declaration": {
+                  "$ref": "#/components/schemas/DataDeclarationRef"
+                },
+                "expected_head": {
+                  "$ref": "#/components/schemas/ExpectedHead"
+                },
+                "schema_digest": {
+                  "$ref": "#/components/schemas/ResourceSchemaDigest"
+                },
+                "source_invocation_id": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "source_invocation_id",
+                "declaration",
+                "schema_digest",
+                "expected_head"
+              ],
+              "type": "object"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "pins": {
+            "items": {
+              "$ref": "#/components/schemas/DataExplicitPin"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "request_hash": {
+            "pattern": "^resource-run-creation-request-v1:sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "bundle_hash",
+          "request_hash",
+          "imports",
+          "pins"
+        ],
+        "type": "object"
+      },
       "DataShowResult": {
         "oneOf": [
           {
             "$ref": "#/components/schemas/DataDeclarationPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataImportShape"
           },
           {
             "$ref": "#/components/schemas/DataVersionPage"
@@ -17349,6 +17473,9 @@
           },
           {
             "$ref": "#/components/schemas/DataFusedChildDefectPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataRunCreationRequestBinding"
           }
         ]
       },

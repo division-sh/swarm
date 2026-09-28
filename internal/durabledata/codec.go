@@ -119,7 +119,7 @@ func compileJSONL(declaration DeclarationRef, schema map[string]any, businessKey
 			continue
 		}
 		if len(canonical) > MaxCanonicalRowBytes {
-			defects = append(defects, ValidationDefect{Row: line, Path: "$", Code: "row_too_large", Message: fmt.Sprintf("canonical row exceeds %d bytes", MaxCanonicalRowBytes)})
+			defects = append(defects, ValidationDefect{Row: line, Path: "$", Code: "row_too_large", Message: fmt.Sprintf("canonical row has %d bytes; limit is %d bytes", len(canonical), MaxCanonicalRowBytes)})
 			continue
 		}
 		rows = append(rows, Row{BusinessKey: businessKey, Canonical: canonical})

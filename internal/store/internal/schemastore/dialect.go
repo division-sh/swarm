@@ -492,6 +492,7 @@ var sqlitePredicateReplacements = func() [][2]string {
 		prefix string
 	}{
 		{"schema_digest", "resource-schema-v1:sha256:"},
+		{"shape_digest", "resource-import-shape-v1:sha256:"},
 		{"content_digest", "resource-content-v1:sha256:"},
 		{"version_id", "resource-version-v1:sha256:"},
 		{"request_hash", "resource-source-request-v1:sha256:"},

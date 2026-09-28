@@ -95,6 +95,7 @@ type StaticData struct {
 type Catalog struct {
 	BundleHash   string        `json:"bundle_hash"`
 	Declarations []Declaration `json:"declarations"`
+	ImportShapes []ImportShape `json:"import_shapes,omitempty"`
 	StaticData   []StaticData  `json:"static_data"`
 }
 
@@ -673,6 +674,8 @@ type RunCreationOperationRecord struct {
 	Summary  RunCreationOperationSummary `json:"summary"`
 	Binding  DataBinding                 `json:"data_binding"`
 	Evidence RunCreationEvidence         `json:"evidence"`
+	// RequestBinding is populated only on validated selected-store readback.
+	RequestBinding *RunCreationRequestBinding `json:"-"`
 }
 
 // ValidateRunCreationReceiptForCommand admits the closed event-backed and

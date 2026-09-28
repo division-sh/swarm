@@ -21,6 +21,7 @@ type DurableDataStore interface {
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
+	GetDeclarationImportShape(context.Context, string, durabledata.DeclarationRef) (durabledata.ImportShape, error)
 	ListDataVersionSummaries(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.VersionSummary, error)
 	ResolveDataVersionSummary(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, error)
 	ResolveDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error)
@@ -153,6 +154,33 @@ func executeDataShow(ctx context.Context, req Request, store DurableDataStore) (
 			return nil, dataApplicationError(err)
 		}
 		return pageDataItems(items, page, dataCursorFingerprint(view, bundleHash))
+	case "import_shape":
+		if err := exactDataParams(req.Params, "view", "bundle_hash", "declaration", "schema_digest"); err != nil {
+			return nil, err
+		}
+		bundleHash, err := dataString(req.Params["bundle_hash"], "bundle_hash")
+		if err != nil {
+			return nil, err
+		}
+		ref, err := dataDeclarationRef(req.Params["declaration"])
+		if err != nil {
+			return nil, err
+		}
+		digest, err := dataString(req.Params["schema_digest"], "schema_digest")
+		if err != nil {
+			return nil, err
+		}
+		if err := durabledata.SchemaDigest(digest).Validate(); err != nil {
+			return nil, NewInvalidParamsError(map[string]any{"field": "schema_digest", "reason": err.Error()})
+		}
+		shape, err := store.GetDeclarationImportShape(ctx, bundleHash, ref)
+		if err != nil {
+			return nil, dataApplicationError(err)
+		}
+		if err := shape.Validate(); err != nil || shape.BundleHash != bundleHash || shape.Declaration != ref || shape.SchemaDigest != durabledata.SchemaDigest(digest) {
+			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "compiled import shape contradicts selected declaration"})
+		}
+		return shape, nil
 	case "versions", "version", "rows", "row", "export_chunk", "provenance", "pins", "head_history":
 		return executeDataShowResource(ctx, req.Params, store, view)
 	case "operation":
@@ -376,7 +404,7 @@ func executeDataShowOperation(ctx context.Context, params map[string]any, store 
 	if err != nil {
 		return nil, err
 	}
-	if detail == "summary" {
+	if detail == "summary" || detail == "request_binding" {
 		if err := exactDataParams(params, "view", "operation_ref", "detail"); err != nil {
 			return nil, err
 		}
@@ -390,6 +418,9 @@ func executeDataShowOperation(ctx context.Context, params map[string]any, store 
 	kind, err := dataString(ref["kind"], "operation_ref.kind")
 	if err != nil {
 		return nil, err
+	}
+	if detail == "request_binding" && kind != "run_creation" {
+		return nil, NewInvalidParamsError(map[string]any{"field": "detail", "reason": "incompatible operation detail"})
 	}
 	switch kind {
 	case "source":
@@ -479,6 +510,19 @@ func executeDataShowOperation(ctx context.Context, params map[string]any, store 
 		runID, err := canonicalDataUUID(ref["run_id"], "operation_ref.run_id")
 		if err != nil {
 			return nil, err
+		}
+		if detail == "request_binding" {
+			record, err := store.LoadDataRunCreationOperation(ctx, runID)
+			if err != nil {
+				return nil, dataApplicationError(err)
+			}
+			if record.RequestBinding == nil {
+				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": "request binding is absent"})
+			}
+			if err := record.RequestBinding.ValidateForRecord(record); err != nil {
+				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"operation": runID, "reason": err.Error()})
+			}
+			return *record.RequestBinding, nil
 		}
 		record, err := store.LoadDataRunCreationOperation(ctx, runID)
 		if err != nil {

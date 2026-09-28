@@ -13587,6 +13587,7 @@ durable_data_resources:
     row_publication_source: Each row publication carries typed deployment-feed routing source authority at the exact importable declaration scope, not a flow-instance or entity producer. Only that declaration's exact compiled output pin may route it; a source event name, row payload, or coincident flow/entity identity cannot substitute for the pinned declaration and output-pin match.
     row_iteration: The pinned immutable version supplies canonical row order and zero-based activation ordinals. Keyless equal payloads remain distinct ordinals without synthetic business keys. The durable-data row ceiling, not the authored collection fan_out ceiling, applies. The existing fan-out pump publishes each row through ordinary EventBus routing and settlement; no authored handler delivery, direct-delivery shortcut, or second queue is created.
     empty: A selected zero-row version creates a closed zero-cardinality feed. When all selected feeds and all other work are settled, the deployment run can complete without manufacturing an entity or event; ordinary event-origin completion rules are unchanged.
+    deployment_data_boundary: Operator-supplied deployment or per-user files are versioned --data resources outside the bundle, never flow_data_access static files or bundle members. Bundle-owned flow_data_access files remain for workflow-definition data only. File-lowered versions use the same explicit pin, feed, output-pin routing, receiver, settlement, replay, and data_access path as JSONL versions; no authored source node, data.* namespace, synthetic delivery, or second queue is introduced.
   declaration_projection:
     owner: workflow_model.compiled_event_schema_projection
     identity: Structured exact (flow_path, qualified event name). Bundle generation and source path are not identity. Rename or package move creates a new declaration without aliases, inference, migration, or backfill.
@@ -13594,6 +13595,11 @@ durable_data_resources:
     business_key: The optional business-key fact is consumed only after compiled admission proves that it names one required top-level boolean, number, or string field. Keyed and keyless interpretations have distinct resource schema digests.
     grammar_boundary: Durable-data consumers never inspect authored event maps, retired required lists, source paths, aliases, or YAML grammar. The implemented presence-preserving event admission owns trailing-? optionality and key authoring; durable data consumes only the resulting immutable CompiledEventSchema fields, business-key fact, canonical schema bytes, and digest.
     access: Agents declare data_access by exact qualified event name. Runtime access consumes the loader's package-qualified declaration record.
+    file_import_shape_detail:
+      owner: The compiled event schema projection supplies resolved top-level TypeRef, alias/refinement, optionality, and business-key facts to the exact-bundle catalog and selected-store declaration owner. This is a read projection of that owner, not another schema or type authority.
+      dto: An exact detail read binds bundle_hash, structured declaration (flow_path and qualified event name), and schema_digest; it carries the optional required text business-key field name and a bounded set of exact top-level file-assignable text field names with their compiled optionality. Text aliases/refinements are classified from resolved compiled types; JSON Schema type:string alone does not establish text eligibility. The business-key field is never file-assignable.
+      admission: Registration, selected-store detail, API DTO, and both standalone and fused CLI consumers must agree on the same immutable shape. Missing, stale, conflicting, corrupt, or wrong-bundle/declaration/digest detail fails closed; no raw YAML, host source path, local type inference, or schema-string heuristic is a fallback. The source owner still validates the submitted JSONL candidate against the exact admitted declaration.
+      bounds: Fetch detail for one exact selected declaration only. Keep the ordinary data.show declaration inventory a lightweight summary rather than expanding it into a full schema or payload scan. Import shape changes neither schema digest inputs nor event authoring grammar; fresh schemas only, without migration or legacy fallback.
   version_identity:
     manifest_format: swarm.resource.version.manifest.v1
     row_codec: swarm.resource.rows.v1
@@ -13612,6 +13618,61 @@ durable_data_resources:
     fused: event.publish and run.start may carry the same typed source request. Validation and reservation evidence is parent-owned until the parent transaction commits; an accepted child receipt is created only with that commit.
     delta: Accepted or ready candidates return a computed delta with one explicit row_identity fact. Positional deltas forbid key evidence; business_key deltas require complete key evidence whose class counts exactly match the summary. Validation rejection and head conflict return an explicit not_computed reason.
     candidate_projection: A validated but uncommitted semantic candidate carries state candidate, version_id, and manifest without a human alias. State version and its mandatory monotonic alias exist only after selected-store commit.
+  file_to_row_import:
+    operand_grammar: >
+      `swarm run start --data event=path` always reads JSONL row input, regardless of extension or contents;
+      `--data event.field=path` always reads a UTF-8 file or keyed directory into that exact compiled text field.
+      No sniffing, `event=file` shorthand, document type, source declaration, mode flag, key-supply syntax, or
+      per-field import configuration exists. Standalone `swarm data import ./event field=path [field=path ...]`
+      uses the same field operand; its existing positional JSONL path remains JSONL, and `--check` uses the
+      same lowering without committing a version or head. Direct API source inputs remain canonical JSONL.
+    selector_resolution: >
+      For fused operands, compare the left side against both the full exact selected declaration inventory
+      and every exact declaration plus top-level field interpretation before opening a path. If both match,
+      including `profile.body` as an event and `profile` with field `body`, reject as ambiguous and name both;
+      never guess JSONL then fall back to a field or conversely. A full dotted event with no competing field
+      interpretation remains JSONL. Standalone separated selector and field operands disambiguate; for a
+      fused collision, import separately and pin. Qualified/local aliases resolving to one declaration group
+      once, and bare local names still require unambiguous exact selection.
+    grouping: >
+      Resolve exact compiled field eligibility first. Group all file assignments for one declaration into one
+      complete row-set candidate, one source invocation, and at most one version; never assemble versions
+      across flags or invocations. Operand order cannot change the result. Repeated assignment of a field,
+      JSONL plus fields for one declaration, or a pin plus fields for one declaration is a contradiction in
+      either order and rejects before source/run mutation. The stem-owned business-key field cannot be
+      assigned from a file. Every required file-assignable non-key field must have an assignment even when
+      all directories are empty; the row codec rejects any other unsatisfied required schema field.
+      Optional fields may be omitted and remain absent, not null or defaulted.
+    singleton_files: >
+      All fields for one event may be regular UTF-8 singleton files only when the compiled event is keyless;
+      they form exactly one row, preserving decoded text bytes including whitespace and newlines. A keyed
+      singleton is a teaching error naming its key and directing the operator to a keyed directory or JSONL
+      row; no implicit key is inferred. Mixing singleton files and directories for one event rejects rather
+      than broadcasting a file across keyed rows. An empty file supplies an empty string only when the
+      compiled row schema accepts it.
+    keyed_directories: >
+      A directory requires a declared required top-level text business key. Read only immediate regular
+      non-symlink files; reject nested directories, symlinks, other nonregular entries, invalid UTF-8 bytes
+      or names, and empty/invalid stems or keys as whole-input errors. Bytewise filename sort controls
+      scanning and diagnostic order. Remove only the final extension to form a stem; an extensionless
+      filename is its stem. Duplicate stems within one field reject the entire import naming both files;
+      equal stems in different field directories join. Build rows from the union of all supplied directory
+      stems, not an anchor or intersection. For every union key, a missing required non-key field rejects
+      naming that key, and a missing optional field is omitted. An optional-only orphan key must satisfy
+      the full schema or reject; it is never dropped. With all required assignments present, all-empty
+      directories produce a valid zero-row candidate. Filename scan order does not replace canonical
+      typed business-key sort for version identity, storage, activation, or replay.
+    bounded_lowering: >
+      One shared standalone/fused owner reads only operator-supplied paths, lowers once to a JSONL candidate,
+      validates UTF-8 and the exact compiled row schema through the existing codec, and submits through
+      existing data.check/data.import or fused run.start source ownership. Enforce the 720 KiB decoded
+      input bound on generated JSONL and on aggregate fused imports, 128 KiB per canonical row, 100000
+      rows, 4 KiB business key, and 1 MiB RPC message bound before source submission. Escaping can make
+      generated JSONL or a canonical row exceed a bound even when raw files fit. Fail atomically with
+      deterministic size/count/limit diagnostics where applicable; cancellation or read failure likewise
+      leaves no version, head, run, pin, or feed mutation. Paths are provenance context only, not version
+      identity or runtime read authority; equal canonical content retains the existing idempotent version,
+      expected-head CAS, delta, pin, fork, prune, and receipt semantics.
   operation_receipts:
     integrity: Source, run-creation, and prune receipts are selected-store aggregates, never self-authorizing JSON documents. Their typed operation, parent, actor, bundle, declaration, version, observed-head revision, and completion-time columns must agree exactly with canonical request/result JSON on insert, exact replay, and public readback. Source evaluation order is anchored by the typed observed-head revision and, for a head-changing operation, its exact next immutable history revision; wall-clock timestamps never reconstruct operation order.
     source_commit: Every accepted import receipt must join to its exact immutable admitted declaration, historical evaluation version and head revision, committed version manifest, import provenance, and conditional head-history transition. Check, validation-rejected, and head-conflict receipts and failed fused-child evidence must prove that no provenance or head-history mutation exists for that source invocation. Later head movement and payload prune or rematerialization never invalidate an otherwise complete historical receipt.
@@ -13621,6 +13682,49 @@ durable_data_resources:
     fork: A fork inherits the source run's exact stored pin set and applies explicit exact-version overrides atomically with fork creation. Unselected target declarations remain unpinned; a pinned source declaration absent from or schema-incompatible with the target bundle fails before fork mutation.
     retention: Active and terminal forkable runs pin versions. There is no automatic garbage collection in v1. Live pin pagination binds the selected version and its declaration in the fixed query fingerprint, then resumes strictly after the run_id carried by the bounded opaque cursor. Concurrent pin insertion never shifts an offset because offsets are forbidden.
     rejection_evidence: Failed run creation permanently records one closed typed rejection fact. Explicit-pin failures name the exact declaration and version, schema mismatch also records both schema digests, and fused aggregate failures carry their exact class without invented target facts.
+  run_creation_request_binding:
+    owner: The existing selected-store permanent run-creation request and receipt, including rejected operations, own request identity and replay. The canonical request hash and existing CAS owner remain the final equality and conflict authority; an API idempotency-key cache, CLI-local cache, current declaration head, or current default bundle is not a substitute.
+    readback_detail: >
+      Existing data.show view=operation for run_creation exposes a bounded metadata-only `request_binding`
+      detail for a caller-supplied canonical run_id. Derive it from the selected-store validated retained
+      canonical request and receipt, not partial public summary, child-evaluation, or run-binding pages:
+      an early rejected multi-pin operation may expose only the first rejected pin elsewhere. Bind run_id,
+      exact bundle_hash, request_hash, original event-presence intent, and the complete original ordered
+      import and pin sets. Each import binds source_invocation_id, structured declaration, schema_digest,
+      and expected_head; each pin binds structured declaration and resolved exact version. Bound counts
+      by the existing 256-declaration/import/pin and RPC limits. Validate all receipt identities,
+      request-hash and cross-field relationships before exposure or consumption, including rejected arms;
+      missing or corrupt detail for an existing receipt fails closed. Do not expose raw input bytes, event payload, host paths,
+      or actor credentials. Authentication and authorization still gate the read.
+    ordered_admission: >
+      For a caller-supplied run ID, read the permanent operation first; select its immutable binding if
+      present, otherwise bind one new snapshot; resolve exact compiled shape and unambiguous grammar;
+      read and lower bounded input once; submit the full command through normal source/run admission;
+      return the canonical outcome. Keep readiness, authentication, and publication gates on replay.
+      An omitted run ID creates a new operation and never implies a retry. Typed receipt absence alone
+      permits first-attempt binding; authorization refusal, infrastructure failure, corrupt receipt, or
+      an existing run without a matching creation receipt cannot be treated as absence.
+    reconstruction: >
+      A fresh CLI process with the same explicit run ID reconstructs originally implicit or resolved
+      bundle, schema-bound declaration, import expected-head, and mutable `@head` pin selections from
+      the validated binding before consulting mutable defaults or heads. Explicit bundle, declaration,
+      version/alias, pin, import set, actor, event payload, and current file bytes remain current user
+      intent and must not be overwritten by receipt facts; a mismatch conflicts. Explicit exact versions
+      and aliases are checked, while an explicit mutable `@head` selector consumes its original resolved
+      version on retry rather than a newer head. Actor identity comes
+      only from authenticated admission. Materialize file and payload bytes once per invocation,
+      preserve deterministic field/declaration order, and resubmit the full request; only the store's
+      unchanged canonical request hash decides exact replay versus conflict. A committed success or
+      typed rejection replays that outcome even after heads or pins change; a new run ID is a new
+      operation even for equal content and version.
+    conflict_retry: >
+      After an initially absent receipt, an exact invocation conflict may trigger one receipt reread
+      and reconstruction using the already materialized input. Do not reread files, mint new child IDs,
+      overwrite the retained request, retry arbitrary failures, or loop. Concurrent first attempts
+      produce one winning request and receipt; the other exactly replays or conflicts. Before any
+      receipt commits there is no durable original binding to recover, so a later attempt may create
+      a new operation against the then-current head if it wins. Once committed, changed file bytes,
+      payload, explicit selections, or actor cannot silently reuse that run/source identity.
   prune:
     rule: data.prune uses a permanent prune_invocation_id and fail-closed expected-head check. Current or pinned versions cannot be pruned.
     replay: Replay/conflicting receipt reuse has precedence over catalog integrity, expected-head, current, pin, and already-pruned checks.
@@ -13750,6 +13854,7 @@ platform_tables:
         - runtime_store_metadata
         - resource_declarations
         - resource_bundle_declarations
+        - resource_bundle_import_shapes
         - bundle_static_data
         - resource_versions
         - resource_version_provenance
@@ -13938,6 +14043,20 @@ platform_tables:
             PRIMARY KEY (bundle_hash, flow_path, event_name),
             UNIQUE (bundle_hash, flow_path, display_name),
             FOREIGN KEY (flow_path, event_name) REFERENCES resource_declarations(flow_path, event_name)
+        );
+    resource_bundle_import_shapes:
+      description: Immutable exact-bundle compiled top-level field eligibility for operator text-file import; never inferred from a stored JSON Schema reader.
+      ddl: |-
+        CREATE TABLE resource_bundle_import_shapes (
+            bundle_hash          TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            flow_path            TEXT NOT NULL,
+            event_name           TEXT NOT NULL,
+            schema_digest        TEXT NOT NULL CHECK (schema_digest ~ '^resource-schema-v1:sha256:[0-9a-f]{64}$'),
+            shape_digest         TEXT NOT NULL CHECK (shape_digest ~ '^resource-import-shape-v1:sha256:[0-9a-f]{64}$'),
+            shape_json           BYTEA NOT NULL,
+            admitted_at          TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (bundle_hash, flow_path, event_name),
+            FOREIGN KEY (bundle_hash, flow_path, event_name) REFERENCES resource_bundle_declarations(bundle_hash, flow_path, event_name)
         );
     bundle_static_data:
       description: Exact strict-UTF-8 static input bytes and identity projected at bundle admission; host paths are not persisted authority.
@@ -33164,6 +33283,7 @@ api_specification:
       DataShowResult:
         oneOf:
         - $ref: '#/components/schemas/DataDeclarationPage'
+        - $ref: '#/components/schemas/DataImportShape'
         - $ref: '#/components/schemas/DataVersionPage'
         - $ref: '#/components/schemas/DataVersionSummary'
         - $ref: '#/components/schemas/DataRowPage'
@@ -33179,6 +33299,52 @@ api_specification:
         - $ref: '#/components/schemas/DataRunCreationItemPage'
         - $ref: '#/components/schemas/DataFusedChildEvaluationPage'
         - $ref: '#/components/schemas/DataFusedChildDefectPage'
+        - $ref: '#/components/schemas/DataRunCreationRequestBinding'
+      DataImportShape:
+        type: object
+        additionalProperties: false
+        required: [bundle_hash, declaration, schema_digest, fields]
+        properties:
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+          business_key: {type: string}
+          fields:
+            type: array
+            maxItems: 1024
+            items:
+              type: object
+              additionalProperties: false
+              required: [name, required, text]
+              properties:
+                name: {type: string}
+                required: {type: boolean}
+                text: {type: boolean}
+      DataRunCreationRequestBinding:
+        type: object
+        additionalProperties: false
+        required: [run_id, bundle_hash, request_hash, imports, pins]
+        properties:
+          run_id: {type: string, format: uuid}
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          event_id: {type: string, format: uuid}
+          request_hash: {type: string, pattern: '^resource-run-creation-request-v1:sha256:[0-9a-f]{64}$'}
+          imports:
+            type: array
+            maxItems: 256
+            items:
+              type: object
+              additionalProperties: false
+              required: [source_invocation_id, declaration, schema_digest, expected_head]
+              properties:
+                source_invocation_id: {type: string, format: uuid}
+                declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+                schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+                expected_head: {$ref: '#/components/schemas/ExpectedHead'}
+          pins:
+            type: array
+            maxItems: 256
+            items: {$ref: '#/components/schemas/DataExplicitPin'}
       DataFusedImport:
         type: object
         additionalProperties: false
@@ -34153,10 +34319,12 @@ api_specification:
     data.show:
       tier: should_have
       description: >
-        Bounded typed readback for declarations, immutable versions, rows,
-        canonical export chunks, provenance, pins, head history, and permanent
-        source/prune/run-creation operation evidence. Every non-singleton view
-        requires an explicit bounded page and every cursor is query-bound.
+        Bounded typed readback for declarations, exact compiled import shapes,
+        immutable versions, rows, canonical export chunks, provenance, pins,
+        head history, and permanent source/prune/run-creation operation evidence,
+        including the payload-free run-creation request binding. Every
+        non-singleton view requires an explicit bounded page and every cursor
+        is query-bound.
       scope:
         required: [read:data]
       params:
@@ -34164,13 +34332,16 @@ api_specification:
         required: true
         schema:
           type: string
-          enum: [declarations, versions, version, rows, row, export_chunk, provenance, head_history, pins, operation]
+          enum: [declarations, import_shape, versions, version, rows, row, export_chunk, provenance, head_history, pins, operation]
       - name: bundle_hash
         required: false
         schema: {$ref: '#/components/schemas/BundleHash'}
       - name: declaration
         required: false
         schema: {$ref: '#/components/schemas/DataDeclarationRef'}
+      - name: schema_digest
+        required: false
+        schema: {$ref: '#/components/schemas/ResourceSchemaDigest'}
       - name: selector
         required: false
         schema: {$ref: '#/components/schemas/DataVersionSelector'}
@@ -34184,7 +34355,7 @@ api_specification:
         required: false
         schema:
           type: string
-          enum: [summary, defects, delta_added, delta_removed, delta_changed, pins, run_binding, child_evaluations, child_defects]
+          enum: [summary, defects, delta_added, delta_removed, delta_changed, pins, run_binding, request_binding, child_evaluations, child_defects]
       - name: page
         required: false
         schema: {$ref: '#/components/schemas/DataPageRequest'}
