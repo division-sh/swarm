@@ -2741,6 +2741,9 @@ func eventPublishRenamedConnectedCreateEntityTestBundle() *runtimecontracts.Work
 }
 
 func mustCompileEventPublishTestBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	if bundle != nil && bundle.SourceArtifact == nil {
+		bundle.SourceArtifact = authorActivityTestSourceArtifact
+	}
 	if bundle != nil && bundle.RootSchema != nil && bundle.FlowTree.Root != nil {
 		bundle.FlowTree.Root.Schema = *bundle.RootSchema
 	}

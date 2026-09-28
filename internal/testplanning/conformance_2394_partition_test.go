@@ -209,6 +209,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	fileRowRoots := []string{
 		"TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores",
 		"TestDataTextFile2456Keyed37DeltaOldPinBothStores",
+		"TestDataTextFile2456Keyed37DynamicReceiversBothStores",
 		"TestDataTextFile2456MultiFieldAndLimitsBothStores",
 		"TestDataTextFile2456FreshProcessBindingAndExactWireBothStores",
 		"TestDataTextFile2456DefaultBundleAndHeadPinReplayBothStores",
@@ -218,7 +219,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestStandaloneTextFileImportSupport2456BothStores",
 		"TestStandaloneTextFileEmptyKeyedRequiredDirectory2456BothStores",
 	}
-	want := []int{159, 14, 5, 1}
+	want := []int{160, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -272,7 +273,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:179 =159 general +14 core +5 pressure +1 reporter")
+	t.Log("complete disjoint census:180 =160 general +14 core +5 pressure +1 reporter")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
