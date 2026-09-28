@@ -34,22 +34,25 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 		t.Fatal("pack event was misclassified as authored")
 	}
 	resolved, name, ok := wrapped.ResolveFlowEventCatalogEntry("coordinator", "inbound.telegram.text_message")
-	wantFields := []string{"conversation_reference", "conversation_scope", "external_account_reference", "provider_message_reference", "text"}
+	wantFields := []string{"command_invocation", "conversation_reference", "conversation_scope", "external_account_reference", "provider_message_reference", "reply_to_message_reference", "text"}
 	if !ok || name != "inbound.telegram.text_message" || len(resolved.Payload.Properties) != len(wantFields) {
 		t.Fatalf("flow catalog resolution = (%#v, %q, %v)", resolved, name, ok)
 	}
 	for _, field := range wantFields {
 		spec, exists := resolved.Payload.Properties[field]
 		wantType := "text"
-		if field == "provider_message_reference" {
+		if field == "provider_message_reference" || field == "reply_to_message_reference" {
 			wantType = "integer"
+		} else if field == "command_invocation" {
+			wantType = "object"
 		}
 		if !exists || spec.Type != wantType {
 			t.Fatalf("flow catalog field %q = (%#v, %v), want %s", field, spec, exists, wantType)
 		}
 	}
-	if strings.Join(resolved.Payload.Required, ",") != strings.Join(wantFields, ",") {
-		t.Fatalf("flow catalog required fields = %q, want %q", resolved.Payload.Required, wantFields)
+	wantRequired := []string{"conversation_reference", "conversation_scope", "external_account_reference", "provider_message_reference", "text"}
+	if strings.Join(resolved.Payload.Required, ",") != strings.Join(wantRequired, ",") {
+		t.Fatalf("flow catalog required fields = %q, want %q", resolved.Payload.Required, wantRequired)
 	}
 	if _, err := ResolveStandingTargetDeclarations(wrapped, catalog); err != nil {
 		t.Fatalf("standing declarations rejected pack-composed source: %v", err)
