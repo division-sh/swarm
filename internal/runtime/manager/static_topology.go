@@ -179,17 +179,31 @@ func (am *AgentManager) committedRouteFinalizeError(ctx context.Context, identit
 	state, _, err := am.lifecycle.committedRouteStateByIdentity(identity)
 	var failure *runtimefailures.Error
 	retirementConflict := errors.As(cause, &failure) && failure.Failure.Detail.Code == "agent_retirement_pending"
-	if retirementConflict && ctx.Err() != nil {
+	ownedCancellation := func(branch error) bool {
+		return ctx.Err() != nil && (errors.Is(branch, ctx.Err()) || errors.Is(branch, context.Cause(ctx)))
+	}
+	onlyRetirement := runtimefailures.OnlyBranches(cause, func(branch error) bool {
+		return isAgentRetirementPending(branch) || ownedCancellation(branch)
+	})
+	if err == nil && retirementConflict && onlyRetirement && ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if retirementConflict && err == nil && state == committedRouteReady {
+	if retirementConflict && err == nil && onlyRetirement && state == committedRouteReady {
 		return nil
 	}
 	if err == nil && (state == committedRouteLaunching || state == committedRouteRetiring) &&
-		(retirementConflict || errors.Is(cause, ErrAgentNotFound)) {
+		(retirementConflict || errors.Is(cause, ErrAgentNotFound)) &&
+		runtimefailures.OnlyBranches(cause, func(branch error) bool {
+			return isAgentRetirementPending(branch) || errors.Is(branch, ErrAgentNotFound) || ownedCancellation(branch)
+		}) {
 		return fmt.Errorf("agent %s: %w", identity.Description(), runtimebus.ErrCommittedAgentRouteTransition)
 	}
 	return fmt.Errorf("finalize committed agent %s: %w", identity.Description(), errors.Join(cause, err))
+}
+
+func isAgentRetirementPending(err error) bool {
+	failure, ok := err.(*runtimefailures.Error)
+	return ok && failure.Failure.Detail.Code == "agent_retirement_pending"
 }
 
 // PrepareStaticTopologyForStartup settles predecessor effect authority and

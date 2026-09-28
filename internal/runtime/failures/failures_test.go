@@ -14,6 +14,29 @@ type normalizationCause struct {
 
 func (e *normalizationCause) Error() string { return e.name }
 
+func TestOnlyBranchesRejectsIndependentJoinedFailure(t *testing.T) {
+	expected := errors.New("expected transition")
+	independent := errors.New("independent cleanup")
+	allowed := func(branch error) bool { return branch == expected }
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "absent", want: false},
+		{name: "expected", err: fmt.Errorf("wrapped: %w", expected), want: true},
+		{name: "repeated expected", err: errors.Join(expected, fmt.Errorf("wrapped: %w", expected)), want: true},
+		{name: "independent", err: errors.Join(expected, independent), want: false},
+		{name: "nested independent", err: fmt.Errorf("wrapped: %w", errors.Join(expected, independent)), want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := OnlyBranches(tc.err, allowed); got != tc.want {
+				t.Fatalf("OnlyBranches(%v) = %t, want %t", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRegistryIsClosedAndSelectorsArePositiveSets(t *testing.T) {
 	if got := len(Classes()); got != 23 {
 		t.Fatalf("class count = %d, want 23", got)

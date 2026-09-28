@@ -929,7 +929,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	}
 	if route.Recipient.IsAgent() {
 		if err := eb.finalizeCommittedAgentReadiness(ctx, evt, []events.DeliveryRoute{route}); err != nil {
-			if errors.Is(err, ErrCommittedAgentRouteTransition) {
+			if onlyCommittedRouteTransition(ctx, err) {
 				return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeAgentRouteLifecycle)
 			}
 			return runtimedeliverycontinuation.Fatal(err)
@@ -1015,6 +1015,18 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 		return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeAgentRouteLifecycle)
 	}
 	return runtimedeliverycontinuation.Deferred(runtimedeliverycontinuation.DispatchWakeInternalSubscriptionLifecycle)
+}
+
+func onlyCommittedRouteTransition(ctx context.Context, err error) bool {
+	if !errors.Is(err, ErrCommittedAgentRouteTransition) {
+		return false
+	}
+	return runtimefailures.OnlyBranches(err, func(branch error) bool {
+		if errors.Is(branch, ErrCommittedAgentRouteTransition) {
+			return true
+		}
+		return ctx.Err() != nil && (errors.Is(branch, ctx.Err()) || errors.Is(branch, context.Cause(ctx)))
+	})
 }
 
 func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.DeliveryRoute {
