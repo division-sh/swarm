@@ -171,7 +171,7 @@ func persistLifecycleDiagnosticTx(ctx context.Context, tx *sql.Tx, attempt *muta
 	if err != nil {
 		return false, err
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, true)
 	if err != nil {
 		return false, err
 	}

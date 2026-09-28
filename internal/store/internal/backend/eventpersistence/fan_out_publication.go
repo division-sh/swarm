@@ -21,7 +21,9 @@ func commitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.At
 	if err := projection.ValidateEvent(command.Commit.Event.Event()); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	return commitValidatedPublicationTx(ctx, attempt, store, command)
+	// The named chunk mutation synchronizes each touched run once after its
+	// publications. No intermediate counter value can escape that transaction.
+	return commitValidatedPublicationTx(ctx, attempt, store, command, false)
 }
 
 func (s *EventPostgresOwner) CommitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt,

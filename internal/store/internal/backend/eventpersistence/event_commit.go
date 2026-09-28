@@ -26,7 +26,7 @@ import (
 
 type eventCommitTxStore interface {
 	standaloneCompletionOwner() standaloneCompletionCapability
-	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
+	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement, bool) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	CommitInitialPipelineScopeTx(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope) error
@@ -109,7 +109,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := req.ValidatePreparedEvent(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement)
+	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.attempt, req.Event, req.RouteSettlement, true)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -216,7 +216,7 @@ func commitSelectedForkEvent(
 	result := runtimebus.CommittedSelectedForkEvent{}
 	committer := sqlPublishCommitter{attempt: attempt, store: store}
 	var err error
-	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, attempt, req.Commit.Event, req.Commit.RouteSettlement)
+	result.AppendOutcome, err = store.appendAdmittedEventTxOutcome(ctx, attempt, req.Commit.Event, req.Commit.RouteSettlement, true)
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
@@ -563,23 +563,23 @@ func commitPublicationTx(
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	return commitValidatedPublicationTx(ctx, attempt, store, command)
+	return commitValidatedPublicationTx(ctx, attempt, store, command, true)
 }
 
 func commitValidatedPublicationTx(
-	ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, command runtimebus.PublicationCommand,
+	ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, command runtimebus.PublicationCommand, syncCounters bool,
 ) (runtimebus.CommittedPublication, error) {
 	var result runtimebus.CommittedPublication
 	err := attempt.WithSQL(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var writeErr error
-		result, writeErr = commitValidatedPublicationSQL(txctx, tx, attempt, store, command)
+		result, writeErr = commitValidatedPublicationSQL(txctx, tx, attempt, store, command, syncCounters)
 		return writeErr
 	})
 	return result, err
 }
 
 func commitValidatedPublicationSQL(
-	ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, command runtimebus.PublicationCommand,
+	ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, command runtimebus.PublicationCommand, syncCounters bool,
 ) (runtimebus.CommittedPublication, error) {
 	if command.HasAuthorScope {
 		ctx = runtimeauthoractivity.WithScope(ctx, command.AuthorScope)
@@ -606,7 +606,7 @@ func commitValidatedPublicationSQL(
 			return runtimebus.CommittedPublication{}, err
 		}
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, attempt, request.Event, request.RouteSettlement, syncCounters)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
@@ -687,7 +687,7 @@ func commitRuntimeLogEventTx(ctx context.Context, store eventCommitTxStore, atte
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement)
+	return store.appendAdmittedEventTxOutcome(ctx, attempt, admitted, settlement, true)
 }
 
 func (s *EventPostgresOwner) CommitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {

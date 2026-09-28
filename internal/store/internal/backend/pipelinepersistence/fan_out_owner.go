@@ -746,6 +746,7 @@ func commitFanOutChunk(
 				}
 				break
 			}
+			insertedPublication := false
 			for index, outcome := range command.Outcomes {
 				wantOrdinal := intent.Cursor + index
 				if outcome.Ordinal != wantOrdinal {
@@ -771,6 +772,9 @@ func commitFanOutChunk(
 					committed, err := store.commitFanOutPublicationTx(txctx, attempt, plan.PublicationCommand(), projection)
 					if err != nil {
 						return fmt.Errorf("commit fan-out publication ordinal %d: %w", outcome.Ordinal, err)
+					}
+					if committed.AppendOutcome == runtimebus.EventAppendInserted {
+						insertedPublication = true
 					}
 					evidence, err := runtimebus.NewCommittedEnginePublication(plan, committed)
 					if err != nil {
@@ -801,6 +805,13 @@ func commitFanOutChunk(
 					return err
 				}
 				if err := attempt.AddFacts(command.Claim.Key.RunID, ref); err != nil {
+					return err
+				}
+			}
+			if insertedPublication {
+				// Every validated ordinal emission targets the intent run. The
+				// final counter value is the only one visible outside this tx.
+				if err := store.syncRunCountersTx(txctx, attempt, command.Claim.Key.RunID); err != nil {
 					return err
 				}
 			}
