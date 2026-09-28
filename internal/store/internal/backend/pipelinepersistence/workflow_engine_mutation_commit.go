@@ -21,6 +21,7 @@ import (
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 func commitWorkflowEngineState(
@@ -523,6 +524,7 @@ func commitWorkflowEngineMutation(
 		}
 		var err error
 		err = attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(txctx, transactiontest.WorkflowMutation)
 			if runID := strings.TrimSpace(command.GateRouteAdmissionRunID); runID != "" {
 				if postgres {
 					err = gaterouteadapter.RequirePostgres(txctx, tx, runID)
@@ -645,14 +647,8 @@ func commitWorkflowEngineMutation(
 					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
 				}
 				if !command.Lifecycle.RequestCompletionCandidate {
-					needed, err := candidateWriter.SettlementNeedsCompletionTx(txctx, tx, success.Claim.RunID())
-					if err != nil {
+					if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {
 						return err
-					}
-					if needed {
-						if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {
-							return err
-						}
 					}
 				}
 				claim := success.Claim

@@ -38,12 +38,25 @@ func (p *nestedCancellationHandlers) NotifyLifecycle(ctx context.Context, signal
 	p.gate.NotifyLifecycle(ctx, signal)
 }
 
-func (p *nestedCancellationHandlers) assertOnlyHeld(t *testing.T, id string) {
+func (p *nestedCancellationHandlers) assertOnlyHeld(t *testing.T, ids ...string) {
 	t.Helper()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !reflect.DeepEqual(p.ids, []string{id}) {
-		t.Fatalf("partially dispatched group entered unexpected task handlers: %v, want only %s", p.ids, id)
+	if len(p.ids) != len(ids) {
+		t.Fatalf("partially dispatched group entered unexpected task handlers: %v, want %v", p.ids, ids)
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		seen[id] = true
+	}
+	for _, id := range p.ids {
+		if !seen[id] {
+			t.Fatalf("partially dispatched group entered unexpected task handler %s, want %v", id, ids)
+		}
+		delete(seen, id)
+	}
+	if len(seen) != 0 {
+		t.Fatalf("partially dispatched group missed held task handlers: %v", seen)
 	}
 }
 
@@ -52,7 +65,9 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t))
 			probe := newNestedServingProbe(t)
-			gate := newNestedChildHandlerGate(t, "account.task.requested")
+			probe.pauseAccountTurn = 2
+			probe.accountTurnPaused = make(chan struct{}, 1)
+			gate := newNestedChildHandlerGateCount(t, "account.task.requested", 2)
 			rt, db := newNestedServingRuntime(t, backend, source, nil, probe, gate)
 			handlers := &nestedCancellationHandlers{gate: gate}
 			rt.pipeline.SetTestLifecycleProbe(handlers)
@@ -73,15 +88,24 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			waitNotifyAllChildrenRuntime(t, rt, runID)
 			notifyID := publishNotifyAllChildrenEventAsync(t, ctx, rt, source, runID, "portfolio.notify.requested", map[string]any{"portfolio_id": "portfolio-main", "command": "cancel-nested-proof"})
 			held := gate.wait(t)
-			var parent nestedServingReceipt
-			for i := 0; i < 2; i++ {
+			secondHeld := gate.wait(t)
+			select {
+			case <-probe.accountTurnPaused:
+			case <-time.After(5 * time.Second):
+				t.Fatal("second child turn did not reach pre-claim gate")
+			}
+			var parent, issued nestedServingReceipt
+			for deadline := time.After(5 * time.Second); parent.ReturnedAt.IsZero() || issued.Key.RunID == ""; {
 				select {
 				case receipt := <-probe.receipts:
 					if receipt.ParentEvent == notifyID {
 						parent = receipt
 					}
-				case <-time.After(5 * time.Second):
-					t.Fatal("parent did not return before held child cancellation")
+					if receipt.Key.ElementRef.FlowPath == "account" && receipt.Publications == 2 && receipt.Err == nil {
+						issued = receipt
+					}
+				case <-deadline:
+					t.Fatal("parent and issued child did not return before held child cancellation")
 				}
 			}
 			if parent.ReturnedAt.IsZero() || parent.Publications != 3 || parent.Err != nil {
@@ -145,10 +169,10 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatalf("expected registration3/parent3/held-child2 exact prefix, got %v", prefix)
 			}
 			counts := probe.snapshot()
-			if counts.Active != 1 || counts.Started != 3 || counts.Returned != 2 || counts.Carriers != 2 || counts.CommitPlans != 2 {
-				t.Fatalf("cancellation requires a held, partially dispatched two-member child group: %+v", counts)
+			if counts.Active != 0 || counts.Started != counts.Returned || counts.FirstError != nil {
+				t.Fatalf("pre-claim pause must leave no live serving turn with the durable eight-event prefix: %+v", counts)
 			}
-			handlers.assertOnlyHeld(t, held.EventID)
+			handlers.assertOnlyHeld(t, held.EventID, secondHeld.EventID)
 			triggerDeadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(triggerDeadline) {
 				var outcome string
@@ -162,23 +186,17 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 			}
 			assertNestedPipelineReceipt(t, ctx, db, notifyID, true)
-			// Stop cannot steal a live foreground publication claim. Cancel the
-			// actual runtime occurrence and join its interrupted group first;
-			// then issue one parent stop, never retry busy as cancellation success.
+			// The second child has not claimed an ordinal. Fence the occurrence,
+			// join that paused turn, then stop without preempting the committed group.
 			rt.workOwner.Retire()
-			var interrupted nestedServingReceipt
-			select {
-			case receipt := <-probe.receipts:
-				if receipt.Publications != 2 || receipt.Key.ElementRef.FlowPath != "account" || !errors.Is(receipt.Err, context.Canceled) {
-					t.Fatalf("actual child group did not return cancellation: %+v", receipt)
-				}
-				interrupted = receipt
-				t.Logf("actual partially dispatched child group joined: result=%+v err=%v", receipt.Result, receipt.Err)
-			case <-time.After(5 * time.Second):
-				t.Fatal("held child caller did not join after actual occurrence cancellation")
-			}
+			probe.releaseHeld()
 			rt.fanOutServing.Close()
-			handlers.assertOnlyHeld(t, held.EventID)
+			quiescence, cancelQuiescence := context.WithTimeout(ctx, 5*time.Second)
+			defer cancelQuiescence()
+			if err := rt.bus.WaitForQuiescence(quiescence); err != nil {
+				t.Fatal(err)
+			}
+			handlers.assertOnlyHeld(t, held.EventID, secondHeld.EventID)
 			stopCtx, cancelStop := context.WithTimeout(ctx, 5*time.Second)
 			defer cancelStop()
 			result, err := controller.Stop(stopCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "nested-held-child-proof", ControlledBy: "conformance"})
@@ -186,11 +204,6 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 				t.Fatalf("production run-control cancellation=%+v err=%v", result, err)
 			}
 			gate.open()
-			quiescence, cancelQuiescence := context.WithTimeout(ctx, 5*time.Second)
-			defer cancelQuiescence()
-			if err := rt.bus.WaitForQuiescence(quiescence); err != nil {
-				t.Fatal(err)
-			}
 			var afterState string
 			var afterFields []byte
 			var afterRevision int64
@@ -200,13 +213,15 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			if afterState != beforeState || afterRevision != beforeRevision || string(afterFields) != string(beforeFields) || !reflect.DeepEqual(loadPrefix(), prefix) {
 				t.Fatalf("canceled held child mutated entity/prefix: state=%s/%s revision=%d/%d fields=%s/%s", beforeState, afterState, beforeRevision, afterRevision, beforeFields, afterFields)
 			}
-			post, err := reader.LoadOperatorEvent(ctx, held.EventID)
-			if err != nil || len(post.Deliveries) != 1 || !post.Deliveries[0].Terminal || post.Deliveries[0].Status != string(deliverylifecycle.StatusDeadLetter) || post.Deliveries[0].ReasonCode != "run_stopped" {
-				t.Fatalf("canceled child public terminal disposition=%+v err=%v", post, err)
-			}
-			effectName := eventidentity.ExternalizeForFlow(path, []string{"account.task.completed"}, "account.task.completed")
-			if ids := nestedEventIDs(t, ctx, db, runID, effectName, held.EventID); len(ids) != 0 {
-				t.Fatalf("canceled held child emitted business effects: %v", ids)
+			for _, id := range []string{held.EventID, secondHeld.EventID} {
+				post, err := reader.LoadOperatorEvent(ctx, id)
+				if err != nil || len(post.Deliveries) != 1 || !post.Deliveries[0].Terminal || post.Deliveries[0].Status != string(deliverylifecycle.StatusDeadLetter) || post.Deliveries[0].ReasonCode != "run_stopped" {
+					t.Fatalf("canceled child %s public terminal disposition=%+v err=%v", id, post, err)
+				}
+				effectName := eventidentity.ExternalizeForFlow(post.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
+				if ids := nestedEventIDs(t, ctx, db, runID, effectName, id); len(ids) != 0 {
+					t.Fatalf("canceled held child %s emitted business effects: %v", id, ids)
+				}
 			}
 			assertNestedExactBarrier(t, ctx, db, parent.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
 			for _, event := range parents {
@@ -235,7 +250,7 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			}
 			for _, key := range children {
 				want := fanoutbarrier.Summary{Total: 2, Canceled: 2}
-				if key == interrupted.Key {
+				if key == issued.Key {
 					// Issued events retain their identity and receive run_stopped
 					// delivery terminalization; only unissued ordinals are canceled.
 					want = fanoutbarrier.Summary{Total: 2, DeadLettered: 2}
@@ -250,8 +265,8 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			if counts.Active != 0 || counts.Started != counts.Returned || counts.LoadedItems != 0 || counts.CommitPlans != 0 || counts.Carriers != 0 {
 				t.Fatalf("canceled actual nested callers did not join: %+v", counts)
 			}
-			handlers.assertOnlyHeld(t, held.EventID)
-			t.Logf("B16/M24 actual occurrence cancellation joins partially dispatched child group, then one production Stop commits: exact8-event prefix,4 canceled unissued ordinals,3 suppressed child barriers,parent3-success barrier unchanged,held business state unchanged; not live-claim preemption or full runtime shutdown qualification")
+			handlers.assertOnlyHeld(t, held.EventID, secondHeld.EventID)
+			t.Logf("B16/M24 occurrence cancellation joins both held deliveries and the pre-claim turn before Stop: exact8-event prefix,4 canceled unissued ordinals,3 suppressed child barriers,parent3-success barrier unchanged,held business state unchanged")
 		})
 	}
 }

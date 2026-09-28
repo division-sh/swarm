@@ -16,8 +16,8 @@ import (
 
 const (
 	scanPageSize     = 32
-	dispatchWorkers  = 2
-	dispatchCapacity = 8
+	dispatchWorkers  = 8
+	dispatchCapacity = 32
 )
 
 var errCoordinatorRetired = errors.New("delivery continuation coordinator is retired")
@@ -78,6 +78,7 @@ type Coordinator struct {
 	cancel        context.CancelFunc
 	failure       error
 	workerFailure error
+	workerLimit   int
 	jobs          chan dispatchJob
 	workers       sync.WaitGroup
 	rescanNeeded  bool
@@ -138,9 +139,17 @@ func newCoordinator(
 	if dispatcher == nil {
 		return nil, errors.New("delivery continuation dispatcher is required")
 	}
+	workerLimit := dispatchWorkers
+	if bounded, ok := store.(interface{ DeliveryContinuationWorkerLimit() int }); ok {
+		workerLimit = bounded.DeliveryContinuationWorkerLimit()
+		if workerLimit < 1 || workerLimit > dispatchWorkers {
+			return nil, fmt.Errorf("delivery continuation worker limit must be between 1 and %d", dispatchWorkers)
+		}
+	}
 	return &Coordinator{
 		store: store, restarts: restarts, authority: authority, workOwner: workOwner, dispatcher: dispatcher, report: report,
-		entries: make(map[string]entry), reserved: make(map[string]struct{}),
+		workerLimit: workerLimit,
+		entries:     make(map[string]entry), reserved: make(map[string]struct{}),
 		wake: make(chan struct{}, 1), sync: make(chan synchronizationRequest), done: make(chan struct{}),
 		jobs: make(chan dispatchJob, dispatchCapacity),
 	}, nil
@@ -186,8 +195,8 @@ func (c *Coordinator) Start(ctx context.Context) error {
 	if err := runCtx.Err(); err != nil {
 		return c.finish(runCtx, cancel, lease, err, false)
 	}
-	c.workers.Add(dispatchWorkers)
-	for range dispatchWorkers {
+	c.workers.Add(c.workerLimit)
+	for range c.workerLimit {
 		go c.dispatch(runCtx)
 	}
 	next, wake, err := c.scan(runCtx, true)
@@ -602,7 +611,7 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 				c.completeDispatch(job.deliveryID, job.lease.Done())
 				return
 			}
-			result := c.dispatcher.DispatchDeliveryContinuation(ctx, job.event, job.route)
+			result := c.dispatcher.DispatchDeliveryContinuation(job.lease.Context(), job.event, job.route)
 			var err error
 			if validationErr := result.Validate(); validationErr != nil {
 				err = fmt.Errorf("dispatch delivery continuation %s returned invalid result: %w", job.deliveryID, validationErr)
@@ -617,7 +626,7 @@ func (c *Coordinator) dispatch(ctx context.Context) {
 					err = fmt.Errorf("dispatch delivery continuation %s returned unknown disposition", job.deliveryID)
 				}
 			}
-			if ctx.Err() != nil && ordinaryCoordinatorStop(ctx, err, true) {
+			if job.lease.Context().Err() != nil && ordinaryCoordinatorStop(job.lease.Context(), err, true) {
 				err = nil
 			}
 			err = errors.Join(err, job.lease.Done())

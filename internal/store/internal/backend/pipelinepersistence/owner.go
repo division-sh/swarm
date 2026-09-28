@@ -61,7 +61,6 @@ type eventCommitTxStore interface {
 
 type completionCandidateWriter interface {
 	mutationprotocol.CandidateWriter
-	SettlementNeedsCompletionTx(context.Context, *sql.Tx, string) (bool, error)
 }
 
 func (s *PipelinePostgresOwner) resourceSourceOwner() *storedurabledata.Owner { return s.resourceData }

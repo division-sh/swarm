@@ -78,12 +78,9 @@ func assertNestedPredecessorsSettledWhileChildHeld(t *testing.T, ctx context.Con
 			t.Fatalf("nested predecessor %s handoff not durably settled before child execution: outcome=%q err=%v", parent.ID, outcome, err)
 		}
 	}
-	var prematureReceipts int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, heldEventID).Scan(&prematureReceipts); err != nil {
-		t.Fatal(err)
-	}
-	if prematureReceipts != 0 {
-		t.Fatalf("still-executing nested member %s acknowledged itself to unblock handoff: receipts=%d", heldEventID, prematureReceipts)
+	held, err := reader.LoadOperatorEvent(ctx, heldEventID)
+	if err != nil || len(held.Deliveries) != 1 || held.Deliveries[0].Terminal {
+		t.Fatalf("still-executing nested member settled its delivery before handler return: event=%+v err=%v", held, err)
 	}
 }
 

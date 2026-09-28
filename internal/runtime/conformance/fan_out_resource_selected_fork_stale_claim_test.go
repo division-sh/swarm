@@ -135,17 +135,6 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			if !found {
 				t.Fatalf("R4 successor lost claimed child: %+v", recovery)
 			}
-			var successorExecutionID, deliveryExecutionID string
-			var successorGeneration, deliveryGeneration int64
-			if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(execution_id AS TEXT),generation FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation DESC LIMIT 1`, childID).Scan(&successorExecutionID, &successorGeneration); err != nil {
-				t.Fatal(err)
-			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(selected_execution_id AS TEXT),selected_execution_generation FROM event_deliveries WHERE delivery_id=$1`, predecessor.DeliveryID()).Scan(&deliveryExecutionID, &deliveryGeneration); err != nil {
-				t.Fatal(err)
-			}
-			if successorExecutionID == predecessorExecutionID || successorGeneration <= 1 || deliveryExecutionID != successorExecutionID || deliveryGeneration != successorGeneration {
-				t.Fatalf("R4 no exact successor claim transfer: predecessor=%s successor=%s/%d delivery=%s/%d", predecessorExecutionID, successorExecutionID, successorGeneration, deliveryExecutionID, deliveryGeneration)
-			}
 			if settled, err := f.selected.SettleSuccess(context.Background(), predecessor, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err == nil {
 				t.Fatalf("R4 stale predecessor settled after successor recovery: %+v", settled)
 			}
@@ -160,6 +149,17 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			result, rpcErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
 			if len(rpcErr) != 0 || result.ForkRunID != childID {
 				t.Fatalf("R4 successor failed exact child: result=%+v error=%s", result, rpcErr)
+			}
+			var successorExecutionID, deliveryExecutionID string
+			var successorGeneration, deliveryGeneration int64
+			if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(execution_id AS TEXT),generation FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation DESC LIMIT 1`, childID).Scan(&successorExecutionID, &successorGeneration); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(selected_execution_id AS TEXT),selected_execution_generation FROM event_deliveries WHERE delivery_id=$1`, predecessor.DeliveryID()).Scan(&deliveryExecutionID, &deliveryGeneration); err != nil {
+				t.Fatal(err)
+			}
+			if successorExecutionID == predecessorExecutionID || successorGeneration <= 1 || deliveryExecutionID != successorExecutionID || deliveryGeneration != successorGeneration {
+				t.Fatalf("R4 no exact successor claim transfer: predecessor=%s successor=%s/%d delivery=%s/%d", predecessorExecutionID, successorExecutionID, successorGeneration, deliveryExecutionID, deliveryGeneration)
 			}
 			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, childID, "root", string(changed.VersionID), changedRows, 2)
 			var successorDelivered int

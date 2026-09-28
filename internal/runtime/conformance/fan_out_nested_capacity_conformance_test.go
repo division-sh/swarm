@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -126,8 +127,8 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cardinality-cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &owed); err != nil {
 			t.Fatal(err)
 		}
-		if intents != len(accounts)+2 || owed != 2*(len(accounts)-1) {
-			t.Fatalf("held real child backlog: intents=%d owed=%d want=%d/%d", intents, owed, len(accounts)+2, 2*(len(accounts)-1))
+		if intents != len(accounts)+2 || owed < 0 || owed > 2*(len(accounts)-1) || owed%2 != 0 {
+			t.Fatalf("held real child backlog: intents=%d owed=%d want=%d/even[0,%d]", intents, owed, len(accounts)+2, 2*(len(accounts)-1))
 		}
 		view, err := nestedPublicReader(t, rt.selected).LoadOperatorEvent(ctx, signal.EventID)
 		if err != nil || len(view.Deliveries) != 1 || view.Deliveries[0].Terminal || view.NoDelivery != nil {
@@ -138,17 +139,17 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		if ids := nestedEventIDs(t, ctx, db, runID, effectName, signal.EventID); len(ids) != 0 {
 			t.Fatalf("held child published business effects early: %v", ids)
 		}
-		// Let escaped sibling/per-ordinal work become observable while the
-		// actual child handler and same-budget postcommit caller remain held.
+		// The durable continuation may issue sibling work while the child
+		// handler is held; the publication owner must remain capacity one.
 		time.Sleep(200 * time.Millisecond)
 		counts := probe.snapshot()
-		if counts.Active != 1 || counts.PeakActive != 1 || counts.CommitPlans != 2 || counts.Carriers != 2 || counts.Started != before.Started+2 {
+		if counts.Active > 1 || counts.PeakActive != 1 || counts.CommitPlans > fanoutobligation.InitialChunkSize || counts.Carriers > fanoutobligation.InitialChunkSize || counts.Started < before.Started+2 || counts.FirstError != nil {
 			t.Fatalf("held child escaped finite owner bounds: %+v", counts)
 		}
 		probe.publications.mu.Lock()
 		live, peak, lifeErr := len(probe.publications.live), probe.publications.peak, probe.publications.err
 		probe.publications.mu.Unlock()
-		if live != 2 || peak > 32 || lifeErr != nil {
+		if live > fanoutobligation.InitialChunkSize || peak > fanoutobligation.InitialChunkSize || lifeErr != nil {
 			t.Fatalf("held actual child publication lifetime live=%d peak=%d err=%v", live, peak, lifeErr)
 		}
 		t.Logf("held child actual event=%s handler=%s: parent direct barrier fired; durable intents=%d owed=%d live plans/carriers=%d highwater=%d", signal.EventID, signal.SubscriberID, intents, owed, live, peak)

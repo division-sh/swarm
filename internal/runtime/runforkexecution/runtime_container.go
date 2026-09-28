@@ -805,7 +805,8 @@ func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) er
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) error {
-	if c.proof.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision && errors.Is(cause, worklifetime.ErrRetired) {
+	if c.proof.ForkPoint.Kind == runfork.RunForkPointDeploymentRevision &&
+		(errors.Is(cause, worklifetime.ErrRetired) || errors.Is(context.Cause(ctx), worklifetime.ErrRetired)) {
 		// The process owner already withdrew execution. Startup recovery must
 		// fence this generation and its open claims before issuing a successor.
 		return fmt.Errorf("selected finite-feed predecessor awaits fenced recovery: %w", worklifetime.ErrRetired)

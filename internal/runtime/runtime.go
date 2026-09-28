@@ -2126,14 +2126,6 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if fanOutServing != nil {
 		fanOutServing.Close()
 	}
-	if rt.runLifecycleExecutor != nil {
-		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil {
-			shutdownErr = errors.Join(
-				shutdownErr,
-				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, err),
-			)
-		}
-	}
 	if err := rt.shutdownGate.Wait(drainCtx); err != nil {
 		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("runtime ingress admission drain timed out after %s: %w", grace, err))
 	}
@@ -2145,6 +2137,14 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 			if err := rt.deliveryContinuations.Retire(context.Background()); err != nil {
 				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("delivery continuation coordinator join: %w", err))
 			}
+		}
+	}
+	if rt.runLifecycleExecutor != nil {
+		if err := rt.runLifecycleExecutor.Retire(drainCtx); err != nil {
+			shutdownErr = errors.Join(
+				shutdownErr,
+				fmt.Errorf("run lifecycle executor retirement timed out after %s: %w", grace, err),
+			)
 		}
 	}
 	if rt.Manager != nil {

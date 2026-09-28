@@ -122,6 +122,7 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {
 		var claimed runtimedelivery.ClaimResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(txctx, transactiontest.DeliveryClaim)
 			snapshot, err := postgresDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
 			if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 				return err
@@ -154,6 +155,7 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite claim delivery", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {
 		var claimed runtimedelivery.ClaimResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+			transactiontest.Mark(txctx, transactiontest.DeliveryClaim)
 			snapshot, err := sqliteDeliveryAdapter.SnapshotExact(txctx, tx, event, route)
 			if err != nil && !errors.Is(err, runtimedelivery.ErrNotFound) && !errors.Is(err, runtimedelivery.ErrConflict) {
 				return err
@@ -359,6 +361,7 @@ func (s *DeliverySQLiteOwner) ObserveDeliveryContinuations(ctx context.Context, 
 
 func (s *DeliveryPostgresOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	return postgresDeliveryMutation(s, ctx, nil, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
+		transactiontest.Mark(txctx, transactiontest.DeliveryRenew)
 		if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
@@ -368,6 +371,7 @@ func (s *DeliveryPostgresOwner) RenewClaim(ctx context.Context, claim runtimedel
 
 func (s *DeliverySQLiteOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	return sqliteDeliveryMutation(s, ctx, nil, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
+		transactiontest.Mark(txctx, transactiontest.DeliveryRenew)
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
@@ -599,6 +603,7 @@ func (s *DeliverySQLiteOwner) BindAgentSession(ctx context.Context, claim runtim
 
 func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	commit, err := postgresDeliveryMutation(s, ctx, s.candidates, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
+		transactiontest.Mark(txctx, transactiontest.DeliverySettle)
 		if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
@@ -616,6 +621,7 @@ func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtime
 
 func (s *DeliverySQLiteOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	commit, err := sqliteDeliveryMutation(s, ctx, s.candidates, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
+		transactiontest.Mark(txctx, transactiontest.DeliverySettle)
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
@@ -633,6 +639,7 @@ func (s *DeliverySQLiteOwner) SettleSuccess(ctx context.Context, claim runtimede
 
 func (s *DeliveryPostgresOwner) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
 	commit, err := postgresDeliveryMutation(s, ctx, s.candidates, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
+		transactiontest.Mark(txctx, transactiontest.DeliverySettle)
 		if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
@@ -664,6 +671,7 @@ func (s *DeliveryPostgresOwner) SettleFailure(ctx context.Context, claim runtime
 
 func (s *DeliverySQLiteOwner) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
 	commit, err := sqliteDeliveryMutation(s, ctx, s.candidates, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) (runtimedelivery.Snapshot, error) {
+		transactiontest.Mark(txctx, transactiontest.DeliverySettle)
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
