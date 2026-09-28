@@ -623,7 +623,16 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				})
 			}
 			issuanceReached := waitNotifyAllChildrenFanOutCursor(t, runtime, db, validRunID, 500)
-			receipt := transactions.Snapshot()
+			var receipt storetest.TransactionSnapshot
+			receiptDeadline := time.Now().Add(5 * time.Second)
+			for {
+				receipt = transactions.Snapshot()
+				claims, chunks := receipt.ByOperation[storetest.TransactionFanOutClaim], receipt.ByOperation[storetest.TransactionFanOutChunk]
+				if claims.WriteCommits >= 20 && chunks.WriteCommits >= 20 || time.Now().After(receiptDeadline) {
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
 			t.Logf("500-row transaction-owner receipt through descendant quiescence (includes ingress, trigger, retained-session and downstream work; excludes implicit-autocommit SQL): total=%+v retained=%+v operations=%+v active=%d", receipt.Total, receipt.Retained, receipt.ByOperation, receipt.Active)
 			claims, chunks := receipt.ByOperation[storetest.TransactionFanOutClaim], receipt.ByOperation[storetest.TransactionFanOutChunk]
 			if claims.WriteCommits != 20 || chunks.WriteCommits != 20 || receipt.ByOperation[storetest.TransactionFanOutRelease].WriteCommits != 0 {
