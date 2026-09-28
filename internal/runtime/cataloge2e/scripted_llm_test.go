@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -112,7 +113,7 @@ func (*scriptedLLMRuntime) ProviderContract() llm.ProviderContract {
 	return llm.AnthropicAPIProviderContract()
 }
 
-func (*scriptedLLMRuntime) PersistConversationSnapshot(context.Context, *llm.Session) error {
+func (*scriptedLLMRuntime) PersistConversationSnapshot(context.Context, *sessions.Lease, *llm.Session) error {
 	return nil
 }
 

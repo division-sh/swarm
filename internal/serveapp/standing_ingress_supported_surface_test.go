@@ -32,6 +32,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -131,7 +132,7 @@ func (telegramPhraseBotLLMRuntime) ContinueForkChatSession(ctx context.Context, 
 	return &runtimellm.Response{Message: runtimellm.Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
 }
 
-func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, *runtimellm.Session) error {
+func (telegramPhraseBotLLMRuntime) PersistConversationSnapshot(context.Context, *sessions.Lease, *runtimellm.Session) error {
 	return nil
 }
 func TestServedParityHarnessStandingServiceLifecycle(t *testing.T) {
