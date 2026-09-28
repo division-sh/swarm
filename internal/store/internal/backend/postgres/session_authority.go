@@ -793,15 +793,21 @@ func runAuthorityTransaction(
 	}
 	probe := session.testTransactions.Begin(opts != nil && opts.ReadOnly, true)
 	defer func() { probe.Finish(err) }()
+	beginStarted := time.Now()
 	tx, err := session.beginTxOptions(ctx, opts)
+	// The session is already pinned; this includes waiting for its operation
+	// ownership but no new connection-pool acquisition.
+	probe.RecordAdmission(0, 0, time.Since(beginStarted))
 	if err != nil {
 		return false, err
 	}
 	probe.Begun()
 	defer func() {
 		if tx != nil {
+			cleanupStarted := time.Now()
 			probe.RollbackAttempted()
 			cleanupErr := rollbackSessionTransaction(tx, session)
+			probe.RecordCleanup(time.Since(cleanupStarted))
 			if cleanupErr != nil {
 				slog.Error("postgres retained transaction cleanup failed", "error", cleanupErr)
 				err = errors.Join(err, cleanupErr)
@@ -822,16 +828,20 @@ func runAuthorityTransaction(
 	probe.BeforeCommit()
 	if commitErr := tx.Commit(); commitErr != nil {
 		probe.CommitFailed()
+		cleanupStarted := time.Now()
 		// Fence possession before endTx releases operationMu. A successor must
 		// never borrow the session between ambiguous settlement and disposal.
 		discardErr := session.prepareDiscardExcept(nil).drain()
 		endErr := session.endTx(tx)
+		probe.RecordCleanup(time.Since(cleanupStarted))
 		tx = nil
 		return false, errors.Join(commitErr, contextError(ctx), endErr, wrapAdvisoryDiscardError(discardErr))
 	}
 	probe.Committed()
 	committed = true
+	cleanupStarted := time.Now()
 	endErr := session.endTx(tx)
+	probe.RecordCleanup(time.Since(cleanupStarted))
 	tx = nil
 	return committed, endErr
 }

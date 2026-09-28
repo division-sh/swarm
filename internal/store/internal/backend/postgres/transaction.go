@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
@@ -50,15 +51,18 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
 		return false, err
 	}
+	poolWait := time.Since(poolStarted)
 	discard := false
 	var tx *sql.Tx
 	probe := b.testTransactions.Begin(opts != nil && opts.ReadOnly, false)
 	defer func() { probe.Finish(err) }()
 	defer func() {
+		cleanupStarted := time.Now()
 		var cleanupErr error
 		if tx != nil {
 			probe.RollbackAttempted()
@@ -86,6 +90,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 			slog.Error("postgres transaction cleanup failed", "error", cleanupErr)
 			err = errors.Join(err, cleanupErr)
 		}
+		probe.RecordCleanup(time.Since(cleanupStarted))
 	}()
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -96,7 +101,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	if drain {
 		sqlCtx = context.WithoutCancel(ctx)
 	}
+	beginStarted := time.Now()
 	tx, err = conn.BeginTx(sqlCtx, opts)
+	probe.RecordAdmission(0, poolWait, time.Since(beginStarted))
 	if err != nil {
 		if callerErr := ctx.Err(); callerErr != nil {
 			return false, errors.Join(callerErr, err)
