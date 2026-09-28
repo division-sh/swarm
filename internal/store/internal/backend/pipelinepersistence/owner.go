@@ -44,6 +44,7 @@ type EventCommitOwner interface {
 type eventCommitTxStore interface {
 	resourceSourceOwner() *storedurabledata.Owner
 	commitFanOutPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error)
+	syncRunCountersTx(context.Context, *mutationprotocol.Attempt, string) error
 	appendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	RequirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	CommitInitialDeliveryObligationsTx(context.Context, *mutationprotocol.Attempt, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
@@ -304,6 +305,14 @@ func (s *PipelinePostgresOwner) commitFanOutPublicationTx(ctx context.Context, a
 
 func (s *PipelineSQLiteOwner) commitFanOutPublicationTx(ctx context.Context, attempt *mutationprotocol.Attempt, command runtimebus.PublicationCommand, projection fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error) {
 	return s.events.CommitFanOutPublicationTx(ctx, attempt, command, projection)
+}
+
+func (s *PipelinePostgresOwner) syncRunCountersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
+	return s.RunLifecyclePostgresOwner.SyncCountersTx(ctx, attempt, runID)
+}
+
+func (s *PipelineSQLiteOwner) syncRunCountersTx(ctx context.Context, attempt *mutationprotocol.Attempt, runID string) error {
+	return s.RunLifecycleSQLiteOwner.SyncCountersTx(ctx, attempt, runID)
 }
 
 func (s *PipelinePostgresOwner) createReplyContextTx(ctx context.Context, attempt *mutationprotocol.Attempt, record runtimereplycontext.Record) error {

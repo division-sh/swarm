@@ -647,6 +647,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				t.Errorf("500-row issuance exceeded the approved %s target: %s (transaction probe %+v)", issuanceBudget, issuanceElapsed, transactionOptions)
 			}
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, validRunID, 5*time.Minute)
+			assertNotifyAllChildrenRunEventCount(t, validCtx, db, validRunID)
 
 			validSummary, err := selected.FanOutRunSummary(validCtx, validRunID, time.Now().UTC())
 			if err != nil {
@@ -695,6 +696,7 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 				},
 			})
 			waitNotifyAllChildrenRuntimeWithin(t, runtime, mixedRunID, 5*time.Minute)
+			assertNotifyAllChildrenRunEventCount(t, mixedCtx, db, mixedRunID)
 			mixedSummary, err := selected.FanOutRunSummary(mixedCtx, mixedRunID, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("mixed FanOutRunSummary: %v", err)
@@ -743,6 +745,18 @@ func runNumericFanOutReporterShape(t *testing.T, transactionOptions storetest.Tr
 			}
 			assertNotifyAllChildrenFanOutRunStatus(t, mixedCtx, selected, mixedRunID)
 		})
+	}
+}
+
+func assertNotifyAllChildrenRunEventCount(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
+	t.Helper()
+	var stored, actual int
+	err := db.QueryRowContext(ctx, `SELECT r.event_count, (SELECT COUNT(*) FROM events e WHERE e.run_id = r.run_id) FROM runs r WHERE r.run_id = $1`, runID).Scan(&stored, &actual)
+	if err != nil {
+		t.Fatalf("read run event counter: %v", err)
+	}
+	if stored != actual {
+		t.Fatalf("run event_count = %d, want %d durable events", stored, actual)
 	}
 }
 

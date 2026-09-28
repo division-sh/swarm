@@ -63,6 +63,8 @@ type Counts struct {
 	CleanupFailures  uint64
 	DelayedCommits   uint64
 	InjectedDelay    time.Duration
+	CommitDuration   time.Duration
+	Mutation         MutationCounts
 	Revision         RevisionCounts
 	FirstCommitAt    time.Time
 	LastCommitAt     time.Time
@@ -143,8 +145,12 @@ type Attempt struct {
 	begun, commitAttempted, acknowledged, rollbackAttempted bool
 	delay                                                   time.Duration
 	committedAt                                             time.Time
+	commitStarted                                           time.Time
+	commitDuration                                          time.Duration
 	revisionMu                                              sync.Mutex
 	revision                                                RevisionCounts
+	mutationMu                                              sync.Mutex
+	mutation                                                MutationCounts
 	activeClass                                             ActiveClass
 	finished                                                bool
 }
@@ -213,12 +219,16 @@ func (a *Attempt) BeforeCommit() {
 		time.Sleep(a.delay)
 	}
 	a.commitAttempted = true
+	a.commitStarted = time.Now()
 	a.reclassify(PhaseCommitCall)
 }
 
 func (a *Attempt) Committed() {
 	if a != nil {
 		a.committedAt = time.Now()
+		if !a.commitStarted.IsZero() {
+			a.commitDuration = a.committedAt.Sub(a.commitStarted)
+		}
 		a.acknowledged = true
 		a.reclassify(PhaseAcknowledgedCleanup)
 	}
@@ -238,8 +248,13 @@ func (a *Attempt) Finish(finalErr error) {
 	a.revisionMu.Lock()
 	revision := a.revision
 	a.revisionMu.Unlock()
+	a.mutationMu.Lock()
+	mutation := a.mutation
+	a.mutationMu.Unlock()
 	add := func(counts Counts) Counts {
 		counts.Revision.add(revision)
+		counts.Mutation.add(mutation)
+		counts.CommitDuration += a.commitDuration
 		counts.BeginAttempts++
 		if a.begun {
 			counts.Begun++

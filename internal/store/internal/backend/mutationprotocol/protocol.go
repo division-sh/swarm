@@ -15,6 +15,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
@@ -445,25 +446,34 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 		previous = attempt
 		defer func() { attempt.active = false }()
 		phase = AcquireFence
+		fenceSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationFence)
 		switch evidence {
 		case Story:
 			story, err := privateactivity.Begin(txctx, tx, dialect)
 			if err != nil {
+				fenceSpan.End()
 				return err
 			}
 			attempt.story = story
 		case AuthorityFence:
 			if err := privateactivity.FenceMutationOrder(txctx, tx, dialect); err != nil {
+				fenceSpan.End()
 				return err
 			}
 		}
+		fenceSpan.End()
 		phase = DomainWrite
+		domainSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationDomain)
 		candidate, err := write(txctx, attempt)
+		domainSpan.End()
 		if err != nil {
 			return err
 		}
-		if err := attempt.finalize(txctx, &phase); err != nil {
-			return err
+		finalizeSpan := transactiontest.BeginMutationPhase(txctx, transactiontest.MutationFinalize)
+		finalizeErr := attempt.finalize(txctx, &phase)
+		finalizeSpan.End()
+		if finalizeErr != nil {
+			return finalizeErr
 		}
 		value = candidate
 		phase = CommitAdmission
