@@ -13624,7 +13624,9 @@ durable_data_resources:
       `--data event.field=path` always reads a UTF-8 file or keyed directory into that exact compiled text field.
       No sniffing, `event=file` shorthand, document type, source declaration, mode flag, key-supply syntax, or
       per-field import configuration exists. Standalone `swarm data import ./event field=path [field=path ...]`
-      uses the same field operand; its existing positional JSONL path remains JSONL, and `--check` uses the
+      uses the same field operand; its existing positional JSONL path remains JSONL, including a path with `=`
+      when a directory separator precedes `=` (for example `./rows=backup.jsonl`). A bare `field=path` is a
+      field assignment; prefix a same-named JSONL file with `./` to select the positional form. `--check` uses the
       same lowering without committing a version or head. Direct API source inputs remain canonical JSONL.
     selector_resolution: >
       For fused operands, compare the left side against both the full exact selected declaration inventory

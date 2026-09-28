@@ -120,6 +120,28 @@ func TestFileRowLoweringRefusesContradictoryShapesAndPaths(t *testing.T) {
 	if _, err := lowerFileAssignments(root, "application", keyless, []fileAssignment{{"resume", "link.md"}}); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("symlink error = %v", err)
 	}
+	if err := os.WriteFile(root.Resolve("invalid.txt"), []byte{0xff}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lowerFileAssignments(root, "application", keyless, []fileAssignment{{"resume", "invalid.txt"}}); err == nil || !strings.Contains(err.Error(), "UTF-8") {
+		t.Fatalf("invalid UTF-8 error = %v", err)
+	}
+	if err := os.Mkdir(root.Resolve("hostile"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root.Resolve("resume.md"), root.Resolve("hostile/link.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lowerFileAssignments(root, "application", shape, []fileAssignment{{"resume", "hostile"}}); err == nil || !strings.Contains(err.Error(), "regular non-symlink") {
+		t.Fatalf("directory symlink error = %v", err)
+	}
+	if err := os.Remove(root.Resolve("hostile/link.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeFileImportTestFile(t, root.Resolve("hostile/.md"), "empty stem")
+	if _, err := lowerFileAssignments(root, "application", shape, []fileAssignment{{"resume", "hostile"}}); err == nil || !strings.Contains(err.Error(), "invalid or over-limit key") {
+		t.Fatalf("empty key stem error = %v", err)
+	}
 }
 
 func TestFileRowLoweringEmptyDirectoryAndEscapingBound(t *testing.T) {
@@ -185,5 +207,18 @@ func TestFileRowDottedSelectorCollision(t *testing.T) {
 	got, err = resolveRunDataOperand("profile.body=resume.md", []durabledata.DeclarationSummary{parent}, eligible)
 	if err != nil || got.Declaration.Declaration != parentRef || got.Field != "body" {
 		t.Fatalf("field operand = %#v, %v", got, err)
+	}
+}
+
+func TestStandaloneDataImportPositionalJSONLPathWithEquals(t *testing.T) {
+	for _, path := range []string{"./rows=backup.jsonl", "../rows=backup.jsonl", "/tmp/rows=backup.jsonl", `C:\rows=backup.jsonl`, "rows/subset=backup.jsonl"} {
+		if !standaloneDataJSONLPath([]string{path}) {
+			t.Fatalf("positional JSONL path %q was reinterpreted as a field assignment", path)
+		}
+	}
+	for _, operands := range [][]string{{"body=resume.md"}, {"body=resume.md", "cover=cover.md"}} {
+		if standaloneDataJSONLPath(operands) {
+			t.Fatalf("file assignments %v were reinterpreted as JSONL", operands)
+		}
 	}
 }

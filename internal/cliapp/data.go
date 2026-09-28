@@ -116,7 +116,7 @@ func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataI
 		return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
 	}
 	var input []byte
-	if len(operands) == 1 && !strings.Contains(operands[0], "=") {
+	if standaloneDataJSONLPath(operands) {
 		input, err = readBoundedDataFile(opts.apiOptions.invocationRoot.Resolve(operands[0]))
 	} else {
 		assignments := make([]fileAssignment, 0, len(operands))
@@ -166,6 +166,14 @@ func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataI
 	}, func() ([]string, error) {
 		return []string{string(result.Candidate.VersionID)}, nil
 	})
+}
+
+func standaloneDataJSONLPath(operands []string) bool {
+	if len(operands) != 1 {
+		return false
+	}
+	prefix, _, assignment := strings.Cut(operands[0], "=")
+	return !assignment || strings.ContainsAny(prefix, `/\`)
 }
 
 func newDataShowCommand(root rootCommandOptions) *cobra.Command {
