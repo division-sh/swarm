@@ -6498,10 +6498,6 @@ engine:
           eligibility or a retry clock, and rescans after capacity frees only when work was deferred for capacity.
           Dispatch failure is retained and reported as the generation's terminal failure. Startup and synchronization
           report such a failure if it has already occurred; successful enumeration does not assert handler completion.
-          A pre-claim error at an exact node-delivery boundary remains that delivery's original error; it cannot be
-          converted into an event-level dead-letter disposition while its exact continuation is still unconsumed.
-          An acknowledged terminal exact-delivery settlement owns the handler failure; it remains a diagnostic and
-          cannot be reported again as an event-wide failure.
           Retirement fences new dispatch, cancels and joins every worker before settling the standing lease.
           For a newly acquired claim, the selected-store claim transaction may also renew the exact claim and return
           its acknowledged snapshot for pre-execution heartbeat admission. A recovery claim without that receipt
