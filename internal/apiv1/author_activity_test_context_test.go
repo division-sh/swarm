@@ -118,6 +118,10 @@ func testAuthorActivityRequest(req *http.Request) *http.Request {
 }
 
 func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+	return newScopedAPITestEventBusWithDataCatalog(t, eventStore, nil, options...)
+}
+
+func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus.EventStore, exactCatalog *durabledata.Catalog, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
 	opts := runtimebus.EventBusOptions{}
 	if len(options) > 0 {
@@ -145,7 +149,12 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	}
 	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok {
 		catalog := durabledata.Catalog{BundleHash: opts.SourceArtifactFact.BundleHash()}
-		if opts.ContractBundle != nil {
+		if exactCatalog != nil {
+			catalog = *exactCatalog
+			if catalog.BundleHash != opts.SourceArtifactFact.BundleHash() {
+				return nil, fmt.Errorf("API test data catalog %s does not match selected source %s", catalog.BundleHash, opts.SourceArtifactFact.BundleHash())
+			}
+		} else if opts.ContractBundle != nil {
 			for _, declaration := range opts.ContractBundle.DurableDataDeclarations() {
 				catalog.Declarations = append(catalog.Declarations, durabledata.Declaration{
 					Name: declaration.Name, Ref: declaration.Ref, OwnerFlowID: declaration.OwnerFlowID,

@@ -908,9 +908,9 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			)
 
 			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, selected, workOwner, eventID, route)
-			assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
-			if got := deliveryOwner.renewals.Load(); got < 2 {
-				t.Fatalf("claim renewals = %d, want immediate and final handler renewal", got)
+			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
+			if got := deliveryOwner.renewals.Load(); got != 0 {
+				t.Fatalf("standalone claim renewals = %d, want claim/settlement-owned renewal", got)
 			}
 			continuations.Signal()
 			assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, 1)
@@ -1025,10 +1025,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			if err != nil {
 				t.Fatalf("derive poison delivery identity: %v", err)
 			}
-			poisonSnapshot, err := selected.Snapshot(ctx, poisonDeliveryID)
-			if err != nil {
-				t.Fatalf("load poison delivery snapshot: %v", err)
-			}
+			poisonSnapshot := waitForNodeDeliveryStatus(t, ctx, selected, poisonDeliveryID, runtimedelivery.StatusDeadLetter)
 			if poisonSnapshot.Status != runtimedelivery.StatusDeadLetter || poisonSnapshot.ReasonCode != "handler_terminal_failure" {
 				t.Fatalf("poison delivery = status:%s reason:%s, want committed terminal-handler dead letter", poisonSnapshot.Status, poisonSnapshot.ReasonCode)
 			}
@@ -1204,8 +1201,8 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, route, 2)
 			waitForRecoveredNodeDelivery(t, ctx, selected, expiringEventID, route, 1)
 			assertExpiredNodeDeliveryAttemptHistory(t, ctx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
-			if got := deliveryOwner.renewals.Load(); got < 4 {
-				t.Fatalf("standing recovery claim renewals = %d, want immediate and final renewal for two handlers", got)
+			if got := deliveryOwner.renewals.Load(); got != 0 {
+				t.Fatalf("standalone recovery claim renewals = %d, want claim/settlement-owned renewal", got)
 			}
 		})
 	}
@@ -1295,25 +1292,30 @@ func makeNodeDeliveryImmediatelyEligible(t *testing.T, ctx context.Context, db *
 
 func waitForRecoveredNodeDelivery(t *testing.T, ctx context.Context, selected runtimedelivery.Store, eventID string, route events.DeliveryRoute, wantOutcomes int) {
 	t.Helper()
+	proof, err := selected.ProveHandoff(ctx, eventID, route)
+	if err != nil {
+		t.Fatalf("ProveHandoff: %v", err)
+	}
+	waitForNodeDeliveryStatus(t, ctx, selected, proof.DeliveryID(), runtimedelivery.StatusDelivered)
+	assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, wantOutcomes)
+}
+
+func waitForNodeDeliveryStatus(t *testing.T, ctx context.Context, selected runtimedelivery.Store, deliveryID string, want runtimedelivery.Status) runtimedelivery.Snapshot {
+	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
 	for {
-		proof, err := selected.ProveHandoff(ctx, eventID, route)
-		if err != nil {
-			t.Fatalf("ProveHandoff: %v", err)
-		}
-		snapshot, err := selected.Snapshot(ctx, proof.DeliveryID())
+		snapshot, err := selected.Snapshot(ctx, deliveryID)
 		if err != nil {
 			t.Fatalf("Snapshot: %v", err)
 		}
-		if snapshot.Status == runtimedelivery.StatusDelivered {
-			assertRecoveredNodeDelivery(t, ctx, selected, eventID, route, wantOutcomes)
-			return
+		if snapshot.Status == want {
+			return snapshot
 		}
 		if time.Now().After(deadline) {
-			outcomes, outcomesErr := selected.Outcomes(ctx, snapshot.DeliveryID)
-			t.Fatalf("standing recovery snapshot = %#v outcomes=%#v outcomes_err=%v, want delivered", snapshot, outcomes, outcomesErr)
+			outcomes, outcomesErr := selected.Outcomes(ctx, deliveryID)
+			t.Fatalf("delivery snapshot = %#v outcomes=%#v outcomes_err=%v, want %s", snapshot, outcomes, outcomesErr, want)
 		}
 		<-ticker.C
 	}

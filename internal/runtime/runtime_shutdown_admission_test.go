@@ -558,11 +558,11 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	releaseDispatch()
 	select {
 	case err := <-startResult:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("startup retirement: %v", err)
+		if err != nil {
+			t.Fatalf("startup scan: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("initial dispatch not joined")
+		t.Fatal("startup scan did not complete")
 	}
 
 	select {

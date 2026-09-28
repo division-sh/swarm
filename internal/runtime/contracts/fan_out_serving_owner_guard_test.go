@@ -88,8 +88,8 @@ func hostileRegistrationReadback(owner fanOutExecutionObserver) {
 	const startupPackage = "github.com/division-sh/swarm/internal/runtime/startupownership"
 	observationAllowed := map[string]map[string]bool{
 		startupPackage + ".FanOutServingStore.NextFanOutCandidate": {
-			startupPackage + ".fanOutServingService.refill":                    true,
-			startupPackage + ".fanOutServingService.detectMissedOpportunities": true,
+			startupPackage + ".fanOutServingService.refill":                   true,
+			startupPackage + ".fanOutServingService.observeMissedOpportunity": true,
 		},
 		startupPackage + ".fanOutExecutionObserver.ObserveFanOutExecutions": {
 			startupPackage + ".ObserveFanOutRuntimePage": true,
