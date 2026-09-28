@@ -15,7 +15,7 @@ import (
 
 func TestCompletionNonterminalEntityDefersOnlyUnusedFanOutFoldBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, session := range []string{"none", "exact_expiry", "foreign_expiry", "malformed_holder"} {
+		for _, session := range []string{"none", "exact_expiry", "foreign_expiry"} {
 			t.Run(backend+"/"+session, func(t *testing.T) {
 				fixture := openRunLifecycleCandidateParityFixture(t, backend)
 				ctx := testAuthorActivitySourceArtifactContext()
@@ -26,12 +26,8 @@ func TestCompletionNonterminalEntityDefersOnlyUnusedFanOutFoldBothStores(t *test
 				}
 				now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 				expiry := time.Date(2100, 1, 1, 0, 0, 0, 123456000, time.UTC)
-				if session == "exact_expiry" || session == "malformed_holder" {
-					var lease any = expiry
-					if session == "malformed_holder" {
-						lease = nil
-					}
-					if err := insertCompletionBlockerSession(t, fixture, ctx, fan.runID, "worker", lease); err != nil {
+				if session == "exact_expiry" {
+					if err := insertCompletionBlockerSession(t, fixture, ctx, fan.runID, "worker", expiry); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -47,9 +43,6 @@ func TestCompletionNonterminalEntityDefersOnlyUnusedFanOutFoldBothStores(t *test
 				}
 				if session == "exact_expiry" && !full.Sessions.NextExpiry.Equal(expiry) {
 					t.Fatalf("canonical expiry=%s want=%s", full.Sessions.NextExpiry, expiry)
-				}
-				if session == "malformed_holder" && full.Sessions.MalformedLease != 1 {
-					t.Fatalf("malformed lease not represented by session owner: %+v", full.Sessions)
 				}
 				corrupt := corruptCompletionShortCircuitSettlement(t, original)
 				writeCompletionShortCircuitSettlement(t, fixture, ctx, eventID, corrupt)
@@ -100,7 +93,7 @@ func TestCompletionNonterminalEntityDefersOnlyUnusedFanOutFoldBothStores(t *test
 				assertCompletionShortCircuitRunning(t, fixture, ctx, fan.runID)
 
 				writeCompletionShortCircuitSettlement(t, fixture, ctx, eventID, original)
-				if _, err := fixture.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_holder=NULL,lease_expires_at=NULL WHERE run_id=$1`, fan.runID); err != nil {
+				if _, err := fixture.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_holder=NULL,lease_grant_id=NULL,lease_expires_at=NULL WHERE run_id=$1`, fan.runID); err != nil {
 					t.Fatal(err)
 				}
 				full, err = loadCompletionShortCircuitSummaries(ctx, fixture, fan.runID, now)

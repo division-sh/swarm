@@ -125,19 +125,15 @@ func conformanceProviderCredentialResolver(t testing.TB, key, value string) runt
 	return runtimellm.NewProviderCredentialResolver(store)
 }
 
-func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, identity agentmemory.Identity) string {
+func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, identity agentmemory.Identity) *runtimesessions.Lease {
 	t.Helper()
 	registry := storetest.AdmitPostgresRuntimeStore(t, db)
-	registry.SetSessionLockTTL(30 * time.Second)
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, identity, "test-owner")
 	if err != nil {
 		t.Fatalf("Acquire(%+v): %v", identity, err)
 	}
-	if _, err := registry.ReleaseOutcome(ctx, lease); err != nil {
-		t.Fatalf("Release(%s,%s): %v", identity.AgentID(), lease.SessionID, err)
-	}
-	return lease.SessionID
+	return lease
 }
 
 func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *testing.T) {
@@ -221,8 +217,14 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	ctx = runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 
 	identity := lifecycleToken.Identity
-	sessionID := acquireLiveConversationSession(t, ctx, db, identity)
-	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+	lease := acquireLiveConversationSession(t, ctx, db, identity)
+	sessionID := lease.SessionID
+	defer func() {
+		if _, err := pg.ReleaseOutcome(ctx, lease); err != nil {
+			t.Errorf("release conversation proof grant: %v", err)
+		}
+	}()
+	if err := pg.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{
 		SessionID: sessionID,
 		AgentID:   "agent-1",
 		Identity:  identity,
@@ -236,7 +238,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	}); err != nil {
 		t.Fatalf("UpsertConversation(session): %v", err)
 	}
-	if err := pg.UpdateLiveSessionWatchdog(ctx, runtimellm.ConversationWatchdogUpdate{
+	if err := pg.UpdateLiveSessionWatchdog(ctx, lease, runtimellm.ConversationWatchdogUpdate{
 		SessionID: sessionID,
 		AgentID:   "agent-1",
 		Identity:  identity,
@@ -643,10 +645,14 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
 
-	err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
-		SessionID: uuid.NewString(),
+	missingSessionID := uuid.NewString()
+	missingIdentity := conformanceAgentIdentity(t, runID, "agent-1")
+	err := pg.UpsertConversation(ctx, &runtimesessions.Lease{
+		SessionID: missingSessionID, Identity: missingIdentity, LockOwner: "test-owner", GrantID: uuid.NewString(), ExpiresAt: time.Now().Add(time.Minute),
+	}, runtimellm.ConversationRecord{
+		SessionID: missingSessionID,
 		AgentID:   "agent-1",
-		Identity:  conformanceAgentIdentity(t, runID, "agent-1"),
+		Identity:  missingIdentity,
 		Memory:    agentmemory.Authored(true),
 		Messages:  []runtimellm.Message{{Role: "assistant", Content: "should fail"}},
 		Summary:   "should fail",

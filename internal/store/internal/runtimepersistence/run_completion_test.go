@@ -256,14 +256,14 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 			memory_enabled, memory_source,
 			conversation, turn_count, runtime_state,
-			lease_holder, lease_expires_at, status, created_at, updated_at
+			lease_holder, lease_grant_id, lease_expires_at, status, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
 			'[]'::jsonb, 0, '{}'::jsonb,
-			'worker-1', now() + interval '1 minute', 'active', now(), now()
+			'worker-1', $10, now() + interval '1 minute', 'active', now(), now()
 		)
 	`, sessionID, fixture.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, uuid.NewString()); err != nil {
 		t.Fatalf("seed active session lease: %v", err)
 	}
 	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
@@ -274,6 +274,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 	if _, err := db.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET lease_holder = NULL,
+		    lease_grant_id = NULL,
 		    lease_expires_at = NULL
 		WHERE session_id = $1::uuid
 	`, sessionID); err != nil {

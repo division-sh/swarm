@@ -340,13 +340,13 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
 			memory_enabled, memory_source, runtime_state,
-			lease_holder, lease_expires_at, status, created_at, updated_at
+			lease_holder, lease_grant_id, lease_expires_at, status, created_at, updated_at
 		)
 		VALUES
 			(gen_random_uuid(), $1::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored', '{}'::jsonb,
-				'worker-1', now() + interval '1 minute', 'active', now(), now()),
+				'worker-1', gen_random_uuid()::text, now() + interval '1 minute', 'active', now(), now()),
 			(gen_random_uuid(), $2::uuid, $10, $11, $12, $13, $14, $15, $16, TRUE, 'authored', '{}'::jsonb,
-				'worker-1', now() - interval '1 minute', 'active', now(), now())
+				'worker-1', gen_random_uuid()::text, now() - interval '1 minute', 'active', now(), now())
 	`, blockedRunID, readyRunID, blockedFields.AgentID, blockedFields.NameOwner,
 		blockedFields.NameSource, blockedFields.RoutePresence, blockedFields.FlowScopeKey,
 		blockedFields.FlowInstanceID, blockedFields.FlowInstancePath,

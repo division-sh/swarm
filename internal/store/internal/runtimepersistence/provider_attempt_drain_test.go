@@ -1068,6 +1068,7 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 	t.Helper()
 	sibling := fixture
 	sibling.sessionID = uuid.NewString()
+	sibling.grantID = uuid.NewString()
 	sibling.authority.Normal.Identity = mustTestAgentIdentityForRun(fixture.authority.Target.RunID, fixture.agentID, "sibling")
 	sibling.authority.Normal.Generation = fixture.authority.Normal.Generation
 	sibling.authority.Normal.RuntimeEpoch = fixture.authority.Normal.RuntimeEpoch
@@ -1101,17 +1102,17 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 	sibling.authority.Normal.Generation = lifecycle.Generation
 	sibling.authority.FenceGeneration = lifecycle.Generation
 	if fixture.sqlite {
-		if _, err := fixture.db.Exec(`INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,'active',?,?)`,
+		if _, err := fixture.db.Exec(`INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,?,'active',?,?)`,
 			sibling.sessionID, sibling.authority.Target.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			`{"provider_session_id":"provider-head-current"}`, sibling.leaseHolder, now.Add(10*time.Minute), now, now); err != nil {
+			`{"provider_session_id":"provider-head-current"}`, sibling.leaseHolder, sibling.grantID, now.Add(10*time.Minute), now, now); err != nil {
 			t.Fatalf("seed SQLite provider-drain sibling session: %v", err)
 		}
 	} else {
-		if _, err := fixture.db.Exec(`INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13)`,
+		if _, err := fixture.db.Exec(`INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,$13,'active',$14,$14)`,
 			sibling.sessionID, sibling.authority.Target.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-			`{"provider_session_id":"provider-head-current"}`, sibling.leaseHolder, now.Add(10*time.Minute), now); err != nil {
+			`{"provider_session_id":"provider-head-current"}`, sibling.leaseHolder, sibling.grantID, now.Add(10*time.Minute), now); err != nil {
 			t.Fatalf("seed PostgreSQL provider-drain sibling session: %v", err)
 		}
 	}

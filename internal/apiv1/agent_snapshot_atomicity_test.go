@@ -343,8 +343,8 @@ func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(
 	for _, backend := range agentSnapshotBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
-			fixture.setSessionLease(t, "snapshot-lease")
 			turnID := fixture.seedOutputContractTurn(t)
+			fixture.setSessionLease(t, "snapshot-lease")
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
 				Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -785,9 +785,9 @@ func (f agentSnapshotBoundaryFixture) setSessionLease(t *testing.T, holder strin
 	t.Helper()
 	expiresAt := time.Now().UTC().Add(time.Hour)
 	f.execDialect(t, f.db,
-		`UPDATE agent_sessions SET lease_holder=?, lease_expires_at=? WHERE session_id=?`,
-		`UPDATE agent_sessions SET lease_holder=$1, lease_expires_at=$2 WHERE session_id=$3::uuid`,
-		holder, expiresAt, f.sessionID,
+		`UPDATE agent_sessions SET lease_holder=?, lease_grant_id=?, lease_expires_at=? WHERE session_id=?`,
+		`UPDATE agent_sessions SET lease_holder=$1, lease_grant_id=$2, lease_expires_at=$3 WHERE session_id=$4::uuid`,
+		holder, uuid.NewString(), expiresAt, f.sessionID,
 	)
 }
 

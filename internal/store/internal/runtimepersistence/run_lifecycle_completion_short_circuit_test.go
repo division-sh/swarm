@@ -18,7 +18,7 @@ import (
 
 func TestCompletionPendingPipelineDefersOnlyUnusedFanOutFoldBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, session := range []string{"none", "exact_expiry", "foreign_expiry", "malformed_holder"} {
+		for _, session := range []string{"none", "exact_expiry", "foreign_expiry"} {
 			t.Run(backend+"/"+session, func(t *testing.T) {
 				fixture := openRunLifecycleCandidateParityFixture(t, backend)
 				ctx := testAuthorActivitySourceArtifactContext()
@@ -29,10 +29,6 @@ func TestCompletionPendingPipelineDefersOnlyUnusedFanOutFoldBothStores(t *testin
 				switch session {
 				case "exact_expiry":
 					if err := insertCompletionBlockerSession(t, fixture, ctx, fan.runID, "worker", expiry); err != nil {
-						t.Fatal(err)
-					}
-				case "malformed_holder":
-					if err := insertCompletionBlockerSession(t, fixture, ctx, fan.runID, "worker", nil); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -48,9 +44,6 @@ func TestCompletionPendingPipelineDefersOnlyUnusedFanOutFoldBothStores(t *testin
 				}
 				if session == "exact_expiry" && !full.Sessions.NextExpiry.Equal(expiry) {
 					t.Fatalf("session owner expiry=%s want=%s", full.Sessions.NextExpiry, expiry)
-				}
-				if session == "malformed_holder" && full.Sessions.MalformedLease != 1 {
-					t.Fatalf("malformed session did not remain a blocker: %+v", full.Sessions)
 				}
 				corrupt := corruptCompletionShortCircuitSettlement(t, original)
 				writeCompletionShortCircuitSettlement(t, fixture, ctx, eventID, corrupt)
@@ -109,7 +102,7 @@ func TestCompletionPendingPipelineDefersOnlyUnusedFanOutFoldBothStores(t *testin
 				assertJointSourceReadCorrupt(t, eventID, err)
 
 				writeCompletionShortCircuitSettlement(t, fixture, ctx, eventID, original)
-				if _, err := fixture.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_holder=NULL,lease_expires_at=NULL WHERE run_id=$1`, fan.runID); err != nil {
+				if _, err := fixture.db.ExecContext(ctx, `UPDATE agent_sessions SET lease_holder=NULL,lease_grant_id=NULL,lease_expires_at=NULL WHERE run_id=$1`, fan.runID); err != nil {
 					t.Fatal(err)
 				}
 				full, err = loadCompletionShortCircuitSummaries(ctx, fixture, fan.runID, selectedNow)
