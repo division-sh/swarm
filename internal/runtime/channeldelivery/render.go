@@ -15,7 +15,12 @@ import (
 	"github.com/google/uuid"
 )
 
-const ProjectionVersion = "channel-render-v1"
+const ProjectionVersion = "channel-render-v2"
+
+type ActionPage struct {
+	Index    int `json:"index"`
+	Capacity int `json:"capacity"`
+}
 
 type Audience struct {
 	PrincipalID        string
@@ -56,6 +61,7 @@ type Frozen struct {
 	Hash               string
 	FullText           string
 	Choices            []Choice
+	ActionPage         *ActionPage
 	Prompt             *DraftPrompt
 	DraftChoices       []DraftChoice
 	DraftChooser       *DraftChooser
@@ -117,7 +123,8 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 			Label   string  `json:"label"`
 			Fields  []Field `json:"fields"`
 		} `json:"choices"`
-		Audience struct {
+		ActionPage *ActionPage `json:"action_page"`
+		Audience   struct {
 			PrincipalID        string                            `json:"principal_id"`
 			InterfaceKey       string                            `json:"interface_key"`
 			DeliveryEpoch      int64                             `json:"delivery_epoch"`
@@ -141,7 +148,7 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 			ConversationRef: wire.Audience.ConversationRef, ConversationScope: wire.Audience.ConversationScope},
 		Input: append(json.RawMessage(nil), raw...), Hash: hash, FullText: wire.FullText, Choices: choices,
 		Prompt: wire.DraftPrompt, DraftChoices: wire.DraftChoices, DraftChooser: wire.DraftChooser,
-		Recovery: wire.Recovery, RecoveryChoices: wire.RecoveryChoices, Page: wire.Page,
+		Recovery: wire.Recovery, RecoveryChoices: wire.RecoveryChoices, Page: wire.Page, ActionPage: wire.ActionPage,
 	}
 	if err := frozen.Validate(); err != nil {
 		return Frozen{}, err
@@ -182,6 +189,7 @@ func (f Frozen) Validate() error {
 		Chooser         *DraftChooser    `json:"draft_chooser"`
 		Recovery        *RecoveryPage    `json:"recovery_page"`
 		RecoveryChoices []RecoveryChoice `json:"recovery_choices"`
+		ActionPage      *ActionPage      `json:"action_page"`
 	}
 	if err := json.Unmarshal(f.Input, &index); err != nil {
 		return err
@@ -197,6 +205,19 @@ func (f Frozen) Validate() error {
 	}
 	if (f.Page == nil) != (index.Page == nil) {
 		return fmt.Errorf("channel response page contradicts frozen input")
+	}
+	if (f.ActionPage == nil) != (index.ActionPage == nil) {
+		return fmt.Errorf("channel action page contradicts frozen input")
+	}
+	if f.ActionPage != nil {
+		page := f.ActionPage
+		if f.SourceKind != "card" || *page != *index.ActionPage || page.Capacity < 1 || page.Index < 0 {
+			return fmt.Errorf("channel action page is invalid")
+		}
+		_, err := actionPageCount(f, page.Capacity)
+		if err != nil {
+			return err
+		}
 	}
 	if f.Page != nil && (f.SourceKind != "response" || !f.Page.Valid() || *f.Page != *index.Page) {
 		return fmt.Errorf("channel response page is invalid")
@@ -240,6 +261,55 @@ func (f Frozen) Validate() error {
 		seenRecovery[choice.DeliveryID] = true
 	}
 	return nil
+}
+
+func ActionPageCount(f Frozen) (int, error) {
+	if err := f.Validate(); err != nil {
+		return 0, err
+	}
+	if f.ActionPage == nil {
+		return 0, fmt.Errorf("channel render has no selected action page")
+	}
+	return actionPageCount(f, f.ActionPage.Capacity)
+}
+
+func actionPageCount(f Frozen, capacity int) (int, error) {
+	count := len(f.Choices)
+	if f.Prompt != nil {
+		count++
+		if f.Prompt.Optional {
+			count++
+		}
+	}
+	if len([]rune(f.FullText)) > ChannelExcerptRunes {
+		count++
+	}
+	if count <= capacity {
+		return 1, nil
+	}
+	if capacity < 2 {
+		return 0, fmt.Errorf("channel action capacity cannot page controls")
+	}
+	return (count + capacity - 2) / (capacity - 1), nil
+}
+
+func WithActionPage(f Frozen, capacity, index int) (Frozen, error) {
+	if err := f.Validate(); err != nil {
+		return Frozen{}, err
+	}
+	if f.SourceKind != "card" || capacity < 1 || index < 0 {
+		return Frozen{}, fmt.Errorf("action page requires a card and selected capacity")
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(f.Input, &raw); err != nil {
+		return Frozen{}, err
+	}
+	projection := make(map[string]any, len(raw)+1)
+	for key, value := range raw {
+		projection[key] = value
+	}
+	projection["action_page"] = ActionPage{Index: index, Capacity: capacity}
+	return freeze(projection, f.SourceKind, f.SourceID, f.Revision, f.Audience, f.FullText)
 }
 
 // Notice is the committed notice presentation projection. Mailbox persistence
