@@ -274,7 +274,7 @@ func TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores(t *testing.
 	}
 }
 
-func TestDataTextFile2456Keyed37DeltaOldPinBothStores(t *testing.T) {
+func TestFileRow2456Keyed37DeltaOldPinBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, _ := textFileDeploymentFixture2456(t, backend, true)
@@ -788,7 +788,7 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 	return server
 }
 
-func TestDataTextFile2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
+func TestFileRow2456FreshProcessBindingAndExactWireBothStores(t *testing.T) {
 	binary := textFileSwarmBinary2456(t)
 	repo := conformanceRepoRoot(t)
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -888,7 +888,7 @@ func TestDataTextFile2456FreshProcessBindingAndExactWireBothStores(t *testing.T)
 	}
 }
 
-func TestDataTextFile2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
+func TestFileRow2456DefaultBundleAndHeadPinReplayBothStores(t *testing.T) {
 	binary := textFileSwarmBinary2456(t)
 	repo := conformanceRepoRoot(t)
 	for _, backend := range []string{"sqlite", "postgres"} {

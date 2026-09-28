@@ -208,18 +208,20 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	}
 	fileRowRoots := []string{
 		"TestDataTextFile2456KeylessOperatorRouteRestartReplayBothStores",
-		"TestDataTextFile2456Keyed37DeltaOldPinBothStores",
 		"TestDataTextFile2456Keyed37DynamicReceiversBothStores",
 		"TestDataTextFile2456MultiFieldAndLimitsBothStores",
-		"TestDataTextFile2456FreshProcessBindingAndExactWireBothStores",
-		"TestDataTextFile2456DefaultBundleAndHeadPinReplayBothStores",
 		"TestDataTextFile2456RejectedMultiPinServedReplayBothStores",
 		"TestDataTextFile2456ConcurrentFirstAttemptBothStores",
 		"TestDataTextFile2456HostileGrammarNoMutationBothStores",
 		"TestStandaloneTextFileImportSupport2456BothStores",
 		"TestStandaloneTextFileEmptyKeyedRequiredDirectory2456BothStores",
 	}
-	want := []int{160, 14, 5, 1}
+	fileRowLongRoots := []string{
+		"TestFileRow2456Keyed37DeltaOldPinBothStores",
+		"TestFileRow2456FreshProcessBindingAndExactWireBothStores",
+		"TestFileRow2456DefaultBundleAndHeadPinReplayBothStores",
+	}
+	want := []int{157, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -260,6 +262,16 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 			t.Fatalf("general conformance partition omitted reviewed #2456 root %s", name)
 		}
 	}
+	fileRowLong := regexp.MustCompile(policy.Units["conformance-1"].Run)
+	for _, name := range fileRowLongRoots {
+		if i := sort.SearchStrings(names, name); i == len(names) || names[i] != name {
+			t.Fatalf("#2456 long file-row root %s is missing", name)
+		}
+		i := sort.SearchStrings(groups[0], name)
+		if !fileRowLong.MatchString(name) || i < len(groups[0]) && groups[0][i] == name {
+			t.Fatalf("#2456 long file-row root %s must belong only to conformance-1", name)
+		}
+	}
 	const generatedResultsProof = "TestActionRetirementCorpusExcludesGeneratedTestResults"
 	if i := sort.SearchStrings(groups[0], generatedResultsProof); i == len(groups[0]) || groups[0][i] != generatedResultsProof {
 		t.Fatalf("general conformance partition omitted generated-results guard %s", generatedResultsProof)
@@ -273,7 +285,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if i := sort.SearchStrings(groups[3], reporterProof); i == len(groups[3]) || groups[3][i] != reporterProof {
 		t.Fatalf("reporter conformance partition omitted %s", reporterProof)
 	}
-	t.Log("complete disjoint census:180 =160 general +14 core +5 pressure +1 reporter")
+	t.Log("complete disjoint census:180 =157 general +14 core +5 pressure +1 reporter +3 long file-row roots in conformance-1")
 	for _, profile := range []string{ProfilePRCommon, ProfilePREscalated, ProfileFull, ProfileNightly} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
