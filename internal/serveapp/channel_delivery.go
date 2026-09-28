@@ -391,6 +391,81 @@ func (d *serveChannelDeliveryDispatcher) dispatchEdit(ctx context.Context, candi
 	return d.dispatchChannel(ctx, candidate, prepared, "edit", previous.DeliveryReference)
 }
 
+func (d *serveChannelDeliveryDispatcher) currentCompiledDelivery(ctx context.Context, candidate runtimechanneldelivery.Candidate) (channelonboarding.ConnectedChannelActivation, packs.OutboundBindingPlan, func(), error) {
+	if d == nil || d.store == nil || d.activations == nil || d.manager == nil {
+		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery binding owners are unavailable")
+	}
+	selectedID := candidate.RequestActivationID
+	if candidate.SourceKind != "response" {
+		if selectedID != "" {
+			return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("non-response delivery has entry activation")
+		}
+		var found bool
+		var err error
+		selectedID, found, err = d.store.CurrentChannelDeliveryActivationID(ctx)
+		if err != nil {
+			return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, err
+		}
+		if !found {
+			return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery has no succeeded activation")
+		}
+	} else if selectedID == "" {
+		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel response has no admitted entry activation")
+	}
+	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, err
+	}
+	var selected channelonboarding.ConnectedChannelActivation
+	for _, activation := range activations {
+		if activation.ActivationID == selectedID {
+			if selected.ActivationID != "" {
+				return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery activation identity is duplicated")
+			}
+			selected = activation
+		}
+	}
+	if selected.ActivationID == "" || selected.PrincipalID != candidate.Audience.PrincipalID ||
+		selected.Interface.Key() != candidate.Audience.InterfaceKey ||
+		selected.BindingRevision != candidate.BindingRevision ||
+		selected.ConversationRef != candidate.Audience.ConversationRef {
+		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery activation contradicts selected destination")
+	}
+	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
+	if err != nil {
+		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, err
+	}
+	if !current {
+		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery runtime publication is unavailable")
+	}
+	var compiled channelonboarding.CompiledActivation
+	for _, activation := range lease.Activations() {
+		if activation.Source == channelonboarding.ActivationSourceLearned &&
+			activation.OnboardingOperationID == selected.OperationID &&
+			activation.ActivationRevision == selected.Revision && activation.Coordinate.Matches(selected.Coordinate) {
+			if compiled.OnboardingOperationID != "" {
+				lease.Release()
+				return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery compiled activation is duplicated")
+			}
+			compiled = activation
+		}
+	}
+	if compiled.OnboardingOperationID == "" {
+		lease.Release()
+		return channelonboarding.ConnectedChannelActivation{}, packs.OutboundBindingPlan{}, nil, fmt.Errorf("channel delivery compiled activation is absent")
+	}
+	return selected, compiled.Plan, lease.Release, nil
+}
+
+func (d *serveChannelDeliveryDispatcher) selectedActionCapacity(ctx context.Context, candidate runtimechanneldelivery.Candidate) (int, error) {
+	_, plan, release, err := d.currentCompiledDelivery(ctx, candidate)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	return plan.ActionCapacity()
+}
+
 func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, candidate runtimechanneldelivery.Candidate, prepared runtimechanneldelivery.PreparedRender, operation string, previousReference any) error {
 	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.effects == nil || d.credentials == nil ||
 		!d.posture.Valid() || strings.TrimSpace(d.runtimeInstanceID) == "" || d.now == nil {
@@ -405,88 +480,31 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 		candidate.Audience != prepared.Frozen.Audience {
 		return fmt.Errorf("channel delivery candidate and render are not exact-current")
 	}
-	selectedID := candidate.RequestActivationID
-	if candidate.SourceKind != "response" {
-		if selectedID != "" {
-			return fmt.Errorf("non-response delivery has entry activation")
-		}
-		var found bool
-		var err error
-		selectedID, found, err = d.store.CurrentChannelDeliveryActivationID(ctx)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("channel delivery has no succeeded activation")
-		}
-	} else if selectedID == "" {
-		return fmt.Errorf("channel response has no admitted entry activation")
-	}
-	activations, err := d.activations.ListCurrentConnectedChannelActivations(ctx)
+	selected, plan, release, err := d.currentCompiledDelivery(ctx, candidate)
 	if err != nil {
 		return err
 	}
-	var selected channelonboarding.ConnectedChannelActivation
-	for _, activation := range activations {
-		if activation.ActivationID == selectedID {
-			if selected.ActivationID != "" {
-				return fmt.Errorf("channel delivery activation identity is duplicated")
-			}
-			selected = activation
-		}
-	}
-	if selected.ActivationID == "" || selected.PrincipalID != candidate.Audience.PrincipalID ||
-		selected.Interface.Key() != candidate.Audience.InterfaceKey ||
-		selected.BindingRevision != candidate.BindingRevision ||
-		selected.ConversationRef != candidate.Audience.ConversationRef {
-		return fmt.Errorf("channel delivery activation contradicts selected destination")
-	}
+	defer release()
 	if err := d.reconcileNativeInboxActivation(ctx, selected); err != nil {
 		return fmt.Errorf("channel delivery recovery entry is unavailable: %w", err)
 	}
-	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
-	if err != nil {
-		return err
-	}
-	if !current {
-		return fmt.Errorf("channel delivery runtime publication is unavailable")
-	}
-	defer lease.Release()
-	var compiled channelonboarding.CompiledActivation
-	for _, activation := range lease.Activations() {
-		if activation.Source == channelonboarding.ActivationSourceLearned &&
-			activation.OnboardingOperationID == selected.OperationID &&
-			activation.ActivationRevision == selected.Revision && activation.Coordinate.Matches(selected.Coordinate) {
-			if compiled.OnboardingOperationID != "" {
-				return fmt.Errorf("channel delivery compiled activation is duplicated")
-			}
-			compiled = activation
-		}
-	}
-	if compiled.OnboardingOperationID == "" {
-		return fmt.Errorf("channel delivery compiled activation is absent")
-	}
-	presentation, truncated, err := runtimechanneldelivery.PresentationText(prepared.Frozen)
+	presentation, _, err := runtimechanneldelivery.PresentationText(prepared.Frozen)
 	if err != nil {
 		return err
 	}
 	actions := make([]any, 0, len(prepared.Actions))
-	viewFull := false
-	verdicts := 0
 	for _, action := range prepared.Actions {
 		if action.Token == "" || action.Label == "" {
 			return fmt.Errorf("channel delivery action is incomplete")
 		}
-		if action.Kind == "view_full" {
-			viewFull = true
-		}
-		if action.Kind == "verdict" {
-			verdicts++
-		}
 		actions = append(actions, map[string]any{"label": action.Label, "token": action.Token})
 	}
-	if viewFull != truncated || (candidate.SourceKind == "card" && verdicts != len(prepared.Frozen.Choices)) {
-		return fmt.Errorf("channel delivery actions contradict frozen presentation")
+	capacity, err := plan.ActionCapacity()
+	if err != nil {
+		return err
+	}
+	if len(actions) > capacity || (candidate.SourceKind == "card" && prepared.Frozen.ActionPage == nil) {
+		return fmt.Errorf("channel delivery actions exceed selected compiled capacity")
 	}
 	semanticInput := map[string]any{
 		"presentation": map[string]any{"text": presentation}, "actions": actions,
@@ -494,11 +512,11 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if operation == "edit" {
 		semanticInput["delivery_reference"] = previousReference
 	}
-	_, input, err := compiled.Plan.PrepareOperation(operation, semanticInput)
+	_, input, err := plan.PrepareOperation(operation, semanticInput)
 	if err != nil {
 		return err
 	}
-	toolID, tool, err := compiled.Plan.ConnectorOperation(operation)
+	toolID, tool, err := plan.ConnectorOperation(operation)
 	if err != nil {
 		return err
 	}
@@ -506,7 +524,7 @@ func (d *serveChannelDeliveryDispatcher) dispatchChannel(ctx context.Context, ca
 	if !ok {
 		return fmt.Errorf("channel delivery connector has no compiled receipt projection")
 	}
-	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, compiled.Plan, selected.CredentialAdmissions, tool)
+	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, selected.CredentialAdmissions, tool)
 	if err != nil {
 		return err
 	}
