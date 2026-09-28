@@ -258,6 +258,22 @@ func TestStandaloneTextFileImportSupport2456BothStores(t *testing.T) {
 			if versions != 1 || history != 1 || receipts != 2 || revision != 1 || head != string(imported.Candidate.VersionID) {
 				t.Fatal("refused requests mutated durable data state")
 			}
+			jsonlPath := filepath.Join(t.TempDir(), "rows=backup.jsonl")
+			jsonlRow, err := json.Marshal(map[string]string{"body": "Standalone \"text\" and \\backslash\n"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(jsonlPath, append(jsonlRow, '\n'), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			jsonlCheck, code, stderr := standaloneTextDataCommand2456(t, f, uuid.NewString(), string(imported.Candidate.VersionID), true, "./root.ready", jsonlPath)
+			if code != 0 || jsonlCheck.Candidate.VersionID != imported.Candidate.VersionID {
+				t.Fatalf("positional JSONL path with equals was reinterpreted: code=%d result=%#v stderr=%s", code, jsonlCheck, stderr)
+			}
+			versions, history, receipts, revision, head = standaloneTextDataCounts2456(t, f)
+			if versions != 1 || history != 1 || receipts != 3 || revision != 1 || head != string(imported.Candidate.VersionID) {
+				t.Fatal("positional JSONL check changed durable data state")
+			}
 		})
 	}
 }
