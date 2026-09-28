@@ -1718,6 +1718,9 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	} else if !bound.Acknowledged {
 		t.Fatal("BindAgentSession trace event was not acknowledged")
 	}
+	if released, err := store.ReleaseOutcome(ctx, lease); err != nil || !released.Acknowledged {
+		t.Fatalf("Release session before managed turn: result=%+v err=%v", released, err)
+	}
 	if err := persistManagedAgentTurnReadbackFixture(t, runtimedelivery.WithClaim(ctx, claimed.Claim), store, runtimellm.AgentTurnRecord{
 		AgentID:          "agent-1",
 		Memory:           agentmemory.Authored(true),
@@ -1760,9 +1763,6 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	}
 	if len(logs.Logs) != 1 || logs.Logs[0].LogID != logID || logs.Logs[0].SessionID != lease.SessionID {
 		t.Fatalf("runtime logs = %#v, want persisted runtime log", logs)
-	}
-	if _, err := store.ReleaseOutcome(ctx, lease); err != nil {
-		t.Fatalf("Release session: %v", err)
 	}
 }
 

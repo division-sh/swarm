@@ -29,7 +29,7 @@ func TestSQLiteReleaseOutcomeRetainsCommittedLeaseAndHandoffError(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer registration.Release()
-	lease := &runtimesessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder}
+	lease := &runtimesessions.Lease{SessionID: fixture.sessionID, GrantID: fixture.grantID, Identity: identity, LockOwner: fixture.leaseHolder}
 	released, err := store.lLMSQLiteOwner.ReleaseOutcome(ctx, lease)
 	if !released.Acknowledged || !errors.Is(err, injected) || submits != 1 {
 		t.Fatalf("released=%+v handoff=%v submissions=%d", released, err, submits)
