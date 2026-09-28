@@ -193,6 +193,13 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	providerCtx = managedSelectedExecutionStoreTestContext(t, providerCtx, providerAuthority)
 	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
 	for _, registration := range runtimeeffects.Registrations() {
+		switch registration.Kind {
+		case runtimeeffects.KindChannelDelivery, runtimeeffects.KindChannelActionAck, runtimeeffects.KindChannelNativeSetting:
+			if _, err := runtimeeffects.Begin(providerCtx, registration.Adapter, []byte(registration.Adapter), nil); err == nil || !strings.Contains(err.Error(), string(registration.Kind)+"_authority_invalid") {
+				t.Fatalf("selected fork authority admitted channel effect %s: %v", registration.Adapter, err)
+			}
+			continue
+		}
 		if registration.Kind == runtimeeffects.KindProviderTurn ||
 			registration.Kind == runtimeeffects.KindProviderStartupProbe ||
 			registration.Kind == runtimeeffects.KindServeRegistration ||
