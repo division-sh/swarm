@@ -4196,7 +4196,9 @@ handler_specification:
           observed_opportunity: >-
             A separately scheduled, generation-owned observer uses canonical eligibility, exact candidate identity and
             available capacity. Record monotonic local observation and actual claim-operation entry, not callback
-            scheduling. An observed eligible/free-capacity opportunity remaining without a matching claim attempt for
+            scheduling. The first observation and each witnessed eligible-candidate episode use a 500ms cadence;
+            confirmed idle observation uses the independent one-second recovery cadence. An observed eligible/free-capacity
+            opportunity remaining without a matching claim attempt for
             more than one second emits fan_out_claim_opportunity_missed through existing typed runtime logs, once per
             exact source/generation/candidate episode. Revalidate current evidence before reporting. An unrelated
             attempt cannot clear the episode. Unknown or disconnected observations do not prove continuous eligibility;
@@ -6496,6 +6498,10 @@ engine:
           eligibility or a retry clock, and rescans after capacity frees only when work was deferred for capacity.
           Dispatch failure is retained and reported as the generation's terminal failure. Startup and synchronization
           report such a failure if it has already occurred; successful enumeration does not assert handler completion.
+          A pre-claim error at an exact node-delivery boundary remains that delivery's original error; it cannot be
+          converted into an event-level dead-letter disposition while its exact continuation is still unconsumed.
+          An acknowledged terminal exact-delivery settlement owns the handler failure; it remains a diagnostic and
+          cannot be reported again as an event-wide failure.
           Retirement fences new dispatch, cancels and joins every worker before settling the standing lease.
           For a newly acquired claim, the selected-store claim transaction may also renew the exact claim and return
           its acknowledged snapshot for pre-execution heartbeat admission. A recovery claim without that receipt

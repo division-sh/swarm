@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-const fanOutOpportunityObservationInterval = 250 * time.Millisecond
+const fanOutOpportunityObservationInterval = 500 * time.Millisecond
 
 type fanOutOpportunity struct {
 	candidate FanOutCandidate
@@ -60,60 +60,65 @@ func (o *fanOutObservedClaimOwner) ClaimFanOutIntent(ctx context.Context, reques
 // This observer never claims or wakes work. Query failure is unknown state, not
 // proof of eligible work, and ends the currently observed opportunity episode.
 func (s *fanOutServingService) detectMissedOpportunities() {
-	ticker := time.NewTicker(fanOutOpportunityObservationInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(fanOutOpportunityObservationInterval)
+	defer timer.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 		}
-		grants, registrations, excluded := s.snapshot(true)
-		if len(grants) == 0 {
-			s.observeOpportunity(FanOutCandidate{}, false, time.Now())
-			continue
-		}
-		lease, err := s.owner.fanOutCapacity.workProcess.Begin(s.ctx)
-		if err != nil {
-			return
-		}
-		candidate, found, err := s.store.NextFanOutCandidate(lease.Context(), grants, excluded)
-		lease.Done()
-		if err != nil || !found {
-			s.observeOpportunity(FanOutCandidate{}, false, time.Now())
-			continue
-		}
-		r := registrations[candidate.GrantID]
-		if r == nil || r.ctx.Err() != nil || candidate.Validate() != nil {
-			s.observeOpportunity(FanOutCandidate{}, false, time.Now())
-			continue
-		}
-		if !s.observeOpportunity(candidate, true, time.Now()) {
-			continue
-		}
-		if err := r.grant.ProveCurrent(r.ctx); err != nil {
-			s.observeOpportunity(FanOutCandidate{}, false, time.Now())
-			continue
-		}
-		reportLease, err := r.occurrence.Begin(r.ctx)
-		if err != nil {
-			continue
-		}
-		s.owner.mu.Lock()
-		stillPending := s.opportunity != nil && sameFanOutOpportunity(s.opportunity.candidate, candidate) && !s.claimEntered[candidate.Key]
-		s.owner.mu.Unlock()
-		if !stillPending {
-			reportLease.Done()
-			continue
-		}
-		r.executor.ReportFanOutServingError(correlation.WithRunID(reportLease.Context(), candidate.Key.RunID), failures.New(failures.ClassInternalFailure, "fan_out_claim_opportunity_missed", "runtime.fan_out", "observe_opportunity", map[string]any{
-			"grant_id": candidate.GrantID, "run_id": candidate.Key.RunID,
-			"triggering_delivery_id": candidate.Key.TriggeringDeliveryID,
-			"flow_path":              candidate.Key.ElementRef.FlowPath, "declaration_family": candidate.Key.ElementRef.Family,
-			"semantic_path": candidate.Key.ElementRef.SemanticPath, "claim_attempt_bound_ms": 1000,
-		}))
-		reportLease.Done()
+		timer.Reset(s.observeMissedOpportunity())
 	}
+}
+
+func (s *fanOutServingService) observeMissedOpportunity() time.Duration {
+	grants, registrations, excluded := s.snapshot(true)
+	if len(grants) == 0 {
+		s.observeOpportunity(FanOutCandidate{}, false, time.Now())
+		return fanOutRecoveryInterval
+	}
+	lease, err := s.owner.fanOutCapacity.workProcess.Begin(s.ctx)
+	if err != nil {
+		return fanOutRecoveryInterval
+	}
+	candidate, found, err := s.store.NextFanOutCandidate(lease.Context(), grants, excluded)
+	lease.Done()
+	if err != nil || !found {
+		s.observeOpportunity(FanOutCandidate{}, false, time.Now())
+		return fanOutRecoveryInterval
+	}
+	r := registrations[candidate.GrantID]
+	if r == nil || r.ctx.Err() != nil || candidate.Validate() != nil {
+		s.observeOpportunity(FanOutCandidate{}, false, time.Now())
+		return fanOutRecoveryInterval
+	}
+	if !s.observeOpportunity(candidate, true, time.Now()) {
+		return fanOutOpportunityObservationInterval
+	}
+	if err := r.grant.ProveCurrent(r.ctx); err != nil {
+		s.observeOpportunity(FanOutCandidate{}, false, time.Now())
+		return fanOutRecoveryInterval
+	}
+	reportLease, err := r.occurrence.Begin(r.ctx)
+	if err != nil {
+		return fanOutOpportunityObservationInterval
+	}
+	s.owner.mu.Lock()
+	stillPending := s.opportunity != nil && sameFanOutOpportunity(s.opportunity.candidate, candidate) && !s.claimEntered[candidate.Key]
+	s.owner.mu.Unlock()
+	if !stillPending {
+		reportLease.Done()
+		return fanOutOpportunityObservationInterval
+	}
+	r.executor.ReportFanOutServingError(correlation.WithRunID(reportLease.Context(), candidate.Key.RunID), failures.New(failures.ClassInternalFailure, "fan_out_claim_opportunity_missed", "runtime.fan_out", "observe_opportunity", map[string]any{
+		"grant_id": candidate.GrantID, "run_id": candidate.Key.RunID,
+		"triggering_delivery_id": candidate.Key.TriggeringDeliveryID,
+		"flow_path":              candidate.Key.ElementRef.FlowPath, "declaration_family": candidate.Key.ElementRef.Family,
+		"semantic_path": candidate.Key.ElementRef.SemanticPath, "claim_attempt_bound_ms": 1000,
+	}))
+	reportLease.Done()
+	return fanOutOpportunityObservationInterval
 }
 
 func (s *fanOutServingService) observeOpportunity(candidate FanOutCandidate, eligible bool, now time.Time) bool {

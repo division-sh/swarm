@@ -4327,8 +4327,8 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	))
-	if err != nil {
-		t.Fatalf("Publish: %v", err)
+	if err != nil && !strings.Contains(err.Error(), "does not identify a local declaration") {
+		t.Fatalf("Publish = %v, want only undeclared descendant rejection", err)
 	}
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
