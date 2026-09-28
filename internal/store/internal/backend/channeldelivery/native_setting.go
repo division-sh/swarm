@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
 )
 
@@ -85,20 +86,21 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		PrincipalID:       admission.PrincipalID,
 	}
 	query = `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
-		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, '')
+		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, ''), readback_hash
 		FROM channel_native_settings WHERE provider=? AND resource_slot_id=? AND conversation_reference=?
 		AND scope_kind=? AND member_reference=? AND language_code=''`
 	if postgres {
 		query = `SELECT setting_id::text, principal_id::text, pack_id, pack_version, pack_manifest_hash,
-			entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id::text, '')
+			entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id::text, ''), readback_hash
 			FROM channel_native_settings WHERE provider=$1 AND resource_slot_id=$2 AND conversation_reference=$3
 			AND scope_kind=$4 AND member_reference=$5 AND language_code='' FOR UPDATE`
 	}
 	var existingPrincipal, existingPack, existingVersion, existingHash, contract, existingCommand string
 	var raw []byte
+	var readbackHash sql.NullString
 	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference, scopeKind, memberReference).
 		Scan(&setting.SettingID, &existingPrincipal, &existingPack, &existingVersion, &existingHash,
-			&contract, &existingCommand, &raw, &setting.Generation, &setting.State, &setting.InstallOperationID)
+			&contract, &existingCommand, &raw, &setting.Generation, &setting.State, &setting.InstallOperationID, &readbackHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		setting.SettingID, setting.Generation, setting.State = uuid.NewString(), 1, "planned"
 		setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
@@ -163,7 +165,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			}
 			setting.State = "uncertain"
 		}
-		if !compatible || setting.State == "retired" {
+		if !compatible || (setting.State == "retired" && !readbackHash.Valid) {
 			if unresolved || setting.State == "uncertain" || setting.State == "unavailable" {
 				return channelnative.Setting{}, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
@@ -295,6 +297,72 @@ func MarkNativeInboxSettingUnavailableTx(ctx context.Context, tx *sql.Tx, settin
 	return nil
 }
 
+func ConfirmRetiredNativeInboxSettingReadbackTx(ctx context.Context, tx *sql.Tx, settingID string, generation int64, observed []byte, postgres bool) (bool, error) {
+	if tx == nil || uuid.Validate(settingID) != nil || generation < 1 {
+		return false, fmt.Errorf("retired native inbox readback requires exact setting generation")
+	}
+	desired, err := channelnative.DesiredCommands(settingID, generation)
+	if err != nil {
+		return false, err
+	}
+	installID, err := channelnative.InstallOperationID(settingID, generation)
+	if err != nil {
+		return false, err
+	}
+	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
+		return false, err
+	}
+	query := `SELECT readback_hash, install_operation_id FROM channel_native_settings
+		WHERE setting_id=? AND generation=? AND state='retired'`
+	if postgres {
+		query = `SELECT readback_hash, install_operation_id::text FROM channel_native_settings
+			WHERE setting_id=$1::uuid AND generation=$2 AND state='retired' FOR UPDATE`
+	}
+	var storedHash sql.NullString
+	var storedInstallID string
+	if err := tx.QueryRowContext(ctx, query, settingID, generation).Scan(&storedHash, &storedInstallID); err != nil {
+		return false, fmt.Errorf("retired native inbox setting is not exact-current: %w", err)
+	}
+	if !storedHash.Valid || storedHash.String != runtimeeffects.Fingerprint(desired) || storedInstallID != installID {
+		return false, fmt.Errorf("retired native inbox setting lacks settled install evidence")
+	}
+	query = `SELECT state FROM runtime_external_effect_operations WHERE operation_id=? AND authority_kind='channel_native_setting'`
+	if postgres {
+		query = `SELECT state FROM runtime_external_effect_operations WHERE operation_id=$1::uuid AND authority_kind='channel_native_setting' FOR UPDATE`
+	}
+	var operationState string
+	if err := tx.QueryRowContext(ctx, query, installID).Scan(&operationState); err != nil {
+		return false, fmt.Errorf("retired native inbox install is not settled: %w", err)
+	}
+	if operationState != string(runtimeeffects.StateSettled) {
+		return false, fmt.Errorf("retired native inbox install is %s, not settled", operationState)
+	}
+	consumers, err := currentNativeConsumersTx(ctx, tx, settingID, postgres)
+	if err != nil {
+		return false, fmt.Errorf("retired native inbox setting has no current consumer: %w", err)
+	}
+	if consumers == 0 {
+		return false, fmt.Errorf("retired native inbox setting has no current consumer")
+	}
+	matched := bytes.Equal(observed, desired)
+	state := "unavailable"
+	if matched {
+		state = "installed"
+	}
+	query = `UPDATE channel_native_settings SET state=?, updated_at=? WHERE setting_id=? AND generation=? AND state='retired'`
+	if postgres {
+		query = `UPDATE channel_native_settings SET state=$1, updated_at=$2 WHERE setting_id=$3::uuid AND generation=$4 AND state='retired'`
+	}
+	result, err := tx.ExecContext(ctx, query, state, time.Now().UTC(), settingID, generation)
+	if err != nil {
+		return false, err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		return false, fmt.Errorf("retired native inbox readback did not transition exact generation: %w", err)
+	}
+	return matched, nil
+}
+
 func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) error {
 	query := `UPDATE channel_native_setting_consumers SET state='retired', updated_at=?
 		WHERE state='current' AND NOT EXISTS (
@@ -353,12 +421,12 @@ func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres
 		return err
 	}
 	query = `UPDATE channel_native_settings SET state='retired', updated_at=?
-		WHERE state IN ('planned','installed','unavailable') AND NOT EXISTS (
+		WHERE state IN ('planned','installed') AND NOT EXISTS (
 			SELECT 1 FROM channel_native_setting_consumers c
 			WHERE c.setting_id=channel_native_settings.setting_id AND c.state='current')`
 	if postgres {
 		query = `UPDATE channel_native_settings SET state='retired', updated_at=$1
-			WHERE state IN ('planned','installed','unavailable') AND NOT EXISTS (
+			WHERE state IN ('planned','installed') AND NOT EXISTS (
 				SELECT 1 FROM channel_native_setting_consumers c
 				WHERE c.setting_id=channel_native_settings.setting_id AND c.state='current')`
 	}
