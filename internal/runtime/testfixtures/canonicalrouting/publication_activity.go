@@ -112,7 +112,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		siblingInputs += "      - " + trigger + "\n"
 		siblingTriggerSchemas += trigger + ":\n  activity_id: integer\n"
 		siblingConnects += fmt.Sprintf("  - {event: %s, from: ., to: sibling}\n", trigger)
-		siblingProducers += fmt.Sprintf("produce-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {activity_id: payload.activity_id}}\n", event, trigger, trigger, event)
+		siblingProducers += fmt.Sprintf("produce-%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n      emit: {event: %s, fields: {activity_id: \"${payload.activity_id}\"}}\n", event, trigger, trigger, event)
 		siblingSchemas += event + ":\n  activity_id: integer\n"
 		siblingNode += "    " + event + ":\n      guard: {id: sibling_only, check: 'payload.activity_id > 0'}\n"
 	}

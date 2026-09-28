@@ -105,7 +105,7 @@ func eventBusGroupSourceConsumerContracts() []eventBusSourceConsumerContract {
 			`if err := committed.ValidateCommittedDurablePublication(); err != nil { return err }`,
 			`operation, found, takeErr := eb.takeFanOutOutboxOperation(committed)`,
 			`if takeErr != nil { return takeErr }`,
-			`if err := dispatcher.dispatchFanOutOperation(ctx, operation, settlement); err != nil { return err }`,
+			`if err := dispatcher.dispatchFanOutOperation(ctx, operation, committed.plan.prepared.plan, settlement, transferGroup); err != nil { return err }`,
 		}},
 		{"run_stop.go", "BeginRunStop", []string{
 			`owner, ok := eb.pipelineObligations.(pipelineobligation.ParentTransitionOwner)`,
@@ -207,7 +207,7 @@ func TestRepositoryEventBusSourceOperationLedgerHostileControls(t *testing.T) {
 		{"commit_wrong_context", "fan_out_publication_group.go", "group.ValidateCommitted(ctx, claims)", "group.ValidateCommitted(context.Background(), claims)"},
 		{"finalize_wrong_values", "fan_out_publication_group.go", "eb.FinalizeEnginePublications(ctx, values)", "eb.FinalizeEnginePublications(ctx, nil)"},
 		{"dispatch_wrong_source", "fan_out_publication_group.go", "eb.admitSourceArtifactFact(ctx)", "other.admitSourceArtifactFact(ctx)"},
-		{"dispatch_wrong_operation", "fan_out_publication_group.go", "dispatcher.dispatchFanOutOperation(ctx, operation, settlement)", "dispatcher.dispatchFanOutOperation(ctx, other, settlement)"},
+		{"dispatch_wrong_operation", "fan_out_publication_group.go", "dispatcher.dispatchFanOutOperation(ctx, operation, committed.plan.prepared.plan, settlement, transferGroup)", "dispatcher.dispatchFanOutOperation(ctx, other, committed.plan.prepared.plan, settlement, transferGroup)"},
 		{"stop_wrong_run", "run_stop.go", "owner.BeginParentTransition(ctx, runID)", "owner.BeginParentTransition(ctx, otherRun)"},
 		{"stop_wrong_owner", "run_stop.go", "eb.pipelineObligations.(pipelineobligation.ParentTransitionOwner)", "other.(pipelineobligation.ParentTransitionOwner)"},
 	} {
