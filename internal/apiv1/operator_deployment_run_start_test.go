@@ -343,22 +343,16 @@ func deploymentRunStartTestSource(t *testing.T) (semanticview.Source, durabledat
 	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
 		t.Fatalf("compile deployment run.start source: %v", err)
 	}
+	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
+	if err != nil {
+		t.Fatalf("build deployment run.start catalog: %v", err)
+	}
 	refs := make([]durabledata.DeclarationRef, 0, 3)
-	catalog := durabledata.Catalog{BundleHash: runStartTestBundleHash}
 	for _, name := range []string{"scan.requested", "score.observed", "portfolio.opened"} {
 		ref, err := durabledata.ParseDeclarationRef(".", name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		declaration, ok := bundle.DurableDataDeclarationByRef(ref)
-		if !ok {
-			t.Fatalf("compiled deployment declaration %s missing", name)
-		}
-		catalog.Declarations = append(catalog.Declarations, durabledata.Declaration{
-			Name: declaration.Name, Ref: declaration.Ref, OwnerFlowID: declaration.OwnerFlowID,
-			BusinessKey: declaration.BusinessKey, SchemaDigest: declaration.SchemaDigest,
-			CanonicalSchema: declaration.CanonicalSchema,
-		})
 		refs = append(refs, ref)
 	}
 	return semanticview.Wrap(bundle), catalog, refs[0], refs[1], refs[2]

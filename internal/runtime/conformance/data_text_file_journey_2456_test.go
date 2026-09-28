@@ -336,6 +336,79 @@ func TestDataTextFile2456Keyed37DeltaOldPinBothStores(t *testing.T) {
 	}
 }
 
+func TestDataTextFile2456Keyed37DynamicReceiversBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := canonicalrouting.CopySelectedDeploymentResource(t, "dynamic", true)
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready:\n  key: account_id\n  account_id: text\n  body: text\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(conformanceRepoRoot(t), root, contracts.DefaultPlatformSpecFile(conformanceRepoRoot(t)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
+			server := f.operatorServer(t)
+			directory := filepath.Join(t.TempDir(), "resumes")
+			if err := os.Mkdir(directory, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			rows := make([]map[string]any, 0, 37)
+			wantBody := make(map[string]string, 37)
+			for ordinal := 36; ordinal >= 0; ordinal-- {
+				key := fmt.Sprintf("candidate-%02d", ordinal)
+				body := fmt.Sprintf("Resume %02d\n", ordinal)
+				if err := os.WriteFile(filepath.Join(directory, key+".md"), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				rows = append(rows, map[string]any{"account_id": key, "body": body})
+				wantBody[key] = body
+			}
+			version := textFileVersion2456(t, f, rows)
+			runID := startTextFileRun2456(t, f, server, uuid.NewString(), "--data", "root.ready.body="+directory)
+			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 3*time.Minute)
+			for _, check := range []struct {
+				name, query string
+			}{
+				{"dynamic receiver instances", `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='consumer'`},
+				{"committed row outcomes", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`},
+				{"delivered row events", `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='root.ready' AND d.status='delivered'`},
+			} {
+				var count int
+				if err := f.db.QueryRowContext(f.ctx, check.query, runID).Scan(&count); err != nil || count != 37 {
+					t.Fatalf("%s=%d, %v; want 37", check.name, count, err)
+				}
+			}
+			var pinned string
+			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pinned); err != nil || pinned != string(version.VersionID) {
+				t.Fatalf("dynamic receiver pin=%s, %v; want %s", pinned, err, version.VersionID)
+			}
+			seen := map[string]bool{}
+			cursor := ""
+			for {
+				page := deploymentResourcePublicEventsByName(t, f.ctx, server, runID, "root.ready", cursor)
+				for _, event := range page.Events {
+					key, _ := event.Payload["account_id"].(string)
+					if seen[key] || event.Payload["body"] != wantBody[key] || len(event.Deliveries) != 1 || event.Deliveries[0].Status != "delivered" {
+						t.Fatalf("dynamic receiver public readback lost unique settled key: %+v", event)
+					}
+					seen[key] = true
+				}
+				if page.NextCursor == "" {
+					break
+				}
+				if page.NextCursor == cursor {
+					t.Fatal("dynamic receiver public cursor did not advance")
+				}
+				cursor = page.NextCursor
+			}
+			if len(seen) != 37 {
+				t.Fatalf("public dynamic receiver keys=%d, want 37", len(seen))
+			}
+		})
+	}
+}
+
 func TestDataTextFile2456MultiFieldAndLimitsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
