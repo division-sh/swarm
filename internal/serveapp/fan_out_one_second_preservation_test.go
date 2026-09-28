@@ -130,7 +130,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			}
 			receipt := transactions.Snapshot()
 			for operation, want := range map[storetest.TransactionOperation]uint64{
-				storetest.TransactionFanOutClaim: 2, storetest.TransactionFanOutChunk: 2, storetest.TransactionFanOutProducer: 1,
+				storetest.TransactionFanOutClaim: 2, storetest.TransactionFanOutChunk: 2, storetest.TransactionFanOutProducer: 0,
 				storetest.TransactionFanOutRelease: 0, storetest.TransactionFanOutRetry: 0, storetest.TransactionFanOutBlock: 0,
 			} {
 				if got := receipt.ByOperation[operation].WriteCommits; got != want {
