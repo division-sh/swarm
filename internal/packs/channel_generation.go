@@ -25,6 +25,18 @@ func (p OutboundBindingPlan) Generation() (plangeneration.Generation, error) {
 	return p.structural.Generation()
 }
 
+func (p OutboundBindingPlan) ActionCapacity() (int, error) {
+	constraint, found := p.structural.Constraint("actions")
+	if !found {
+		return 0, fmt.Errorf("channel actions have no selected constraint")
+	}
+	capacity, finite := constraint.MaxItems()
+	if !finite || capacity < 1 {
+		return 0, fmt.Errorf("channel actions require a positive finite capacity")
+	}
+	return capacity, nil
+}
+
 // ActivationCanonicalValue is the complete behavior-bearing value of one
 // executable channel binding. It is intentionally separate from the
 // structural SatisfactionPlan generation because destinations, credential

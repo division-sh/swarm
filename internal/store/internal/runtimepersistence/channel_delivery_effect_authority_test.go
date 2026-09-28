@@ -34,7 +34,7 @@ type selectedChannelDeliveryTestStore interface {
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)
 	GetCurrentChannelSentReceipt(context.Context, string, string) (render.SentReceipt, bool, error)
-	FreezeAndPersistChannelRender(context.Context, string) (render.PreparedRender, error)
+	FreezeAndPersistChannelRender(context.Context, string, int) (render.PreparedRender, error)
 }
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
@@ -625,7 +625,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}); err != nil {
 						t.Fatal(err)
 					}
-					updated, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID)
+					updated, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID, 8)
 					if err != nil || updated.RenderID == renderID {
 						t.Fatalf("freeze changed source = %#v, err=%v", updated, err)
 					}
@@ -697,7 +697,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						}); err != nil {
 							t.Fatal(err)
 						}
-						latest, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID)
+						latest, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID, 8)
 						if err != nil || latest.RenderID == renderID {
 							t.Fatalf("freeze second edit = %#v, %v", latest, err)
 						}

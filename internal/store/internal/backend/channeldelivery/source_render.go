@@ -117,7 +117,11 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 				return channeldelivery.Frozen{}, err
 			}
 		}
-		return channeldelivery.FreezeCard(card, revision, dispatch, audience, prompt)
+		frozen, err := channeldelivery.FreezeCard(card, revision, dispatch, audience, prompt)
+		if err != nil {
+			return channeldelivery.Frozen{}, err
+		}
+		return channeldelivery.WithActionPage(frozen, plan.ActionCapacity, plan.ActionPageIndex)
 	default:
 		return channeldelivery.Frozen{}, fmt.Errorf("unsupported channel render source %q", plan.SourceKind)
 	}
