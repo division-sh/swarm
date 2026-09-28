@@ -343,6 +343,28 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if replay.Error != nil || stringValue(t, asMap(t, replay.Result)["event_id"], "replay event_id") != stringValue(t, result["event_id"], "event_id") {
 				t.Fatalf("fused replay = %#v", replay)
 			}
+			changedPayload := map[string]any{}
+			if err := json.Unmarshal([]byte(dataRunEventPublishBody(runID, uuid.NewString(), data)), &changedPayload); err != nil {
+				t.Fatal(err)
+			}
+			asMap(t, changedPayload["params"])["payload"] = map[string]any{"topic": "changed after commit"}
+			changedWire, err := json.Marshal(changedPayload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conflict := rpcCall(t, handler, string(changedWire))
+			if conflict.Error == nil || asMap(t, conflict.Error.Data)["code"] != "RUN_DATA_IMMUTABLE" {
+				t.Fatalf("changed event payload did not receive typed fused-run refusal: error=%+v data=%+v", conflict.Error, conflict.Error.Data)
+			}
+			if got := dataRunCount(t, fixture, "runs", "run_id", runID); got != 1 {
+				t.Fatalf("changed event payload created %d runs, want one", got)
+			}
+			if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 1 {
+				t.Fatalf("changed event payload created %d events, want one", got)
+			}
+			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+				t.Fatalf("changed event payload created %d feeds, want one", got)
+			}
 		})
 
 		t.Run("failed multi-import retains evidence and no child mutation", func(t *testing.T) {
