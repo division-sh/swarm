@@ -59,6 +59,11 @@ type eventCommitTxStore interface {
 	SettleWorkflowNodeSuccessTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
 }
 
+type completionCandidateWriter interface {
+	mutationprotocol.CandidateWriter
+	SettlementNeedsCompletionTx(context.Context, *sql.Tx, string) (bool, error)
+}
+
 func (s *PipelinePostgresOwner) resourceSourceOwner() *storedurabledata.Owner { return s.resourceData }
 func (s *PipelineSQLiteOwner) resourceSourceOwner() *storedurabledata.Owner   { return s.resourceData }
 
@@ -123,7 +128,7 @@ type PipelinePostgresOwner struct {
 
 	backend                *postgresbackend.Backend
 	requireCurrent         func() error
-	candidateRequests      mutationprotocol.CandidateWriter
+	candidateRequests      completionCandidateWriter
 	runLifecycleCandidates *runhandoff.CandidateCoordinator
 	workflowEntityQueries  *storeworkflowentityquery.Postgres
 	workflowRoutes         *storeworkflowroute.Postgres
@@ -145,7 +150,7 @@ type PipelineSQLiteOwner struct {
 
 	backend                *sqlitebackend.Backend
 	requireCurrent         func() error
-	candidateRequests      mutationprotocol.CandidateWriter
+	candidateRequests      completionCandidateWriter
 	runLifecycleCandidates *runhandoff.CandidateCoordinator
 	workflowEntityQueries  *storeworkflowentityquery.SQLite
 	workflowRoutes         *storeworkflowroute.SQLite

@@ -509,7 +509,7 @@ func commitWorkflowEngineMutation(
 	store eventCommitTxStore,
 	postgres bool,
 	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedWorkflowEngineMutation, error)) mutationprotocol.Result[runtimepipeline.CommittedWorkflowEngineMutation],
-	candidateWriter mutationprotocol.CandidateWriter,
+	candidateWriter completionCandidateWriter,
 	command runtimepipeline.WorkflowEngineMutationCommand,
 ) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
 	if err := command.Validate(); err != nil {
@@ -644,8 +644,16 @@ func commitWorkflowEngineMutation(
 				); err != nil {
 					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
 				}
-				if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {
-					return err
+				if !command.Lifecycle.RequestCompletionCandidate {
+					needed, err := candidateWriter.SettlementNeedsCompletionTx(txctx, tx, success.Claim.RunID())
+					if err != nil {
+						return err
+					}
+					if needed {
+						if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {
+							return err
+						}
+					}
 				}
 				claim := success.Claim
 				result.DeliverySuccess = &claim

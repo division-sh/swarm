@@ -31,7 +31,7 @@ func validateGroupedSingletonSettlementTx(ctx context.Context, tx *sql.Tx, state
 // The enclosing attempt owns candidate representation and revision finalization.
 func settlePipelineMemberTx(ctx context.Context, attempt *mutationprotocol.Attempt, postgres bool, now time.Time,
 	claim pipelineobligation.Claim, disposition pipelineobligation.Disposition,
-	candidates mutationprotocol.CandidateWriter,
+	candidates completionCandidateWriter,
 ) error {
 	if err := disposition.ValidateFor(claim.Purpose()); err != nil {
 		return err
@@ -48,8 +48,18 @@ func settlePipelineMemberTx(ctx context.Context, attempt *mutationprotocol.Attem
 		return err
 	}
 	if runID != "" {
-		if _, err := attempt.RequestCompletion(ctx, candidates, runID, nil); err != nil {
+		var needed bool
+		if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			needed, err = candidates.SettlementNeedsCompletionTx(ctx, tx, runID)
 			return err
+		}); err != nil {
+			return err
+		}
+		if needed {
+			if _, err := attempt.RequestCompletion(ctx, candidates, runID, nil); err != nil {
+				return err
+			}
 		}
 	}
 	if !disposition.Successful() {

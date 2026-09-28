@@ -15,18 +15,23 @@ import (
 type nestedChildHandlerGate struct {
 	eventName string
 	mu        sync.Mutex
-	chosen    bool
+	chosen    int
+	limit     int
 	started   chan lifecycleprobe.Signal
 	release   chan struct{}
 	once      sync.Once
 }
 
 func newNestedChildHandlerGate(t *testing.T, eventName string) *nestedChildHandlerGate {
+	return newNestedChildHandlerGateCount(t, eventName, 1)
+}
+
+func newNestedChildHandlerGateCount(t *testing.T, eventName string, count int) *nestedChildHandlerGate {
 	t.Helper()
-	if eventName == "" {
+	if eventName == "" || count < 1 {
 		t.Fatal("nested child gate requires a canonical event name")
 	}
-	g := &nestedChildHandlerGate{eventName: eventName, started: make(chan lifecycleprobe.Signal, 1), release: make(chan struct{})}
+	g := &nestedChildHandlerGate{eventName: eventName, limit: count, started: make(chan lifecycleprobe.Signal, count), release: make(chan struct{})}
 	t.Cleanup(g.open)
 	return g
 }
@@ -36,11 +41,11 @@ func (g *nestedChildHandlerGate) NotifyLifecycle(ctx context.Context, signal lif
 		return
 	}
 	g.mu.Lock()
-	if g.chosen {
+	if g.chosen == g.limit {
 		g.mu.Unlock()
 		return
 	}
-	g.chosen = true
+	g.chosen++
 	g.mu.Unlock()
 	g.started <- signal
 	select {

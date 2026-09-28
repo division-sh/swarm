@@ -61,6 +61,9 @@ func (unexpectedDurableTestRoles) ScanDeliveryContinuations(context.Context, run
 func (unexpectedDurableTestRoles) ObserveDeliveryContinuation(context.Context, runtimedelivery.ExecutionAuthority, string) (runtimedelivery.ContinuationObservation, error) {
 	return runtimedelivery.ContinuationObservation{}, errUnexpectedDurableTestRole
 }
+func (unexpectedDurableTestRoles) ObserveDeliveryContinuations(context.Context, runtimedelivery.ExecutionAuthority, []string) ([]runtimedelivery.ContinuationObservation, error) {
+	return nil, errUnexpectedDurableTestRole
+}
 func (unexpectedDurableTestRoles) RenewClaim(context.Context, runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
 	return runtimedelivery.ClaimCommit{}, errUnexpectedDurableTestRole
 }

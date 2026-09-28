@@ -223,6 +223,14 @@ func (*managedNativeRecoveryDeliveryStore) ObserveDeliveryContinuation(
 	return runtimedelivery.ContinuationObservation{Disposition: runtimedelivery.ClaimAbsent}, nil
 }
 
+func (*managedNativeRecoveryDeliveryStore) ObserveDeliveryContinuations(_ context.Context, _ runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	observations := make([]runtimedelivery.ContinuationObservation, 0, len(deliveryIDs))
+	for _, deliveryID := range deliveryIDs {
+		observations = append(observations, runtimedelivery.ContinuationObservation{DeliveryID: deliveryID, Disposition: runtimedelivery.ClaimAbsent})
+	}
+	return observations, nil
+}
+
 func (s *managedNativeRecoveryDeliveryStore) ScanDeliveryContinuations(
 	ctx context.Context,
 	_ runtimedelivery.ExecutionAuthority,

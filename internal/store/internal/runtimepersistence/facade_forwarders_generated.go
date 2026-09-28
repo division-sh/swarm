@@ -882,6 +882,10 @@ func (s *PostgresStore) ObserveDeliveryContinuation(ctx context.Context, authori
 	return s.deliveryPostgresOwner.ObserveDeliveryContinuation(ctx, authority, deliveryID)
 }
 
+func (s *PostgresStore) ObserveDeliveryContinuations(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, deliveryIDs []string) ([]deliverylifecycle.ContinuationObservation, error) {
+	return s.deliveryPostgresOwner.ObserveDeliveryContinuations(ctx, authority, deliveryIDs)
+}
+
 func (s *PostgresStore) Outcomes(ctx context.Context, deliveryID string) ([]deliverylifecycle.Outcome, error) {
 	return s.deliveryPostgresOwner.Outcomes(ctx, deliveryID)
 }
@@ -2068,6 +2072,10 @@ func (s *SQLiteRuntimeStore) MaterializeRunForkForSelectedContractExecution(ctx 
 
 func (s *SQLiteRuntimeStore) ObserveDeliveryContinuation(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, deliveryID string) (deliverylifecycle.ContinuationObservation, error) {
 	return s.deliverySQLiteOwner.ObserveDeliveryContinuation(ctx, authority, deliveryID)
+}
+
+func (s *SQLiteRuntimeStore) ObserveDeliveryContinuations(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, deliveryIDs []string) ([]deliverylifecycle.ContinuationObservation, error) {
+	return s.deliverySQLiteOwner.ObserveDeliveryContinuations(ctx, authority, deliveryIDs)
 }
 
 func (s *SQLiteRuntimeStore) Outcomes(ctx context.Context, deliveryID string) ([]deliverylifecycle.Outcome, error) {

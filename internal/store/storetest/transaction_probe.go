@@ -27,6 +27,8 @@ const (
 	TransactionFanOutProducer               = transactiontest.FanOutProducer
 	TransactionFanOutLoad                   = transactiontest.FanOutLoad
 	TransactionFanOutObservation            = transactiontest.FanOutObservation
+	TransactionDeliveryContinuationScan     = transactiontest.DeliveryContinuationScan
+	TransactionDeliveryContinuationObserve  = transactiontest.DeliveryContinuationObserve
 	TransactionFanOutRetry                  = transactiontest.FanOutRetry
 	TransactionFanOutBlock                  = transactiontest.FanOutBlock
 	TransactionFanOutRelease                = transactiontest.FanOutRelease
@@ -37,6 +39,7 @@ const (
 	TransactionPipelineLoad                 = transactiontest.PipelineLoad
 	TransactionRunExecutionInspection       = transactiontest.RunExecutionInspection
 	TransactionSourceSetLoad                = transactiontest.SourceSetLoad
+	TransactionRunCompletionCandidate       = transactiontest.RunCompletionCandidate
 )
 
 // CollectTransactions observes actual transaction-owner settlement. Write

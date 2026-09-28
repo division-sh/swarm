@@ -16828,7 +16828,14 @@ platform_tables:
             event transaction. Real resume from paused to running, active source revision, active standing generation repair,
             ordinary or selected-contract fork activation, and final settlement or expiry of delivery, pipeline,
             workflow-timer, session, decision/gate, external-effect, and entity obligations declare their exact candidate
-            effect inside the named mutation. A byte-identical duplicate does not advance revision. Paused runs carry no
+            effect inside the named mutation. A closed fan-out chunk, pipeline-member settlement, or workflow-node delivery
+            settlement may omit that request
+            only after the canonical lifecycle owner locks the run in the same mutation and proves through the selected
+            delivery, pipeline, and fan-out owners that another non-time obligation still blocks completion and no live
+            fan-out barrier can advance. Every last settlement must request a candidate; paused, terminal, and absent runs
+            retain their ordinary candidate disposition rather than being inferred from pending-work summaries. No
+            process-local counter, diagnostic row, or delayed retry is eligibility authority. A byte-identical duplicate
+            does not advance revision. Paused runs carry no
             completion candidate: requests return deferred_paused without changing durable identity, and the exact
             paused-to-running transition requests an immediate candidate after it writes running. A standing repair that
             preserves a suspended operator override first writes the replacement run paused, then still invokes this candidate
@@ -17471,8 +17478,10 @@ run_model:
       preserved_lineage: >
         Freeze preserves source events, deliveries, receipts, dead letters, timers, sessions, turns, audits, reply contexts,
         state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,
-        settle, delete, migrate, copy, reopen, or reinterpret those rows as source execution. Only an actual live
-        lease, claim, reservation, or in-progress authority blocks the freeze; historical rows do not.
+        settle, delete, migrate, copy, reopen, or reinterpret those rows as source execution. A post-freeze
+        continuation encountering the exact typed forked-run claim refusal returns its process-local carrier
+        without claiming or settling the preserved source delivery; only the fork-local delivery may execute.
+        Only an actual live lease, claim, reservation, or in-progress authority blocks the freeze; historical rows do not.
       terminal_effect_selection: >
         The shared terminal lifecycle mutation owner makes one closed effect decision before mutation. Failed and
         cancelled transitions terminalize deliveries; successful completion and the named fork-source transition do not.
@@ -37179,6 +37188,11 @@ durable_pipeline_processing_obligation_authority:
         issuance turn without treating the delivery as settled; an acknowledged later chunk may issue while an
         earlier consumer is still executing. Receiver activation and readiness prerequisites precede transfer.
         The continuation's exact generation, delivery claim and runtime occurrence own execution and shutdown join.
+        A queued continuation dispatch holds a transient occurrence from scheduling until dispatch completes or
+        retirement joins and releases the unstarted job; quiescence cannot precede that queued work.
+        Missing held continuations may be reconciled in bounded selected-store read batches, but each requested
+        delivery keeps its exact authority, disposition, wake, and identity; missing or mismatched batch evidence
+        fails closed. Batching does not create a new eligibility or retry owner.
         A publication lacking complete durable handoff evidence keeps ordinary decision/dispatch ownership; neither
         cursor readback nor a process-local staged callback can substitute for a selected-store acknowledgment.
         A segment flush consumes only its completed claims and transfers only its committed handoffs. Untouched

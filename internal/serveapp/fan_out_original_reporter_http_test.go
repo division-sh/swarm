@@ -35,6 +35,56 @@ func TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores(t *testing.
 	}, 2*time.Minute)
 }
 
+func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := issue2394ServedReporterSource(t)
+			opts, start := lifecycleRestartHarness(t, backend, root)
+			opts.TestLLMRuntime = servedNoopLLMRuntime{}
+			var selected any
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
+			process, rt := start()
+			t.Cleanup(func() {
+				if t.Failed() {
+					t.Logf("served output:\n%s", process.outputString())
+				}
+			})
+			runID := uuid.NewString()
+			portfolio := "transaction-census"
+			var started struct {
+				RunID string `json:"run_id"`
+			}
+			issue2394ReporterRPC(t, rt, "run.start", map[string]any{
+				"run_id": runID, "bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
+				"payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString(),
+			}, &started)
+			if started.RunID != runID {
+				t.Fatalf("run identity changed: %+v", started)
+			}
+			waitPublicationSiteCompletion(t, rt, runID)
+			transactions := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+			rows := make([]map[string]any, 8)
+			for ordinal := range rows {
+				rows[ordinal] = map[string]any{
+					"account_id": fmt.Sprintf("census-%02d", ordinal), "eng_roles": ordinal,
+					"gem_score": float64(ordinal) + 0.25, "external_id": uuid.NewString(),
+				}
+			}
+			publishIssue2394ReporterBatch(t, rt, runID, portfolio, rows)
+			waitIssue2394ReporterCursor(t, rt, runID, len(rows))
+			waitIssue2394ReporterDiagnosis(t, rt, runID, len(rows))
+			receipt := transactions.Snapshot()
+			candidateWrites := receipt.ByOperation[storetest.TransactionRunCompletionCandidate].WriteCommits
+			if candidateWrites >= uint64(len(rows)) || receipt.Total.Failed != 0 {
+				t.Fatalf("completion work did not coalesce across eight real consumers: candidates=%d receipt=%+v", candidateWrites, receipt)
+			}
+			t.Logf("eight-row real-consumer commits: total_writes=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, candidateWrites,
+				receipt.ByOperation[storetest.TransactionDeliveryContinuationScan].ReadCommits,
+				receipt.ByOperation[storetest.TransactionDeliveryContinuationObserve].ReadCommits)
+		})
+	}
+}
+
 func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest.TransactionProbeOptions, issuanceBudget time.Duration) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -257,16 +307,42 @@ func waitIssue2394ReporterCursor(t *testing.T, rt servedControlProofRuntime, run
 func waitIssue2394ReporterDiagnosis(t *testing.T, rt servedControlProofRuntime, runID string, cursor int) cliapp.DiagnosticRunDiagnosisResult {
 	t.Helper()
 	var result cliapp.DiagnosticRunDiagnosisResult
+	var unsettled, dead int
+	var lastReadinessProbe time.Time
 	for deadline := time.Now().Add(5 * time.Minute); time.Now().Before(deadline); {
+		// The raw count only wakes the public diagnosis; it is not the readiness oracle.
+		if err := rt.DB.QueryRow(`SELECT COALESCE(SUM(CASE WHEN status NOT IN ('delivered','dead_letter') THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN status='dead_letter' THEN 1 ELSE 0 END),0) FROM event_deliveries WHERE run_id=$1`, runID).Scan(&unsettled, &dead); err != nil {
+			t.Fatal(err)
+		}
+		if dead != 0 {
+			issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &result)
+			t.Fatalf("original HTTP reporter dead-lettered %d deliveries: %+v", dead, result)
+		}
+		if unsettled != 0 {
+			if time.Since(lastReadinessProbe) >= 2*time.Second {
+				issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &result)
+				lastReadinessProbe = time.Now()
+				var stillUnsettled int
+				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status NOT IN ('delivered','dead_letter')`, runID).Scan(&stillUnsettled); err != nil {
+					t.Fatal(err)
+				}
+				if stillUnsettled != 0 && result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) {
+					t.Fatalf("public readiness became true with %d deliveries still unsettled: %+v", stillUnsettled, result)
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
 		issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &result)
 		f := result.FanOut
 		if f.Cursor == cursor && f.Owed == 0 && f.Open == 0 && f.Blocked == 0 && f.Unsettled == 0 && f.BarrierArmed == 0 && f.BarrierPending == 0 &&
 			result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) {
 			return result
 		}
-		time.Sleep(25 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("original HTTP reporter did not settle: %+v", result)
+	t.Fatalf("original HTTP reporter did not settle: unsettled=%d dead=%d diagnosis=%+v", unsettled, dead, result)
 	return result
 }
 

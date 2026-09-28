@@ -346,6 +346,18 @@ func (s *pipelineTestDeliveryOwner) ObserveDeliveryContinuation(
 	return s.adapter.ObserveContinuation(ctx, s.db, authority, deliveryID)
 }
 
+func (s *pipelineTestDeliveryOwner) ObserveDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	observations := make([]runtimedelivery.ContinuationObservation, 0, len(deliveryIDs))
+	for _, deliveryID := range deliveryIDs {
+		observation, err := s.ObserveDeliveryContinuation(ctx, authority, deliveryID)
+		if err != nil {
+			return nil, err
+		}
+		observations = append(observations, observation)
+	}
+	return observations, nil
+}
+
 func (s *pipelineTestDeliveryOwner) BindAgentSession(ctx context.Context, claim runtimedelivery.Claim, sessionID string) (runtimedelivery.ClaimCommit, error) {
 	var snapshot runtimedelivery.Snapshot
 	result := s.mutateOutcome(ctx, func(ctx context.Context, attempt *eventfixture.Attempt, _ *sql.Tx) error {

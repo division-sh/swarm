@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	runstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
 
@@ -184,6 +185,7 @@ func (s *DeliveryPostgresOwner) ScanDeliveryContinuations(ctx context.Context, a
 	}
 	var page runtimedelivery.ContinuationPage
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.DeliveryContinuationScan)
 		var err error
 		page, err = s.receiverAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
@@ -221,6 +223,7 @@ func (s *DeliverySQLiteOwner) ScanDeliveryContinuations(ctx context.Context, aut
 	}
 	var page runtimedelivery.ContinuationPage
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.DeliveryContinuationScan)
 		var err error
 		page, err = s.receiverAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
@@ -262,6 +265,7 @@ func (s *DeliveryPostgresOwner) ObserveDeliveryContinuation(
 	}
 	var observation runtimedelivery.ContinuationObservation
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.DeliveryContinuationObserve)
 		var err error
 		observation, err = s.receiverAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err
@@ -279,11 +283,78 @@ func (s *DeliverySQLiteOwner) ObserveDeliveryContinuation(
 	}
 	var observation runtimedelivery.ContinuationObservation
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.DeliveryContinuationObserve)
 		var err error
 		observation, err = s.receiverAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err
 	})
 	return observation, err
+}
+
+func observeDeliveryContinuationsTx(ctx context.Context, tx *sql.Tx, adapter *Adapter, authority runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	observations := make([]runtimedelivery.ContinuationObservation, 0, len(deliveryIDs))
+	for _, deliveryID := range deliveryIDs {
+		observation, err := adapter.ObserveContinuation(ctx, tx, authority, deliveryID)
+		if err != nil {
+			return nil, err
+		}
+		if observation.DeliveryID != deliveryID {
+			return nil, fmt.Errorf("delivery continuation observation %s returned identity %s", deliveryID, observation.DeliveryID)
+		}
+		observations = append(observations, observation)
+	}
+	return observations, nil
+}
+
+func validateContinuationObservationBatch(deliveryIDs []string) error {
+	if len(deliveryIDs) == 0 || len(deliveryIDs) > runtimedelivery.MaxContinuationObservationBatch {
+		return fmt.Errorf("delivery continuation observation batch must contain 1..%d identities", runtimedelivery.MaxContinuationObservationBatch)
+	}
+	seen := make(map[string]struct{}, len(deliveryIDs))
+	for _, deliveryID := range deliveryIDs {
+		if deliveryID == "" {
+			return errors.New("delivery continuation observation identity is empty")
+		}
+		if _, exists := seen[deliveryID]; exists {
+			return fmt.Errorf("duplicate delivery continuation observation identity %s", deliveryID)
+		}
+		seen[deliveryID] = struct{}{}
+	}
+	return nil
+}
+
+func (s *DeliveryPostgresOwner) ObserveDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	if err := validateContinuationObservationBatch(deliveryIDs); err != nil {
+		return nil, err
+	}
+	var observations []runtimedelivery.ContinuationObservation
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.DeliveryContinuationObserve)
+		var err error
+		observations, err = observeDeliveryContinuationsTx(txctx, tx, s.receiverAdapter, authority, deliveryIDs)
+		return err
+	})
+	return observations, err
+}
+
+func (s *DeliverySQLiteOwner) ObserveDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, deliveryIDs []string) ([]runtimedelivery.ContinuationObservation, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
+	if err := validateContinuationObservationBatch(deliveryIDs); err != nil {
+		return nil, err
+	}
+	var observations []runtimedelivery.ContinuationObservation
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		transactiontest.Mark(txctx, transactiontest.DeliveryContinuationObserve)
+		var err error
+		observations, err = observeDeliveryContinuationsTx(txctx, tx, s.receiverAdapter, authority, deliveryIDs)
+		return err
+	})
+	return observations, err
 }
 
 func (s *DeliveryPostgresOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error) {
