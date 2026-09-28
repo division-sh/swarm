@@ -52,6 +52,22 @@ func TestChannelDeliveryNativeInboxE2E(t *testing.T) {
 	}
 }
 
+func TestChannelDeliveryNativeInboxServedRestartE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_restart")
+		})
+	}
+}
+
+func TestChannelDeliveryNativeInboxRetiredReadbackConflictE2E(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			runChannelDeliveryInboundDispositionE2E(t, backend, "inbox_restart_mismatch")
+		})
+	}
+}
+
 func TestChannelDeliveryNativeInboxLostAcknowledgmentE2E(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -245,7 +261,7 @@ func (r telegramLongNoticeLLMRuntime) ContinueManagedSession(ctx context.Context
 
 func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario string) {
 	t.Helper()
-	nativeInboxScenario := scenario == "inbox" || scenario == "inbox_loss"
+	nativeInboxScenario := scenario == "inbox" || scenario == "inbox_loss" || scenario == "inbox_restart"
 	isolateCLIAPIConfigEnv(t)
 	configureStandingLifecycleCredentials(t)
 	provider := &telegramapi.Double{}
@@ -385,6 +401,39 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 		chatID, chatType = -1001, "group"
 	}
 	runChannelOnboardingCLIJourney(t, configPath, endpoint, provider, "connect", "bot-token", chatID, chatType, 0)
+	var preRestartDeliveries int
+	if scenario == "inbox_restart" || scenario == "inbox_restart_mismatch" {
+		deadline := time.Now().Add(15 * time.Second)
+		for provider.Delivery(1) == nil {
+			if time.Now().After(deadline) {
+				t.Fatal("initial card was not delivered before served restart")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		time.Sleep(250 * time.Millisecond)
+		_, preRestartDeliveries = provider.Counts()
+		if code := process.stop(); code != 0 {
+			t.Fatalf("first serve exited %d: %s", code, process.outputString())
+		}
+		if scenario == "inbox_restart_mismatch" {
+			if err := provider.SeedCommands("bot-token", map[string]any{"type": "chat", "chat_id": "1001"}, "",
+				[]map[string]any{{"command": "foreign", "description": "Foreign owner"}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		process = startServeRuntimeTestProcess(t, opts)
+		process.waitForReadyLine()
+		endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+		if scenario == "inbox_restart_mismatch" {
+			time.Sleep(5500 * time.Millisecond)
+			_, after := provider.Counts()
+			if after != preRestartDeliveries || len(provider.CommandWrites()) != 1 {
+				t.Fatalf("conflicting retired command was reused or overwritten: deliveries=%d before=%d writes=%v",
+					after, preRestartDeliveries, provider.CommandWrites())
+			}
+			return
+		}
+	}
 	if scenario == "shared_audience" {
 		callbackURL, signing, _ := provider.Registration()
 		proveChannelSharedAudience(t, provider, callbackURL, signing)
@@ -684,6 +733,13 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			message := fmt.Sprint(delivery["text"])
 			if nativeInboxScenario && fmt.Sprint(delivery["chat_id"]) == "1001" &&
 				strings.HasPrefix(message, "Inbox\nUnread notices: ") && strings.Contains(message, "Retire service") {
+				if scenario == "inbox_restart" {
+					time.Sleep(time.Second)
+					_, after := provider.Counts()
+					if after != preRestartDeliveries+1 {
+						t.Fatalf("served restart resent a card or lost inbox response: before=%d after=%d", preRestartDeliveries, after)
+					}
+				}
 				if scenario == "inbox_loss" {
 					_, before := provider.Counts()
 					time.Sleep(2500 * time.Millisecond)
