@@ -199,6 +199,7 @@ typed-process-local	callback-type	typed	internal/runtime/entityruntime/contained
 typed-process-local	callback-type	typed	internal/runtime/eventbus_logger.go	NewRuntimePayloadAdmitter	result:#1	github.com/division-sh/swarm/internal/runtime/bus.PayloadAdmitter
 typed-process-local	callback-type	typed	internal/runtime/eventbus_logger.go	newRuntimeEventBus	param:interceptorProvider	func() []github.com/division-sh/swarm/internal/runtime/bus.EventInterceptor
 typed-process-local	callback-type	typed	internal/runtime/eventbus_logger.go	newRuntimeEventBus	param:payloadAdmitter	github.com/division-sh/swarm/internal/runtime/bus.PayloadAdmitter
+typed-process-local	callback-type	typed	internal/runtime/failures/failures.go	OnlyBranches	param:allowed	func(error) bool
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:agentEntries	func(*T) map[string]A
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:agentURIs	func(*T) *map[string]string
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:children	func(*T) []*T
