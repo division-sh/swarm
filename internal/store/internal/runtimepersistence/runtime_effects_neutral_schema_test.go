@@ -129,10 +129,14 @@ func nonCompletionRegistrationsForParity(t *testing.T) []runtimeeffects.Registra
 	actual := make(map[string]int)
 	var registrations []runtimeeffects.Registration
 	for _, registration := range runtimeeffects.Registrations() {
+		// Completion and channel-specific effects have separate authority proofs; this fixture has only neutral authority.
 		if registration.Kind == runtimeeffects.KindProviderTurn ||
 			registration.Kind == runtimeeffects.KindProviderStartupProbe ||
 			registration.Kind == runtimeeffects.KindServeRegistration ||
-			registration.Kind == runtimeeffects.KindChannelConfirmation {
+			registration.Kind == runtimeeffects.KindChannelConfirmation ||
+			registration.Kind == runtimeeffects.KindChannelDelivery ||
+			registration.Kind == runtimeeffects.KindChannelActionAck ||
+			registration.Kind == runtimeeffects.KindChannelNativeSetting {
 			continue
 		}
 		if _, duplicate := actual[registration.Adapter]; duplicate {
