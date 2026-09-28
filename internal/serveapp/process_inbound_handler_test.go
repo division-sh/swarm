@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,7 +65,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
 			ContractBundle:         source,
-			Durable:                runtimebus.DurableDependencies{TargetOwners: processIngressTargetOwners{{RunID: runID, FlowInstance: "telegram-ingress", EntityID: entityID}}},
+			Durable:                runtimebus.DurableDependencies{ActiveFlows: processIngressNoFlowDescriptors{}, TargetOwners: processIngressTargetOwners{{RunID: runID, FlowInstance: "telegram-ingress", EntityID: entityID}}},
 			SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(hash),
 			ProviderOutputVerifier: catalog,
 			WorkOwner:              workOwner,
@@ -152,6 +153,35 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 
 type processIngressTargetOwners []runtimepkg.StandingTarget
 
+type processIngressNoFlowDescriptors struct{}
+
+func (processIngressNoFlowDescriptors) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func (processIngressNoFlowDescriptors) ListActiveFlowInstanceDescriptorsForScope(context.Context, string, []string, []string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func (processIngressNoFlowDescriptors) ListActiveFlowInstanceDescriptorsForKey(context.Context, string, string, string, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func TestProcessIngressTargetOwnersRespectSelectedScope(t *testing.T) {
+	owners := processIngressTargetOwners{
+		{RunID: "run-a", FlowInstance: "ingress-a", EntityID: "entity-a"},
+		{RunID: "run-a", FlowInstance: "ingress-b", EntityID: "entity-b"},
+		{RunID: "run-b", FlowInstance: "ingress-a", EntityID: "entity-a"},
+	}
+	selected, err := owners.ListSelectedRunTargetOwnersForScope(context.Background(), "run-a", []string{"ingress-b"}, "")
+	if err != nil || len(selected) != 1 || selected[0].EntityID != "entity-b" {
+		t.Fatalf("selected scope = %#v, %v", selected, err)
+	}
+	if _, err := owners.ListSelectedRunTargetOwnersForScope(context.Background(), "run-a", nil, ""); err == nil {
+		t.Fatal("empty scope was accepted")
+	}
+}
+
 func (owners processIngressTargetOwners) ListSelectedRunTargetOwners(_ context.Context, runID string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	var out []runtimebus.ActiveTargetDescriptor
 	for _, owner := range owners {
@@ -160,6 +190,30 @@ func (owners processIngressTargetOwners) ListSelectedRunTargetOwners(_ context.C
 		}
 	}
 	return out, nil
+}
+
+func (owners processIngressTargetOwners) ListSelectedRunTargetOwnersForScope(ctx context.Context, runID string, instancePaths []string, sourceEntityID string) ([]runtimebus.ActiveTargetDescriptor, error) {
+	if len(instancePaths) == 0 && sourceEntityID == "" {
+		return nil, errors.New("target owner lookup requires a selected scope")
+	}
+	all, err := owners.ListSelectedRunTargetOwners(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	var selected []runtimebus.ActiveTargetDescriptor
+	for _, owner := range all {
+		if owner.EntityID == sourceEntityID && sourceEntityID != "" {
+			selected = append(selected, owner)
+			continue
+		}
+		for _, path := range instancePaths {
+			if owner.FlowInstance == path {
+				selected = append(selected, owner)
+				break
+			}
+		}
+	}
+	return selected, nil
 }
 
 // These transport/controller fixtures use real provider declarations without

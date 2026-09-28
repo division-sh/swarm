@@ -97,7 +97,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	workOwner := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
 		ContractBundle:         source,
-		Durable:                runtimebus.DurableDependencies{TargetOwners: processIngressTargetOwners{{RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress", EntityID: "41000000-0000-0000-0000-000000000002"}}},
+		Durable:                runtimebus.DurableDependencies{ActiveFlows: processIngressNoFlowDescriptors{}, TargetOwners: processIngressTargetOwners{{RunID: "41000000-0000-0000-0000-000000000001", FlowInstance: "telegram-ingress", EntityID: "41000000-0000-0000-0000-000000000002"}}},
 		SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(bundleHash),
 		ProviderOutputVerifier: catalog,
 		WorkOwner:              workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
