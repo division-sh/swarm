@@ -186,7 +186,8 @@ type canonicalFormsRow struct {
 }
 
 func TestCanonicalFormsRegistryPinsNodeIDRetirement(t *testing.T) {
-	registry := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
+	root := conformanceRepoRoot(t)
+	registry := loadCanonicalFormsRegistry(t, root)
 	for _, row := range registry.Rows {
 		if row.ID != "node.identity_defaults_projections" {
 			continue
@@ -200,8 +201,10 @@ func TestCanonicalFormsRegistryPinsNodeIDRetirement(t *testing.T) {
 		if _, ok := reflect.TypeOf(runtimecontracts.SystemNodeContract{}).FieldByName("ID"); ok {
 			t.Fatal("retired node ID carrier restored")
 		}
-		var nodes map[string]runtimecontracts.SystemNodeContract
-		if err := yaml.Unmarshal([]byte("worker:\n  id: worker\n  event_handlers: {}\n"), &nodes); err == nil || !strings.Contains(err.Error(), "node.id is retired; the map key is the identity.") {
+		fixture := t.TempDir()
+		writeRegistryMutationFile(t, filepath.Join(fixture, "schema.yaml"), "name: node-retirement\n")
+		writeRegistryMutationFile(t, filepath.Join(fixture, "nodes.yaml"), "worker:\n  id: worker\n  event_handlers: {}\n")
+		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(root, fixture, runtimecontracts.DefaultPlatformSpecFile(root)); err == nil || !strings.Contains(err.Error(), "node.id is retired; the map key is the identity.") {
 			t.Fatalf("node ID admitted: %v", err)
 		}
 		return

@@ -3,7 +3,7 @@ registry_version: 1
 matrix_version: 1
 status: checked_merge_bearing
 census_head: 25ad370da
-decoder_census_head: f4e9574cc
+decoder_census_head: issue-2489-nodes-root
 scope:
   loader_root: LoadWorkflowContractBundle
   included:
@@ -42,12 +42,12 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 91
-  custom_unmarshal_reachable: 86
-  custom_unmarshal_retired: 3
+  custom_unmarshal_total: 67
+  custom_unmarshal_reachable: 63
+  custom_unmarshal_retired: 2
   custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
-    contracts: 76
+    contracts: 52
     flowmodel_policy: 11
     agentintent: 1
     channel_pack: 1
@@ -324,7 +324,7 @@ rows:
   - id: node.identity_defaults_projections
     ruled: mechanical-ratified
     paths: "nodes.<node>.id, nodes.<node>.execution_type, nodes.<node>.subscribes_to, nodes.<node>.produces"
-    owner: SystemNodeContract.UnmarshalYAML
+    owner: projectSystemNodeValue
     information:
       fact: [node map key]
       derived_projection: [id, execution_type, exact handler subscriptions, exact emitted events]
@@ -340,7 +340,7 @@ rows:
   - id: node.state_schema
     ruled: mechanical-ratified
     paths: "nodes.<node>.state_schema.description, nodes.<node>.state_schema.fields, nodes.<node>.gate_state"
-    owners: [NodeStateSchema.UnmarshalYAML, NodeGateStateSchema.UnmarshalYAML, decodeNodeStateFields, decodeNodeGateFields]
+    owners: [projectNodeStateSchemaValue, projectNodeGateStateValue]
     information:
       fact: [state/gate names, types, defaults, storage]
       annotation: [descriptions]
@@ -353,7 +353,7 @@ rows:
   - id: node.timer
     ruled: mechanical-ratified
     paths: "nodes.<node>.timers[].id, nodes.<node>.timers[].event, nodes.<node>.timers[].owner, nodes.<node>.timers[].action, nodes.<node>.timers[].cancellation, nodes.<node>.timers[].delay, nodes.<node>.timers[].start_on, nodes.<node>.timers[].cancel_on, nodes.<node>.timers[].recurring"
-    owner: WorkflowTimerContract.UnmarshalYAML
+    owner: projectNodeTimerValue
     information:
       fact: [id, event, owner]
       choice: [action, cancellation, delay, start_on, cancel_on, recurring]
@@ -366,22 +366,22 @@ rows:
   - id: handler.container
     ruled: mechanical-ratified
     paths: "nodes.<node>.event_handlers.<event>.*"
-    owner: SystemNodeEventHandler.UnmarshalYAML
+    owner: projectNodeHandlerValue
     information:
-      choice: [activity, create_entity, emit, on_success, guard, advances_to, sets_gate, clear_gates, data_accumulation, loop, on_complete, rules, accumulate, join, compute, query, fan_out, group_by, filter, reduce, count, clear, from, dedup_by]
+      choice: [activity, create_entity, emit, on_success, guard, advances_to, sets_gate, clear_gates, data_accumulation, loop, on_complete, rules, accumulate, join, compute, query, fan_out, group_by, filter, reduce, count, clear]
       annotation: [description, _note]
     spelling:
       canonical_candidate: effect_owned_nested_mapping
       retired_duplicates: []
       already_retired: [action, evidence_target, template, instance_id_from, config_from, condition, logic, branch, emits, payload_transform, on_below_threshold, on_dedup, on_pass, select_entity, select_or_create_entity]
     action_retirement: "#2307: reject action and its four sibling options on presence, before values or aliases are interpreted; no action-local or sibling precedence remains. Other handler grammar work is not closed."
-    execution_note: "handler.from and handler.dedup_by are allowed by the current field map but absent from the handler projection; W4 must reject them on presence unless an executed owner is independently identified."
+    execution_note: "#2489 rejects handler.from and handler.dedup_by on authored presence. Each executed primitive retains its own source/dedup owner."
     corpus: {handlers: 31, duplicate_action_option_uses: 0}
 
   - id: handler.rules_shape
     ruled: mechanical-ratified
     paths: "handler.rules, handler.on_complete, join.on_complete, join.timeout"
-    owners: [HandlerRuleEntry.UnmarshalYAML, decodeHandlerRuleEntriesNode]
+    owners: [projectNodeRuleRowsValue, projectNodeRuleValue]
     information:
       fact: [stable row identity when trace-addressable]
       choice: [ordered row behavior]
@@ -396,7 +396,7 @@ rows:
   - id: handler.policy_selection_rows
     ruled: mechanical-ratified
     paths: "rule.when, retired handler.rules.condition, rule.case.selector, rule.case.selectors, rule.case.equals, rule.range.*, rule.lookup.*, rule.validate.*, rule.compute_module.*, rule.else, rule.default"
-    owner: decodeHandlerRuleEntriesNode + lowerPolicySheetRuleNode
+    owner: projectNodeRuleRowsValue + projectNodePolicyRowValue
     information:
       choice: [predicate, case/range/lookup/validation/module selection, default branch]
       fact: [stable row id, module and validation references]
@@ -411,7 +411,7 @@ rows:
   - id: handler.emit_action_activity
     ruled: mechanical-ratified
     paths: "emit, activity, activity.approval, on_success.emit"
-    owners: [EmitSpec.UnmarshalYAML, ActivitySpec.UnmarshalYAML, HandlerOnSuccessSpec.UnmarshalYAML]
+    owners: [projectNodeEmitValue, projectNodeActivityValue, projectNodeOnSuccessValue]
     information:
       fact: [event/tool/decision identity]
       choice: [from, fields, input, approval]
@@ -426,7 +426,7 @@ rows:
   - id: handler.guard_gate_clear
     ruled: mechanical-ratified
     paths: "guard, guard.on_fail, guard.on_fail.escalate, sets_gate, clear_gates"
-    owners: [GuardSpec.UnmarshalYAML, GateSpec.UnmarshalYAML, decodeClearGatesNode]
+    owners: [projectNodeGuardValue, projectNodeGateEffectValue, projectNodeClearGatesValue]
     information:
       fact: [guard/check IDs and policy refs]
       choice: [failure behavior, gate name, clear targets]
@@ -439,8 +439,8 @@ rows:
 
   - id: handler.expression
     ruled: R2
-    paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, guard.on_fail.escalate.fields.*, stage_gate.context.*, data_accumulation.writes[].value/key/index; reduce.params is accepted but not executed; sets_gate.value is inert and is not an expression-value slot"
-    owners: [decodeExpressionValueNode, ExpressionValue.UnmarshalYAML, LowerEmitSpecFields, validateEmitTemplateFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
+    paths: "handler/rule/on_success/fan_out emit.fields.*, activity.input.*, guard.on_fail.escalate.fields.*, stage_gate.context.*, data_accumulation.writes[].value/key/index; reduce.params and sets_gate.value are rejected on presence"
+    owners: [projectNodeExpressionValue, decodeExpressionValueNode, ExpressionValue.UnmarshalYAML, LowerEmitSpecFields, validateEmitTemplateFields, CarriesLoopRevision, evalExpressionValue, evalWorkflowGateContext]
     information:
       fact: [literal values and references]
       choice: [typed_literal, exact_typed_interpolation, mixed_string_interpolation, recursive_container]
@@ -448,13 +448,13 @@ rows:
       canonical_candidate: "R2: literal YAML by default; one ${...} returns a typed expression value; mixed text interpolates to string; {literal: ...} escapes interpretation"
       retired_duplicates: ["authored {expression: X}", "authored {cel: X}", "authored {ref: X} and kind metadata", "bare CEL scalar and emit namespace shorthand", "stage-gate literal-to-CEL rewrite", "emit-template CEL-only validation"]
       distinct_overrides: [typed_exact_interpolation, mixed_text_interpolation, explicit_literal_escape, structural_emit_from]
-    f2_bug: "general/emit/gate scalar decoders, emit lowering and template validation, loop carriage, boot expression checks, and engine/gate evaluators can assign different meaning to one authored value; reduce.params is accepted but ignored by stepReduce"
+    f2_resolution: "#2305 owns R2 lowering and evaluation; #2489 projects node-origin values from source Value. Raw expression admission remains only for the #2490 schema-root sibling. reduce.params is rejected."
     corpus: {expression_alias_uses: 0}
 
   - id: handler.data_write
     ruled: mechanical-ratified
     paths: "data_accumulation.writes[], data_accumulation.source_event"
-    owners: [WorkflowDataWrite.UnmarshalYAML, WorkflowDataAccumulation.UnmarshalYAML]
+    owners: [projectNodeDataWriteValue, projectNodeDataAccumulationValue]
     information:
       fact: [source and target paths]
       choice: [operation, value, key, index]
@@ -467,7 +467,7 @@ rows:
   - id: handler.collection_compute
     ruled: mechanical-ratified
     paths: "accumulate.*, compute.*, fan_out.*, group_by.*, filter.*, reduce.*, count.*, query.*, clear.targets"
-    owners: [AccumulateSpec.UnmarshalYAML, ComputeSpec.UnmarshalYAML, FanOutSpec.UnmarshalYAML, GroupBySpec.UnmarshalYAML, FilterSpec.UnmarshalYAML, ReduceSpec.UnmarshalYAML, CountSpec.UnmarshalYAML, QuerySpec.UnmarshalYAML]
+    owners: [projectNodeAccumulateValue, projectNodeComputeValue, projectNodeFanOutValue, projectNodeGroupByValue, projectNodeFilterValue, projectNodeReduceValue, projectNodeCountValue, projectNodeQueryValue]
     information:
       fact: [source/target paths, fan-out identity expression, compute module/set IDs]
       choice: [operation, typed compute keys/tiers, bounds, aggregation/filter/reduce/count/query behavior]
@@ -477,13 +477,13 @@ rows:
       canonical_candidate: strict_typed_mapping
       retired_duplicates: [query_mapping_equals_one_item_sequence, query_sequence_inert_nested_rows]
       already_retired: [fan_out.target, fan_out.emit_per_item, fan_out.emit_mapping, clear.target]
-    execution_note: "QuerySpec.Queries from any authored query sequence is not executed by Executor.stepQuery; retire sequences on presence, preserve the single mapping. QuerySpec.Operation and ComputeSpec.Params have no identified engine reader and require fail-closed W4 disposition. fan_out.identity is conditional on typed item kind. reduce/count.items_from supersedes source when present."
+    execution_note: "#2489 rejects query sequences, query.operation, compute.params, filter.predicate and reduce.params on presence. Exactly one of query.source/query.entities is admitted by the collection semantic owner; store_as defaults, dataflow and exclusive output ownership are unchanged. fan_out.identity is conditional on typed item kind. reduce/count.items_from supersedes source when present."
     corpus: {fan_out: 0, compute: 0, query: 0}
 
   - id: handler.join
     ruled: mechanical-ratified
     paths: "join.id, join.stage, join.members.*, join.window.*, join.output, join.complete_when, join.remaining, join.on_complete, join.timeout.*"
-    owners: [JoinSpec.UnmarshalYAML, JoinMembersSpec.UnmarshalYAML, JoinWindowSpec.UnmarshalYAML]
+    owners: [projectNodeJoinValue, JoinSpec.ValidateAuthoredShape]
     information:
       derived_projection: [id_when_equal_to_stage]
       fact: [member and window correlation]
@@ -688,40 +688,29 @@ decoder_coverage:
     typed_field: [TypeFieldSpec, EntityFieldDecl]
     entity_document: [EntityContractsDocument, EntityContract]
   workflow_contract_yaml_schema.go:
-    node.state_schema: [NodeStateSchema, NodeGateStateSchema]
     tool.schema_value: [ToolInputSchema]
     platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
     tool.schema_entry: [ToolSchemaEntry]
   workflow_contract_yaml_flow.go:
-    handler.rules_shape: [HandlerRuleEntry]
     flow.pin_event_entry: [FlowInputPins, FlowOutputPins]
     flow.identity_mode: [TemplateInstanceField]
     flow.input_pin_resolution: [FlowInputPinResolution]
-    handler.collection_compute: [ComputeSpec]
     flow.other_surface: [FlowVariable]
   workflow_contract_yaml_handlers.go:
-    node.timer: [WorkflowTimerContract]
-    handler.emit_action_activity: [EmitSpec, HandlerOnSuccessSpec, ActivitySpec]
-    handler.container: [SystemNodeEventHandler]
+    handler.emit_action_activity: [EmitSpec]
   durable_data.go:
     agent.behavior: [DurableDataAccessRef]
   workflow_contract_yaml_rules.go:
-    handler.guard_gate_clear: [GuardSpec, GateSpec]
-    handler.collection_compute: [AccumulateSpec, FanOutSpec, GroupBySpec, FilterSpec, ReduceSpec, CountSpec, QuerySpec]
-    handler.data_write: [WorkflowDataWrite, WorkflowDataAccumulation]
     handler.expression: [ExpressionValue]
   workflow_contract_yaml.go:
     flow.identity_mode: [FlowSchemaDocument]
     schema.imports: [FlowSchemaImports]
-    node.identity_defaults_projections: [SystemNodeContract]
   workflow_contract_stages.go:
     flow.lifecycle: [FlowStageDeclarations, FlowStageDeclaration]
     flow.stage_timer: [FlowStageTimerDeclaration]
     flow.stage_gate: [FlowStageGateDeclaration, FlowStageGateOutcomeDeclaration, WorkflowGateInputField]
   workflow_contract_loops.go:
     flow.loop: [FlowLoopDeclarations, FlowLoopDeclaration, LoopAttemptLimit, LoopEscapeSpec, LoopOperationSpec]
-  workflow_contract_join.go:
-    handler.join: [JoinSpec, JoinMembersSpec, JoinWindowSpec]
   workflow_contract_agent_writes.go:
     agent.behavior: [AgentEntityWriteRule]
   workflow_contract_types.go:
@@ -740,8 +729,6 @@ decoder_coverage:
 decoder_retired:
   workflow_contract_yaml_schema.go:
     unreachable_retired_decoders: [EntitySchema, EventPayloadSpec]
-  workflow_contract_yaml_handlers.go:
-    unreachable_retired_decoders: [EventEmission]
 
 decoder_exclusions:
   internal/config/config.go:
@@ -752,7 +739,7 @@ decode_bypasses:
   # Direct roots count yaml.Unmarshal and yaml.NewDecoder calls repository-wide.
   # The canonical owner's root is classified but excluded from the off-owner ceiling.
   # CI compares each PR to the accepted base ledger, not just these initial ceilings.
-  node_site_ceiling: 288
+  node_site_ceiling: 191
   off_owner_direct_decode_ceiling: 29
   files:
     internal/cliapp/cli_output.go: {family: other_production_projection, node_sites: 0, direct_decode_roots: 1}
@@ -771,19 +758,17 @@ decode_bypasses:
     internal/runtime/contracts/platform_event_catalog.go: {family: closure_pack_platform, node_sites: 6, direct_decode_roots: 0}
     internal/runtime/contracts/receiver_initialization.go: {family: wave_4_node_handler, node_sites: 6, direct_decode_roots: 0}
     internal/runtime/contracts/tool_input_schema_value.go: {family: wave_5_agent_tool_policy, node_sites: 0, direct_decode_roots: 1}
-    internal/runtime/contracts/workflow_contract_action_retirement.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_activity.go: {family: wave_4_node_handler, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_agent_writes.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_join.go: {family: wave_4_node_handler, node_sites: 10, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_loops.go: {family: wave_4_node_handler, node_sites: 6, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_policy_sheet.go: {family: wave_5_agent_tool_policy, node_sites: 25, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_policy_sheet.go: {family: wave_5_agent_tool_policy, node_sites: 1, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_stages.go: {family: wave_4_node_handler, node_sites: 9, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_types.go: {family: wave_5_agent_tool_policy, node_sites: 6, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 10, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_flow.go: {family: mixed_wave_4_wave_5, node_sites: 27, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_handlers.go: {family: wave_4_node_handler, node_sites: 37, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 18, direct_decode_roots: 0}
-    internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 24, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml.go: {family: mixed_wave_4_wave_5, node_sites: 7, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_flow.go: {family: mixed_wave_4_wave_5, node_sites: 23, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_handlers.go: {family: wave_4_node_handler, node_sites: 5, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_rules.go: {family: wave_4_node_handler, node_sites: 2, direct_decode_roots: 0}
+    internal/runtime/contracts/workflow_contract_yaml_schema.go: {family: mixed_wave_4_wave_5, node_sites: 17, direct_decode_roots: 0}
     internal/runtime/contracts/workflow_contract_yaml_wave1.go: {family: mixed_existing_typed_admission, node_sites: 28, direct_decode_roots: 0}
     internal/runtime/flowmodel/model.go: {family: wave_5_agent_tool_policy, node_sites: 12, direct_decode_roots: 0}
     internal/runtime/scenarioderivation/declaration.go: {family: excluded_scenario_tooling, node_sites: 0, direct_decode_roots: 1}
@@ -795,10 +780,20 @@ decode_bypasses:
     internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
-  completeness: "all 91 remaining production custom unmarshallers classified as 86 bundle-reachable row owners, 3 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
+  completeness: "all 67 remaining production custom unmarshallers classified as 63 bundle-reachable row owners, 2 retired unreachable decoders, and 2 deployment swarm.yaml exclusions; off-owner yaml.Node sites and pack/config decode roots are separately ratcheted"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
+
+node_root_admission:
+  issue: 2489
+  owner: projectNodeDeclarationsValue
+  source_owner: yamlsource.Document.Root/Value
+  nested_owner_family: workflow_contract_nodes_*_value.go
+  provenance_owner: populateEffectiveProvenance
+  retired_fields: [node.permissions, node.implementation, node.owned_transitions, node.idempotency_table, handler.from, handler.dedup_by, query.sequence, query.operation, compute.params, sets_gate.value, filter.predicate, reduce.params]
+  retained_raw_callers: [schema.emit, schema.expression_value, schema.loop_escape, W1.scalar_helpers, durable_data.mapping_helper]
+  remaining_parent: "#2490 schema root, then W5 and pack/platform roots under #2300"
 
 action_retirement:
   issue: 2307
