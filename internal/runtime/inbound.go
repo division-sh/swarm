@@ -655,6 +655,83 @@ type operatorInboundProjection struct {
 	BareCandidate *operatorchannel.InboundText
 }
 
+func projectOperatorInboundOutput(output providertriggers.DeliveryEvent, request runtimeinbound.Request, channelPlans []packs.SatisfactionPlan, selectBare func(operatorchannel.InboundText) (bool, error), operatorEvent *operatorInboundProjection) (*operatorInboundProjection, error) {
+	if output.Kind == providertriggers.OutputKindNormalized {
+		for _, plan := range channelPlans {
+			actionFact, actionMatched, err := plan.ProjectActionFact(string(output.Name), output.Authorization, output.Payload)
+			if err != nil {
+				return nil, err
+			}
+			if actionMatched {
+				if operatorEvent != nil {
+					return nil, fmt.Errorf("normalized provider output ambiguously satisfies multiple operator channel interfaces")
+				}
+				operatorEvent = &operatorInboundProjection{Action: &operatorchannel.InboundAction{
+					ActionFact: actionFact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+					PublicationID:         request.PublicationID,
+					ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
+				}}
+			}
+			fact, matched, err := plan.ProjectTextFact(string(output.Name), output.Authorization, output.Payload)
+			if err != nil {
+				return nil, err
+			}
+			if !matched {
+				continue
+			}
+			if operatorEvent != nil {
+				return nil, fmt.Errorf("normalized provider output ambiguously satisfies multiple operator channel text interfaces")
+			}
+			operatorEvent, err = projectOperatorTextOutput(fact, output, request, selectBare)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return operatorEvent, nil
+}
+
+func projectOperatorTextOutput(fact operatorchannel.TextFact, output providertriggers.DeliveryEvent, request runtimeinbound.Request, selectBare func(operatorchannel.InboundText) (bool, error)) (*operatorInboundProjection, error) {
+	var operatorEvent *operatorInboundProjection
+	var err error
+	challenge, challengeShaped := operatorchannel.ChallengeFromText(fact.Text)
+	if !challengeShaped && fact.EntryReference == "" && fact.ReplyToReference == "" {
+		candidate := operatorchannel.InboundText{
+			TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+			PublicationID:         request.PublicationID,
+			ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
+		}
+		selected := false
+		if selectBare != nil {
+			selected, err = selectBare(candidate)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if selected {
+			operatorEvent = &operatorInboundProjection{Text: &candidate}
+		} else {
+			operatorEvent = &operatorInboundProjection{BareCandidate: &candidate}
+		}
+		return operatorEvent, nil
+	}
+	if challengeShaped {
+		claim := operatorchannel.InboundClaim{
+			TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+			PublicationID: request.PublicationID, Challenge: challenge,
+			ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
+		}
+		operatorEvent = &operatorInboundProjection{Claim: &claim}
+	} else {
+		operatorEvent = &operatorInboundProjection{Text: &operatorchannel.InboundText{
+			TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
+			PublicationID:         request.PublicationID,
+			ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
+		}}
+	}
+	return operatorEvent, nil
+}
+
 func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time, posture executionposture.Posture, channelPlans []packs.SatisfactionPlan, selectBare func(operatorchannel.InboundText) (bool, error)) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, *operatorInboundProjection, error) {
 	var noEvidence events.Event
 	delivery, err := target.AdmissionPlan.ProjectDelivery(admitted)
@@ -674,71 +751,9 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 	authorProjection := runtimeauthoractivity.InboundProjection{}
 	var operatorEvent *operatorInboundProjection
 	for ordinal, output := range delivery.Events {
-		if output.Kind == providertriggers.OutputKindNormalized {
-			for _, plan := range channelPlans {
-				actionFact, actionMatched, err := plan.ProjectActionFact(string(output.Name), output.Authorization, output.Payload)
-				if err != nil {
-					return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
-				}
-				if actionMatched {
-					if operatorEvent != nil {
-						return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("normalized provider output ambiguously satisfies multiple operator channel interfaces")
-					}
-					operatorEvent = &operatorInboundProjection{Action: &operatorchannel.InboundAction{
-						ActionFact: actionFact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
-						PublicationID:         request.PublicationID,
-						ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
-					}}
-				}
-				fact, matched, err := plan.ProjectTextFact(string(output.Name), output.Authorization, output.Payload)
-				if err != nil {
-					return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
-				}
-				if !matched {
-					continue
-				}
-				challenge, challengeShaped := operatorchannel.ChallengeFromText(fact.Text)
-				if !challengeShaped && fact.EntryReference == "" && fact.ReplyToReference == "" {
-					if operatorEvent != nil {
-						return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("normalized provider output ambiguously satisfies multiple operator channel text interfaces")
-					}
-					candidate := operatorchannel.InboundText{
-						TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
-						PublicationID:         request.PublicationID,
-						ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
-					}
-					selected := false
-					if selectBare != nil {
-						selected, err = selectBare(candidate)
-						if err != nil {
-							return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
-						}
-					}
-					if selected {
-						operatorEvent = &operatorInboundProjection{Text: &candidate}
-					} else {
-						operatorEvent = &operatorInboundProjection{BareCandidate: &candidate}
-					}
-					continue
-				}
-				if operatorEvent != nil {
-					return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, fmt.Errorf("normalized provider output ambiguously satisfies multiple operator channel text interfaces")
-				}
-				if challengeShaped {
-					claim := operatorchannel.InboundClaim{
-						TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
-						PublicationID: request.PublicationID, Challenge: challenge,
-						ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
-					}
-					operatorEvent = &operatorInboundProjection{Claim: &claim}
-				} else {
-					operatorEvent = &operatorInboundProjection{Text: &operatorchannel.InboundText{
-						TextFact: fact, Provider: request.Provider, ProviderEventID: request.ProviderEventID,
-						PublicationID:         request.PublicationID,
-						ProviderAuthorization: operatorchannel.Hash(output.Authorization.Provider(), output.Authorization.Event(), output.Authorization.PackID(), output.Authorization.PackVersion(), output.Authorization.ManifestHash(), output.Authorization.Generation().Diagnostic()),
-					}}
-				}
-			}
+		operatorEvent, err = projectOperatorInboundOutput(output, request, channelPlans, selectBare, operatorEvent)
+		if err != nil {
+			return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, nil, err
 		}
 		eventID, err := runtimeinbound.DeterministicEventID(request.PublicationID, ordinal)
 		if err != nil {
