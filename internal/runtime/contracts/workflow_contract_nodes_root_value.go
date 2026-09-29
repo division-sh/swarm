@@ -150,6 +150,18 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Accumulate, err = projectNodeAccumulateValue(field)
 		case "fan_out":
 			out.FanOut, err = projectNodeFanOutValue(field)
+		case "group_by":
+			out.GroupBy, err = projectNodeGroupByValue(field)
+		case "filter":
+			out.Filter, err = projectNodeFilterValue(field)
+		case "reduce":
+			out.Reduce, err = projectNodeReduceValue(field)
+		case "count":
+			out.Count, err = projectNodeCountValue(field)
+		case "clear":
+			out.Clear, err = projectNodeClearValue(field)
+		case "clear_gates":
+			out.ClearGates, err = projectNodeClearGatesValue(field)
 		default:
 			return SystemNodeEventHandler{}, fmt.Errorf("source-aware projection of %s is not yet implemented at %s", name, field.Location())
 		}
