@@ -125,7 +125,8 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 		return SystemNodeEventHandler{}, err
 	}
 	var out SystemNodeEventHandler
-	for name, field := range fields {
+	for _, name := range sortedContractKeys(fields) {
+		field := fields[name]
 		switch name {
 		case "description":
 			out.Description, err = nodeValueText(field, "handler.description")
@@ -143,6 +144,8 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.OnSuccess, err = projectNodeOnSuccessValue(field)
 		case "sets_gate":
 			out.SetsGate, err = projectNodeGateEffectValue(field)
+		case "query":
+			out.Query, err = projectNodeQueryValue(field)
 		default:
 			return SystemNodeEventHandler{}, fmt.Errorf("source-aware projection of %s is not yet implemented at %s", name, field.Location())
 		}
