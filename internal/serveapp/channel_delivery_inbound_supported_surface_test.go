@@ -18,6 +18,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
+	"gopkg.in/yaml.v3"
 )
 
 func TestChannelDeliveryInboundDispositionE2E(t *testing.T) {
@@ -322,18 +323,53 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			if scenario == "invalid_input" {
 				inputType = "integer"
 			}
-			inputBlock := "            reason: {type: " + inputType + ", required: true}\n"
+			inputBlock := "reason: {type: " + inputType + ", required: true}\n"
 			if scenario == "ordered_input" {
-				inputBlock = "            zeta: {type: integer, required: true}\n            alpha: {type: boolean, required: true}\n"
+				inputBlock = "zeta: {type: integer, required: true}\nalpha: {type: boolean, required: true}\n"
 			} else if scenario == "skip_input" {
-				inputBlock = "            reason: {type: text, required: false}\n"
+				inputBlock = "reason: {type: text, required: false}\n"
 			}
-			modified := strings.Replace(string(raw), "        retire:\n          advances_to: done",
-				"        retire:\n          input:\n"+inputBlock+"          advances_to: done", 1)
-			if modified == string(raw) {
-				t.Fatal("standing Telegram fixture did not contain the expected gate outcome")
+			var schema, input yaml.Node
+			if err := yaml.Unmarshal(raw, &schema); err != nil {
+				t.Fatal(err)
 			}
-			if err := os.WriteFile(schemaPath, []byte(modified), 0o600); err != nil {
+			if err := yaml.Unmarshal([]byte(inputBlock), &input); err != nil {
+				t.Fatal(err)
+			}
+			if len(schema.Content) != 1 || len(input.Content) != 1 {
+				t.Fatal("standing Telegram fixture has invalid schema or input document")
+			}
+			outcome := schema.Content[0]
+			for _, key := range []string{"stages", "active", "gate", "outcomes", "retire"} {
+				var next *yaml.Node
+				if outcome.Kind == yaml.MappingNode {
+					for index := 0; index+1 < len(outcome.Content); index += 2 {
+						if outcome.Content[index].Value == key {
+							next = outcome.Content[index+1]
+							break
+						}
+					}
+				}
+				if next == nil {
+					t.Fatalf("standing Telegram fixture missing %q gate path", key)
+				}
+				outcome = next
+			}
+			if outcome.Kind != yaml.MappingNode {
+				t.Fatal("standing Telegram retire outcome is not a mapping")
+			}
+			for index := 0; index+1 < len(outcome.Content); index += 2 {
+				if outcome.Content[index].Value == "input" {
+					t.Fatal("standing Telegram retire outcome already has input")
+				}
+			}
+			outcome.Content = append(outcome.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "input"}, input.Content[0])
+			modified, err := yaml.Marshal(&schema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(schemaPath, modified, 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -383,7 +419,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 			var published map[string]any
 			requireServedJSONRPCResult(t, rpcEndpoint, "event.publish", map[string]any{
 				"bundle_hash":     identity.SourceArtifacts[0].BundleHash,
-				"event_name":      "telegram-chat/inbound.telegram.text_message",
+				"event_name":      "inbound.telegram.text_message",
 				"idempotency_key": fmt.Sprintf("preconnection-notice-%d", index),
 				"payload": map[string]any{
 					"text": "ordinary business text", "external_account_reference": "7000",
