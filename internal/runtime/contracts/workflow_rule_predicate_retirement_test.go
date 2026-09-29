@@ -5,8 +5,44 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
+
+func ruleTestRoot(source string) (yamlsource.Value, error) {
+	snapshot, err := yamlsource.Load([]byte(source))
+	if err != nil {
+		return yamlsource.Value{}, err
+	}
+	return snapshot.Document("nodes.yaml").Root(), nil
+}
+
+func ruleTestRows(source string) ([]HandlerRuleEntry, error) {
+	root, err := ruleTestRoot(source)
+	if err != nil {
+		return nil, err
+	}
+	field, err := root.Lookup("rules")
+	if err != nil {
+		return nil, err
+	}
+	return projectNodeRuleRowsValue(field.Value, handlerRuleDecodeContextRules)
+}
+
+func ruleTestHandler(source string) (SystemNodeEventHandler, error) {
+	root, err := ruleTestRoot(source)
+	if err != nil {
+		return SystemNodeEventHandler{}, err
+	}
+	return projectNodeHandlerValue(root)
+}
+
+func ruleTestJoin(source string) (*JoinSpec, error) {
+	root, err := ruleTestRoot(source)
+	if err != nil {
+		return nil, err
+	}
+	return projectNodeJoinValue(root)
+}
 
 func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 	cases := map[string]string{
@@ -24,22 +60,7 @@ func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 	}
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {
-			var document yaml.Node
-			if err := yaml.Unmarshal([]byte(source), &document); err != nil {
-				t.Fatal(err)
-			}
-			root := document.Content[0]
-			var rules *yaml.Node
-			for i := 0; i+1 < len(root.Content); i += 2 {
-				if root.Content[i].Value == "rules" {
-					rules = root.Content[i+1]
-					break
-				}
-			}
-			if rules == nil {
-				t.Fatal("missing rules test fixture")
-			}
-			_, err := decodeHandlerRuleEntriesNode(rules, handlerRuleDecodeContextRules)
+			_, err := ruleTestRows(source)
 			if err == nil || !strings.Contains(err.Error(), "RETIRED-POLICY-SHEET-ROW") || !strings.Contains(err.Error(), "use when") {
 				t.Fatalf("condition admission error = %v, want teaching retirement", err)
 			}
@@ -48,32 +69,28 @@ func TestHandlerRulesConditionRetiredInEveryAuthoredShape(t *testing.T) {
 }
 
 func TestHandlerRulesConditionCanBeKeyedDisplayLabel(t *testing.T) {
-	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("rules:\n  condition:\n    when: payload.ready\n  fallback:\n    else: true\n"), &handler); err != nil {
+	handler, err := ruleTestHandler("rules:\n  condition:\n    when: payload.ready\n  fallback:\n    else: true\n")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(handler.Rules) != 2 || handler.Rules[0].ID != "condition" || handler.Rules[0].PolicyRow.Kind != PolicySheetRowKindWhen {
 		t.Fatalf("keyed rule label changed: %#v", handler.Rules)
 	}
-	var document yaml.Node
-	if err := yaml.Unmarshal([]byte("rules:\n  condition: {when: payload.ready}\n  malformed: []\n"), &document); err != nil {
-		t.Fatal(err)
-	}
-	_, err := decodeHandlerRuleEntriesNode(document.Content[0].Content[1], handlerRuleDecodeContextRules)
+	_, err = ruleTestRows("rules:\n  condition: {when: payload.ready}\n  malformed: []\n")
 	if err == nil || strings.Contains(err.Error(), "RETIRED-POLICY-SHEET-ROW") {
 		t.Fatalf("keyed display label was mistaken for predicate: %v", err)
 	}
 }
 
 func TestHandlerRulesWhenOwnsPolicyPredicateAndFallback(t *testing.T) {
-	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("rules:\n  - when: payload.ready\n    emit: work.ready\n  - else: true\n    emit: work.skipped\n"), &handler); err != nil {
+	handler, err := ruleTestHandler("rules:\n  - when: payload.ready\n    emit: work.ready\n  - else: true\n    emit: work.skipped\n")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(handler.Rules) != 2 || handler.Rules[0].Condition != "payload.ready" || handler.Rules[0].PolicyRow.Kind != PolicySheetRowKindWhen || handler.Rules[1].Condition != "else" || handler.Rules[1].PolicyRow.Kind != PolicySheetRowKindDefault {
 		t.Fatalf("compiled policy rows = %#v", handler.Rules)
 	}
-	if err := yaml.Unmarshal([]byte("rules:\n  - when: payload.ready\n    emit: work.ready\n"), &handler); err == nil || !strings.Contains(err.Error(), "require an else/default row") {
+	if _, err := ruleTestHandler("rules:\n  - when: payload.ready\n    emit: work.ready\n"); err == nil || !strings.Contains(err.Error(), "require an else/default row") {
 		t.Fatalf("missing typed fallback error = %v", err)
 	}
 }
@@ -90,22 +107,7 @@ func TestHandlerRulesWhenRejectsDefaultSentinel(t *testing.T) {
 	}
 	for name, source := range cases {
 		t.Run(name, func(t *testing.T) {
-			var document yaml.Node
-			if err := yaml.Unmarshal([]byte(source), &document); err != nil {
-				t.Fatal(err)
-			}
-			root := document.Content[0]
-			var rules *yaml.Node
-			for i := 0; i+1 < len(root.Content); i += 2 {
-				if root.Content[i].Value == "rules" {
-					rules = root.Content[i+1]
-					break
-				}
-			}
-			if rules == nil {
-				t.Fatal("missing rules test fixture")
-			}
-			_, err := decodeHandlerRuleEntriesNode(rules, handlerRuleDecodeContextRules)
+			_, err := ruleTestRows(source)
 			if err == nil {
 				t.Fatal("when default sentinel was admitted")
 			}
@@ -143,27 +145,25 @@ func TestBundleAdmissionRejectsWhenDefaultSentinel(t *testing.T) {
 }
 
 func TestRulePredicateContextsRemainDistinct(t *testing.T) {
-	var handler SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte("on_complete:\n  - condition: payload.ready\n    advances_to: done\n"), &handler); err != nil {
+	handler, err := ruleTestHandler("on_complete:\n  - condition: payload.ready\n    advances_to: done\n")
+	if err != nil {
 		t.Fatalf("ordinary completion condition: %v", err)
 	}
 	if len(handler.OnComplete) != 1 || handler.OnComplete[0].Condition != "payload.ready" || handler.OnComplete[0].PolicyRow.Kind != "" {
 		t.Fatalf("completion rules = %#v", handler.OnComplete)
 	}
-	if err := yaml.Unmarshal([]byte("on_complete:\n  - when: payload.ready\n    advances_to: done\n"), &handler); err == nil || !strings.Contains(err.Error(), "only supported under handler.rules") {
+	if _, err := ruleTestHandler("on_complete:\n  - when: payload.ready\n    advances_to: done\n"); err == nil || !strings.Contains(err.Error(), "only supported under handler.rules") {
 		t.Fatalf("on_complete.when error = %v", err)
 	}
 	for _, spelling := range []string{"condition", "when"} {
 		t.Run("join-"+spelling, func(t *testing.T) {
-			var join JoinSpec
-			err := yaml.Unmarshal([]byte("on_complete:\n  "+spelling+": payload.ready\n"), &join)
+			_, err := ruleTestJoin("on_complete:\n  " + spelling + ": payload.ready\n")
 			if err == nil || !strings.Contains(err.Error(), spelling) {
 				t.Fatalf("join %s error = %v", spelling, err)
 			}
 		})
 		t.Run("join-timeout-"+spelling, func(t *testing.T) {
-			var join JoinSpec
-			err := yaml.Unmarshal([]byte("timeout:\n  after: 1h\n  "+spelling+": payload.ready\n"), &join)
+			_, err := ruleTestJoin("timeout:\n  after: 1h\n  " + spelling + ": payload.ready\n")
 			if err == nil || !strings.Contains(err.Error(), spelling) {
 				t.Fatalf("join timeout %s error = %v", spelling, err)
 			}

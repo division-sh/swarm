@@ -102,11 +102,17 @@ func (b *effectiveProvenanceBuilder) ledger() EffectiveProvenanceLedger {
 	return cloneEffectiveProvenanceLedger(EffectiveProvenanceLedger{entries: b.entries})
 }
 
-func populateEffectiveEventProvenance(bundle *WorkflowContractBundle) {
+func populateEffectiveProvenance(bundle *WorkflowContractBundle) {
 	if bundle == nil {
 		return
 	}
 	builder := newEffectiveProvenanceBuilder()
+	for _, record := range bundle.ScopedNodeRecords() {
+		prefix := effectiveNodeProvenancePrefix(record.Source.FlowPath, record.LogicalID)
+		for relativePath, provenance := range record.Entry.admissionProvenance {
+			builder.set(prefix+"."+relativePath, provenance)
+		}
+	}
 	owners := map[string]string{}
 	for _, record := range bundle.canonicalCurrentEventDeclarationRecords() {
 		prefix := effectiveEventProvenancePrefix(record.flowPath, record.qualifiedName)
@@ -124,6 +130,10 @@ func populateEffectiveEventProvenance(bundle *WorkflowContractBundle) {
 	}
 	populateEffectiveEventProjectionProvenance(bundle, builder)
 	bundle.effectiveProvenance = builder.ledger()
+}
+
+func effectiveNodeProvenancePrefix(flowPath, nodeID string) string {
+	return "nodes[" + strconv.Quote(strings.TrimSpace(flowPath)+":"+strings.TrimSpace(nodeID)) + "]"
 }
 
 func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, builder *effectiveProvenanceBuilder) {

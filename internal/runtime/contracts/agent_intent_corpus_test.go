@@ -80,7 +80,7 @@ func classifyAgentIntentCorpusFile(t testing.TB, path, negativeClass string) (st
 		t.Fatal(err)
 	}
 	var document yaml.Node
-	if err := yaml.Unmarshal(raw, &document); err != nil {
+	if err := decodeNodeTestYAML(raw, &document); err != nil {
 		t.Fatalf("parse agents.yaml: %v", err)
 	}
 	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {

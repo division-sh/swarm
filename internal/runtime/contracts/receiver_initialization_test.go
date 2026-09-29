@@ -14,14 +14,14 @@ import (
 func TestReceiverVariableProjectionPreservesPresenceAndRefinements(t *testing.T) {
 	for _, raw := range []string{"integer", "{type: json, default: null}", "text?", "{type: text, pattern: '^ok', length: {min: 2}}", "{type: integer, range: {max: 4}, default: 3}", "{type: integer, equal_to: sibling}"} {
 		var before, after FlowVariable
-		if err := yaml.Unmarshal([]byte(raw), &before); err != nil {
+		if err := decodeNodeTestYAML([]byte(raw), &before); err != nil {
 			t.Fatal(err)
 		}
 		encoded, err := yaml.Marshal(before)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := yaml.Unmarshal(encoded, &after); err != nil {
+		if err := decodeNodeTestYAML(encoded, &after); err != nil {
 			t.Fatalf("%s: %v", encoded, err)
 		}
 		if !reflect.DeepEqual(before, after) {
@@ -32,7 +32,7 @@ func TestReceiverVariableProjectionPreservesPresenceAndRefinements(t *testing.T)
 
 func TestReceiverConfigurationConsumesSharedSiblingRefinements(t *testing.T) {
 	var variables FlowInstanceVariables
-	if err := yaml.Unmarshal([]byte("variables:\n  left: integer\n  right: {type: integer, equal_to: left}\n"), &variables); err != nil {
+	if err := decodeNodeTestYAML([]byte("variables:\n  left: integer\n  right: {type: integer, equal_to: left}\n"), &variables); err != nil {
 		t.Fatal(err)
 	}
 	config, err := CompileReceiverConfiguration(variables, TypeCatalogDocument{})
@@ -65,7 +65,7 @@ func TestReceiverVariableTypeAndDefaultAdmission(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var variable FlowVariable
-			err := yaml.Unmarshal([]byte(tc.source), &variable)
+			err := decodeNodeTestYAML([]byte(tc.source), &variable)
 			if err == nil {
 				_, err = CompileReceiverConfiguration(FlowInstanceVariables{Variables: map[string]FlowVariable{"count": variable}}, TypeCatalogDocument{})
 			}
@@ -75,10 +75,10 @@ func TestReceiverVariableTypeAndDefaultAdmission(t *testing.T) {
 		})
 	}
 	var absent, null FlowVariable
-	if err := yaml.Unmarshal([]byte("{type: integer}"), &absent); err != nil {
+	if err := decodeNodeTestYAML([]byte("{type: integer}"), &absent); err != nil {
 		t.Fatal(err)
 	}
-	if err := yaml.Unmarshal([]byte("{type: integer, default: null}"), &null); err != nil {
+	if err := decodeNodeTestYAML([]byte("{type: integer, default: null}"), &null); err != nil {
 		t.Fatal(err)
 	}
 	if absent.HasDefault || !null.HasDefault {
@@ -185,7 +185,7 @@ func TestReceiverInitializeGrammar(t *testing.T) {
 	for _, raw := range []string{"null", "{}", "{count: payload}", "{count: entity.count}", "{count: {from: payload.count}}", "{count: payload..count}"} {
 		var pins FlowInputPins
 		malformed := strings.Replace(string(source), initialization, "initialize: "+raw, 1)
-		err := yaml.Unmarshal([]byte(malformed), &pins)
+		err := decodeNodeTestYAML([]byte(malformed), &pins)
 		if err == nil {
 			t.Errorf("admitted %s", raw)
 		}
@@ -426,7 +426,7 @@ func TestReceiverVariableAliasesKeepPresenceAndRejectDuplicateDefaults(t *testin
 		"variables:\n  a: &integer {type: integer, default: 3}\n  b: {<<: *integer}\n",
 	} {
 		var variables FlowInstanceVariables
-		if err := yaml.Unmarshal([]byte(text), &variables); err != nil {
+		if err := decodeNodeTestYAML([]byte(text), &variables); err != nil {
 			t.Fatal(err)
 		}
 		c, err := CompileReceiverConfiguration(variables, TypeCatalogDocument{})
@@ -439,7 +439,7 @@ func TestReceiverVariableAliasesKeepPresenceAndRejectDuplicateDefaults(t *testin
 		}
 	}
 	var variables FlowInstanceVariables
-	if err := yaml.Unmarshal([]byte("variables:\n  a: &integer {type: integer, default: 3}\n  b: {<<: *integer, default: 4}\n"), &variables); err == nil {
+	if err := decodeNodeTestYAML([]byte("variables:\n  a: &integer {type: integer, default: 3}\n  b: {<<: *integer, default: 4}\n"), &variables); err == nil {
 		t.Fatal("duplicate merged default accepted")
 	}
 }

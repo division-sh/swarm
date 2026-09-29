@@ -124,35 +124,6 @@ func validateFlowSchemaDocumentFields(node *yaml.Node) error {
 	return nil
 }
 
-func (n *SystemNodeContract) UnmarshalYAML(node *yaml.Node) error {
-	if n == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*n = SystemNodeContract{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("system node contract must be a mapping")
-	}
-	if err := validateSystemNodeContractFields(node); err != nil {
-		return err
-	}
-	type alias SystemNodeContract
-	var aux alias
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*n = SystemNodeContract(aux)
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if strings.TrimSpace(node.Content[i].Value) == "produces" {
-			n.ProducesDeclared = true
-			break
-		}
-	}
-	return nil
-}
-
 var systemNodeContractFields = map[string]struct{}{
 	"description":    {},
 	"execution_type": {},
@@ -163,31 +134,6 @@ var systemNodeContractFields = map[string]struct{}{
 	"event_handlers": {},
 	"state_schema":   {},
 	"gate_state":     {},
-}
-
-func validateSystemNodeContractFields(node *yaml.Node) error {
-	retired := map[string]string{
-		"permissions":       "node permissions are not public node YAML authority",
-		"implementation":    "executor binding is not public node YAML authority",
-		"owned_transitions": "transition ownership is expressed through executable event_handlers",
-		"idempotency_table": "node idempotency table semantics are not public node YAML authority",
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "id" {
-			return fmt.Errorf("node.id is retired; the map key is the identity.")
-		}
-		if key == "" {
-			continue
-		}
-		if reason, ok := retired[key]; ok {
-			return fmt.Errorf("RETIRED: node field %q is retired; %s", key, reason)
-		}
-		if _, ok := systemNodeContractFields[key]; !ok {
-			return NewUndefinedFieldDiagnostic("node", key, systemNodeContractFields)
-		}
-	}
-	return nil
 }
 
 func decodeStringListNode(node *yaml.Node) ([]string, error) {
@@ -222,28 +168,4 @@ func decodeScalarStringNode(node *yaml.Node) (string, error) {
 		return "", nil
 	}
 	return strings.TrimSpace(node.Value), nil
-}
-
-func decodeBoolNode(node *yaml.Node) (bool, error) {
-	if node == nil || node.Kind == 0 {
-		return false, nil
-	}
-	if node.Kind != yaml.ScalarNode {
-		return false, fmt.Errorf("unsupported bool yaml node kind %d", node.Kind)
-	}
-	if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
-		return false, nil
-	}
-	var value bool
-	if err := node.Decode(&value); err == nil {
-		return value, nil
-	}
-	switch strings.ToLower(strings.TrimSpace(node.Value)) {
-	case "true", "yes", "on", "conditional":
-		return true, nil
-	case "false", "no", "off":
-		return false, nil
-	default:
-		return false, fmt.Errorf("unsupported bool value %q", node.Value)
-	}
 }

@@ -148,7 +148,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 			return EventCatalogEntry{}, fmt.Errorf("event key at %s must not have surrounding whitespace", field.Value.Location())
 		}
 		entry.BusinessKeyField = key
-		entry.admissionProvenance["business_key"] = authoredEventProvenance(field.Value)
+		entry.admissionProvenance["business_key"] = authoredSourceProvenance(field.Value)
 	}
 
 	payloadFieldNames := make([]string, 0, len(fields))
@@ -166,10 +166,10 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		entry.Payload.Properties[field.Name] = payloadField
 		payloadFieldNames = append(payloadFieldNames, field.Name)
 		typePath := "fields." + field.Name + ".type"
-		entry.admissionProvenance[typePath] = authoredEventProvenance(typeSource)
+		entry.admissionProvenance[typePath] = authoredSourceProvenance(typeSource)
 		optionalPath := "fields." + field.Name + ".is_optional"
 		if optional {
-			entry.admissionProvenance[optionalPath] = authoredEventProvenance(typeSource)
+			entry.admissionProvenance[optionalPath] = authoredSourceProvenance(typeSource)
 		} else {
 			location := typeSource.IntroductionLocation()
 			entry.admissionProvenance[optionalPath] = EffectiveValueProvenance{
@@ -227,7 +227,7 @@ func populateEventPayloadFieldAdmissionProvenance(entry *EventCatalogEntry, fiel
 			if name != "description" {
 				path = "refinements." + name
 			}
-			entry.admissionProvenance[prefix+path] = authoredEventProvenance(field.Value)
+			entry.admissionProvenance[prefix+path] = authoredSourceProvenance(field.Value)
 		}
 	}
 	for _, nested := range []struct {
@@ -260,7 +260,7 @@ func populateEventNestedAdmissionProvenance(entry *EventCatalogEntry, prefix str
 	}
 	for _, field := range fields {
 		if _, ok := allowed[field.Name]; ok {
-			entry.admissionProvenance[prefix+field.Name] = authoredEventProvenance(field.Value)
+			entry.admissionProvenance[prefix+field.Name] = authoredSourceProvenance(field.Value)
 		}
 	}
 	return nil
@@ -612,7 +612,7 @@ func optionalStrictStringSequence(value yamlsource.Value, context string) ([]str
 	}
 }
 
-func authoredEventProvenance(value yamlsource.Value) EffectiveValueProvenance {
+func authoredSourceProvenance(value yamlsource.Value) EffectiveValueProvenance {
 	location := value.IntroductionLocation()
 	return EffectiveValueProvenance{
 		Origin:         EffectiveValueOriginAuthored,

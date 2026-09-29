@@ -9,7 +9,6 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"gopkg.in/yaml.v3"
 )
 
 func TestRetiredDataFanOutSourceRejectedAtDecodeAndCompilation(t *testing.T) {
@@ -19,7 +18,7 @@ func TestRetiredDataFanOutSourceRejectedAtDecodeAndCompilation(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			for _, suffix := range []string{"", "as: row\n"} {
 				var spec FanOutSpec
-				err := yaml.Unmarshal([]byte("items_from: "+source+"\n"+suffix), &spec)
+				err := decodeNodeTestYAML([]byte("items_from: "+source+"\n"+suffix), &spec)
 				if err == nil {
 					t.Fatalf("retired source %q with %q decoded", source, suffix)
 				}

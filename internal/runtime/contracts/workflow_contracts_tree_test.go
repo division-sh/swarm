@@ -124,7 +124,7 @@ func TestAgentDeclarationIDPresenceMatrix(t *testing.T) {
 				source = "worker:\n" + tc.field + "\n  role: worker\n"
 			}
 			var entries map[string]AgentRegistryEntry
-			if err := yaml.Unmarshal([]byte(source), &entries); err != nil {
+			if err := decodeNodeTestYAML([]byte(source), &entries); err != nil {
 				t.Fatal(err)
 			}
 			normalized, err := normalizeAgentRegistryEntries(entries, "agents.yaml")
@@ -158,7 +158,7 @@ func TestAgentDeclarationRejectsDuplicateEffectiveNames(t *testing.T) {
 		"first:\n  id: shared\n  role: first\nsecond:\n  id: shared\n  role: second\n",
 	} {
 		var entries map[string]AgentRegistryEntry
-		if err := yaml.Unmarshal([]byte(source), &entries); err != nil {
+		if err := decodeNodeTestYAML([]byte(source), &entries); err != nil {
 			t.Fatal(err)
 		}
 		_, err := normalizeAgentRegistryEntries(entries, "agents.yaml")
@@ -910,5 +910,5 @@ func admitEventCatalogParserSnippet(t testing.TB, snippet canonicalrouting.Parse
 }
 
 func loadYAMLBytes(raw []byte, target any) error {
-	return yaml.Unmarshal(raw, target)
+	return decodeNodeTestYAML(raw, target)
 }

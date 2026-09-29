@@ -8,7 +8,7 @@ import (
 )
 
 var retiredNodeContractFields = map[string]string{
-	"id":                "node.id is retired; the map key is the identity",
+	"id":                "node.id is retired; the map key is the identity.",
 	"permissions":       "node permissions are not public YAML authority",
 	"implementation":    "executor binding is not public YAML authority",
 	"owned_transitions": "transition ownership is expressed through event_handlers",
@@ -16,6 +16,9 @@ var retiredNodeContractFields = map[string]string{
 }
 
 func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeContract, error) {
+	if err := root.ValidateAcyclic(); err != nil {
+		return nil, err
+	}
 	fields, err := uniqueYAMLMappingFields(root, "nodes.yaml declarations")
 	if err != nil {
 		return nil, err
@@ -28,6 +31,12 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 		projected, err := projectSystemNodeValue(field.Value)
 		if err != nil {
 			return nil, fmt.Errorf("node %q: %w", field.Name, err)
+		}
+		projected.admissionProvenance = map[string]EffectiveValueProvenance{
+			"declaration": authoredSourceProvenance(field.Value),
+		}
+		if err := collectNodeValueProvenance(field.Value, "", projected.admissionProvenance); err != nil {
+			return nil, fmt.Errorf("node %q provenance: %w", field.Name, err)
 		}
 		out[field.Name] = projected
 	}
@@ -105,7 +114,7 @@ func projectNodeEventHandlersValue(value yamlsource.Value) (map[string]SystemNod
 
 var retiredNodeHandlerFields = map[string]string{
 	"condition":               "handler condition is retired; use rules.when or on_complete.condition",
-	"logic":                   "handler logic is retired",
+	"logic":                   "DEPRECATED: handler logic is retired",
 	"from":                    "handler.from is accepted but never executed; use the owning primitive's source",
 	"dedup_by":                "handler.dedup_by is accepted but never executed; use accumulate or the input pin",
 	"action":                  "authored action is retired",
@@ -136,6 +145,9 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 		case "create_entity":
 			out.CreateEntity, err = nodeValueBool(field, "handler.create_entity")
 		case "advances_to":
+			if field.Presence() == yamlsource.PresenceSequence || field.Presence() == yamlsource.PresenceEmptySequence {
+				return SystemNodeEventHandler{}, fmt.Errorf("DIALECT-ADV-LIST: advances_to at %s is list, must be string", field.Location())
+			}
 			out.AdvancesTo, err = nodeValueText(field, "handler.advances_to")
 			out.AdvancesTo = strings.TrimSpace(out.AdvancesTo)
 		case "emit":
@@ -195,6 +207,16 @@ func projectNodeGateEffectValue(value yamlsource.Value) (*GateSpec, error) {
 	if value.Presence() == yamlsource.PresenceNull {
 		return nil, nil
 	}
+	if value.Presence() == yamlsource.PresenceScalar || value.Presence() == yamlsource.PresenceEmptyScalar {
+		name, err := nodeValueText(value, "sets_gate")
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(name) == "" {
+			return nil, nil
+		}
+		return &GateSpec{Name: strings.TrimSpace(name), Value: true}, nil
+	}
 	fields, err := nodeValueFields(value, "sets_gate", map[string]struct{}{"name": {}}, map[string]string{
 		"value": "sets_gate always sets the named gate to true; value is not executed",
 	})
@@ -212,5 +234,5 @@ func projectNodeGateEffectValue(value yamlsource.Value) (*GateSpec, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
 	}
-	return &GateSpec{Name: strings.TrimSpace(text)}, nil
+	return &GateSpec{Name: strings.TrimSpace(text), Value: true}, nil
 }

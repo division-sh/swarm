@@ -123,7 +123,7 @@ func TestAgentIntentSourceUnion_FailsClosed(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var entry AgentRegistryEntry
-			err := yaml.Unmarshal([]byte(tc.yaml), &entry)
+			err := decodeNodeTestYAML([]byte(tc.yaml), &entry)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}

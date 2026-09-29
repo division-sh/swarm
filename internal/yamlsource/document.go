@@ -108,6 +108,40 @@ func ValueFromNode(node *yaml.Node) Value {
 
 func (v Value) SemanticPath() string { return v.path }
 
+// ValidateAcyclic rejects aliases that recursively contain their target.
+// Merge expansion has its own cycle check, but ordinary mapping/sequence
+// traversal also needs this boundary before typed admission descends.
+func (v Value) ValidateAcyclic() error {
+	var walk func(*yaml.Node, map[*yaml.Node]bool, map[*yaml.Node]bool) error
+	walk = func(node *yaml.Node, visiting, visited map[*yaml.Node]bool) error {
+		if node == nil || visited[node] {
+			return nil
+		}
+		if visiting[node] {
+			return fmt.Errorf("YAML-ALIAS-CYCLE: recursive alias at %s", Location{File: v.file, Line: node.Line, Column: node.Column})
+		}
+		visiting[node] = true
+		if node.Kind == yaml.AliasNode {
+			if node.Alias == nil {
+				return fmt.Errorf("YAML-ALIAS: alias at %s has no target", Location{File: v.file, Line: node.Line, Column: node.Column})
+			}
+			if err := walk(node.Alias, visiting, visited); err != nil {
+				return err
+			}
+		} else {
+			for _, child := range node.Content {
+				if err := walk(child, visiting, visited); err != nil {
+					return err
+				}
+			}
+		}
+		delete(visiting, node)
+		visited[node] = true
+		return nil
+	}
+	return walk(v.node, map[*yaml.Node]bool{}, map[*yaml.Node]bool{})
+}
+
 func (v Value) Location() Location {
 	node := authoredValueNode(v.node)
 	if node == nil {

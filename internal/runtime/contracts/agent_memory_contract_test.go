@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	"gopkg.in/yaml.v3"
 )
 
 func TestEffectiveAgentMemoryPreservesPresenceAndProvenance(t *testing.T) {
@@ -23,7 +22,7 @@ func TestEffectiveAgentMemoryPreservesPresenceAndProvenance(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var entry AgentRegistryEntry
-			if err := yaml.Unmarshal([]byte(tt.yaml), &entry); err != nil {
+			if err := decodeNodeTestYAML([]byte(tt.yaml), &entry); err != nil {
 				t.Fatalf("yaml.Unmarshal: %v", err)
 			}
 			effective := EffectiveAgentRegistryEntry("helper", entry)
@@ -38,7 +37,7 @@ func TestAgentRegistryEntryRejectsRetiredMemoryFields(t *testing.T) {
 	for _, field := range []string{"mode", "conversation_mode", "session_scope", "session_scope_authority"} {
 		t.Run(field, func(t *testing.T) {
 			var entry AgentRegistryEntry
-			err := yaml.Unmarshal([]byte("role: helper\n"+field+": task\n"), &entry)
+			err := decodeNodeTestYAML([]byte("role: helper\n"+field+": task\n"), &entry)
 			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "memory") {
 				t.Fatalf("yaml.Unmarshal error = %v, want RETIRED guidance to memory", err)
 			}
