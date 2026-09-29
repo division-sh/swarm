@@ -1743,6 +1743,20 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		t.Fatalf("%s durable fork rows = %d, err=%v, want 1", rt.Backend, forkRows, err)
 	}
 	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for {
+		var candidateSettled bool
+		if err := rt.DB.QueryRow(`SELECT completion_due_at IS NULL FROM runs WHERE run_id=$1`, fork.ForkRunID).Scan(&candidateSettled); err != nil {
+			t.Fatal(err)
+		}
+		if candidateSettled {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fork completion candidate did not settle before refusal baseline: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, fork.ForkRunID))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	beforeRefusal := snapshotForkReceiverApplication(t, rt)
 	// A selected fork cannot acquire future ordinary ingress from the loaded
 	// same-hash runtime. Retained controls still own its explicit terminal stop.
@@ -1764,8 +1778,8 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != "event.publish" {
 		t.Fatalf("selected ingress refusal lost exact binding: %+v", refused)
 	}
-	if !reflect.DeepEqual(beforeRefusal, snapshotForkReceiverApplication(t, rt)) {
-		t.Fatal("refused selected ingress changed persisted state")
+	if afterRefusal := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, afterRefusal) {
+		t.Fatalf("refused selected ingress changed persisted state: tables=%v", forkReceiverChangedTables(beforeRefusal, afterRefusal))
 	}
 	var stopped struct {
 		OK bool `json:"ok"`
