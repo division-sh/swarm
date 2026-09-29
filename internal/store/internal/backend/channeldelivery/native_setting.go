@@ -140,14 +140,10 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			existingVersion == admission.PackVersion && existingHash == admission.PackManifestHash &&
 			contract == admission.EntryContractHash && existingCommand == setting.EntryCommand && bytes.Equal(canonical, desired)
 		if unresolved && setting.State != "uncertain" {
-			query = `UPDATE channel_native_settings SET state='uncertain', updated_at=? WHERE setting_id=?`
-			if postgres {
-				query = `UPDATE channel_native_settings SET state='uncertain', updated_at=$1 WHERE setting_id=$2::uuid`
-			}
-			if _, err := tx.ExecContext(ctx, query, time.Now().UTC(), setting.SettingID); err != nil {
+			setting, err = markNativeSettingUncertainTx(ctx, tx, setting, postgres)
+			if err != nil {
 				return channelnative.Setting{}, err
 			}
-			setting.State = "uncertain"
 		}
 		if !compatible || (setting.State == "retired" && !readbackHash.Valid) {
 			if unresolved || setting.State == "uncertain" || setting.State == "unavailable" {
@@ -161,6 +157,18 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	}
 	setting.CurrentConsumerCount, err = attachNativeInboxConsumerTx(ctx, tx, admission, setting, postgres)
 	return setting, err
+}
+
+func markNativeSettingUncertainTx(ctx context.Context, tx *sql.Tx, setting channelnative.Setting, postgres bool) (channelnative.Setting, error) {
+	query := `UPDATE channel_native_settings SET state='uncertain', updated_at=? WHERE setting_id=?`
+	if postgres {
+		query = `UPDATE channel_native_settings SET state='uncertain', updated_at=$1 WHERE setting_id=$2::uuid`
+	}
+	if _, err := tx.ExecContext(ctx, query, time.Now().UTC(), setting.SettingID); err != nil {
+		return channelnative.Setting{}, err
+	}
+	setting.State = "uncertain"
+	return setting, nil
 }
 
 func createNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (channelnative.Setting, error) {
