@@ -113,36 +113,9 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		Scan(&setting.SettingID, &existingPrincipal, &existingPack, &existingVersion, &existingHash,
 			&contract, &existingCommand, &raw, &setting.Generation, &setting.State, &setting.InstallOperationID, &readbackHash)
 	if errors.Is(err, sql.ErrNoRows) {
-		setting.SettingID, setting.Generation, setting.State = uuid.NewString(), 1, "planned"
-		setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
+		setting, err = createNativeInboxSettingTx(ctx, tx, admission, setting, postgres)
 		if err != nil {
 			return channelnative.Setting{}, err
-		}
-		desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
-		if err != nil {
-			return channelnative.Setting{}, err
-		}
-		setting.InstallOperationID, err = channelnative.InstallOperationID(setting.SettingID, setting.Generation)
-		if err != nil {
-			return channelnative.Setting{}, err
-		}
-		query = `INSERT INTO channel_native_settings
-			(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code,
-			pack_id, pack_version, pack_manifest_hash, entry_contract_hash, entry_command, desired_commands,
-			principal_id, generation, state, install_operation_id, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, 1, 'planned', ?, ?, ?)`
-		if postgres {
-			query = `INSERT INTO channel_native_settings
-				(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code,
-				pack_id, pack_version, pack_manifest_hash, entry_contract_hash, entry_command, desired_commands,
-				principal_id, generation, state, install_operation_id, created_at, updated_at)
-				VALUES ($1::uuid, $2, $3, $4, $5, $6, '', $7, $8, $9, $10, $11, $12::jsonb, $13::uuid, 1, 'planned', $14::uuid, $15, $16)`
-		}
-		now := time.Now().UTC()
-		if _, err := tx.ExecContext(ctx, query, setting.SettingID, admission.Provider, admission.ResourceSlotID,
-			admission.ConversationReference, setting.ScopeKind, setting.MemberReference, admission.PackID, admission.PackVersion, admission.PackManifestHash,
-			admission.EntryContractHash, setting.EntryCommand, string(desired), admission.PrincipalID, setting.InstallOperationID, now, now); err != nil {
-			return channelnative.Setting{}, fmt.Errorf("create physical native inbox setting: %w", err)
 		}
 	} else if err != nil {
 		return channelnative.Setting{}, err
@@ -186,9 +159,50 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			}
 		}
 	}
+	setting.CurrentConsumerCount, err = attachNativeInboxConsumerTx(ctx, tx, admission, setting, postgres)
+	return setting, err
+}
+
+func createNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (channelnative.Setting, error) {
+	var err error
+	setting.SettingID, setting.Generation, setting.State = uuid.NewString(), 1, "planned"
+	setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	desired, err := channelnative.DesiredCommands(setting.SettingID, setting.Generation)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	setting.InstallOperationID, err = channelnative.InstallOperationID(setting.SettingID, setting.Generation)
+	if err != nil {
+		return channelnative.Setting{}, err
+	}
+	query := `INSERT INTO channel_native_settings
+		(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code,
+		pack_id, pack_version, pack_manifest_hash, entry_contract_hash, entry_command, desired_commands,
+		principal_id, generation, state, install_operation_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, 1, 'planned', ?, ?, ?)`
+	if postgres {
+		query = `INSERT INTO channel_native_settings
+			(setting_id, provider, resource_slot_id, conversation_reference, scope_kind, member_reference, language_code,
+			pack_id, pack_version, pack_manifest_hash, entry_contract_hash, entry_command, desired_commands,
+			principal_id, generation, state, install_operation_id, created_at, updated_at)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, '', $7, $8, $9, $10, $11, $12::jsonb, $13::uuid, 1, 'planned', $14::uuid, $15, $16)`
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, query, setting.SettingID, admission.Provider, admission.ResourceSlotID,
+		admission.ConversationReference, setting.ScopeKind, setting.MemberReference, admission.PackID, admission.PackVersion, admission.PackManifestHash,
+		admission.EntryContractHash, setting.EntryCommand, string(desired), admission.PrincipalID, setting.InstallOperationID, now, now); err != nil {
+		return channelnative.Setting{}, fmt.Errorf("create physical native inbox setting: %w", err)
+	}
+	return setting, nil
+}
+
+func attachNativeInboxConsumerTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (int64, error) {
 	// Handoff history may survive, but an independent current connection may not
 	// acquire this setting. Retired predecessors were fenced above.
-	query = `SELECT COUNT(*) FROM channel_native_setting_consumers
+	query := `SELECT COUNT(*) FROM channel_native_setting_consumers
 		WHERE setting_id=? AND state='current' AND activation_id<>?`
 	if postgres {
 		query = `SELECT COUNT(*) FROM channel_native_setting_consumers
@@ -196,10 +210,10 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	}
 	var competing int64
 	if err := tx.QueryRowContext(ctx, query, setting.SettingID, admission.ActivationID).Scan(&competing); err != nil {
-		return channelnative.Setting{}, err
+		return 0, err
 	}
 	if competing != 0 {
-		return channelnative.Setting{}, fmt.Errorf("native inbox setting has a competing current connection")
+		return 0, fmt.Errorf("native inbox setting has a competing current connection")
 	}
 	query = `INSERT INTO channel_native_setting_consumers
 		(setting_id, activation_id, activation_revision, interface_key, binding_revision,
@@ -223,10 +237,9 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	}
 	if _, err := tx.ExecContext(ctx, query, setting.SettingID, admission.ActivationID, admission.ActivationRevision,
 		admission.InterfaceKey, admission.BindingRevision, admission.ContextPublicationGeneration, time.Now().UTC()); err != nil {
-		return channelnative.Setting{}, fmt.Errorf("attach native inbox activation consumer: %w", err)
+		return 0, fmt.Errorf("attach native inbox activation consumer: %w", err)
 	}
-	setting.CurrentConsumerCount, err = currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
-	return setting, err
+	return currentNativeConsumersTx(ctx, tx, setting.SettingID, postgres)
 }
 
 func advanceNativeSettingGenerationTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, setting channelnative.Setting, postgres bool) (channelnative.Setting, error) {
