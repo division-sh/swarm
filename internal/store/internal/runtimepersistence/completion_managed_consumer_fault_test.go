@@ -315,6 +315,57 @@ func managedConsumerWithRuntime(t *testing.T, fixture completionSettlementFixtur
 	return conversation
 }
 
+func TestManagedSelectedSessionReplacementRejectsBeforeProviderDispatchBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var store completionSettlementTestStore
+			var db *sql.DB
+			if backend == "sqlite" {
+				sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				store, db = sqlite, sqlite.backend.ConstructionHandle()
+			} else {
+				_, db, _ = testutil.StartPostgres(t)
+				store = admitTestPostgresStore(t, db)
+			}
+			fixture := newCompletionSettlementFixture(t, store, db, backend == "sqlite")
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls.Add(1) }))
+			defer server.Close()
+			cfg := &config.Config{LLM: config.LLMConfig{Backend: "openai_responses", OpenAIResponses: config.OpenAIResponsesConfig{BaseURL: server.URL}}}
+			controller := liveTestCompletionController(store, store, store, publicationGroupSpendProjection{})
+			runtime, err := (runtimellm.RuntimeFactory{
+				Cfg: cfg, Sessions: store.(sessions.Registry), LiveSessions: store.(runtimellm.LiveSessionAcquirer),
+				Conversations: store.(runtimellm.ConversationPersistence), LockOwner: fixture.leaseHolder,
+				Credentials: mapCredentialStore{"OPENAI_API_KEY": "test-key"}, CompletionController: controller,
+			}).Build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			settlement := completionSettlementForTest(t, fixture.authority.Target, fixture, "openai_responses", "", "")
+			conversation := managedConsumerWithRuntime(t, fixture, settlement, runtime)
+			conversation.Session.ID = uuid.NewString()
+			ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
+			ctx = managedExecutionStoreTestContext(t, ctx)
+			ctx = runtimedelivery.WithClaim(ctx, fixture.origin)
+			ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
+				ID: fixture.agentID, Identity: fixture.authority.Normal.Identity, Role: "worker", Type: "managed",
+				ExecutionMode: runtimeeffects.ExecutionModeLive, Model: "regular", LLMBackend: "openai_responses",
+				Memory: settlement.AgentTurn.Memory, FlowID: "global", FlowPath: "global",
+			})
+			ctx = agentmemory.WithExecution(ctx, settlement.AgentTurn.Memory, settlement.AgentTurn.Identity)
+			ctx = runtimecorrelation.WithInboundEvent(ctx, managedCompletionTestEvent(fixture.authority))
+			response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: managedCompletionTestEvent(fixture.authority)})
+			failure, typed := runtimefailures.As(err)
+			if response != nil || !typed || failure.Failure.Detail.Code != "managed_capability_turn_identity_mismatch" || calls.Load() != 0 {
+				t.Fatalf("replacement session crossed selected-store provider gate: response=%+v err=%v calls=%d", response, err, calls.Load())
+			}
+			if conversation.Session.ID != fixture.sessionID {
+				t.Fatalf("selected snapshot identity=%q, want %q", conversation.Session.ID, fixture.sessionID)
+			}
+		})
+	}
+}
+
 func TestManagedBlockedProviderGrantReplacementIsEvidenceOnlyBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, replaced := range []bool{false, true} {
