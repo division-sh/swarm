@@ -2,7 +2,15 @@
 
 Issue: #2498, agent-g. Parent: #2407 R1.1.
 Baseline: `origin/master@21bff28c8f582b3d515c420ad299f963822504ec`.
-Phase: pre-audit only. Independent gate: requested, not recorded yet.
+Phase: implementation approved, not runtime closure. Independent gate: [approved](https://github.com/division-sh/swarm/issues/2498#issuecomment-5901252923), with the following binding addendum recorded before implementation.
+
+## Approved gate addendum
+
+- Node receiver ownership is canonically classified by `pipeline.ClassifyDeliveryTargetOwnership` (`internal/runtime/pipeline/delivery_target_ownership.go`). The only production classification entrance is EventBus `selectedRunTargetOwnerProjection.resolveNodeTargetOwners`; both ordinary pubsub and selected/connect delivery plans consume it. `ValidateDeliveryTargetOwnership` delegates to that same classifier; executing handlers validate the immutable stamped ownership rather than rematching routes. These seams already consume the canonical owner; no independent live bypass was found. U3 must qualify the classifier's exact static receiver decision/evidence through the real root-to-static golden route, not merely mutate its EventBus wrapper.
+- The explicit retirement of `source: external` governs. This PR will remove its contradictory permission from `resolved_input_pin.canonical_form`, alongside the new test-contract registration. No compatibility path or unmerged grammar is authorized.
+- M10 requires a stable run ID and idempotency key, then receipt replay across a retained process restart (transport cache absent), with the permanent creation receipt and frozen domain facts unchanged. Immediate cached replay earns no permanent-receipt credit.
+- M12 requires an acknowledged public pause followed by a publicly observed partial feed cursor/cardinality and pending or unsettled exact rows, captured before forced death. Retained restart and lawful continuation must close the same feed without duplicated predecessor facts. If this checkpoint cannot be reached, implementation stops for a new ruling; a settled restart cannot substitute.
+- All 23 rows and U1-U5 remain mandatory on both stores. Unreachable or nondiscriminating mutations, unsupported source grammar, another production interpreter or a required runtime repair require a new ruling. Approval is permission to implement, not R1 or merge closure; #2407 stays open.
 
 ## 1. Classification, authority and closure boundary
 
