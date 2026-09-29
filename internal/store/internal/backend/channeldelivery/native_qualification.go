@@ -41,6 +41,16 @@ type nativeQualificationFacts struct {
 	qualifiedContract                                                        string
 }
 
+func validateNativeQualificationRequest(tx *sql.Tx, req channelnative.QualificationRequest) error {
+	if tx == nil || uuid.Validate(req.ActivationID) != nil || uuid.Validate(req.SettingID) != nil ||
+		req.SettingGeneration < 1 || req.LocaleRevision < 1 || req.ObservedAt.IsZero() ||
+		(req.State != channelnative.QualificationQualified && req.State != channelnative.QualificationInvalid && req.State != channelnative.QualificationMissing) ||
+		(req.State == channelnative.QualificationQualified && (req.ReadbackHash == "" || req.ClientLanguage == "")) {
+		return fmt.Errorf("native qualification requires exact coordinates and observation")
+	}
+	return nil
+}
+
 func loadNativeQualification(ctx context.Context, tx *sql.Tx, activationID string, postgres, lock bool) (nativeQualificationFacts, bool, error) {
 	query := nativeQualificationSelect + "?"
 	if postgres {
@@ -105,11 +115,8 @@ func ReadNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, activationI
 }
 
 func RecordNativeInboxQualificationTx(ctx context.Context, tx *sql.Tx, req channelnative.QualificationRequest, postgres bool) error {
-	if tx == nil || uuid.Validate(req.ActivationID) != nil || uuid.Validate(req.SettingID) != nil ||
-		req.SettingGeneration < 1 || req.LocaleRevision < 1 || req.ObservedAt.IsZero() ||
-		(req.State != channelnative.QualificationQualified && req.State != channelnative.QualificationInvalid && req.State != channelnative.QualificationMissing) ||
-		(req.State == channelnative.QualificationQualified && (req.ReadbackHash == "" || req.ClientLanguage == "")) {
-		return fmt.Errorf("native qualification requires exact coordinates and observation")
+	if err := validateNativeQualificationRequest(tx, req); err != nil {
+		return err
 	}
 	facts, found, err := loadNativeQualification(ctx, tx, req.ActivationID, postgres, true)
 	if err != nil {
