@@ -160,36 +160,31 @@ func validateBudgetPolicy(policy BudgetPolicy, document *yaml.Node) error {
 			budget CommandBudget
 		}{"hard.mandatory_soak_command_seconds", policy.Hard.MandatorySoakCommandSeconds})
 	}
-	for _, item := range budgets {
-		if err := validateCommandBudget(item.name, item.budget, document); err != nil {
-			return err
-		}
-	}
 	for id, budget := range policy.Hard.UnitCommandSeconds {
 		if strings.TrimSpace(id) != id || id == "" {
 			return fmt.Errorf("hard.unit_command_seconds has an invalid unit ID %q", id)
 		}
-		if err := validateCommandBudget("hard.unit_command_seconds."+id, budget, document); err != nil {
-			return err
+		budgets = append(budgets, struct {
+			name   string
+			budget CommandBudget
+		}{"hard.unit_command_seconds." + id, budget})
+	}
+	for _, item := range budgets {
+		if !finitePositive(item.budget.LimitSeconds) {
+			return fmt.Errorf("%s.limit_seconds must be a finite positive number", item.name)
 		}
-	}
-	return nil
-}
-
-func validateCommandBudget(name string, budget CommandBudget, document *yaml.Node) error {
-	if !finitePositive(budget.LimitSeconds) {
-		return fmt.Errorf("%s.limit_seconds must be a finite positive number", name)
-	}
-	justification := strings.TrimSpace(budget.Justification)
-	if justification == "" {
-		return fmt.Errorf("%s.justification must be non-empty", name)
-	}
-	if strings.ContainsAny(justification, "\r\n") {
-		return fmt.Errorf("%s.justification must be one line", name)
-	}
-	node := mappingPath(document, strings.Split(name+".justification", ".")...)
-	if node == nil || node.Style == yaml.LiteralStyle || node.Style == yaml.FoldedStyle {
-		return fmt.Errorf("%s.justification must be a plain one-line scalar", name)
+		justification := strings.TrimSpace(item.budget.Justification)
+		if justification == "" {
+			return fmt.Errorf("%s.justification must be non-empty", item.name)
+		}
+		if strings.ContainsAny(justification, "\r\n") {
+			return fmt.Errorf("%s.justification must be one line", item.name)
+		}
+		path := strings.Split(item.name+".justification", ".")
+		node := mappingPath(document, path...)
+		if node == nil || node.Style == yaml.LiteralStyle || node.Style == yaml.FoldedStyle {
+			return fmt.Errorf("%s.justification must be a plain one-line scalar", item.name)
+		}
 	}
 	return nil
 }
