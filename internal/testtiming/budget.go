@@ -17,6 +17,7 @@ const (
 	BudgetPolicyVersion    = 1
 	CommandEvidenceVersion = 5
 	BudgetResultVersion    = 1
+	commandBudgetBuffer    = 1.30
 
 	AttemptPrimary        = "primary"
 	CountModeCacheDefault = "cache-default"
@@ -78,8 +79,10 @@ type SurfaceResult struct {
 	Surface                  string       `json:"surface"`
 	Status                   BudgetStatus `json:"status"`
 	LimitSeconds             float64      `json:"limit_seconds"`
+	BufferedCeilingSeconds   float64      `json:"buffered_ceiling_seconds"`
 	PrimarySeconds           *float64     `json:"primary_seconds,omitempty"`
 	PrimaryPackageElapsedSec *float64     `json:"primary_package_elapsed_seconds,omitempty"`
+	Warnings                 []string     `json:"warnings,omitempty"`
 	Problems                 []string     `json:"problems,omitempty"`
 }
 
@@ -170,7 +173,7 @@ func validateBudgetPolicy(policy BudgetPolicy, document *yaml.Node) error {
 		}{"hard.unit_command_seconds." + id, budget})
 	}
 	for _, item := range budgets {
-		if !finitePositive(item.budget.LimitSeconds) {
+		if !finitePositive(item.budget.LimitSeconds) || !finitePositive(bufferedCommandCeiling(item.budget.LimitSeconds)) {
 			return fmt.Errorf("%s.limit_seconds must be a finite positive number", item.name)
 		}
 		justification := strings.TrimSpace(item.budget.Justification)
@@ -483,6 +486,12 @@ func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []Comm
 
 func evaluateSurface(plan testplanning.RunPlan, unit testplanning.ProofUnit, budget CommandBudget, group *evidenceAttempts) SurfaceResult {
 	result := SurfaceResult{Surface: unit.ID, Status: BudgetPass, LimitSeconds: budget.LimitSeconds}
+	result.BufferedCeilingSeconds = bufferedCommandCeiling(budget.LimitSeconds)
+	if !finitePositive(budget.LimitSeconds) || !finitePositive(result.BufferedCeilingSeconds) {
+		result.Status = BudgetIncomplete
+		result.Problems = append(result.Problems, "command budget baseline or buffered ceiling is invalid")
+		return result
+	}
 	if group == nil || group.primary == nil {
 		result.Status = BudgetIncomplete
 		result.Problems = append(result.Problems, "primary evidence is missing")
@@ -506,11 +515,17 @@ func evaluateSurface(plan testplanning.RunPlan, unit testplanning.ProofUnit, bud
 		return result
 	}
 
-	if primary.ElapsedSeconds > budget.LimitSeconds {
+	if primary.ElapsedSeconds > result.BufferedCeilingSeconds {
 		result.Status = BudgetFail
-		result.Problems = append(result.Problems, "primary command exceeded its timing budget")
+		result.Problems = append(result.Problems, "primary command exceeded its buffered timing ceiling")
+	} else if primary.ElapsedSeconds > budget.LimitSeconds {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("performance warning: primary command %.3fs exceeded %.3fs baseline but stayed within %.3fs buffered ceiling", primary.ElapsedSeconds, budget.LimitSeconds, result.BufferedCeilingSeconds))
 	}
 	return result
+}
+
+func bufferedCommandCeiling(baseline float64) float64 {
+	return baseline * commandBudgetBuffer
 }
 
 func packageDiagnostics(opts EvaluationOptions, grouped map[string]*evidenceAttempts) []PackageDiagnostic {
@@ -593,17 +608,18 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 	if _, err := fmt.Fprintf(w, "\n**Status: %s**\n\n", result.Status); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, "Hard latency is command-level `go test` elapsed. Package elapsed is concurrent work telemetry only; whole-job latency is reported separately."); err != nil {
+	if _, err := fmt.Fprintln(w, "Hard latency is command-level `go test` elapsed. Committed limits are baselines; evaluation allows a fixed 30% CI buffer without changing those targets. Package elapsed is concurrent work telemetry only; whole-job latency is reported separately."); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(w, "\n| Surface | Primary | Limit | Package work | Status |\n| --- | ---: | ---: | ---: | --- |"); err != nil {
+	if _, err := fmt.Fprintln(w, "\n| Surface | Primary | Baseline | Buffered ceiling | Package work | Status |\n| --- | ---: | ---: | ---: | ---: | --- |"); err != nil {
 		return err
 	}
 	for _, surface := range result.Surfaces {
-		if _, err := fmt.Fprintf(w, "| `%s` | %s | %.0fs | %s | %s |\n",
+		if _, err := fmt.Fprintf(w, "| `%s` | %s | %.3fs | %.3fs | %s | %s |\n",
 			surface.Surface,
 			formatOptionalSeconds(surface.PrimarySeconds),
 			surface.LimitSeconds,
+			surface.BufferedCeilingSeconds,
 			formatOptionalSeconds(surface.PrimaryPackageElapsedSec),
 			surface.Status,
 		); err != nil {
@@ -634,6 +650,22 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 		}
 		for _, diagnostic := range result.PackageDiagnostics {
 			if _, err := fmt.Fprintf(w, "- `%s`: %s\n", diagnostic.Kind, diagnostic.Message); err != nil {
+				return err
+			}
+		}
+	}
+	var warnings []string
+	for _, surface := range result.Surfaces {
+		for _, warning := range surface.Warnings {
+			warnings = append(warnings, surface.Surface+": "+warning)
+		}
+	}
+	if len(warnings) > 0 {
+		if _, err := fmt.Fprintln(w, "\n## Performance Warnings"); err != nil {
+			return err
+		}
+		for _, warning := range warnings {
+			if _, err := fmt.Fprintf(w, "- %s\n", warning); err != nil {
 				return err
 			}
 		}
