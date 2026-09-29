@@ -2450,6 +2450,22 @@
           }
         },
         {
+          "name": "client_language",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "expected_locale_revision",
+          "required": false,
+          "schema": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -2741,6 +2757,14 @@
           "schema": {
             "default": true,
             "type": "boolean"
+          }
+        },
+        {
+          "name": "client_language",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         {
@@ -14953,6 +14977,13 @@
             "minimum": 1,
             "type": "integer"
           },
+          "client_language": {
+            "type": "string"
+          },
+          "client_locale_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "completed_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
@@ -15061,6 +15092,8 @@
           "phase",
           "revision",
           "save_proof",
+          "client_language",
+          "client_locale_revision",
           "credential_reservations",
           "requested_at",
           "updated_at"
@@ -15087,8 +15120,7 @@
           }
         },
         "required": [
-          "operation",
-          "candidate"
+          "operation"
         ],
         "type": "object"
       },
@@ -15273,6 +15305,9 @@
           },
           "coordinate": {
             "$ref": "#/components/schemas/ChannelRuntimeContextCoordinate"
+          },
+          "native_inbox": {
+            "$ref": "#/components/schemas/NativeInboxQualification"
           },
           "observed_at": {
             "$ref": "#/components/schemas/Timestamp"
@@ -20008,6 +20043,46 @@
           "deferred"
         ],
         "type": "string"
+      },
+      "NativeInboxQualification": {
+        "additionalProperties": false,
+        "properties": {
+          "client_language": {
+            "type": "string"
+          },
+          "locale_revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "observed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "setting_generation": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "setting_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "state": {
+            "enum": [
+              "missing",
+              "invalid",
+              "stale",
+              "qualified"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "client_language",
+          "locale_revision"
+        ],
+        "type": "object"
       },
       "OkResult": {
         "additionalProperties": false,
