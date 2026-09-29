@@ -44,7 +44,7 @@ func TestCatalogExternalProofPartitionsThroughInventory(t *testing.T) {
 			u.Run = "^TestSecond$/sqlite"
 			p.Units["second"] = u
 			// Policy admission rejects this before the declaration partition census.
-		}, "units.second: only the mandatory soak may set a timeout or backend filter"},
+		}, "units.second: only the mandatory soak or exact served reporter may set a timeout; only the soak may filter a backend"},
 		{"cached unit", func(_ *testing.T, _ string, p *testplanning.Policy) {
 			u := p.Units["second"]
 			u.CountMode = "cache-default"
