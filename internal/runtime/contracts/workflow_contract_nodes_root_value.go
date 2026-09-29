@@ -154,6 +154,8 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.Rules, err = projectNodeRuleRowsValue(field, handlerRuleDecodeContextRules)
 		case "on_complete":
 			out.OnComplete, err = projectNodeRuleRowsValue(field, handlerRuleDecodeContextOnComplete)
+		case "join":
+			out.Join, err = projectNodeJoinValue(field)
 		case "on_success":
 			out.OnSuccess, err = projectNodeOnSuccessValue(field)
 		case "sets_gate":
@@ -177,7 +179,7 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 		case "clear_gates":
 			out.ClearGates, err = projectNodeClearGatesValue(field)
 		default:
-			return SystemNodeEventHandler{}, fmt.Errorf("source-aware projection of %s is not yet implemented at %s", name, field.Location())
+			return SystemNodeEventHandler{}, fmt.Errorf("unsupported handler field %q at %s", name, field.Location())
 		}
 		if err != nil {
 			return SystemNodeEventHandler{}, err

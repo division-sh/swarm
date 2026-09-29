@@ -96,8 +96,8 @@ func loadOptionalNodeDeclarationsFromSource(artifact *sourceartifact.AdmittedSou
 	if err != nil || !present {
 		return map[string]SystemNodeContract{}, err
 	}
-	entries := map[string]SystemNodeContract{}
-	if err := artifact.DecodeYAML(label, &entries); err != nil {
+	entries, err := projectNodeDeclarationsValue(admission.document.Root())
+	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, label)
 	}
 	return entries, admission.RequireLive(len(entries))
@@ -198,8 +198,8 @@ func loadOptionalNodeDeclarations(path string) (map[string]SystemNodeContract, e
 	if err != nil || !present {
 		return map[string]SystemNodeContract{}, err
 	}
-	entries := map[string]SystemNodeContract{}
-	if err := admission.source.Decode(&entries); err != nil {
+	entries, err := projectNodeDeclarationsValue(admission.document.Root())
+	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
 	}
 	return entries, admission.RequireLive(len(entries))
