@@ -1,14 +1,45 @@
 # Post-Implementation Proof Audit: #2447 R1.4
 
-Agent-g. **LSF-044 repair passes full-load packages; qualification blocked by
-separate #2353 LSF-045/046. Not review-ready.**
-Final integrated executable candidate: `0e21ee7f1`, including separate test-only
-repair `054b888e5`. This outcome update changes documentation only.
-Executable checker/test Go head: `3ba8c5678`; inventory-metadata heads: `ac3d00dde`
-and `6019a729f` (plus this artifact's exact classification entry);
-base: `27a9f1b8c` (current master integration,
-including the separately merged scatter-gather safety tests). Subsequent changes
-to this artifact are documentation-only; the baseline carries no circular SHA.
+Agent-g. **Current-master integration is complete; final whole-suite
+qualification is in progress.** The complexity ratchet and approved LSF-044
+test-contract repair are rebased on `origin/master@a907854ae`. The committed
+executable/baseline head before this documentation-only update is `bab48509c`.
+Subsequent changes to this artifact do not alter the measured Go snapshot; the
+baseline intentionally carries no circular commit SHA.
+
+The prior `0e21ee7f1` qualification record remains below as historical evidence,
+not current merge proof. Its LSF-045 blocker was repaired independently by Agent A
+and merged through PR #2402 (`486ea4161`); G consumed that implementation from
+master without duplicating it. LSF-046 was host `/tmp` inode exhaustion, and the
+current run uses a private disk-backed `TMPDIR`/`GOTMPDIR`. All six retained-data
+shards and the complete dual-store golden workload now pass in that environment.
+No production runtime, `platform-spec.yaml`, module dependency, `go.mod`, `go.sum`
+or vendored source is changed by this branch.
+
+## 2026-09-29 Current-Master Integration
+
+- The original 11 commits were replayed one-for-one onto current master. The only
+  first-rebase conflict was `.github/workflows/ci.yml`; both upstream
+  `mandatory-soak` and this branch's unconditional `complexity` requirement are
+  retained in the required aggregate. A second replay onto `a907854ae` was
+  conflict-free.
+- Exact current base -> head measurements are cognit callables **18981 -> 19010**,
+  >=30 **597 -> 597**, >=50 **199 -> 199**, maximum **302 -> 302**; cyclo
+  callables **18981 -> 19010**, >=30 **282 -> 282**, >=50 **58 -> 58**, maximum
+  **184 -> 184**. `hotspot_count_increased` is false for both independent metrics.
+- The generated baseline is byte-exact on the rebased committed head. The route,
+  retired-builder and action-retirement inventories explicitly classify it; no
+  scan exclusion or weakened assertion was introduced.
+- Focused/race/count100 LSF-044 proofs pass. The managed full-profile dual-store
+  golden restart/SIGKILL and both burst iterations pass in **166.425s**.
+- The first current-master `swarm-test --full` attempt passed every preceding
+  shard through `apiv1` and entered `conformance-2`, where it exposed one exact
+  metadata omission: `.github/complexity-baseline.json` was absent from the
+  action-retirement corpus ledger. That row is now explicitly classified and its
+  focused proof passes. This failed attempt is not claimed as qualification.
+- One fresh final `swarm-test --full` run is required on the repaired, rebased
+  head. Its result will be bound in the PR proof-audit comment; no retry of an
+  unchanged failed head is used as proof.
 
 ## Governing Contract and Closure Boundary
 
@@ -27,9 +58,9 @@ complexity control (#2447 / R1.4); broader parent: durable Recovery acceptance
 boundaries (#2407). This was an absent acceptance invariant, not a local runtime
 symptom. The approved slice closes only the missing ratchet, not hotspot reduction.
 
-Intended closure level: **failure class eliminated**, not yet claimed because full
-qualification and independent review remain outstanding. Current achieved level:
-**touched seam canonicalized**. The whole known local/CI consumer family is migrated;
+Intended closure level: **failure class eliminated**. Implementation closure is
+claimed; final whole-suite qualification and independent review remain outstanding.
+Current achieved level: **chosen working class closed**. The whole known local/CI consumer family is migrated;
 there is no second score implementation or local baseline ceiling that can approve
 growth. Both counts >=30 must independently not increase. This is NOT a promise
 that total complexity, every function, or all executable bodies can only decrease.
@@ -61,7 +92,7 @@ new exported library, production dependency or custom complexity algorithm.
 | Existing CI planner/timing tooling | Different concept, proven by unchanged execution-SHA planning and separate job; no parallel complexity interpretation there. |
 | Historical score/keep-map readers | Historical only, not current approval authority; missing eligibility evidence continues to block future factoring. |
 | Repository-wide route-authority drift census | Different semantic concept: reads callable names as searchable text, not scores or executable route authority. Exact baseline path classified in its existing inventory; no search exclusion or test-assertion change. |
-| Retired-transport reference census | Different semantic concept: its existing exact-count table classifies the JSON's 75 metadata references and this audit's single test-name reference. No path-wide exclusion or assertion removed. |
+| Retired-transport reference census | Different semantic concept: its existing exact-count table classifies the JSON's 81 metadata references and this audit's single test-name reference. No path-wide exclusion or assertion removed. |
 | Monthly delta publication / protection administration | Explicitly split / tracked separately in #2407 R1.5 / R1.3. No second checker or invented publication framework. |
 | Runtime/golden consumers | Different semantic concept; production and golden fixture code stays unchanged. The separately approved disposal-observation test repair is tabulated below. |
 
@@ -123,9 +154,9 @@ unit controls; workflow assertions are not the only proof.
 - LSF-044 unchanged-base command: `go test ./internal/store/internal/backend/runforkpersistence -run '^TestConversationForkGracefulMutation$/^keyed$/^commit_failure$' -count=20 -timeout=5m`; one failure, 8.165s. No source modification in `/tmp/agent-g-2447-base-proof`.
 - Full log SHA256 `92d029af28c17abf3b9ac86d371c8535bca26f275ed193533cc53f53f3e6887d`; unchanged-base fork probe SHA256 `59583d7931adb2289fe16111f95ce5b406c4d82f6155977198e5436b0376360b`; golden proof SHA256 `5c7817ab46f472f417651d95b3efa1b6b95957ca21077e12b7b80c24cb7d174a`. Logs are retained under `/tmp/agent-g-2447-{full-final,base-fork-proof,golden-full}.log`.
 
-Measured base -> head: cyclo >=30 **236 -> 236**, >=50 **43 -> 43**, maximum
-**184 -> 184**; cognit >=30 **518 -> 518**, >=50 **158 -> 158**, maximum
-**294 -> 294**. Each metric's callable population is **18143 -> 18172** in this
+Current measured base -> head: cyclo >=30 **282 -> 282**, >=50 **58 -> 58**, maximum
+**184 -> 184**; cognit >=30 **597 -> 597**, >=50 **199 -> 199**, maximum
+**302 -> 302**. Each metric's callable population is **18981 -> 19010** in this
 repository (equality here does not imply equal upstream populations generally).
 No runtime complexity reduction is claimed. Added authored files are exclusively
 development tooling; generated baseline/audit/test lines are reported separately.
@@ -194,7 +225,7 @@ published. Effort/ROI: one small
 test-only patch removes a false full-load failure without runtime machinery.
 No new issue, platform behavior, compatibility or factoring is introduced.
 
-### Final Candidate Receipts and Separate Failures
+### Historical Candidate Receipts and Separate Failures
 
 Candidate `0e21ee7f1` on unchanged `origin/master@27a9f1b8c`:
 
