@@ -315,8 +315,9 @@ coordinator-node:
 
 func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFieldsAsExpressions(t *testing.T) {
 	tests := []struct {
-		name     string
-		operator string
+		name      string
+		operator  string
+		rejection string
 	}{
 		{
 			name: "filter predicate",
@@ -325,6 +326,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         predicate: entity.verticals
         condition: "true"
         store_as: metadata.filtered`,
+			rejection: `RETIRED: filter field "predicate"`,
 		},
 		{
 			name: "reduce params",
@@ -334,6 +336,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
         params:
           value: entity.verticals
         store_as: metadata.reduced`,
+			rejection: `RETIRED: reduce field "params"`,
 		},
 		{
 			name: "filter source shadowed by items from",
@@ -371,6 +374,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 			operator: `query:
         - source: entity.verticals
           store_as: metadata.rows`,
+			rejection: "must be a mapping, got sequence",
 		},
 		{
 			name: "activity approval decision",
@@ -392,6 +396,18 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.rejection != "" {
+				// Retired inert forms cannot create demand because they no longer
+				// reach the executable projection at all.
+				handler, err := admitBootHandlerFixture(t, tc.operator)
+				if err == nil || !strings.Contains(err.Error(), tc.rejection) {
+					t.Fatalf("admission error=%v, want %s", err, tc.rejection)
+				}
+				if handler.Query != nil || handler.Filter != nil || handler.Reduce != nil {
+					t.Fatalf("rejected form reached demand projection: %#v", handler)
+				}
+				return
+			}
 			bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator
 mode: singleton

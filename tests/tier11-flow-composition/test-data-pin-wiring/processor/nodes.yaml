@@ -6,7 +6,8 @@ processor-node:
     process.run:
       create_entity: true
       guard:
-        entity.task_config: { exists: true }
+        id: task_config_present
+        check: has(entity.task_config)
       data_accumulation:
         writes:
           - target_field: result
