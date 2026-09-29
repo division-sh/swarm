@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -102,11 +103,49 @@ type Setting struct {
 	State                string
 	InstallOperationID   string
 	CurrentConsumerCount int64
+	ClientLanguage       string
+	ClientLocaleRevision int64
+}
+
+type QualificationState string
+
+const (
+	QualificationMissing   QualificationState = "missing"
+	QualificationInvalid   QualificationState = "invalid"
+	QualificationStale     QualificationState = "stale"
+	QualificationQualified QualificationState = "qualified"
+)
+
+type Qualification struct {
+	State             QualificationState `json:"state"`
+	ClientLanguage    string             `json:"client_language"`
+	LocaleRevision    int64              `json:"locale_revision"`
+	SettingID         string             `json:"setting_id,omitempty"`
+	SettingGeneration int64              `json:"setting_generation,omitempty"`
+	Reason            string             `json:"reason,omitempty"`
+	ObservedAt        time.Time          `json:"observed_at,omitzero"`
+}
+
+type QualificationRequest struct {
+	SettingID          string
+	SettingGeneration  int64
+	ActivationID       string
+	ActivationRevision int64
+	ContextGeneration  int64
+	BindingRevision    int64
+	EntryContractHash  string
+	ClientLanguage     string
+	LocaleRevision     int64
+	State              QualificationState
+	Reason             string
+	ReadbackHash       string
+	ObservedAt         time.Time
 }
 
 type Store interface {
 	AttachNativeInboxSetting(context.Context, Admission) (Setting, error)
 	RetireStaleNativeInboxConsumers(context.Context) error
-	ConfirmRetiredNativeInboxSettingReadback(context.Context, string, int64, []byte) (bool, error)
 	MarkNativeInboxSettingUnavailable(context.Context, string, int64) error
+	RecordNativeInboxQualification(context.Context, QualificationRequest) error
+	ReadNativeInboxQualification(context.Context, string) (Qualification, error)
 }

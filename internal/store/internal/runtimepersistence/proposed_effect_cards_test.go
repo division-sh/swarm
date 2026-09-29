@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -18,6 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
 
@@ -361,9 +363,35 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				if err != nil || readback.DispatchState != status || readback.ContinuationState != decisioncard.ProposedEffectRequestReleased {
 					t.Fatalf("readback = %#v, %v; want authorization=decided continuation=released dispatch=%s", readback, err, status)
 				}
+				db, postgres := decisionCardStoreDB(t, cards)
+				plan := channeldelivery.Plan{
+					DeliveryID: uuid.NewString(), SourceKind: "card", SourceID: card.CardID,
+					PrincipalID: uuid.NewString(), InterfaceKey: "swarm.hitl-channel/v2/dispatch-proof",
+					BindingRevision: 1, DeliveryEpoch: 1, ExternalAccountRef: "operator", ConversationRef: "inbox",
+					ConversationScope: "direct", State: "planned",
+					Bounds: packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64},
+				}
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				frozen, err := channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
+				_ = tx.Rollback()
+				if err != nil || !strings.Contains(frozen.FullText, "Dispatch: "+status) {
+					t.Fatalf("channel render diverges from canonical dispatch %s: text=%q err=%v", status, frozen.FullText, err)
+				}
 				overwriteProposedEffectAttemptMode(t, ctx, cards, continuation.RequestEventID, executionmode.Mock)
 				if _, err := store.ProposedEffectReadback(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), "execution mode") {
 					t.Fatalf("cross-mode readback error = %v", err)
+				}
+				tx, err = db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = channeldelivery.FreezeCurrentSourceTx(ctx, tx, plan, postgres)
+				_ = tx.Rollback()
+				if err == nil || !strings.Contains(err.Error(), "execution mode") {
+					t.Fatalf("cross-mode channel render error = %v", err)
 				}
 			})
 		}

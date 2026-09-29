@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/division-sh/swarm/internal/packs"
 	"sort"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const ProjectionVersion = "channel-render-v2"
+const ProjectionVersion = "channel-render-v3"
 
 type ActionPage struct {
 	Index    int `json:"index"`
@@ -62,6 +63,7 @@ type Frozen struct {
 	FullText           string
 	Choices            []Choice
 	ActionPage         *ActionPage
+	Bounds             packs.PresentationBounds
 	Prompt             *DraftPrompt
 	DraftChoices       []DraftChoice
 	DraftChooser       *DraftChooser
@@ -76,15 +78,11 @@ type RecoveryChoice struct {
 }
 
 type RecoveryPage struct {
-	BaseText  string `json:"base_text"`
-	PageIndex int    `json:"page_index"`
+	BaseText string `json:"base_text"`
 }
-
-const DraftChooserPageSize = 7
 
 type DraftChooser struct {
 	TextPublicationID string `json:"text_publication_id"`
-	PageIndex         int    `json:"page_index"`
 }
 
 type DraftChoice struct {
@@ -123,7 +121,8 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 			Label   string  `json:"label"`
 			Fields  []Field `json:"fields"`
 		} `json:"choices"`
-		ActionPage *ActionPage `json:"action_page"`
+		ActionPage *ActionPage              `json:"action_page"`
+		Bounds     packs.PresentationBounds `json:"presentation_bounds"`
 		Audience   struct {
 			PrincipalID        string                            `json:"principal_id"`
 			InterfaceKey       string                            `json:"interface_key"`
@@ -148,7 +147,7 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 			ConversationRef: wire.Audience.ConversationRef, ConversationScope: wire.Audience.ConversationScope},
 		Input: append(json.RawMessage(nil), raw...), Hash: hash, FullText: wire.FullText, Choices: choices,
 		Prompt: wire.DraftPrompt, DraftChoices: wire.DraftChoices, DraftChooser: wire.DraftChooser,
-		Recovery: wire.Recovery, RecoveryChoices: wire.RecoveryChoices, Page: wire.Page, ActionPage: wire.ActionPage,
+		Recovery: wire.Recovery, RecoveryChoices: wire.RecoveryChoices, Page: wire.Page, ActionPage: wire.ActionPage, Bounds: wire.Bounds,
 	}
 	if err := frozen.Validate(); err != nil {
 		return Frozen{}, err
@@ -182,14 +181,15 @@ func (f Frozen) Validate() error {
 			ConversationRef    string `json:"conversation_reference"`
 			ConversationScope  string `json:"conversation_scope"`
 		} `json:"audience"`
-		FullText        string           `json:"full_text"`
-		Page            *ResponsePage    `json:"page"`
-		Prompt          *DraftPrompt     `json:"draft_prompt"`
-		Drafts          []DraftChoice    `json:"draft_choices"`
-		Chooser         *DraftChooser    `json:"draft_chooser"`
-		Recovery        *RecoveryPage    `json:"recovery_page"`
-		RecoveryChoices []RecoveryChoice `json:"recovery_choices"`
-		ActionPage      *ActionPage      `json:"action_page"`
+		FullText        string                   `json:"full_text"`
+		Page            *ResponsePage            `json:"page"`
+		Prompt          *DraftPrompt             `json:"draft_prompt"`
+		Drafts          []DraftChoice            `json:"draft_choices"`
+		Chooser         *DraftChooser            `json:"draft_chooser"`
+		Recovery        *RecoveryPage            `json:"recovery_page"`
+		RecoveryChoices []RecoveryChoice         `json:"recovery_choices"`
+		ActionPage      *ActionPage              `json:"action_page"`
+		Bounds          packs.PresentationBounds `json:"presentation_bounds"`
 	}
 	if err := json.Unmarshal(f.Input, &index); err != nil {
 		return err
@@ -209,10 +209,16 @@ func (f Frozen) Validate() error {
 	if (f.ActionPage == nil) != (index.ActionPage == nil) {
 		return fmt.Errorf("channel action page contradicts frozen input")
 	}
+	if f.Bounds != index.Bounds || (f.ActionPage == nil && f.Bounds != (packs.PresentationBounds{})) {
+		return fmt.Errorf("channel presentation bounds contradict frozen input")
+	}
 	if f.ActionPage != nil {
 		page := f.ActionPage
-		if f.SourceKind != "card" || *page != *index.ActionPage || page.Capacity < 1 || page.Index < 0 {
+		if *page != *index.ActionPage || page.Capacity != f.Bounds.Actions || page.Index < 0 {
 			return fmt.Errorf("channel action page is invalid")
+		}
+		if f.Bounds != index.Bounds || f.Bounds.Validate() != nil {
+			return fmt.Errorf("channel presentation bounds contradict frozen input")
 		}
 		_, err := actionPageCount(f, page.Capacity)
 		if err != nil {
@@ -232,7 +238,6 @@ func (f Frozen) Validate() error {
 		(f.DraftChooser == nil && len(f.DraftChoices) != 0) ||
 		(f.DraftChooser != nil && (f.SourceKind != "response" || f.Page != nil || f.Prompt != nil ||
 			uuid.Validate(f.DraftChooser.TextPublicationID) != nil || len(f.DraftChoices) < 2 ||
-			f.DraftChooser.PageIndex < 0 || f.DraftChooser.PageIndex > (len(f.DraftChoices)-1)/DraftChooserPageSize ||
 			*f.DraftChooser != *index.Chooser)) {
 		return fmt.Errorf("channel draft chooser contradicts frozen input")
 	}
@@ -248,14 +253,13 @@ func (f Frozen) Validate() error {
 		(f.Recovery == nil && len(f.RecoveryChoices) != 0) ||
 		(f.Recovery != nil && (f.SourceKind != "response" || f.Page != nil || f.Prompt != nil || f.DraftChooser != nil ||
 			len(f.RecoveryChoices) == 0 || strings.TrimSpace(f.Recovery.BaseText) == "" ||
-			f.Recovery.PageIndex < 0 || f.Recovery.PageIndex > (len(f.RecoveryChoices)-1)/DraftChooserPageSize ||
 			*f.Recovery != *index.Recovery)) {
 		return fmt.Errorf("channel recovery page contradicts frozen input")
 	}
 	seenRecovery := make(map[string]bool, len(f.RecoveryChoices))
 	for i, choice := range f.RecoveryChoices {
 		if choice != index.RecoveryChoices[i] || uuid.Validate(choice.DeliveryID) != nil ||
-			strings.TrimSpace(choice.Label) == "" || len([]rune(choice.Label)) > 64 || seenRecovery[choice.DeliveryID] {
+			strings.TrimSpace(choice.Label) == "" || seenRecovery[choice.DeliveryID] {
 			return fmt.Errorf("channel recovery page has invalid or duplicate choice")
 		}
 		seenRecovery[choice.DeliveryID] = true
@@ -274,14 +278,20 @@ func ActionPageCount(f Frozen) (int, error) {
 }
 
 func actionPageCount(f Frozen, capacity int) (int, error) {
-	count := len(f.Choices)
+	count := len(f.Choices) + len(f.DraftChoices) + len(f.RecoveryChoices)
 	if f.Prompt != nil {
 		count++
 		if f.Prompt.Optional {
 			count++
 		}
 	}
-	if len([]rune(f.FullText)) > ChannelExcerptRunes {
+	if f.SourceKind == "summary" || f.SourceKind == "notice" && !f.NoticeAcknowledged {
+		count++
+	}
+	if f.Page != nil && f.Page.Index+1 < f.Page.Count {
+		count++
+	}
+	if len([]rune(f.FullText)) > f.Bounds.TextRunes {
 		count++
 	}
 	if count <= capacity {
@@ -293,12 +303,15 @@ func actionPageCount(f Frozen, capacity int) (int, error) {
 	return (count + capacity - 2) / (capacity - 1), nil
 }
 
-func WithActionPage(f Frozen, capacity, index int) (Frozen, error) {
+func WithPresentation(f Frozen, bounds packs.PresentationBounds, index int) (Frozen, error) {
 	if err := f.Validate(); err != nil {
 		return Frozen{}, err
 	}
-	if f.SourceKind != "card" || capacity < 1 || index < 0 {
-		return Frozen{}, fmt.Errorf("action page requires a card and selected capacity")
+	if err := bounds.Validate(); err != nil {
+		return Frozen{}, err
+	}
+	if index < 0 || f.ActionPage != nil && f.Bounds != bounds {
+		return Frozen{}, fmt.Errorf("presentation requires exact pinned bounds and page")
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(f.Input, &raw); err != nil {
@@ -308,7 +321,8 @@ func WithActionPage(f Frozen, capacity, index int) (Frozen, error) {
 	for key, value := range raw {
 		projection[key] = value
 	}
-	projection["action_page"] = ActionPage{Index: index, Capacity: capacity}
+	projection["action_page"] = ActionPage{Index: index, Capacity: bounds.Actions}
+	projection["presentation_bounds"] = bounds
 	return freeze(projection, f.SourceKind, f.SourceID, f.Revision, f.Audience, f.FullText)
 }
 
@@ -409,6 +423,9 @@ func FreezeCard(card decisioncard.Card, revision int64, dispatchState string, au
 	switch card.Status {
 	case decisioncard.StatusPending:
 		lines = append(lines, "Decision: pending")
+		if !card.DeferredUntil.IsZero() {
+			lines = append(lines, "Deferred until: "+card.DeferredUntil.UTC().Format(time.RFC3339Nano))
+		}
 	case decisioncard.StatusDecided:
 		lines = append(lines, "Decision: "+card.Verdict, "Actor: "+card.DecidedBy,
 			"At: "+card.DecidedAt.UTC().Format(time.RFC3339Nano))
@@ -564,31 +581,29 @@ func FreezeResponse(publicationID, fullText string, audience Audience) (Frozen, 
 	return freeze(input, "response", publicationID, 1, audience, fullText)
 }
 
-func FreezeDraftChooser(publicationID, textPublicationID string, choices []DraftChoice, pageIndex int, audience Audience) (Frozen, error) {
+func FreezeDraftChooser(publicationID, textPublicationID string, choices []DraftChoice, audience Audience) (Frozen, error) {
 	if err := audience.Validate(); err != nil {
 		return Frozen{}, err
 	}
 	if uuid.Validate(publicationID) != nil || uuid.Validate(textPublicationID) != nil ||
-		len(choices) < 2 || pageIndex < 0 || pageIndex > (len(choices)-1)/DraftChooserPageSize {
+		len(choices) < 2 {
 		return Frozen{}, fmt.Errorf("channel draft chooser requires exact publications and a bounded page")
 	}
 	lines := []string{"Choose the card for your reply:"}
 	seen := make(map[string]bool, len(choices))
-	for index, choice := range choices {
+	for _, choice := range choices {
 		if uuid.Validate(choice.DraftID) != nil || uuid.Validate(choice.CardID) != nil ||
-			strings.TrimSpace(choice.Label) == "" || len([]rune(choice.Label)) > 64 || seen[choice.DraftID] {
+			strings.TrimSpace(choice.Label) == "" || seen[choice.DraftID] {
 			return Frozen{}, fmt.Errorf("channel draft chooser has invalid or duplicate choices")
 		}
 		seen[choice.DraftID] = true
-		if index >= pageIndex*DraftChooserPageSize && index < (pageIndex+1)*DraftChooserPageSize {
-			lines = append(lines, "- "+choice.Label)
-		}
+		lines = append(lines, "- "+choice.Label)
 	}
 	fullText := strings.Join(lines, "\n")
 	input := map[string]any{
 		"projection_version": ProjectionVersion, "source_kind": "response", "source_id": publicationID,
 		"source_revision": 1, "audience": audienceProjection(audience), "full_text": fullText,
-		"draft_choices": choices, "draft_chooser": DraftChooser{TextPublicationID: textPublicationID, PageIndex: pageIndex},
+		"draft_choices": choices, "draft_chooser": DraftChooser{TextPublicationID: textPublicationID},
 	}
 	return freeze(input, "response", publicationID, 1, audience, fullText)
 }
@@ -598,39 +613,32 @@ func DraftChoiceLabel(title, cardID string) string {
 	if title == "" {
 		title = "Card"
 	}
-	runes := []rune(title)
-	if len(runes) > 53 {
-		runes = runes[:53]
-	}
-	return string(runes) + " [" + shortRunID(cardID) + "]"
+	return title + " [" + shortRunID(cardID) + "]"
 }
 
-func FreezeRecoveryInbox(publicationID, baseText string, choices []RecoveryChoice, pageIndex int, audience Audience) (Frozen, error) {
+func FreezeRecoveryInbox(publicationID, baseText string, choices []RecoveryChoice, audience Audience) (Frozen, error) {
 	if err := audience.Validate(); err != nil {
 		return Frozen{}, err
 	}
-	if uuid.Validate(publicationID) != nil || strings.TrimSpace(baseText) == "" || len(choices) == 0 ||
-		pageIndex < 0 || pageIndex > (len(choices)-1)/DraftChooserPageSize {
+	if uuid.Validate(publicationID) != nil || strings.TrimSpace(baseText) == "" || len(choices) == 0 {
 		return Frozen{}, fmt.Errorf("channel recovery page requires exact entry and bounded choices")
 	}
 	seen := make(map[string]bool, len(choices))
 	lines := []string{baseText, "Uncertain deliveries - check the chat before resending:",
 		"The first message may have arrived. Resend creates another message."}
-	for index, choice := range choices {
+	for _, choice := range choices {
 		if uuid.Validate(choice.DeliveryID) != nil || strings.TrimSpace(choice.Label) == "" ||
-			len([]rune(choice.Label)) > 64 || seen[choice.DeliveryID] {
+			seen[choice.DeliveryID] {
 			return Frozen{}, fmt.Errorf("channel recovery page has invalid or duplicate choice")
 		}
 		seen[choice.DeliveryID] = true
-		if index >= pageIndex*DraftChooserPageSize && index < (pageIndex+1)*DraftChooserPageSize {
-			lines = append(lines, "- "+choice.Label)
-		}
+		lines = append(lines, "- "+choice.Label)
 	}
 	fullText := strings.Join(lines, "\n")
 	input := map[string]any{
 		"projection_version": ProjectionVersion, "source_kind": "response", "source_id": publicationID,
 		"source_revision": 1, "audience": audienceProjection(audience), "full_text": fullText,
-		"recovery_page": RecoveryPage{BaseText: baseText, PageIndex: pageIndex}, "recovery_choices": choices,
+		"recovery_page": RecoveryPage{BaseText: baseText}, "recovery_choices": choices,
 	}
 	return freeze(input, "response", publicationID, 1, audience, fullText)
 }
@@ -645,7 +653,7 @@ func FreezeResponsePage(publicationID string, source Frozen, sourceRenderID stri
 	if uuid.Validate(publicationID) != nil || uuid.Validate(sourceRenderID) != nil || source.Page != nil {
 		return Frozen{}, fmt.Errorf("view-full response requires an immutable original render")
 	}
-	pageText, count, err := FullTextPage(source.FullText, index)
+	pageText, count, err := FullTextPage(source.FullText, index, source.Bounds)
 	if err != nil {
 		return Frozen{}, err
 	}
@@ -660,15 +668,18 @@ func FreezeResponsePage(publicationID string, source Frozen, sourceRenderID stri
 	}
 	frozen := Frozen{SourceKind: "response", SourceID: publicationID, Revision: 1, Audience: audience,
 		Input: raw, Hash: canonicaljson.HashBytes(raw), FullText: pageText, Page: page}
-	return frozen, frozen.Validate()
+	return WithPresentation(frozen, source.Bounds, 0)
 }
 
-func FullTextPage(fullText string, index int) (string, int, error) {
+func FullTextPage(fullText string, index int, bounds packs.PresentationBounds) (string, int, error) {
+	if err := bounds.Validate(); err != nil {
+		return "", 0, err
+	}
 	runes := []rune(fullText)
 	if len(runes) == 0 {
 		return "", 0, fmt.Errorf("view-full source is empty")
 	}
-	const pageRunes = ChannelExcerptRunes - 100
+	pageRunes := bounds.TextRunes - len("Page 1000/1000\n")
 	count := (len(runes) + pageRunes - 1) / pageRunes
 	if count > 1000 || index < 0 || index >= count {
 		return "", 0, fmt.Errorf("view-full page is outside the bounded immutable source")
