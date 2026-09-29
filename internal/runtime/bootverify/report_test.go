@@ -687,7 +687,7 @@ func TestRun_MapsEventNoProducerToNamedWarning(t *testing.T) {
 func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name:       "dead-event-schema-warning",
-		rootEvents: "root.unused: {}\n",
+		rootEvents: "root.unused:\n",
 	})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -727,7 +727,7 @@ func TestRun_DoesNotWarnWhenDeclaredEventHasAcceptedActiveRoleCarrier(t *testing
 				name: "dead-event-schema-same-flow-handler",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready: {}\n",
+						events: "ticket.ready:\n",
 						nodes: `
 support-node:
   execution_type: system_node
@@ -746,7 +746,7 @@ support-node:
 			target: "ticket.ready",
 			opts: deadEventSchemaFixtureOptions{
 				name:       "dead-event-schema-root-local",
-				rootEvents: "ticket.ready: {}\n",
+				rootEvents: "ticket.ready:\n",
 				rootNodes: `
 root-node:
   execution_type: system_node
@@ -781,7 +781,7 @@ root-node:
 				name: "dead-event-schema-timer-reference",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready: {}\nstart.signal: {}\n",
+						events: "ticket.ready:\nstart.signal:\n",
 						nodes: `
 timer-owner:
   execution_type: system_node
@@ -803,7 +803,7 @@ timer-owner:
 				name: "dead-event-schema-fanout",
 				flows: map[string]deadEventSchemaFlowFiles{
 					"support": {
-						events: "ticket.ready: {}\nstart:\n  items: '[json]'\n",
+						events: "ticket.ready:\nstart:\n  items: '[json]'\n",
 						nodes: `
 fanout-node:
   execution_type: system_node
@@ -838,7 +838,7 @@ initial_state: idle
 terminal_states: [done]
 states: [idle, done]
 `,
-						events: "ticket.ready: {}\n",
+						events: "ticket.ready:\n",
 					},
 				},
 			},
@@ -875,7 +875,7 @@ func TestRun_DoesNotTreatCrossFlowQualifiedSubscriptionAsDeadEventLiveness(t *te
 		name: "dead-event-schema-cross-flow-qualified",
 		flows: map[string]deadEventSchemaFlowFiles{
 			"producer": {
-				events: "ticket.ready: {}\n",
+				events: "ticket.ready:\n",
 			},
 			"consumer": {
 				nodes: `
@@ -903,7 +903,7 @@ func TestRun_TreatsScopedLocalWildcardAsSameFlowDeadEventLiveness(t *testing.T) 
 		name: "dead-event-schema-local-wildcard",
 		flows: map[string]deadEventSchemaFlowFiles{
 			"child": {
-				events: "ticket.ready: {}\n",
+				events: "ticket.ready:\n",
 				nodes: `
 consumer-node:
   execution_type: system_node
@@ -914,7 +914,7 @@ consumer-node:
 `,
 			},
 			"sibling": {
-				events: "ticket.ready: {}\n",
+				events: "ticket.ready:\n",
 			},
 		},
 	})
@@ -935,10 +935,10 @@ func TestRun_DoesNotUseSameLocalNameAcrossFlowsByCoincidenceForDeadEventSchema(t
 		name: "dead-event-schema-coincidental-name",
 		flows: map[string]deadEventSchemaFlowFiles{
 			"alpha": {
-				events: "task.completed: {}\n",
+				events: "task.completed:\n",
 			},
 			"beta": {
-				events: "task.completed: {}\n",
+				events: "task.completed:\n",
 				nodes: `
 beta-node:
   execution_type: system_node
@@ -975,7 +975,7 @@ root-node:
 `,
 		flows: map[string]deadEventSchemaFlowFiles{
 			"scoring": {
-				events: "ticket.ready: {}\n",
+				events: "ticket.ready:\n",
 			},
 		},
 	})
@@ -991,7 +991,7 @@ root-node:
 func TestRun_DoesNotUsePlatformCatalogOverlapAsProofForDeadEventSchema(t *testing.T) {
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name:       "dead-event-schema-platform-overlap",
-		rootEvents: "platform.runtime_log: {}\n",
+		rootEvents: "platform.runtime_log:\n",
 	})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -1049,7 +1049,7 @@ func TestRun_RootExportNeedsNoInternalConsumer(t *testing.T) {
 func TestRun_WarnsForSubscriptionWithoutProducer(t *testing.T) {
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: consumer-only\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "task.requested: {}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "task.requested:\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "consumer:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  event_handlers:\n    task.requested: {}\n")
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -7041,7 +7041,7 @@ task.assigned:
   score: numeric
 task.feedback:
   comment: string
-task.result: {}
+task.result:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "nodes.yaml"), `
 worker:

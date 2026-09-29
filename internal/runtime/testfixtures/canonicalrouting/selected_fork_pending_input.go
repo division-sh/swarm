@@ -94,10 +94,10 @@ func CopySelectedInputValidationProbe(t testing.TB) string {
 	root := t.TempDir()
 	for name, body := range map[string]string{
 		"schema.yaml":       "name: selected-input\nmode: static\npins:\n  inputs:\n    events:\n      - thing.created\n",
-		"events.yaml":       "thing.created: {}\n",
+		"events.yaml":       "thing.created:\n",
 		"nodes.yaml":        "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: '_entity.id != \"\"'\n",
 		"child/schema.yaml": "name: child\nmode: static\npins:\n  inputs:\n    events:\n      - thing.created\n",
-		"child/events.yaml": "thing.created: {}\n",
+		"child/events.yaml": "thing.created:\n",
 		"child/nodes.yaml":  "worker:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: '_entity.id != \"\"'\n",
 	} {
 		writeClosedVariantFile(t, root, name, body)

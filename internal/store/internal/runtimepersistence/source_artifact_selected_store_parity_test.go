@@ -21,6 +21,63 @@ type selectedSourceArtifactStore interface {
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
 }
 
+func TestPayloadlessEventSourceArtifactBytesBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected selectedSourceArtifactStore
+			if backend == "sqlite" {
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			} else {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = newTestPostgresStore(t, db)
+			}
+			// The source owner is byte-preserving, not a second grammar interpreter.
+			for _, variant := range []string{"", "{}", `""`, "~", "null"} {
+				name := variant
+				if name == "" {
+					name = "bare"
+				}
+				t.Run(name, func(t *testing.T) {
+					root := t.TempDir()
+					body := []byte("# Exact authored bytes\ninvestigation.timed_out: " + variant + "\n")
+					path := filepath.Join(root, "events.yaml")
+					if err := os.WriteFile(path, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					artifact, err := sourceartifact.AdmitDirectory(root)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx := context.Background()
+					if _, err := selected.EnsureSourceArtifact(ctx, artifact); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(path, []byte("changed.event: null\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					persisted, err := selected.GetSourceArtifact(ctx, artifact.BundleHash())
+					if err != nil {
+						t.Fatal(err)
+					}
+					reconstructed, err := persisted.Decode()
+					if err != nil {
+						t.Fatal(err)
+					}
+					member, ok := reconstructed.Entry("events.yaml")
+					if !ok || !bytes.Equal(member.Bytes(), body) || reconstructed.BundleHash() != artifact.BundleHash() || !bytes.Equal(reconstructed.LogicalBlob(), artifact.LogicalBlob()) {
+						t.Fatalf("source changed: hash=%s bytes=%q", reconstructed.BundleHash(), member.Bytes())
+					}
+					ensured, err := selected.EnsureSourceArtifact(ctx, reconstructed)
+					if err != nil || ensured.Created || !bytes.Equal(ensured.Artifact.SourceBlob, artifact.LogicalBlob()) {
+						t.Fatalf("reconstructed source changed on re-ensure: %+v, %v", ensured, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

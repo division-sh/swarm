@@ -446,7 +446,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	owner := testGatewayWorkOwner(t)
 	root := t.TempDir()
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-fork-cancellation\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received: {}\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
 	repoRoot := filepath.Join("..", "..", "..")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

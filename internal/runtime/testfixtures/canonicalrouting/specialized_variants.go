@@ -17,7 +17,7 @@ func CopyOutputModeVerify(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: output-mode-verify\npins:\n  inputs:\n    events: [task.assigned]\n  outputs:\n    events: [task.assigned]\nconnect:\n  - {event: task.assigned, from: ., to: child}\n")
 	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
-	writeClosedVariantFile(t, root, "events.yaml", "task.assigned: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "task.assigned:\n")
 	writeLegacyInstanceFlow(t, root, "child", `name: child
 initial_state: idle
 terminal_states: [done]
@@ -76,7 +76,7 @@ pins:
 `, agentID, agentID, agentID))
 	writeClosedVariantFile(t, root, filepath.Join("prompts", agentID+".md"), "Operate as the managed native lifecycle test agent.\n")
 	for file, contents := range map[string]string{
-		"events.yaml": "task.requested: {}\n",
+		"events.yaml": "task.requested:\n",
 	} {
 		writeClosedVariantFile(t, root, file, contents)
 	}
@@ -108,7 +108,7 @@ stages:
     terminal: true
   timed_out:
     terminal: true
-`, `ticket.sla_escalated: {}
+`, `ticket.sla_escalated:
 line_item.requested:
   line_item_id: string
   line_item_index: integer
@@ -378,7 +378,7 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	removeClosedVariantFiles(t, root, "nodes.yaml", "entities.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "mode: static\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [agent.requested]\n")
-	writeClosedVariantFile(t, root, "events.yaml", "agent.requested: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n")
 	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n  id: "+agentID+"\n  role: "+agentID+"\n  intent: prompts/"+agentID+".md\n  model: regular\n  memory: false\n  subscriptions: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "prompts/"+agentID+".md", "Handle assigned work.\n")
 	return root
@@ -389,7 +389,7 @@ func CopyVerifyMissingPin(t testing.TB) string {
 	root := CopyExample(t, ParentConnect)
 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-missing-pin-warning\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
-	writeClosedVariantFile(t, root, "events.yaml", "task.requested: {}\ntask.completed: {}\nchild/task.assigned: {}\nchild/task.result: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\ntask.completed:\nchild/task.assigned:\nchild/task.result:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `dispatcher:
   execution_type: system_node
   subscribes_to: [task.requested, child/task.result]
@@ -402,7 +402,7 @@ func CopyVerifyMissingPin(t testing.TB) string {
       emit:
         event: task.completed
 `)
-	writeLegacyInstanceFlow(t, root, "child", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, working, done]\npins:\n  inputs:\n    events: [task.assigned, task.feedback]\n", "task.assigned: {}\ntask.feedback:\n  comment: string\ntask.result: {}\n", "work_item: {}\n", `worker:
+	writeLegacyInstanceFlow(t, root, "child", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, working, done]\npins:\n  inputs:\n    events: [task.assigned, task.feedback]\n", "task.assigned:\ntask.feedback:\n  comment: string\ntask.result:\n", "work_item: {}\n", `worker:
   execution_type: system_node
   subscribes_to: [task.assigned, task.feedback]
   produces: [task.result]
@@ -424,7 +424,7 @@ func CopyRunForkTarget(t testing.TB) string {
 
 	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
-	writeClosedVariantFile(t, root, "events.yaml", "task.requested: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n")
 	return root
 }
 

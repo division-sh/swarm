@@ -345,7 +345,7 @@ pins:
 connect:
   - {event: work.completed, from: ., to: sink}
 `)
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.requested:\n", "fork.seeded: {}\nwork.requested:\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "work.requested:\n", "fork.seeded:\nwork.requested:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
   subscribes_to: [work.requested]

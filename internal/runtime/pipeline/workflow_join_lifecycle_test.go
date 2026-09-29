@@ -1103,8 +1103,8 @@ order.accepted:
   line_items: list<LineItem>
 line_item.requested:
   line_item_id: text
-dispatch.completed: {}
-manual.abort: {}
+dispatch.completed:
+manual.abort:
 `,
 		"orders/nodes.yaml": `dispatcher:
   execution_type: system_node
@@ -1138,7 +1138,7 @@ join-node:
 	}
 	if review {
 		files["orders/schema.yaml"] = strings.Replace(files["orders/schema.yaml"], "  awaiting: {initial: true}", "  awaiting: {initial: true}\n  reviewing: {}", 1)
-		files["orders/events.yaml"] += "review.requested: {}\napproval.completed:\n  member_id: text\n  result: ItemResult\n"
+		files["orders/events.yaml"] += "review.requested:\napproval.completed:\n  member_id: text\n  result: ItemResult\n"
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "    manual.abort:", "    review.requested:\n      advances_to: reviewing\n    manual.abort:", 1)
 		files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], "id: awaiting", "id: shared", 1)
 		files["orders/nodes.yaml"] += `    approval.completed:
@@ -1169,7 +1169,7 @@ join-node:
 				files["orders/nodes.yaml"] = strings.Replace(files["orders/nodes.yaml"], replacement.old, replacement.new, 1)
 			}
 		}
-		files["orders/events.yaml"] += "loop.start: {}\nloop.repeat:\n  revision_id: text\n"
+		files["orders/events.yaml"] += "loop.start:\nloop.repeat:\n  revision_id: text\n"
 		files["orders/events.yaml"] = strings.Replace(files["orders/events.yaml"], "item.completed:\n", "item.completed:\n  revision_id: text\n", 1)
 		files["orders/nodes.yaml"] += "observer:\n  execution_type: system_node\n  event_handlers:\n    loop.start:\n      loop: {start: revision, from: dispatching}\n      advances_to: awaiting\n    loop.repeat:\n      loop: {repeat: revision, from: " + from + "}\n      advances_to: awaiting\n"
 	}

@@ -78,7 +78,7 @@ stages:
   done: {terminal: true}
 `,
 		"entities.yaml": "default: {}\n",
-		"events.yaml":   "run_fork.compiled_root_gate_approved: {}\n",
+		"events.yaml":   "run_fork.compiled_root_gate_approved:\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)

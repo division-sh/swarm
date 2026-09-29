@@ -164,7 +164,7 @@ pins:
   inputs:
     events: [work.requested]
 `)
-	write(filepath.Join(flowRoot, "events.yaml"), "work.requested: {}\n")
+	write(filepath.Join(flowRoot, "events.yaml"), "work.requested:\n")
 	write(filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   id: public-worker
@@ -256,7 +256,7 @@ pins:
   inputs:
     events: [root.start]
 `)
-	write(filepath.Join(root, "events.yaml"), "root.start: {}\n")
+	write(filepath.Join(root, "events.yaml"), "root.start:\n")
 
 	write(filepath.Join(root, "orders", "schema.yaml"), `
 name: orders
@@ -268,7 +268,7 @@ pins:
   inputs:
     events: [root.start]
 `)
-	write(filepath.Join(root, "orders", "events.yaml"), "root.start: {}\naddon_a.start: {}\naddon_b.start: {}\n")
+	write(filepath.Join(root, "orders", "events.yaml"), "root.start:\naddon_a.start:\naddon_b.start:\n")
 	write(filepath.Join(root, "orders", "nodes.yaml"), `
 shared:
   execution_type: system_node
@@ -280,7 +280,7 @@ shared:
 		dir := filepath.Join(root, "orders", name)
 
 		eventName := strings.ReplaceAll(name, "-", "_")
-		write(filepath.Join(dir, "events.yaml"), eventName+".start: {}\n")
+		write(filepath.Join(dir, "events.yaml"), eventName+".start:\n")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
   execution_type: system_node

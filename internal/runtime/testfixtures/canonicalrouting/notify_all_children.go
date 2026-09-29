@@ -108,7 +108,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 `)
 	}
 	if opts.AutoEmitOnCreate {
-		applyClosedReplacement(t, accountEvents, "account.notification.completed: {}\n", `account.notification.completed: {}
+		applyClosedReplacement(t, accountEvents, "account.notification.completed:\n", `account.notification.completed:
 account.created:
   account_id: text
   template_instance_key: text?

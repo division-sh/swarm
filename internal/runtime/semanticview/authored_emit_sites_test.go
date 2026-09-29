@@ -184,11 +184,11 @@ pins:
     events: [root.ready]
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), `
-root.start: {}
-root.ready: {}
-root.escalated: {}
-root.routed: {}
-root.audit: {}
+root.start:
+root.ready:
+root.escalated:
+root.routed:
+root.audit:
 `)
 	rootNodeYAML := authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit)
 	if strings.TrimSpace(opts.rootRuleEmit) != "" || strings.TrimSpace(opts.rootOnSuccess) != "" {
@@ -215,20 +215,20 @@ pins:
     events: [support.ready]
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
-support.start: {}
-support.ready: {}
+support.start:
+support.ready:
 `)
 	if flowNodes := authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, ""); strings.TrimSpace(flowNodes) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "nodes.yaml"), flowNodes)
 	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "schema.yaml"), "name: extras\nmode: static\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "events.yaml"), "extras.start: {}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "events.yaml"), "extras.start:\n")
 	if extraNodes := authoredEmitSiteNodeYAML(opts.extrasNodeID, "extras.start", opts.extrasEmit, ""); strings.TrimSpace(extraNodes) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), extraNodes)
 	}
 	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "schema.yaml"), "name: support-addon\nmode: static\n")
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "events.yaml"), "addon.start: {}\n")
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "events.yaml"), "addon.start:\n")
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "addon.start", opts.nestedPackageEmit, ""))
 	}
 

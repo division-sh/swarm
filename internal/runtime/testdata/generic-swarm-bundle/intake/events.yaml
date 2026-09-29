@@ -6,4 +6,4 @@ item.processed:
   score: number
 item.review_requested:
   score: number
-item.rejected: {}
+item.rejected:

@@ -229,7 +229,7 @@ sender:
   memory: false
   subscriptions: [work.requested]
 `)
-	write(filepath.Join(flowRoot, "events.yaml"), "work.requested: {}\n")
+	write(filepath.Join(flowRoot, "events.yaml"), "work.requested:\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

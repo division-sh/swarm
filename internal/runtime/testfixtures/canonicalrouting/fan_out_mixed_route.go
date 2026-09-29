@@ -21,7 +21,7 @@ pins:
   outputs:
     events: [mixed.none, mixed.one, mixed.multi]
 `,
-		"producer/events.yaml": "mixed.none: {}\nmixed.one: {}\nmixed.multi: {}\n",
+		"producer/events.yaml": "mixed.none:\nmixed.one:\nmixed.multi:\n",
 		"one/schema.yaml": `name: one
 mode: static
 initial_state: active

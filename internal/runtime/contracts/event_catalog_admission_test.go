@@ -11,9 +11,7 @@ import (
 func admitEventCatalogEntryForTest(t testing.TB, source string) (EventCatalogEntry, error) {
 	t.Helper()
 	body := strings.TrimSpace(source)
-	if body == "" {
-		body = "{}"
-	} else {
+	if body != "" {
 		body = "\n  " + strings.ReplaceAll(body, "\n", "\n  ")
 	}
 	snapshot, err := yamlsource.Load([]byte("test.event:" + body + "\n"))
@@ -111,7 +109,7 @@ func TestEventCatalogAdmissionRejectsRetiredAndAmbiguousSyntax(t *testing.T) {
 		{name: "double optional marker", source: "id: text??", wantErr: "exactly one trailing ?"},
 		{name: "optional business key", source: "key: id\nid: uuid?", wantErr: "must be required"},
 		{name: "missing business key field", source: "key: id\nname: text", wantErr: "is not a declared payload field"},
-		{name: "null declaration", source: "null", wantErr: "want mapping"},
+		{name: "null declaration", source: "null", wantErr: "an event with no fields is declared bare"},
 		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `RETIRED: events.yaml metadata field swarm`},
 		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `RETIRED: events.yaml metadata field swarm`},
 	}
@@ -177,7 +175,7 @@ value:
 		})
 	}
 
-	snapshot, err := yamlsource.Load([]byte("<<: &defaults\n  test.event: {}\n"))
+	snapshot, err := yamlsource.Load([]byte("<<: &defaults\n  test.event:\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +197,11 @@ func TestEventCatalogAdmissionOwnsDeclarationIdentityBeforeMapInsertion(t *testi
 	}{
 		{name: "empty", source: `"": {}`, wantErr: `event declaration name ""`},
 		{name: "whitespace only", source: `"   ": {}`, wantErr: `event declaration name "   "`},
-		{name: "surrounding whitespace", source: "item: {}\n\" item \": {}", wantErr: `event declaration name " item "`},
+		{name: "surrounding whitespace", source: "item:\n\" item \": {}", wantErr: `event declaration name " item "`},
 		{name: "leading slash", source: `"/item": {}`, wantErr: `event declaration name "/item"`},
 		{name: "uppercase and space", source: `"Item Ready": {}`, wantErr: `event declaration name "Item Ready"`},
-		{name: "hyphenated event token", source: `"addon-a.start": {}`, wantErr: `event declaration name "addon-a.start"`},
-		{name: "unsupported partial glob", source: `"item.pre*": {}`, wantErr: `supported wildcard pattern`},
+		{name: "hyphenated event token", source: `"addon-a.start":`, wantErr: `event declaration name "addon-a.start"`},
+		{name: "unsupported partial glob", source: `"item.pre*":`, wantErr: `supported wildcard pattern`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot, err := yamlsource.Load([]byte(tc.source + "\n"))
@@ -217,7 +215,7 @@ func TestEventCatalogAdmissionOwnsDeclarationIdentityBeforeMapInsertion(t *testi
 		})
 	}
 
-	snapshot, err := yamlsource.Load([]byte("item.created: {}\n'item.*': {}\n'*.completed': {}\n'*/order.completed': {}\n'**/item.processed': {}\n"))
+	snapshot, err := yamlsource.Load([]byte("item.created:\n'item.*':\n'*.completed':\n'*/order.completed':\n'**/item.processed':\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +274,7 @@ func TestEventCatalogBusinessKeyRejectsDynamicSemanticsAtBundleAdmission(t *test
 item.created:
   key: payload
   payload: json
-evidence.recorded: {}
+evidence.recorded:
 `)
 	_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err == nil || !contractErrorContains(err, "business key field \"payload\" must have boolean, number, or string semantics") {

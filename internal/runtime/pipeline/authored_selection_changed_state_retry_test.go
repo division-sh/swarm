@@ -59,7 +59,7 @@ func TestAuthoredSelectionRetryReloadsCurrentStateBothStores(t *testing.T) {
 				bundle := loadWorkflowTempBundle(t, map[string]string{
 					"schema.yaml":   "name: selection-retry\nstages:\n  queued: {initial: true}\n  done: {terminal: true}\n",
 					"entities.yaml": "test_entity:\n  marker: text\n",
-					"events.yaml":   "source.evt: {}\n",
+					"events.yaml":   "source.evt:\n",
 					"nodes.yaml":    nodes,
 				})
 				f := newCompiledAdapterFixture(t, backend, bundle, ".", "queued", true)

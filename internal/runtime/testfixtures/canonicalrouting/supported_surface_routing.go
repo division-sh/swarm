@@ -19,12 +19,12 @@ pins:
       - complete.no_match
       - direct
 `)
-	writeClosedVariantFile(t, root, "events.yaml", `rules.selected: {}
-rules.fallback: {}
-rules.evaluation_failed: {}
-complete.selected: {}
-complete.no_match: {}
-direct: {}
+	writeClosedVariantFile(t, root, "events.yaml", `rules.selected:
+rules.fallback:
+rules.evaluation_failed:
+complete.selected:
+complete.no_match:
+direct:
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `selection-node:
   execution_type: system_node
@@ -145,7 +145,7 @@ pins:
     events:
       - timer.cancel
 `)
-	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel: {}
+	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "timer_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
@@ -194,6 +194,6 @@ pins:
   outputs:
     events:
       - deploy.done
-`, "deploy.done: {}\n", "producer_state:\n  producer_id: string\n", "")
+`, "deploy.done:\n", "producer_state:\n  producer_id: string\n", "")
 	return root
 }

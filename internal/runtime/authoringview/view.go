@@ -38,6 +38,7 @@ type RoutingTopologyView = routingtopology.Topology
 
 type RootView struct {
 	SourceFiles        RootSourceFiles    `json:"source_files"`
+	Events             []EventView        `json:"events,omitempty"`
 	Agents             []AgentView        `json:"agents,omitempty"`
 	RequiredAgents     RequiredAgentsView `json:"required_agents"`
 	PrimaryEntity      *PrimaryEntityView `json:"primary_entity,omitempty"`
@@ -57,6 +58,7 @@ type FlowView struct {
 	Activation           string                    `json:"activation,omitempty"`
 	Ingress              *StandingIngressView      `json:"ingress,omitempty"`
 	SourceFiles          FlowSourceFiles           `json:"source_files"`
+	Events               []EventView               `json:"events,omitempty"`
 	Agents               []AgentView               `json:"agents,omitempty"`
 	RequiredAgents       RequiredAgentsView        `json:"required_agents"`
 	PrimaryEntity        *PrimaryEntityView        `json:"primary_entity,omitempty"`
@@ -68,6 +70,11 @@ type FlowView struct {
 	InputPins            []InputPinView            `json:"input_pins,omitempty"`
 	OutputPins           []OutputPinView           `json:"output_pins,omitempty"`
 	ContainedOperations  []ContainedOperationView  `json:"contained_operations,omitempty"`
+}
+
+type EventView struct {
+	Name   string   `json:"name"`
+	Fields []string `json:"fields"`
 }
 
 type StandingIngressView struct {
@@ -421,6 +428,7 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 		return RootView{}, err
 	}
 	out := RootView{
+		Events: eventViews(rootFlow.Events),
 		SourceFiles: RootSourceFiles{
 			Schema:   strings.TrimSpace(rootFlow.Paths.SchemaFile),
 			Entities: strings.TrimSpace(rootFlow.Paths.EntitiesFile),
@@ -470,6 +478,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			Path:        flowID,
 			Mode:        strings.TrimSpace(schema.Mode),
 			SourceFiles: flowSourceFiles(flow),
+			Events:      eventViews(flow.Events),
 			Agents:      agents,
 			RequiredAgents: requiredAgentsView(
 				schema,
@@ -944,6 +953,24 @@ func addAgentField(fields map[string]AgentFieldView, entry runtimecontracts.Agen
 		Value:  value,
 		Source: source,
 	}
+}
+
+func eventViews(entries map[string]runtimecontracts.EventCatalogEntry) []EventView {
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]EventView, 0, len(names))
+	for _, name := range names {
+		fields := make([]string, 0, len(entries[name].Payload.Properties))
+		for field := range entries[name].Payload.Properties {
+			fields = append(fields, field)
+		}
+		sort.Strings(fields)
+		out = append(out, EventView{Name: name, Fields: fields})
+	}
+	return out
 }
 
 func flowSourceFiles(flow runtimecontracts.FlowContractView) FlowSourceFiles {

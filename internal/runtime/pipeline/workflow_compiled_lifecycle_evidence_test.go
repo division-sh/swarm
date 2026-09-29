@@ -42,11 +42,11 @@ func TestPipelineCompiledTimerTransitionEvidenceOnBothStores(t *testing.T) {
 				files := map[string]string{
 					"schema.yaml":   "name: timer-evidence\nstages:\n  waiting:\n    initial: true\n    timers:\n      - after: 1h\n" + timer + "  done: {terminal: true}\n",
 					"entities.yaml": "test_entity: {}\n",
-					"events.yaml":   "review.expired: {}\n",
+					"events.yaml":   "review.expired:\n",
 				}
 				if loopOwned {
 					files["schema.yaml"] += "  ready: {}\n  escaped: {}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: escaped}\n"
-					files["events.yaml"] += "loop.start: {}\nloop.repeat:\n  revision_id: text\n"
+					files["events.yaml"] += "loop.start:\nloop.repeat:\n  revision_id: text\n"
 					files["nodes.yaml"] = "owner:\n  execution_type: system_node\n  event_handlers:\n    loop.start:\n      loop: {start: revision, from: ready}\n      advances_to: waiting\n    loop.repeat:\n      loop: {repeat: revision, from: waiting}\n      advances_to: waiting\n"
 				}
 				bundle := loadWorkflowTempBundle(t, files)

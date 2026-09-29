@@ -20,7 +20,7 @@ stages:
   done: {terminal: true}
 `,
 		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "work: {}\n",
+		"events.yaml":   "work:\n",
 		"nodes.yaml": `router:
   execution_type: system_node
   event_handlers:

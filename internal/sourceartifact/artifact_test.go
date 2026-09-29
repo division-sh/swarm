@@ -14,7 +14,7 @@ func TestAdmitDirectoryBuildsFiniteFlowTreeAndBundleV2(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "schema.yaml", "name: root\n")
 	writeTestFile(t, root, "orders/schema.yaml", "name: orders\n")
-	writeTestFile(t, root, "orders/events.yaml", "order.accepted: {}\n")
+	writeTestFile(t, root, "orders/events.yaml", "order.accepted:\n")
 	writeTestFile(t, root, "tests/full-path.yaml", "name: full path\n")
 	writeTestFile(t, root, "docs/guide.md", "guide\n")
 	writeTestFile(t, root, ".swarm/pack-selection.yaml", "must_not: open\n")
@@ -33,7 +33,7 @@ func TestAdmitDirectoryBuildsFiniteFlowTreeAndBundleV2(t *testing.T) {
 		t.Fatalf("flow tree = %#v", rootNode)
 	}
 	body, err := fs.ReadFile(artifact.FS(), "orders/events.yaml")
-	if err != nil || string(body) != "order.accepted: {}\n" {
+	if err != nil || string(body) != "order.accepted:\n" {
 		t.Fatalf("artifact FS read = %q, %v", body, err)
 	}
 

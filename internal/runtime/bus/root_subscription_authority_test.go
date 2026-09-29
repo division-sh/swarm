@@ -28,7 +28,7 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 						}
 					}
 					node := "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: 'true'}\n"
-					files := map[string]string{"schema.yaml": schema, "events.yaml": "thing.created: {}\n"}
+					files := map[string]string{"schema.yaml": schema, "events.yaml": "thing.created:\n"}
 					for _, child := range []string{"first", "second"} {
 						files[child+"/schema.yaml"] = "name: " + child + "\nmode: " + mode + "\n"
 						for _, wired := range connected {

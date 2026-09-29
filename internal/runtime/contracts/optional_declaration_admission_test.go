@@ -37,7 +37,7 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
-			name: "events", fileName: "events.yaml", valid: "item.created: {}\n", merged: "<<: &declarations\n  item.created: {}\n", blank: "\"\": {}\n",
+			name: "events", fileName: "events.yaml", valid: "item.created:\n", merged: "<<: &declarations\n  item.created:\n", blank: "\"\": {}\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalEventCatalog(path)
 				return len(value), err

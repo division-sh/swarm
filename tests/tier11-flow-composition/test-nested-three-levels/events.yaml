@@ -1,4 +1,4 @@
-pipeline.start: {}
-child/step.begin: {}
-child/grandchild/micro.done: {}
-step.begin: {}
+pipeline.start:
+child/step.begin:
+child/grandchild/micro.done:
+step.begin:

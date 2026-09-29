@@ -3563,7 +3563,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	owner := testGatewayWorkOwner(t)
 	root := t.TempDir()
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-fork-gateway-cleanup\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received: {}\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
 	repoRoot := runForkExecutionRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

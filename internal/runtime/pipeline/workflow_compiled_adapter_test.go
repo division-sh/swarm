@@ -37,7 +37,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 	files := map[string]string{
 		"schema.yaml":   "name: adapter-proof\nstages:\n  ready: {initial: true}\n  Ready: {terminal: true}\n  working: {}\n  shared: {}\n  done: {terminal: true}\n" + killStages,
 		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "direct: {}\ninherited: {}\nrule: {}\ncomplete: {}\nself: {}\nwrite_only: {}\nfallback: {}\nemit_only: {}\nobserved: {}\nkill: {}\nreject: {}\ndiscard: {}\nguarded: {}\nguard_observed:\n  marker: text\n",
+		"events.yaml":   "direct:\ninherited:\nrule:\ncomplete:\nself:\nwrite_only:\nfallback:\nemit_only:\nobserved:\nkill:\nreject:\ndiscard:\nguarded:\nguard_observed:\n  marker: text\n",
 		"nodes.yaml": `router:
   execution_type: system_node
   event_handlers:
@@ -95,7 +95,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
 `,
 		"child/schema.yaml":   "name: child\nmode: template\nstages:\n  ready: {initial: true}\n  shared: {terminal: true}\n  foreign_only: {}\n  done: {terminal: true}\n  killed: {terminal: true}\n",
 		"child/entities.yaml": "test_entity:\n  marker: text\n",
-		"child/events.yaml":   "direct: {}\nkill: {}\nguarded: {}\nguard_observed:\n  marker: text\n",
+		"child/events.yaml":   "direct:\nkill:\nguarded:\nguard_observed:\n  marker: text\n",
 		"child/nodes.yaml": `router:
   execution_type: system_node
   event_handlers:
@@ -884,7 +884,7 @@ func statelessCompiledAdapterSource(t *testing.T) *contracts.WorkflowContractBun
 	return loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: stateless-proof\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "noop: {}\n",
+		"events.yaml":   "noop:\n",
 		"nodes.yaml":    "router:\n  execution_type: system_node\n  event_handlers:\n    noop: {}\n",
 	})
 }
@@ -1100,7 +1100,7 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 			loopBundle := loadWorkflowTempBundle(t, map[string]string{
 				"schema.yaml":   "name: loop-preview\nstages:\n  ready: {initial: true}\n  drafting: {}\n  review: {}\n  escaped: {terminal: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 1\n    escape: {advances_to: escaped}\n",
 				"entities.yaml": "test_entity:\n  marker: text\n",
-				"events.yaml":   "start: {}\nadmit:\n  revision_id: text\nrepeat:\n  revision_id: text\n",
+				"events.yaml":   "start:\nadmit:\n  revision_id: text\nrepeat:\n  revision_id: text\n",
 				"nodes.yaml":    "router:\n  execution_type: system_node\n  event_handlers:\n    start:\n      loop: {start: revision, from: ready}\n      advances_to: drafting\n    admit:\n      loop: {admit: revision, from: drafting}\n      advances_to: review\n    repeat:\n      loop: {repeat: revision, from: review}\n      advances_to: drafting\n",
 			})
 			f := newCompiledAdapterFixture(t, backend, loopBundle, ".", "ready", true)

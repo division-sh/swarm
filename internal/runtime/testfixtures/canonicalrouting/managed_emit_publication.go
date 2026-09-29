@@ -46,7 +46,7 @@ func CopyManagedEmitPublication(t testing.TB, mode string) string {
 		schema := "name: emit-proof\n" + modeDecl + "pins:\n  inputs:\n    events:\n" + input
 		extraEvent, extraOutput, extraEmit := "", "", ""
 		if sibling {
-			extraEvent, extraOutput, extraEmit = "foreign.only: {}\n", "  outputs:\n    events:\n      - work.ack\n      - {event: foreign.only, sink: harness}\n", ", foreign.only"
+			extraEvent, extraOutput, extraEmit = "foreign.only:\n", "  outputs:\n    events:\n      - work.ack\n      - {event: foreign.only, sink: harness}\n", ", foreign.only"
 		} else if scope != "." {
 			extraOutput = "  outputs:\n    events: [work.ack]\n"
 		}

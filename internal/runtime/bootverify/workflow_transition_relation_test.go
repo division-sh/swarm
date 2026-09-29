@@ -348,7 +348,7 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
         on_complete: {advances_to: done}
         timeout: {after: 3h, advances_to: done}
     tick: {}
-`, "direct: {}\ncreated: {}\nselected: {}\ninherited: {}\ncompleted: {}\ntick: {}\narrived:\n  member: text\n  window: text\n  result: text\n"
+`, "direct:\ncreated:\nselected:\ninherited:\ncompleted:\ntick:\narrived:\n  member: text\n  window: text\n  result: text\n"
 	case "loop":
 		return `stages:
   waiting: {initial: true}
@@ -374,7 +374,7 @@ loops:
     close:
       loop: {close: revision, from: review}
       advances_to: done
-`, "created: {}\nstart: {}\nadmit: {revision_id: text}\nrepeat: {revision_id: text}\nclose: {revision_id: text}\n"
+`, "created:\nstart:\nadmit: {revision_id: text}\nrepeat: {revision_id: text}\nclose: {revision_id: text}\n"
 	case "gate":
 		return `stages:
   ready: {initial: true}
@@ -385,7 +385,7 @@ loops:
         approve: {advances_to: done}
         waive: {advances_to: done}
   done: {terminal: true}
-`, "    created: {create_entity: true, advances_to: waiting}\n", "created: {}\n"
+`, "    created: {create_entity: true, advances_to: waiting}\n", "created:\n"
 	default:
 		panic("unknown relation fixture " + family)
 	}

@@ -46,7 +46,7 @@ connect:
   - {event: review.closed, from: ., to: review}
 `,
 		"entities.yaml": "root: {}\n",
-		"events.yaml":   "work.requested:\n  token: text\nroot.closed: {}\nwork.started:\n  token: text\nreview.retry:\n  revision_id: text\n  token: text\nreview.closed:\n  revision_id: text\n",
+		"events.yaml":   "work.requested:\n  token: text\nroot.closed:\nwork.started:\n  token: text\nreview.retry:\n  revision_id: text\n  token: text\nreview.closed:\n  revision_id: text\n",
 		"nodes.yaml": `controller:
   execution_type: system_node
   subscribes_to: [work.requested, root.closed]

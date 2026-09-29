@@ -112,7 +112,7 @@ func TestEventPatternsAreNotDatasetDeclarationIdentities(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writePromptTestBundle(t, repo)
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), `
-'*.completed': {}
+'*.completed':
 task.completed:
   task_id: text
 `)

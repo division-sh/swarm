@@ -140,7 +140,7 @@ connect:
   - {event: work.requested, from: ., to: child}
   - {event: child.ready, from: child, to: .}
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "work.closed: {}\nwork.requested:\n  token: text\n")
+	writeClosedVariantFile(t, root, "events.yaml", "work.closed:\nwork.requested:\n  token: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "receipt:\n  token: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `collector:
   execution_type: system_node
@@ -185,7 +185,7 @@ func CopyForkReceiverRepeatedOwnership(t testing.TB, receivers []ForkReceiver) s
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "      - start.closed\n", "      - start.closed\n      - producer.closed\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "events: [work.requested", "events: [producer.closed, work.requested")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "connect:\n", "connect:\n  - {event: producer.closed, from: ., to: producer}\n")
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "start.closed: {}\n", "start.closed: {}\nproducer.closed: {}\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "start.closed:\n", "start.closed:\nproducer.closed:\n")
 	applyClosedReplacement(t, filepath.Join(root, "producer/nodes.yaml"), "subscribes_to: [work.requested]", "subscribes_to: [work.requested, producer.closed]")
 	applyClosedReplacement(t, filepath.Join(root, "producer/nodes.yaml"), "  event_handlers:\n", "  event_handlers:\n    producer.closed:\n      advances_to: done\n")
 	return root
@@ -205,7 +205,7 @@ func CopyForkReceiverNestedOwnership(t testing.TB, receivers []ForkReceiver) str
 	inner := CopyForkReceiverOwnership(t, receivers, false)
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "start.seeded", "start.seeded")
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "start.requested", "start.requested")
-	applyClosedReplacement(t, filepath.Join(inner, "events.yaml"), "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed: {}\n", "")
+	applyClosedReplacement(t, filepath.Join(inner, "events.yaml"), "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n", "")
 	applyClosedReplacement(t, filepath.Join(inner, "schema.yaml"), "      - receiver.closed\n", "      - receiver.close.requested\n")
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  subscribes_to: [start.seeded, start.requested, start.closed]", "  subscribes_to: [start.seeded, start.requested, start.closed, receiver.close.requested]")
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  event_handlers:\n    start.seeded:", "  event_handlers:\n    receiver.close.requested:\n      emit: {event: receiver.closed}\n    start.seeded:")
@@ -233,7 +233,7 @@ connect:
   - {event: start.closed, from: ., to: branch}
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  marker: text\n")
-	writeClosedVariantFile(t, root, "events.yaml", "outer.seeded:\n  token: text\nouter.requested:\n  token: text\nouter.closed: {}\nstart.closed: {}\nreceiver.closed: {}\nstart.seeded:\n  token: text\nstart.requested:\n  token: text\n")
+	writeClosedVariantFile(t, root, "events.yaml", "outer.seeded:\n  token: text\nouter.requested:\n  token: text\nouter.closed:\nstart.closed:\nreceiver.closed:\nstart.seeded:\n  token: text\nstart.requested:\n  token: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
   subscribes_to: [outer.seeded, outer.requested, outer.closed]
@@ -345,7 +345,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 	if closeEdges != "" {
 		outputs += ", receiver.closed"
 		closeInput = "      - receiver.closed\n"
-		closeEvent = "receiver.closed: {}\n"
+		closeEvent = "receiver.closed:\n"
 	}
 	if seedEdges != "" {
 		seedEvent = "receiver.seeded:\n  token: text\n"
@@ -368,7 +368,7 @@ pins:
 connect:
 `+rootEdges+seedEdges+closeEdges)
 	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  marker: text\n")
-	writeClosedVariantFile(t, root, "events.yaml", "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed: {}\n"+closeEvent+seedEvent+"work.requested:\n  token: text\n")
+	writeClosedVariantFile(t, root, "events.yaml", "start.seeded:\n  token: text\nstart.requested:\n  token: text\nstart.closed:\n"+closeEvent+seedEvent+"work.requested:\n  token: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
   subscribes_to: [start.seeded, start.requested, start.closed]

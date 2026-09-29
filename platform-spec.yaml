@@ -842,6 +842,14 @@ contract_formats:
         trailing `?` permits omission. Explicit `initial:` values apply
         only at creation. Reads never materialize defaults.
     authoritative_section: See top-level `entity_contracts` and `type_system`.
+  canonical_form_registry:
+    payloadless_event:
+      surface: events.yaml
+      canonical: "event.name:"
+      owner: internal/runtime/contracts.admitEventCatalogEntry
+      rejected_forms: [empty_mapping, empty_quoted_string, explicit_null, null_alias_or_tag]
+      consumers: [disk_event_loader, reconstructed_source_event_loader, describe]
+      authoritative_section: contract_formats.event_schema.payloadless_declaration
   event_schema:
     description: |
       Events in `events.yaml` use the Wave 1 flat payload form.
@@ -887,6 +895,7 @@ contract_formats:
       that already validated before publish. Event-store admission MUST NOT
       interpret routing, delivery, source, target, or recipient semantics.
     format:
+      payloadless_event: "investigation.timed_out:"
       event_name: |
         key: entity_id (optional; must name a required scalar payload field)
         required_field: type
@@ -902,6 +911,35 @@ contract_formats:
             min: 0
             max: 100
           equal_to: sibling_field
+    payloadless_declaration:
+      owner: internal/runtime/contracts.admitEventCatalogEntry
+      rule: |
+        An event with no payload fields is declared by its name alone, with
+        a colon and no value: `investigation.timed_out:`. This is the only
+        spelling. Empty mapping `{}`, empty quoted string `""`, `~`, and
+        explicit `null` are invalid, including alias/tag spellings. A mapping
+        containing only description metadata is not a payload-less declaration.
+        The disk loader and reconstructed-source loader consume the same
+        presence-aware admission owner; neither normalizes authored values.
+        `describe` renders an admitted bare event as `(no fields)`.
+      teaching_error: |
+        an event with no fields is declared bare — write `investigation.timed_out:` (remove the `{}`).
+        Substitute the actual event name and rejected authored variant in this
+        same message for each noncanonical no-fields spelling.
+      cross_file_rule: |
+        Bare keys have file-specific meaning. In `events.yaml`, a bare key
+        declares an event with no fields. In `state.yaml`, a bare field is an
+        error: the field requires a type name or an initial literal (v3 §1.3).
+        In `types.yaml`, a bare named record and an empty mapping `{}` are both
+        errors: an empty named record has no use; declare an optional field as
+        `text?` instead. Do not share an empty-to-default coercion across files.
+      persistence: |
+        Source-artifact persistence retains the exact authored member bytes
+        and bundle hash. Admission does not rewrite bare keys to `null`, an
+        empty string, or an empty mapping. Qualification is public `verify`,
+        local `serve` persistence, then restart by `--bundle-hash`, on SQLite
+        and PostgreSQL, with byte-identical event source and unchanged hash.
+        The retired `bundle.register` command is not a supported proof surface.
     recursive_field_presence:
       owner: internal/runtime/contracts.ResolvedCatalogType
       rule: |

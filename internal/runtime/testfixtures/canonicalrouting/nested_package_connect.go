@@ -35,7 +35,7 @@ pins:
   outputs:
     events: [micro.done]
 `,
-		"child/grandchild/events.yaml": "micro.done: {}\n",
+		"child/grandchild/events.yaml": "micro.done:\n",
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, filepath.ToSlash(name), body)

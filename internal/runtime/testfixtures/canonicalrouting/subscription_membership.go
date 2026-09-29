@@ -16,7 +16,7 @@ pins:
     events:
       - root.started
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "root.started: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "root.started:\n")
 	writeClosedVariantFile(t, root, "child/schema.yaml", `name: child
 initial_state: idle
 terminal_states: [done]

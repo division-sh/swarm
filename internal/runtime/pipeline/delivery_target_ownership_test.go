@@ -592,8 +592,8 @@ states: [active]
   items:
     type: "[text]"
 `,
-		"review/events.yaml": `top.ready: {}
-nested.ready: {}
+		"review/events.yaml": `top.ready:
+nested.ready:
 item.requested:
   item: string
 `,

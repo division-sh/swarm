@@ -1,5 +1,5 @@
 root.check:
   score: integer
-root.done: {}
+root.done:
 grandchild.check:
   score: integer?

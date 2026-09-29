@@ -102,7 +102,7 @@ func CopyParentConnectEventMetadataInvalidity(t testing.TB, invalidity ParentCon
 
 func closedMetadataEvent(name, role string, workID bool) string {
 	if role == "" && !workID {
-		return name + ": {}\n"
+		return name + ":\n"
 	}
 	entry := name + ":\n"
 	if role != "" {

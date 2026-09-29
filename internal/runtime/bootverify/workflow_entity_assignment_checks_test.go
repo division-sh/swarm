@@ -220,12 +220,12 @@ stages:
   done: {terminal: true}
 `)
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "work:\n  score: {type: integer}\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `work.opened: {}
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `work.opened:
 work.scored:
   score: integer
-work.consume: {}
-work.bypass: {}
-work.clear: {}
+work.consume:
+work.bypass:
+work.clear:
 work.result:
   score: integer
 `)
@@ -380,7 +380,7 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: mutation-assignment\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  Profile:\n    id: text\n    note: text?\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "work:\n  profile: Profile\n  observed: text\n  notes: '[text]'\n  by_id: map[text]Profile\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested: {}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `owner:
   execution_type: system_node
   subscribes_to: [work.requested]

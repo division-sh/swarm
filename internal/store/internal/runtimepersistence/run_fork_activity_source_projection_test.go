@@ -508,7 +508,7 @@ func selectedActivityProducerSourceWithLoops(t *testing.T, ordinaryRootLoop, act
 	files := map[string]string{
 		"schema.yaml":   "name: activity-projection\nstages:\n  pending: {initial: true}\n",
 		"entities.yaml": "default:\n  name: text\n",
-		"events.yaml":   "ordinary.ready: {}\nreview.inspect: {}\nsupport.drafted: {}\n",
+		"events.yaml":   "ordinary.ready:\nreview.inspect:\nsupport.drafted:\n",
 		"nodes.yaml": `reader:
   execution_type: system_node
   subscribes_to: [review.inspect]
@@ -524,7 +524,7 @@ support:
 `,
 		"flow-a/schema.yaml":   "name: flow-a\nmode: static\nstages:\n  pending: {initial: true}\n",
 		"flow-a/entities.yaml": "default:\n  name: text\n",
-		"flow-a/events.yaml":   "review.accepted: {}\nreview.inspect: {}\n",
+		"flow-a/events.yaml":   "review.accepted:\nreview.inspect:\n",
 		"flow-a/nodes.yaml": `writer:
   execution_type: system_node
   subscribes_to: [review.accepted]
@@ -560,7 +560,7 @@ telegram.send_message:
 	}
 	if ordinaryRootLoop {
 		files["schema.yaml"] += "  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: opaque_revision\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
-		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: text\nordinary.start: {}\nordinary.retry:\n  opaque_revision: text\nordinary.close:\n  opaque_revision: text\n"
+		files["events.yaml"] = "ordinary.ready:\n  opaque_revision: text\nordinary.start:\nordinary.retry:\n  opaque_revision: text\nordinary.close:\n  opaque_revision: text\n"
 		files["nodes.yaml"] = `reader:
   execution_type: system_node
   subscribes_to: [ordinary.start, ordinary.ready, ordinary.retry, ordinary.close]
@@ -581,7 +581,7 @@ telegram.send_message:
 	}
 	if activityLoop {
 		files["flow-a/schema.yaml"] += "  review: {}\n  closed: {terminal: true}\n  exhausted: {terminal: true}\nloops:\n  revision:\n    revision_field: revision_id\n    max_attempts: 3\n    escape: {advances_to: exhausted}\n"
-		files["flow-a/events.yaml"] = "review.accepted:\n  revision_id: text\nreview.inspect:\n  revision_id: text\nreview.start: {}\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n"
+		files["flow-a/events.yaml"] = "review.accepted:\n  revision_id: text\nreview.inspect:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n"
 		files["flow-a/nodes.yaml"] = `writer:
   execution_type: system_node
   subscribes_to: [review.start, review.accepted, review.retry, review.close]

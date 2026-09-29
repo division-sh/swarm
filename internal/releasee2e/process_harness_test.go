@@ -85,6 +85,7 @@ type releaseProcessSpec struct {
 	WorkingDir                  string
 	ConfigPath                  string
 	Source                      string
+	BundleHash                  string
 	Store                       string
 	Dev                         bool
 	APIPort                     int
@@ -113,6 +114,9 @@ type releaseServeProcess struct {
 
 func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServeProcess {
 	t.Helper()
+	if options.BundleHash != "" && (options.Source != "" || options.InternalMockLifecycleBinary != "") {
+		t.Fatal("bundle-hash restart requires the public launcher and no local source")
+	}
 	output := &releaseProcessOutput{secrets: append([]string{options.Token}, options.RedactValues...)}
 	workspaceBackend := options.WorkspaceBackend
 	if workspaceBackend == "" {
@@ -140,6 +144,9 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	}
 	if options.Source != "" {
 		args = append(args, options.Source)
+	}
+	if options.BundleHash != "" {
+		args = append(args, "--bundle-hash", options.BundleHash)
 	}
 	if options.Store != "" {
 		args = append(args, "--store", options.Store)

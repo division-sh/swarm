@@ -159,7 +159,7 @@ func handlerEngineProjectNodeModule(t *testing.T, fields ...map[string]runtimeco
 	module := &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: handler-engine-test\nstages:\n  queued: {initial: true}\n",
 		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "custom.trigger: {}\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
+		"events.yaml":   "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
 		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 	})}
@@ -765,7 +765,7 @@ func handlerDataAccumulationModule(t *testing.T) *previewWorkflowModule {
 	return &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml":   "name: validation\nstages:\n  queued: {initial: true}\n",
 		"entities.yaml": "test_entity:\n  revision_count: integer\n  kill_reason: text\n  kill_reason_missing: boolean\n",
-		"events.yaml":   "validation.spec_requested: {}\n",
+		"events.yaml":   "validation.spec_requested:\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
 	})}
 }
@@ -993,7 +993,7 @@ func newEmitPersistenceTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoord
 		"schema.yaml":   "name: validation\ninitial_state: researching\nstates: [researching, mvp_speccing]\n",
 		"entities.yaml": "test_entity:\n  business_brief: {type: BusinessBrief}\n",
 		"types.yaml":    "types:\n  BusinessBrief:\n    summary: text\n",
-		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested: {}\n",
+		"events.yaml":   "research.completed:\n  business_brief: BusinessBrief?\nspec.requested:\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [research.completed]\n  event_handlers:\n    research.completed:\n      advances_to: mvp_speccing\n",
 	})
 	pc := &PipelineCoordinator{
@@ -1801,8 +1801,8 @@ validation_entity:
     initial: false
 `,
 		"validation/events.yaml": `
-candidate.discovered: {}
-entity.created: {}
+candidate.discovered:
+entity.created:
 `,
 		"validation/nodes.yaml": `
 node-a:
@@ -1871,7 +1871,7 @@ func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *tes
 	bundle := loadWorkflowTempBundle(t, map[string]string{
 		"schema.yaml": "name: demo\ninitial_state: queued\nstates: [queued, done]\nterminal_states: [done]\n",
 		"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [custom.trigger]\n  event_handlers:\n    custom.trigger: {}\n",
-		"events.yaml": "custom.trigger: {}\n",
+		"events.yaml": "custom.trigger:\n",
 	})
 	pc := &PipelineCoordinator{
 		module: &previewWorkflowModule{bundle: bundle},
@@ -2102,7 +2102,7 @@ func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowCon
 		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
-		"events.yaml":   "rule.emitted: {}\nhandler.succeeded: {}\n",
+		"events.yaml":   "rule.emitted:\nhandler.succeeded:\n",
 	})
 }
 
@@ -2135,7 +2135,7 @@ func declarativeEmitContractTestBundleWithEntry(t *testing.T, eventType string, 
 		"schema.yaml":   "name: test\nstages:\n  queued: {initial: true}\n",
 		"entities.yaml": "test_entity: {}\n",
 		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
-		"events.yaml":   eventType + ": {}\n",
+		"events.yaml":   eventType + ":\n",
 	})
 	for key, value := range eventsByType {
 		bundle.Events[key] = value

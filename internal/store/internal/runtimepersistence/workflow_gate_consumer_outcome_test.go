@@ -61,7 +61,7 @@ func TestWorkflowGateConsumesCommittedErrorWithoutRouteReplayOnBothStores(t *tes
 				bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
 					"schema.yaml":   "name: gate-consumer\nstages:\n  awaiting_review:\n    initial: true\n    gate:\n      decision: root_review\n      outcomes:\n        approve:\n          advances_to: done\n          emit: test.node_emitted\n  done: {terminal: true}\n",
 					"entities.yaml": "default: {}\n",
-					"events.yaml":   "test.node_emitted: {}\n",
+					"events.yaml":   "test.node_emitted:\n",
 				})
 				source := semanticview.Wrap(bundle)
 				bus, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), runtimebus.EventBusOptions{ContractBundle: source})

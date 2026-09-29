@@ -1,4 +1,4 @@
 evidence.submitted:
   finding: text
   severity: text
-evidence.recorded: {}
+evidence.recorded:

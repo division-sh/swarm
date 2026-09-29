@@ -1,4 +1,4 @@
 item.review_requested:
   score: number
-item.completed: {}
-item.rejected: {}
+item.completed:
+item.rejected:

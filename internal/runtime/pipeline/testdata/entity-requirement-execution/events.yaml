@@ -1,4 +1,4 @@
-work.ready: {}
-work.emitted: {}
-work.clear: {}
-work.kill: {}
+work.ready:
+work.emitted:
+work.clear:
+work.kill:

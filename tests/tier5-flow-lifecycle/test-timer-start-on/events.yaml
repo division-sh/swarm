@@ -1,3 +1,3 @@
-task.started: {}
-timer.task_timeout: {}
-task.timed_out: {}
+task.started:
+timer.task_timeout:
+task.timed_out:

@@ -24,7 +24,7 @@ func transitionMutationSource(t *testing.T) semanticview.Source {
 	return loadWorkflowTempSource(t, map[string]string{
 		"schema.yaml":   "name: transition-proof\nstages:\n  ready: {initial: true}\n  other: {}\n  done: {terminal: true}\n",
 		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "advance: {}\nforeign: {}\n",
+		"events.yaml":   "advance:\nforeign:\n",
 		"nodes.yaml": `router:
   event_handlers:
     advance:

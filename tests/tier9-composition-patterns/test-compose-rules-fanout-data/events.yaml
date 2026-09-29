@@ -1,4 +1,4 @@
 batch.requested:
   mode: string
   items: "[DispatchItem]"
-batch.dispatched: {}
+batch.dispatched:

@@ -460,6 +460,63 @@ func TestCanonicalRoutingParserSnippetDecodesOneDocument(t *testing.T) {
 	}
 }
 
+func TestCanonicalRoutingParserSnippetRetainsBareSourceBytes(t *testing.T) {
+	const source = "# Keep lexical presence\nwork.done:  # no fields\n"
+	snippet := NewParserSnippet(t, source)
+	body, err := snippet.SourceBytes()
+	if err != nil || string(body) != source {
+		t.Fatalf("parser source was reserialized: %q, %v", body, err)
+	}
+	body[0] = 'x'
+	again, err := snippet.SourceBytes()
+	if err != nil || string(again) != source {
+		t.Fatalf("parser source aliases the caller: %q, %v", again, err)
+	}
+}
+
+func TestCanonicalRoutingTimerSeparatesBareEventAndNoopHandler(t *testing.T) {
+	root := CopyTimerStateCancelReachability(t, TimerStateCancelReachableState)
+	for _, tc := range []struct {
+		file string
+		path []string
+		bare bool
+	}{
+		{"support/events.yaml", []string{"timer.reminder"}, true},
+		{"support/nodes.yaml", []string{"support-node", "event_handlers", "timer.reminder"}, false},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(root, tc.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value any
+			if err := NewParserSnippet(t, string(raw)).Decode(&value); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range tc.path {
+				mapping, ok := value.(map[string]any)
+				if !ok {
+					t.Fatalf("parent of %q is not a mapping: %#v", key, value)
+				}
+				value, ok = mapping[key]
+				if !ok {
+					t.Fatalf("missing %q", key)
+				}
+			}
+			if tc.bare {
+				if value != nil {
+					t.Fatalf("payload-less event must be bare, got %#v", value)
+				}
+				return
+			}
+			mapping, ok := value.(map[string]any)
+			if !ok || len(mapping) != 0 {
+				t.Fatalf("no-op handler must be an empty mapping, got %#v", value)
+			}
+		})
+	}
+}
+
 func TestCanonicalRoutingRawPositiveBundleConstructionFailsClosed(t *testing.T) {
 	cases := map[string]map[string]string{
 		"unknown-helper": {"fixture_test.go": `package fixture

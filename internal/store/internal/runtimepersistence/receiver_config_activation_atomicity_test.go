@@ -65,10 +65,10 @@ pins:
     events: [task.started]
 `,
 		"review/entities.yaml": "review_item:\n  request_id: string\n",
-		"review/events.yaml":   "task.started: {}\n",
+		"review/events.yaml":   "task.started:\n",
 	}
 	if autoEmit {
-		files["events.yaml"] = "request.started: {}\n"
+		files["events.yaml"] = "request.started:\n"
 		files["review/schema.yaml"] += "auto_emit_on_create: {event: task.started}\n"
 		files["review/events.yaml"] = "task.started:\n  request_id: string\n  label: string\n  enabled: boolean\n  nested: json\n"
 	}

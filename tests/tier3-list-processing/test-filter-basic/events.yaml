@@ -1,3 +1,3 @@
 items.submitted:
   items: "[FilteredItem]"
-items.filtered: {}
+items.filtered:
