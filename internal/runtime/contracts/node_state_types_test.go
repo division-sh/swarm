@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 func TestNormalizeNodeStateFieldType_AllowsCanonicalNodeStateTypes(t *testing.T) {
@@ -57,14 +57,14 @@ func TestNormalizeNodeStateFieldType_RejectsPseudoTypes(t *testing.T) {
 }
 
 func TestDecodeNodeStateFields_RejectsPseudoTypesInSequenceForm(t *testing.T) {
-	var node yaml.Node
-	if err := yaml.Unmarshal([]byte(`
+	snapshot, err := yamlsource.Load([]byte(`
 - name: dimensions_received
   type: dimension score receipts keyed by dimension name
-`), &node); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+`))
+	if err != nil {
+		t.Fatalf("yamlsource.Load: %v", err)
 	}
-	_, err := decodeNodeStateFields(node.Content[0])
+	_, err = projectNodeStateFieldsValue(snapshot.Document("nodes.yaml").Root())
 	if err == nil || !strings.Contains(err.Error(), "not canonical") {
 		t.Fatalf("expected pseudo-type error, got %v", err)
 	}

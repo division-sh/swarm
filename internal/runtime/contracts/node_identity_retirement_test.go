@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"gopkg.in/yaml.v3"
 )
 
 const retiredNodeID = "node.id is retired; the map key is the identity."
@@ -80,13 +79,13 @@ event_handlers:
     activity: {id: send, tool: provider.send, input: {message: payload.message}}
 `
 	var node SystemNodeContract
-	if err := yaml.Unmarshal([]byte(body), &node); err != nil {
+	if err := decodeNodeTestYAML([]byte(body), &node); err != nil {
 		t.Fatal(err)
 	}
 	if node.ExecutionType != "system_node" || !reflect.DeepEqual(node.SubscribesTo, []string{"task.requested", "task.extra"}) || !reflect.DeepEqual(node.Produces, []string{"task.completed"}) || node.Timers[0].ID != "reminder" || node.EventHandlers["task.requested"].Activity.ID != "send" {
 		t.Fatalf("independent node behavior changed: %#v", node)
 	}
-	if err := yaml.Unmarshal([]byte("id: worker\n"+body), &node); err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+	if err := decodeNodeTestYAML([]byte("id: worker\n"+body), &node); err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 		t.Fatalf("node ID accepted alongside legitimate IDs: %v", err)
 	}
 	for _, test := range []struct {
@@ -183,33 +182,29 @@ func TestSystemNodeContractRejectsRetiredIDOnPresence(t *testing.T) {
 	for _, value := range []string{"worker", "other", "worker-{instance_id}", `""`, "null", "42", "true", "{}", "[]"} {
 		t.Run(value, func(t *testing.T) {
 			var nodes map[string]SystemNodeContract
-			err := yaml.Unmarshal([]byte("worker:\n  id: "+value+"\n  event_handlers: {}\n"), &nodes)
-			if err == nil || err.Error() != retiredNodeID {
+			err := decodeNodeTestYAML([]byte("worker:\n  id: "+value+"\n  event_handlers: {}\n"), &nodes)
+			if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 				t.Fatalf("node.id %s: got %v, want %s", value, err, retiredNodeID)
 			}
 		})
 	}
 	t.Run("whole node alias", func(t *testing.T) {
-		var document struct {
-			Node SystemNodeContract `yaml:"node"`
-		}
-		err := yaml.Unmarshal([]byte("definition: &node\n  id: worker\n  event_handlers: {}\nnode: *node\n"), &document)
-		if err == nil || err.Error() != retiredNodeID {
+		var node SystemNodeContract
+		err := decodeNodeTestMember([]byte("definition: &node\n  id: worker\n  event_handlers: {}\nnode: *node\n"), "node", &node)
+		if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 			t.Fatalf("alias: %v", err)
 		}
 	})
-	t.Run("node body merge remains unsupported", func(t *testing.T) {
-		var document struct {
-			Node SystemNodeContract `yaml:"node"`
-		}
-		err := yaml.Unmarshal([]byte("definition: &fields\n  id: worker\nnode:\n  <<: *fields\n  event_handlers: {}\n"), &document)
-		if err == nil || err.Error() != `node field "<<" is not supported.` {
-			t.Fatalf("node body merge rejection changed: %v", err)
+	t.Run("merged retired id remains rejected", func(t *testing.T) {
+		var node SystemNodeContract
+		err := decodeNodeTestMember([]byte("definition: &fields\n  id: worker\nnode:\n  <<: *fields\n  event_handlers: {}\n"), "node", &node)
+		if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+			t.Fatalf("merged node.id must be rejected: %v", err)
 		}
 	})
 	t.Run("omitted", func(t *testing.T) {
 		var nodes map[string]SystemNodeContract
-		if err := yaml.Unmarshal([]byte("worker:\n  event_handlers: {}\n"), &nodes); err != nil {
+		if err := decodeNodeTestYAML([]byte("worker:\n  event_handlers: {}\n"), &nodes); err != nil {
 			t.Fatal(err)
 		}
 	})

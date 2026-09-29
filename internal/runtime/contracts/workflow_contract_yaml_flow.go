@@ -10,39 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
-	resolved, err := resolveHandlerRuleYAMLNode(node)
-	if err != nil {
-		return err
-	}
-	if resolved == nil || resolved.Kind != yaml.MappingNode {
-		return fmt.Errorf("handler rule must be a mapping")
-	}
-	if len(resolved.Content) == 0 {
-		return fmt.Errorf("EMPTY-AUTHORED-RULE: authored handler rule mapping must not be empty")
-	}
-	if err := validateUniqueNormalizedMappingKeys(resolved, "authored handler rule"); err != nil {
-		return err
-	}
-	if err := validateRetiredHandlerActionFields(resolved, "rule"); err != nil {
-		return err
-	}
-	if err := validateRuleFieldNodes(resolved); err != nil {
-		return err
-	}
-	type alias HandlerRuleEntry
-	var aux alias
-	if err := resolved.Decode(&aux); err != nil {
-		return err
-	}
-	*r = HandlerRuleEntry(aux)
-	r.authored = true
-	if err := lowerPolicySheetRuleNode(resolved, r); err != nil {
-		return err
-	}
-	return nil
-}
-
 // resolveHandlerRuleYAMLNode makes aliases presentation-only for rule grammar.
 // The graph walk rejects recursive aliases before yaml.v3 can recurse through
 // them while decoding a semantic row.
@@ -86,36 +53,6 @@ func validateHandlerRuleYAMLAliasGraph(node *yaml.Node, visiting, visited map[*y
 	}
 	delete(visiting, node)
 	visited[node] = true
-	return nil
-}
-
-func validateRuleFieldNodes(node *yaml.Node) error {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		switch key {
-		case "element_id":
-			return fmt.Errorf("RETIRED: rule.element_id is no longer authored; identity derives from the canonical declaration site")
-		case "emits":
-			return fmt.Errorf("RETIRED: rule field %q is retired; use emit: <event> or emit: {event, fields}", key)
-		case "payload_transform":
-			return fmt.Errorf("RETIRED: rule field %q is retired; move payload ownership into rule-local emit.fields", key)
-		case "switch", "threshold":
-			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is not a standalone row type; use rules when/case/range selection rows or split value lookup to compute", key)
-		case "policy":
-			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q would create a second policy-sheet authoring owner; enhance rules in place", key)
-		case "temporal", "join", "loop", "collection", "schedule":
-			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is outside the promoted selection-row scope", key)
-		}
-		if _, ok := ruleFieldOptions[key]; !ok {
-			return NewUndefinedFieldDiagnostic("rule", key, ruleFieldOptions)
-		}
-	}
 	return nil
 }
 
@@ -646,54 +583,6 @@ func decodeExactFlowPinFieldSequence(node *yaml.Node, owner string) ([]string, e
 	return fields, nil
 }
 
-func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
-	if s == nil {
-		return nil
-	}
-	if err := validateComputeFieldNodes(node); err != nil {
-		return err
-	}
-	var aux struct {
-		Operation   ComputeOperation `yaml:"operation"`
-		Tiers       []ComputeTier    `yaml:"tiers"`
-		Keys        ComputeKeyConfig `yaml:"keys"`
-		Params      map[string]any   `yaml:"params"`
-		StoreAs     string           `yaml:"store_as"`
-		Description string           `yaml:"description"`
-	}
-	if err := node.Decode(&aux); err != nil {
-		return err
-	}
-	*s = ComputeSpec{
-		Operation:   aux.Operation,
-		Tiers:       aux.Tiers,
-		Keys:        aux.Keys,
-		Params:      aux.Params,
-		StoreAs:     strings.TrimSpace(aux.StoreAs),
-		Description: strings.TrimSpace(aux.Description),
-	}
-	if err := validateTieredWeightedAverageSpec(*s); err != nil {
-		return err
-	}
-	return nil
-}
-
-func validateComputeFieldNodes(node *yaml.Node) error {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		if _, ok := computeFieldOptions[key]; ok {
-			continue
-		}
-		return NewUndefinedFieldDiagnostic("compute", key, computeFieldOptions)
-	}
-	return nil
-}
 
 func validateTieredWeightedAverageSpec(spec ComputeSpec) error {
 	if spec.Operation != ComputeOpWeightedAverage || len(spec.Tiers) == 0 {

@@ -117,7 +117,7 @@ func TestEventSchemaRegistryFromCatalog_ProjectsSchemaRefinements(t *testing.T) 
 
 func TestPlatformEventCatalogUsesRequiredByDefaultTypedOmission(t *testing.T) {
 	var node yaml.Node
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 payload:
   required_value: string
   optional_value: string?
@@ -137,7 +137,7 @@ payload:
 
 func TestPlatformEventCatalogRejectsRetiredRequiredList(t *testing.T) {
 	var node yaml.Node
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 payload:
   value: string
 required: [value]

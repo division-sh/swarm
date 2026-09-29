@@ -1519,33 +1519,6 @@ func (t WorkflowTimerContract) SemanticKey() string {
 	return ""
 }
 
-type EventEmission struct {
-	Single string   `yaml:"-" json:"single,omitempty"`
-	Many   []string `yaml:"-" json:"many,omitempty"`
-}
-
-func (e EventEmission) First() string {
-	if strings.TrimSpace(e.Single) != "" {
-		return strings.TrimSpace(e.Single)
-	}
-	if len(e.Many) > 0 {
-		return strings.TrimSpace(e.Many[0])
-	}
-	return ""
-}
-func (e EventEmission) Values() []string {
-	if len(e.Many) > 0 {
-		return append([]string{}, normalizeStrings(e.Many)...)
-	}
-	if first := strings.TrimSpace(e.Single); first != "" {
-		return []string{first}
-	}
-	return nil
-}
-func (e EventEmission) Empty() bool {
-	return len(e.Values()) == 0
-}
-
 type EmitSpec struct {
 	Event  string                     `yaml:"event"`
 	From   string                     `yaml:"from,omitempty"`
@@ -1595,18 +1568,19 @@ type GuardActionEntry struct {
 	Effect          string `yaml:"effect"`
 }
 type SystemNodeContract struct {
-	Description      string                            `yaml:"description"`
-	ExecutionType    string                            `yaml:"execution_type"`
-	Implementation   string                            `yaml:"-"`
-	SubscribesTo     []string                          `yaml:"subscribes_to"`
-	Produces         []string                          `yaml:"produces"`
-	ProducesDeclared bool                              `yaml:"-" json:"-"`
-	StateTable       string                            `yaml:"state_table"`
-	IdempotencyTable string                            `yaml:"-"`
-	Timers           []WorkflowTimerContract           `yaml:"timers"`
-	EventHandlers    map[string]SystemNodeEventHandler `yaml:"event_handlers"`
-	StateSchema      NodeStateSchema                   `yaml:"state_schema"`
-	GateState        NodeGateStateSchema               `yaml:"gate_state"`
+	Description         string                            `yaml:"description"`
+	ExecutionType       string                            `yaml:"execution_type"`
+	Implementation      string                            `yaml:"-"`
+	SubscribesTo        []string                          `yaml:"subscribes_to"`
+	Produces            []string                          `yaml:"produces"`
+	ProducesDeclared    bool                              `yaml:"-" json:"-"`
+	StateTable          string                            `yaml:"state_table"`
+	IdempotencyTable    string                            `yaml:"-"`
+	Timers              []WorkflowTimerContract           `yaml:"timers"`
+	EventHandlers       map[string]SystemNodeEventHandler `yaml:"event_handlers"`
+	StateSchema         NodeStateSchema                   `yaml:"state_schema"`
+	GateState           NodeGateStateSchema               `yaml:"gate_state"`
+	admissionProvenance map[string]EffectiveValueProvenance
 }
 type SystemNodeEventHandler struct {
 	Activity         ActivitySpec             `yaml:"activity"`

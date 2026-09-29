@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	"gopkg.in/yaml.v3"
 )
 
 func TestLowerEmitSpecFieldsLowersFromAndPreservesLiteralValues(t *testing.T) {
@@ -106,7 +105,7 @@ func TestLowerEmitSpecFieldsFailsClosed(t *testing.T) {
 
 func TestEmitTargetIsStrictlyRetiredBeforeFieldLowering(t *testing.T) {
 	var spec EmitSpec
-	err := yaml.Unmarshal([]byte(`
+	err := decodeNodeTestYAML([]byte(`
 event: account.bucketed
 from: entity
 target:

@@ -3,8 +3,6 @@ package contracts
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestWorkflowGateInputTypeOwnerAdmitsCanonicalScalarsEndToEnd(t *testing.T) {
@@ -22,7 +20,7 @@ func TestWorkflowGateInputTypeOwnerAdmitsCanonicalScalarsEndToEnd(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.kind, func(t *testing.T) {
 			var field WorkflowGateInputField
-			if err := yaml.Unmarshal([]byte("type: "+tc.kind), &field); err != nil {
+			if err := decodeNodeTestYAML([]byte("type: "+tc.kind), &field); err != nil {
 				t.Fatalf("decode canonical gate input: %v", err)
 			}
 			if field.Type != tc.kind {
@@ -39,7 +37,7 @@ func TestWorkflowGateInputTypeOwnerRejectsNonCanonicalAndStructuredTypes(t *test
 	for _, kind := range []string{"string", "int", "float", "jsonb", "uuid[]", "text[]", "object", "list"} {
 		t.Run(kind, func(t *testing.T) {
 			var field WorkflowGateInputField
-			err := yaml.Unmarshal([]byte("type: "+kind), &field)
+			err := decodeNodeTestYAML([]byte("type: "+kind), &field)
 			if err == nil {
 				t.Fatalf("gate input type %q was accepted", kind)
 			}

@@ -15,17 +15,18 @@ import (
 )
 
 type View struct {
-	WorkflowName    string              `json:"workflow_name,omitempty"`
-	WorkflowVersion string              `json:"workflow_version,omitempty"`
-	SourceHash      string              `json:"source_hash"`
-	SourceAuthority string              `json:"source_authority"`
-	Root            RootView            `json:"root"`
-	Flows           []FlowView          `json:"flows"`
-	ApprovalPoints  []ApprovalPointView `json:"approval_points,omitempty"`
-	StageGraphs     []StageGraphView    `json:"stage_graphs,omitempty"`
-	RoutingTopology RoutingTopologyView `json:"routing_topology"`
-	Diagnostics     []DiagnosticView    `json:"diagnostics,omitempty"`
-	Equivalence     EquivalenceView     `json:"equivalence"`
+	WorkflowName        string                                      `json:"workflow_name,omitempty"`
+	WorkflowVersion     string                                      `json:"workflow_version,omitempty"`
+	SourceHash          string                                      `json:"source_hash"`
+	SourceAuthority     string                                      `json:"source_authority"`
+	Root                RootView                                    `json:"root"`
+	Flows               []FlowView                                  `json:"flows"`
+	ApprovalPoints      []ApprovalPointView                         `json:"approval_points,omitempty"`
+	StageGraphs         []StageGraphView                            `json:"stage_graphs,omitempty"`
+	RoutingTopology     RoutingTopologyView                         `json:"routing_topology"`
+	Diagnostics         []DiagnosticView                            `json:"diagnostics,omitempty"`
+	Equivalence         EquivalenceView                             `json:"equivalence"`
+	EffectiveProvenance []runtimecontracts.EffectiveProvenanceEntry `json:"effective_provenance,omitempty"`
 }
 
 type EquivalenceView struct {
@@ -328,15 +329,16 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		return View{}, err
 	}
 	view := View{
-		WorkflowName:    bundle.WorkflowName(),
-		WorkflowVersion: bundle.WorkflowVersion(),
-		SourceHash:      bundle.SourceArtifact.BundleHash(),
-		SourceAuthority: "projection_only_existing_contract_owners",
-		Root:            root,
-		Flows:           flows,
-		ApprovalPoints:  buildApprovalPoints(bundle),
-		RoutingTopology: BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
-		Diagnostics:     buildDiagnostics(bundle, opts.BootReport),
+		WorkflowName:        bundle.WorkflowName(),
+		WorkflowVersion:     bundle.WorkflowVersion(),
+		SourceHash:          bundle.SourceArtifact.BundleHash(),
+		SourceAuthority:     "projection_only_existing_contract_owners",
+		Root:                root,
+		Flows:               flows,
+		ApprovalPoints:      buildApprovalPoints(bundle),
+		RoutingTopology:     BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
+		Diagnostics:         buildDiagnostics(bundle, opts.BootReport),
+		EffectiveProvenance: bundle.EffectiveProvenance().Entries(),
 		Equivalence: EquivalenceView{
 			ProjectionOnly: true,
 			CanonicalOwners: []string{
