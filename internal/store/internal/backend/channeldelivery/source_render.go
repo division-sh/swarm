@@ -37,9 +37,13 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 		if !found {
 			return channeldelivery.Frozen{}, fmt.Errorf("channel response render is absent")
 		}
-		return stored.Frozen, nil
+		return channeldelivery.WithPresentation(stored.Frozen, plan.Bounds, plan.ActionPageIndex)
 	case PlanSummary:
-		return channeldelivery.FreezeSummary(plan.SourceID, plan.SummaryCount, audience)
+		frozen, err := channeldelivery.FreezeSummary(plan.SourceID, plan.SummaryCount, audience)
+		if err != nil {
+			return channeldelivery.Frozen{}, err
+		}
+		return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
 	case PlanNotice:
 		query := `SELECT item_type, COALESCE(summary, ''), COALESCE(severity, 'normal'), COALESCE(notified, false),
 			COALESCE(payload, '{}'), COALESCE(from_agent, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, '')
@@ -63,7 +67,11 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 		default:
 			return channeldelivery.Frozen{}, fmt.Errorf("stored channel notice context has unsupported type %T", payload)
 		}
-		return channeldelivery.FreezeNotice(notice, audience)
+		frozen, err := channeldelivery.FreezeNotice(notice, audience)
+		if err != nil {
+			return channeldelivery.Frozen{}, err
+		}
+		return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
 	case PlanCard:
 		card, err := decisionpersistence.LoadDecisionCardInTx(ctx, tx, plan.SourceID, postgres)
 		if err != nil {
@@ -79,13 +87,11 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 		}
 		dispatch := ""
 		if card.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
-			query = `SELECT state FROM proposed_effect_continuations WHERE card_id=?`
-			if postgres {
-				query = `SELECT state FROM proposed_effect_continuations WHERE card_id=$1::uuid FOR UPDATE`
-			}
-			if err := tx.QueryRowContext(ctx, query, plan.SourceID).Scan(&dispatch); err != nil {
+			readback, err := decisionpersistence.ProposedEffectReadbackInTx(ctx, tx, plan.SourceID, postgres)
+			if err != nil {
 				return channeldelivery.Frozen{}, fmt.Errorf("load exact card dispatch state: %w", err)
 			}
+			dispatch = readback.DispatchState
 		}
 		prompt := channeldelivery.DraftPrompt{}
 		if card.Status == decisioncard.StatusPending {
@@ -121,7 +127,7 @@ func FreezeCurrentSourceTx(ctx context.Context, tx *sql.Tx, plan Plan, postgres 
 		if err != nil {
 			return channeldelivery.Frozen{}, err
 		}
-		return channeldelivery.WithActionPage(frozen, plan.ActionCapacity, plan.ActionPageIndex)
+		return channeldelivery.WithPresentation(frozen, plan.Bounds, plan.ActionPageIndex)
 	default:
 		return channeldelivery.Frozen{}, fmt.Errorf("unsupported channel render source %q", plan.SourceKind)
 	}

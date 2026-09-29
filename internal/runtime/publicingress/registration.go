@@ -139,6 +139,17 @@ type admittedPair struct {
 	base     string
 }
 
+// SlotCollisionError is a permanent physical ownership rejection, not a
+// provider failure or permission to replace an independently selected bot.
+type SlotCollisionError struct {
+	SlotID     string
+	Selections []string
+}
+
+func (e *SlotCollisionError) Error() string {
+	return fmt.Sprintf("provider registration slot %q has competing independent selections %q; no provider registration was applied", e.SlotID, e.Selections)
+}
+
 func NewProviderRegistrationController(opts RegistrationControllerOptions) (*ProviderRegistrationController, error) {
 	if opts.CredentialOwner == nil || opts.EffectsStore == nil || opts.StartupAuthority == nil || opts.Readiness == nil {
 		return nil, fmt.Errorf("provider registration controller dependencies are incomplete")
@@ -235,7 +246,17 @@ func (c *ProviderRegistrationController) Preflight(ctx context.Context, exposure
 	}
 	c.reconcileMu.Lock()
 	defer c.reconcileMu.Unlock()
-	_, err := c.admitAndIdentify(ctx, exposure, pair)
+	candidate, err := c.admitAndIdentify(ctx, exposure, pair)
+	if err != nil {
+		return err
+	}
+	pairs := []admittedPair{candidate}
+	for _, selected := range c.snapshot.capture().registrations {
+		if selected.SelectionSlotID == candidate.slotID && pairAuthorityKey(selected.Pair) != pairAuthorityKey(pair) {
+			pairs = append(pairs, admittedPair{pair: selected.Pair, slotID: selected.SelectionSlotID})
+		}
+	}
+	_, err = resolveSlotCollisions(pairs)
 	return err
 }
 
@@ -738,7 +759,7 @@ func resolveSlotCollisions(pairs []admittedPair) ([]admittedPair, error) {
 			keys = append(keys, pairAuthorityKey(pairs[index].pair))
 		}
 		sort.Strings(keys)
-		return nil, fmt.Errorf("provider registration slot %q is selected by both %s; no provider registration was applied", slot, strings.Join(keys, ", "))
+		return nil, &SlotCollisionError{SlotID: slot, Selections: keys}
 	}
 	out := make([]admittedPair, 0, len(pairs)-len(drop))
 	for index, pair := range pairs {
