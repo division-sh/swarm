@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -430,6 +431,51 @@ func TestCommandBudgetBufferDoesNotCompoundOrAdmitInvalidEvidence(t *testing.T) 
 	evidence[0].PlanDigest = "invalid"
 	if got := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, evidence).Status; got != BudgetIncomplete {
 		t.Fatalf("invalid evidence status = %s, want INCOMPLETE", got)
+	}
+}
+
+func TestCommandBudgetBufferRejectsInvalidBaselines(t *testing.T) {
+	plan := timingTestPlan(t)
+	var evidence []CommandEvidence
+	for _, unit := range plan.Units {
+		evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, 10))
+	}
+	for _, tc := range []struct {
+		name, authored string
+		baseline       float64
+	}{
+		{"zero", "0", 0},
+		{"negative", "-1", -1},
+		{"NaN", ".nan", math.NaN()},
+		{"positive infinity", ".inf", math.Inf(1)},
+		{"negative infinity", "-.inf", math.Inf(-1)},
+		{"buffer overflow", "1.7976931348623157e308", math.MaxFloat64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			authored := fmt.Sprintf("version: 1\nhard:\n  max_shard_command_seconds: {limit_seconds: %s, justification: test baseline}\n  full_conformance_command_seconds: {limit_seconds: 300, justification: test baseline}\n", tc.authored)
+			if _, err := LoadBudgetPolicy(strings.NewReader(authored)); err == nil || !strings.Contains(err.Error(), "hard.max_shard_command_seconds.limit_seconds must be a finite positive number") {
+				t.Fatalf("policy admission error = %v", err)
+			}
+			policy := timingTestPolicy()
+			policy.Hard.MaxShardCommandSeconds.LimitSeconds = tc.baseline
+			result := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, evidence)
+			if result.Status != BudgetIncomplete {
+				t.Fatalf("invalid baseline status = %s, want INCOMPLETE", result.Status)
+			}
+			found := false
+			for _, surface := range result.Surfaces {
+				if surface.Surface != "broad-01" {
+					continue
+				}
+				found = true
+				if surface.Status != BudgetIncomplete || len(surface.Problems) != 1 || surface.Problems[0] != "command budget baseline or buffered ceiling is invalid" {
+					t.Fatalf("invalid baseline surface = %+v", surface)
+				}
+			}
+			if !found {
+				t.Fatal("invalid baseline has no surface result")
+			}
+		})
 	}
 }
 

@@ -173,7 +173,7 @@ func validateBudgetPolicy(policy BudgetPolicy, document *yaml.Node) error {
 		}{"hard.unit_command_seconds." + id, budget})
 	}
 	for _, item := range budgets {
-		if !finitePositive(item.budget.LimitSeconds) || !finitePositive(bufferedCommandCeiling(item.budget.LimitSeconds)) {
+		if _, valid := bufferedCommandCeiling(item.budget.LimitSeconds); !valid {
 			return fmt.Errorf("%s.limit_seconds must be a finite positive number", item.name)
 		}
 		justification := strings.TrimSpace(item.budget.Justification)
@@ -485,9 +485,9 @@ func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []Comm
 }
 
 func evaluateSurface(plan testplanning.RunPlan, unit testplanning.ProofUnit, budget CommandBudget, group *evidenceAttempts) SurfaceResult {
-	result := SurfaceResult{Surface: unit.ID, Status: BudgetPass, LimitSeconds: budget.LimitSeconds}
-	result.BufferedCeilingSeconds = bufferedCommandCeiling(budget.LimitSeconds)
-	if !finitePositive(budget.LimitSeconds) || !finitePositive(result.BufferedCeilingSeconds) {
+	ceiling, valid := bufferedCommandCeiling(budget.LimitSeconds)
+	result := SurfaceResult{Surface: unit.ID, Status: BudgetPass, LimitSeconds: budget.LimitSeconds, BufferedCeilingSeconds: ceiling}
+	if !valid {
 		result.Status = BudgetIncomplete
 		result.Problems = append(result.Problems, "command budget baseline or buffered ceiling is invalid")
 		return result
@@ -515,17 +515,24 @@ func evaluateSurface(plan testplanning.RunPlan, unit testplanning.ProofUnit, bud
 		return result
 	}
 
-	if primary.ElapsedSeconds > result.BufferedCeilingSeconds {
-		result.Status = BudgetFail
-		result.Problems = append(result.Problems, "primary command exceeded its buffered timing ceiling")
-	} else if primary.ElapsedSeconds > budget.LimitSeconds {
-		result.Warnings = append(result.Warnings, fmt.Sprintf("performance warning: primary command %.3fs exceeded %.3fs baseline but stayed within %.3fs buffered ceiling", primary.ElapsedSeconds, budget.LimitSeconds, result.BufferedCeilingSeconds))
-	}
+	result.applyCommandTiming(primary.ElapsedSeconds)
 	return result
 }
 
-func bufferedCommandCeiling(baseline float64) float64 {
-	return baseline * commandBudgetBuffer
+func (result *SurfaceResult) applyCommandTiming(elapsed float64) {
+	if elapsed > result.BufferedCeilingSeconds {
+		result.Status = BudgetFail
+		result.Problems = append(result.Problems, "primary command exceeded its buffered timing ceiling")
+		return
+	}
+	if elapsed > result.LimitSeconds {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("performance warning: primary command %.3fs exceeded %.3fs baseline but stayed within %.3fs buffered ceiling", elapsed, result.LimitSeconds, result.BufferedCeilingSeconds))
+	}
+}
+
+func bufferedCommandCeiling(baseline float64) (float64, bool) {
+	ceiling := baseline * commandBudgetBuffer
+	return ceiling, finitePositive(baseline) && finitePositive(ceiling)
 }
 
 func packageDiagnostics(opts EvaluationOptions, grouped map[string]*evidenceAttempts) []PackageDiagnostic {
@@ -602,10 +609,7 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 	if w == nil {
 		return fmt.Errorf("budget Markdown writer is nil")
 	}
-	if _, err := fmt.Fprintln(w, "# CI Test Timing Budget"); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "\n**Status: %s**\n\n", result.Status); err != nil {
+	if _, err := fmt.Fprintf(w, "# CI Test Timing Budget\n\n**Status: %s**\n\n", result.Status); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(w, "Hard latency is command-level `go test` elapsed. Committed limits are baselines; evaluation allows a fixed 30% CI buffer without changing those targets. Package elapsed is concurrent work telemetry only; whole-job latency is reported separately."); err != nil {
@@ -654,21 +658,8 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 			}
 		}
 	}
-	var warnings []string
-	for _, surface := range result.Surfaces {
-		for _, warning := range surface.Warnings {
-			warnings = append(warnings, surface.Surface+": "+warning)
-		}
-	}
-	if len(warnings) > 0 {
-		if _, err := fmt.Fprintln(w, "\n## Performance Warnings"); err != nil {
-			return err
-		}
-		for _, warning := range warnings {
-			if _, err := fmt.Fprintf(w, "- %s\n", warning); err != nil {
-				return err
-			}
-		}
+	if err := writePerformanceWarnings(w, result.Surfaces); err != nil {
+		return err
 	}
 	var problems []string
 	problems = append(problems, result.Problems...)
@@ -698,6 +689,27 @@ func WriteBudgetMarkdown(w io.Writer, result BudgetResult) error {
 			return err
 		}
 		if _, err := fmt.Fprintln(w, "3. Raise a committed budget only through review with a new one-line justification."); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writePerformanceWarnings(w io.Writer, surfaces []SurfaceResult) error {
+	var warnings []string
+	for _, surface := range surfaces {
+		for _, warning := range surface.Warnings {
+			warnings = append(warnings, surface.Surface+": "+warning)
+		}
+	}
+	if len(warnings) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(w, "\n## Performance Warnings"); err != nil {
+		return err
+	}
+	for _, warning := range warnings {
+		if _, err := fmt.Fprintf(w, "- %s\n", warning); err != nil {
 			return err
 		}
 	}
