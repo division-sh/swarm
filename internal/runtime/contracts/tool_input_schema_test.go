@@ -105,7 +105,7 @@ func TestValidateToolInputSchemaRejectsMalformedRecursiveSchemas(t *testing.T) {
 	}
 
 	var nested ToolInputSchema
-	err := yaml.Unmarshal([]byte("type: array\nitems:\n  type: money\n"), &nested)
+	err := decodeNodeTestYAML([]byte("type: array\nitems:\n  type: money\n"), &nested)
 	if err == nil || !strings.Contains(err.Error(), "requires an explicit supported JSON type") {
 		t.Fatalf("nested YAML admission error = %v", err)
 	}
@@ -175,7 +175,7 @@ func TestValidateToolInputSchemaRejectsCyclesAndExcessiveDepthBeforeProjectionOr
 
 func TestToolInputSchemaRejectsExplicitEmptyEnum(t *testing.T) {
 	var schema ToolInputSchema
-	err := yaml.Unmarshal([]byte("type: string\nenum: []\n"), &schema)
+	err := decodeNodeTestYAML([]byte("type: string\nenum: []\n"), &schema)
 	if err == nil || !strings.Contains(err.Error(), "enum must contain at least one value") {
 		t.Fatalf("empty enum YAML error = %v", err)
 	}
@@ -223,14 +223,14 @@ func TestToolInputSchemaRejectsExplicitNullForEveryKeyword(t *testing.T) {
 				var schema ToolInputSchema
 				var err error
 				if form == "direct" {
-					err = yaml.Unmarshal([]byte(tc.body), &schema)
+					err = decodeNodeTestYAML([]byte(tc.body), &schema)
 				} else {
 					aliased := strings.Replace(tc.body, tc.keyword+": null", tc.keyword+": *nil", 1)
 					body := "null_anchor: &nil null\nschema:\n  " + strings.ReplaceAll(aliased, "\n", "\n  ")
 					var document struct {
 						Schema ToolInputSchema `yaml:"schema"`
 					}
-					err = yaml.Unmarshal([]byte(body), &document)
+					err = decodeNodeTestYAML([]byte(body), &document)
 					schema = document.Schema
 				}
 				want := fmt.Sprintf("tool schema field %q must not be null", tc.keyword)
@@ -246,7 +246,7 @@ func TestToolInputSchemaAliasAdmissionIsBoundedAndPreservesNonNullAliases(t *tes
 	var document struct {
 		Schema ToolInputSchema `yaml:"schema"`
 	}
-	if err := yaml.Unmarshal([]byte(`
+	if err := decodeNodeTestYAML([]byte(`
 child_schema: &child
   type: string
   enum: [approved]
@@ -384,7 +384,7 @@ func TestAdmittedToolSemanticJSONCarriersRejectCycles(t *testing.T) {
 func schemaWithEnum(t *testing.T, body string) ToolInputSchema {
 	t.Helper()
 	var schema ToolInputSchema
-	if err := yaml.Unmarshal([]byte(body), &schema); err != nil {
+	if err := decodeNodeTestYAML([]byte(body), &schema); err != nil {
 		t.Fatalf("decode schema: %v", err)
 	}
 	return schema

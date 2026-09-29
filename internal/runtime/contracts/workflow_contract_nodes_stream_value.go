@@ -69,7 +69,7 @@ func projectNodeFanOutValue(value yamlsource.Value) (*FanOutSpec, error) {
 	}
 	if max, present := fields["max_items"]; present {
 		if max.Presence() != yamlsource.PresenceScalar {
-			return nil, fmt.Errorf("fan_out.max_items at %s must be a positive integer", max.Location())
+			return nil, fmt.Errorf("fan_out.max_items must be a positive integer when set at %s", max.Location())
 		}
 		out.MaxItemsSet = true
 		if err := max.Project(&out.MaxItems); err != nil {
