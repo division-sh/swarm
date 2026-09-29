@@ -100,6 +100,9 @@ func (s ImportShape) Validate() error {
 	if err := s.SchemaDigest.Validate(); err != nil {
 		return err
 	}
+	if s.Fields == nil {
+		return fmt.Errorf("import shape fields must be an array")
+	}
 	if len(s.Fields) > MaxImportShapeFields {
 		return fmt.Errorf("import shape exceeds %d fields", MaxImportShapeFields)
 	}

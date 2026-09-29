@@ -39,3 +39,24 @@ func TestImportShapeValidatesBoundsIdentityAndTextKey(t *testing.T) {
 		t.Fatal("wrong bundle hash was accepted")
 	}
 }
+
+func TestImportShapeRequiresCanonicalEmptyFieldArray(t *testing.T) {
+	shape := ImportShape{
+		BundleHash:   "bundle-v2:sha256:" + strings.Repeat("a", 64),
+		Declaration:  DeclarationRef{FlowPath: ".", EventName: "empty.ping"},
+		SchemaDigest: SchemaDigest("resource-schema-v1:sha256:" + strings.Repeat("b", 64)),
+	}
+	if err := shape.Validate(); err == nil {
+		t.Fatal("nil field set was admitted")
+	}
+	if _, err := shape.Digest(); err == nil {
+		t.Fatal("nil field set received a digest")
+	}
+	shape.Fields = []ImportShapeField{}
+	if err := shape.Validate(); err != nil {
+		t.Fatalf("empty field array was refused: %v", err)
+	}
+	if _, err := shape.Digest(); err != nil {
+		t.Fatalf("empty field array has no digest: %v", err)
+	}
+}
