@@ -1,0 +1,3185 @@
+# Issue #2394: Original Thread Archive
+
+Snapshot: 2026-09-29. Repository: division-sh/swarm.
+
+This is historical evidence, not the current implementation instruction. Read the live issue body for current status. Original wording, including proposals, stale blockers and subsequently corrected claims, is preserved below. Inclusion here does not ratify a proposal or qualify a test.
+
+## Original Issue Body
+
+## Current Acceptance And Shipping Decision (2026-09-20)
+
+**Stop optimization in PR #2455; reject inline-attempt prototype90f84cfe6 for adoption.** The [lead acceptance amendment](https://github.com/division-sh/swarm/pull/2455#issuecomment-5752572474) explicitly permits partial-closure merge after revised qualification. Only PostgreSQL catalog100's two existing20s phases and SQLite M29's final30s race drain receive fixed60s merge ceilings, without resets. All full-workload correctness/ownership/history assertions remain required; other targets, faults, soaks and CI protections are unchanged. A must record the old targets separately, prove the formerly unreachable final assertions, and pass final required CI before merging. Current red checks are not waived and cannot be admin-bypassed.
+
+**Keep this issue OPEN after that merge.** Original PG20s and SQLite-race30s targets remain unmet performance obligations here, with the original reproducible workloads and receipts. Future transaction-composition design belongs to existing #2412; #2455 does not wait for the whole R6 program. No current-model physical lower bound or failure-class elimination is claimed. The modest prototype gain does not justify its additional action/clock/history obligations. This acceptance exception supersedes prior instructions requiring these two latency goals before merge, including the earlier SQLite-only conditional proposal. It does not authorize production semantic changes, prototype adoption, wider timeouts or legacy/dual ownership. No new audit or performance experiment is requested; A's next work is the scoped acceptance patch and final qualification.
+
+The dated decisions below remain historical context; the linked amendment controls these exact two residuals. #2454's separate-gate language in the historical text was also superseded by ruling5746053255; that filter repair is absorbed into #2455 with its distinct proof/tracker.
+
+## Historical Direction (2026-09-19)
+
+**APPROVED: exact-fact history capture and dedicated mandatory soak CI.** [Binding lead ruling5743323725](https://github.com/division-sh/swarm/issues/2394#issuecomment-5743323725) resolves the S03 revision-effect and soak scheduling requests. A may implement without another pre-audit round. Arbitrary earlier-event forking is a required product capability; current-state-only forks or sparse checkpoints are not substitutes. Refine the existing revision owner with complete writer-owned exact fact sets and explicit whole-family capture, sharing canonical projection/validation/finalization. All committed historical cuts remain exact. Ordinary exact writes need not scan unrelated untouched corruption; full consistency and historical/fork admission retain all-thirteen-family validation. Generated keys, joined/sibling dependencies, deletion/tombstones and valid-write differential proof are mandatory.
+
+Authorize a dedicated required soak lane with both full15-minute backend cells, duration-appropriate CI envelopes, complete/disjoint partition guards and unchanged ordinary budgets/pressure/progress/drain assertions. This does not waive the recorded PostgreSQL stale-claim failure. Existing same-class repairs continue; original500/S03 and final-head qualification remain outstanding. No merge-readiness claim. Watchlist decisions are published on docs master at `7c313eb`.
+
+## Latest Scope Disposition (2026-09-14)
+
+**Settlement amendment APPROVED for implementation:** [independent ruling and reviewer-added preservation coverage](https://github.com/division-sh/swarm/issues/2394#issuecomment-5671541564) approves [audit5671347660](https://github.com/division-sh/swarm/issues/2394#issuecomment-5671347660), including bounded pre-publication shared authority, terminal-segment settlement and explicit one-transaction/one-run-revision visibility. A may implement now; no replacement audit is required. Directive/provider parent-terminalization consumers are added as P16 preservation within B09/B16, not a separate project. Original M01-M35/S01-S04 and B01-B26, the 500-row targets and real-recipient100 proof remain mandatory. No merge-readiness claim.
+
+Next: implement the spec/owner contract and deterministic ownership/history tests, wire dispatch/flush/recovery, then qualify the original workloads. Bounded same-class caller/fixture repairs are explicitly authorized without another pause; escalate only genuinely incompatible contracts or new ownership/behavior outside this ruling. Watchlist amendment and approval are on docs default master at `33508806e74b91342d70588427124d492abc111a`.
+
+Runtime-log filter parity stays split to #2454 (parents #101/#2275); its unchanged reproducer is pushed at `99ddef4b10420cf9ae5775b1b86fbddcd4712cb5`. #2453 and #2454 are not prerequisites or CI waivers. No split closure or automatic separate implementation approval is claimed.
+
+## Current Gate A (2026-09-14)
+
+**APPROVED for implementation:** [independent Gate A ruling and additive coverage repair](https://github.com/division-sh/swarm/issues/2394#issuecomment-5668445427). Baseline `486ea41611ed06fa2932fb43892f8e7f4e1dbefe`. The [pre-audit](https://github.com/division-sh/swarm/issues/2394#issuecomment-5668255316) plus that ruling govern the work. This is not merge approval or a claim that the implementation is complete.
+
+Chosen class is broad enough: complete durable fan-out serving opportunity/turn-settlement ownership across exact admission, shared capacity, continuous refill, finite fairness, retry readiness, lease fencing, atomic successful release, recovery, diagnostics and cancellation evidence. D2 cap-first sizing is already complete through #2402 and must be preserved.
+
+A is authorized to implement the process-capability-owned PostgreSQL4/SQLite1 budget, admitted-source arbitration, finite last-served-or-created ordering, typed1s retry readiness, two-write-transaction clean serving path, retirement of durable commit-duration telemetry, production1s recovery/scoped observed-opportunity diagnosis, paginated intent readback and the enumerated incident-reader parity repair. Preserve all existing source, receiver, revision, stop and selected-fork admission owners. Exact conditions and qualification remain in the ruling; no generic scheduler, compatibility/migration or new replay capability.
+
+**Reviewer-added M35 is absorbed now:** both stores accepted a mutation from an expired but unreclaimed claim when given the old turn-start time. Current lease validity must be established at selected-store mutation admission, separately from command/event timestamps. Also prove newer-generation advancement before lost-acknowledgement readback after the release fold. No replacement pre-audit is required for these enumerated temporal cases.
+
+Independent probes confirmed the coalesced backlog and sustained newcomer ordering defects, and executed the SQLite incident bundle/horizon/grouping/cursor mismatch with PostgreSQL controls. Existing both-store lifecycle, nested cancellation/restart, exact-source, stale-after-reclaim and live-process refusal controls pass. Historical R6 cause remains unproven; supported HTTP/cause evidence is still mandatory. Future implementation must not call baseline red probes passing qualification.
+
+**Split ratified:** #2453 owns dependency-safe downstream backlog admission and is not a prerequisite to #2394. #2394 retains bounded in-memory handoff and cannot claim that a worker cap bounds durable backlog. #1449 is an open split parent/watchpoint; its distinct tool/provider children #1456/#1457 are closed implementations, not new work here.
+
+Watchlist/tracker repair is complete on swarm-docs default branch at `b2e44c51f24c4c8db76e628513c4e10b8130be6d`, including M35 and correction of the stale active #2288 reference. #2288 is closed through #2380; direct-barrier semantics remain preservation obligations.
+
+Acceptance retains the original500-row contents/history/final assertions, <=10s normal local execution and <=2min with300ms per-commit delay on both backends. Race and end-to-end safety proof remains separately required under unchanged budgets; no deadline inflation or retry-to-green. A may start the approved implementation now.
+
+The following sequencing/origin material is retained historical context. Conflicting old wording is superseded only by the explicit recorded rulings, not silently adopted as current scope.
+
+## Post-Merge Sequencing (2026-09-14)
+
+Merged PR #2402 at `486ea41611ed06fa2932fb43892f8e7f4e1dbefe` (2026-09-14). Exact-head proof audit: https://github.com/division-sh/swarm/pull/2402#issuecomment-5667179202 . Frozen source-head whole suite172 package passes/zero failures, full-profile both-store lifecycle/burst, all51 required Go CI units and retained race matrices passed before merge; these are retained qualification receipts, not a new merged-head rerun.
+
+D2 is complete, not remaining implementation work. #2386 is closed and removed from blockers. A is re-diagnosing remaining D1/D3/D4/D5 on current origin/master before a new pre-audit; no implementation approval is inferred for that remainder. The original latency/starvation/cancellation claims below remain historical until separately reproduced. Existing August30 design decisions still bind, as explicitly amended for D2.
+
+## Historical Sequencing Amendment (2026-09-14)
+
+**D2 chunk sizing is now pulled forward into A’s PR #2402**, under the [explicit absorption ruling](https://github.com/division-sh/swarm/issues/2386#issuecomment-5664494977). A may implement it now; it does not wait for #2386 to close. Complete cap-first sizing across creation, success/retry recovery, restart and fork, updating platform-spec.yaml in the same PR. Keep ceiling32, no elapsed-time shrink, and all LSF-052 qualification requirements.
+
+The tracker blocker #2386 applies to the REMAINING program only, not this absorbed D2 work. No reverse dependency is introduced. This issue remains open for concurrency/capacity, sweep/liveness, cancellation/diagnostics and aggregate throughput acceptance; PR #2402 must not claim full #2394 closure. The August30 ruling below supersedes the original body’s gradual adaptation, RTT-only and impossible liveness wording; the September14 amendment governs D2 implementation sequencing and explicit success-to-cap retry recovery.
+
+## Origin
+
+R6 + R7 of #2381 (Aug-28 field review, master `1c20cdf`), durable fan-out serving (PR #2375, #2337 S1):
+
+- **R7 — throughput collapse**: on the jobflow workload (22 concurrent intents, cardinality 25/10) against Postgres with real network latency, the adaptive controller pins `next_chunk_size` at 1 on essentially all intents, inter-serving gaps stretch to minutes, aggregate throughput ~10 ordinals/min and falling. The eager pre-#2375 path did 500 in seconds.
+- **R7 — starvation**: the final ordinals of a 2×10 run stopped being served at all (>15 min, `last_served_at` frozen, **no lease, no blocked_reason**).
+- **R6 — cancellation unreachable**: `run.stop` against a run holding 20 open `fan_out_intents` fails with JSON-RPC `-32603 unclassified_runtime_error`.
+
+## Lead mandate (binding, not a discussion)
+
+**The pump must be fast, must use the full resources available, and must guarantee correctness — all three.** One-item-at-a-time trickle serving through a far store is not an acceptable operating mode of this platform under any latency regime. Durability and exactly-once are non-negotiable; so is saturating available capacity.
+
+## Verified mechanisms
+
+**R7a — inverted controller feedback.** `adaptiveFanOutChunk` (`internal/store/internal/backend/pipelinepersistence/fan_out_owner.go:545`) adapts on the **absolute** wall-clock duration of the commit: ≤250ms → +1, >1s → shrink, floor 1, cap 32. Commit duration = fixed per-transaction cost (network round-trips) + marginal per-item cost. The controller cannot distinguish them: with fixed latency >1s (remote Postgres), every commit is "slow" at any chunk size → pinned at 1, and the 250ms growth threshold is unreachable → no recovery. The correct response to fixed-latency-dominated commits is the exact opposite — **larger chunks amortize the round-trip**. The controller minimizes chunk size precisely when it should maximize it.
+
+**R7b — liveness hole with an undiagnosable state.** "Re-entry is signaled when work remains" (`internal/runtime/pipeline/fan_out_pump.go:18`) — an edge-triggered wakeup. The observed terminal symptom (owing intent, unleased, unblocked, never served again) indicates a dropped signal with no level-triggered recovery. Root cause requires diagnosis-before-code. Independently: the state itself is illegal — the model has typed blocked diagnoses (`fanoutobligation.RunSummary.BlockedIntents`), yet this intent was neither served, nor leased, nor blocked-with-reason. A fourth, undiagnosable state exists.
+
+**R6 — cancellation designed but unreachable.** Obligation cancellation is first-class in #2337 and in #2375's census; the operator surface path normalizes into `unclassified_runtime_error` — both a broken path and a taxonomy violation (no reachable failure may surface unclassified).
+
+## Required design properties
+
+1. **Amortization-aware serving**: chunk sizing must respond to marginal per-item cost, not absolute commit duration. Under fixed-latency-dominated commits, chunks grow toward the cap; total store round-trips scale as O(cardinality / chunk), never O(cardinality).
+2. **Full-resource concurrency**: independent intents are served concurrently up to the store/engine capacity limits — never serialized one-ordinal-at-a-time across the fleet. If a capacity cap exists, it is explicit, named, and observable — no silent 1-at-a-time floor.
+3. **Liveness invariant (the diagnosability law)**: at all times, every open intent is exactly one of — being served, leased with an unexpired lease, or blocked with a typed diagnosis. The fourth state is unrepresentable or fail-loud. Recovery from dropped signals is level-triggered (rescan/sweep), not edge-only.
+4. **Cancellation reachable and typed**: `run.stop` on a run with open intents cancels them with typed terminal dispositions (#2337 cancellation semantics) and returns a typed result. `unclassified_runtime_error` is eliminated from this path.
+5. **Correctness unchanged**: exactly-once per ordinal, durable outcomes, single claim per intent, chunk-bisect failure isolation — all preserved and re-proved under the new concurrency/chunking behavior, on SQLite and Postgres both.
+
+## Acceptance criteria
+
+1. **Latency-injected store harness** (the #2381 production-shape meta-class: CI's local stores never see the remote regime): fan-out suite runs with injected ~300ms and ~1s per-commit latency.
+2. **Throughput bounds, red-first**: the 20×25 workload (500 ordinals) at 300ms injected RTT completes in ≤2 minutes; at local latency in ≤10 seconds. Both demonstrably fail on current master.
+3. **Chunk growth under fixed latency**: at 1s injected RTT, chunk size reaches the cap, not the floor; round-trip count for a 500-ordinal run is ≤ cardinality/cap + intents, proved by counting actual commits.
+4. **Completion guarantee**: the reporter's 2×10 run completes; no owing intent ever exceeds a bounded time-to-next-serve; proved with fault injection that drops the re-entry signal (the sweep must recover it).
+5. **Liveness invariant asserted**: a store-level check (test hook or invariant query) proves no open intent is ever simultaneously unserved+unleased+undiagnosed beyond the sweep bound; mutation test reintroducing an edge-only wakeup fails it.
+6. **Cancellation**: `run.stop` with 20 open intents returns a typed success; intents land in typed terminal dispositions; ordinals already committed stay exactly-once; a second `run.stop` is idempotent. No `unclassified_runtime_error` reachable from this path (mutation-verified).
+7. **Exactly-once re-proof under concurrency**: concurrent serving of many intents with injected failures/crash-restart yields every ordinal exactly once — SQLite and Postgres.
+8. **Observability**: `run status` shows per-intent chunk size, last-served, lease state, and typed blocked reason — the reporter's frozen-state investigation must be answerable from the operator surface alone.
+
+## Diagnosis-before-code
+
+R7b's dropped-signal hypothesis must be root-caused and written up on this issue before the fix lands (production/harness classification per the #1233 taxonomy). The env caveat is recorded honestly: the reporter's ssh tunnel amplified the symptom; the controller inversion, the liveness hole, and the unclassified path are engine-side regardless.
+
+## Relations
+
+Umbrella: #2381 (R6/R7). Design authority: #2337 (obligation laws; cancellation), PR #2375. Class siblings: #2382/#2383/#2386/#2392 (harness-vs-production-shape). Sibling in lane: #2386 (fan-out numeric rejection — same workload, fix order a's choice, likely #2386 first since its repro unblocks this one's throughput measurements).
+
+## tracker
+```yaml
+blockers: []
+score: 100
+```
+
+
+
+
+
+
+
+
+## Comments
+
+### Comment 5471507787
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5471507787
+
+Author: yazzaoui; created: 2026-08-30T21:58:36Z; updated: 2026-08-30T21:58:36Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# Gate ruling (lead, confirmed 2026-08-30): diagnosis corrections adopted; the five design questions settled
+
+agent-a's diagnosis is adopted in full. Corrections to the issue body, on the record:
+
+1. **Serving is structurally serial** (one coordinator, one chunk, one intent at a time) — the concurrency work is structural, not tuning.
+2. **The starvation root cause is open.** A once-per-minute level-trigger already exists, so a >15-minute stall is not explained by a dropped wake. The audit must test maintenance-goroutine lifetime, bundle eligibility, and sustained-backlog behavior before any root-cause claim. Note the harness finding: the lost-wake test runs a 10ms sweep against a 60s production interval — the #2381 harness-vs-production-shape class inside the liveness test itself.
+3. **The liveness taxonomy is amended.** The issue's served/leased/blocked triple omitted the normal queued state and was unsatisfiable. Durable per-intent states are exactly **eligible / leased / blocked** ("executing" is transient evidence beneath leased). The liveness guarantee becomes: *an eligible intent with free capacity is claimed within one sweep interval.*
+4. **R6 is a diagnosis, not a feature.** run.stop already invokes fan-out cancellation atomically inside the selected-store lifecycle transaction. The work is identifying which invariant fails in the real workload. No second cancellation path, no reconciler — one owner stands.
+5. **The chunk policy is spec-binding**, and the spec plus unit tests currently enshrine the inverted thresholds. The fix amends `platform-spec.yaml` in the same PR (#1827 mechanics); the tests asserting the wrong bands migrate with it.
+
+## Reframed law (supersedes the issue's RTT framing)
+
+**Commit duration is not a chunk-size signal.** A commit can be slow for reasons unrelated to chunk size — fsync stalls, WAL checkpoints, lock waits, load. Shrinking the chunk on slow commits raises transactions-per-ordinal exactly when the store is struggling: a positive feedback loop. The field report's ssh tunnel merely amplified it. The requirement is feedback-direction correctness under slow commits, source-agnostic; the harness is **injected commit latency**, not "RTT," and no part of this design assumes a distributed topology.
+
+## The five decisions
+
+**D1 — Capacity: one named, platform-owned cap with backend defaults.** SQLite defaults to a single commit lane; PostgreSQL to a bounded multi-worker pool. Justified by engine write concurrency (SQLite is single-writer by construction; Postgres genuinely commits in parallel), never by network geometry. The cap is validated against store connection capacity at boot — a cap exceeding the pool is a boot error. Observable at runtime; no author-facing knob.
+
+**D2 — Cap-first chunk sizing.** Start at `min(cardinality, cap)`; shrink **only** on typed capacity/retry failures — never because commits are slow. Gradual calibration is eliminated, not disfavored: with cardinality 25 under cap 32 it can never meet the round-trip bound. Cap stays 32; raising it is a later evidence-gated change. One chunk per claim, release, reacquire via least-recently-served — fairness preserved.
+
+**D3 — Liveness: sweep-interval bound.** A short level-triggered eligibility sweep owns liveness; wake signals are acceleration only. Sweep interval pinned in the spec (1s). Guarantee: eligible + free capacity → claimed within one sweep interval. Queue delay under saturation is an observable fact (owed time visible), not a violation. **Binding test condition: at least one CI test runs the production sweep interval** — a shortened-interval-only harness is how the current hole survived.
+
+**D4 — Per-intent diagnostics, paginated.** Aggregates stay in `run status`; a paginated per-intent view exposes state (eligible/leased/blocked), cursor, owed count, chunk size, last-served time, lease expiry, and typed diagnosis. The field report's frozen-state investigation must be answerable from this surface alone.
+
+**D5 — run.stop cause: recover the artifact, fix the evidence path regardless.** The lab preserved repro bundles and a diagnostic patch; the lead is requesting the database snapshot/logs. Do not block on the artifact: sequence the cause-preservation typing (the #2386 class-2 envelope work is adjacent) early, so if the snapshot is gone the first reproduction under the latency harness names the failing invariant itself. Either way, `unclassified_runtime_error` is eliminated from this path.
+
+## SQLite performance expectation (ruled, no exemption)
+
+The single commit lane is why SQLite is fast, not a concession: local commits cost milliseconds, cap-32 chunking turns 500 serial commits into ~16, and parallel writers would only pay the SQLITE_BUSY contention tax (#2363's territory). The commit lane serializes store writes only — per-item expensive work (agent turns, deliveries) never lived inside the pump transaction. **The local throughput bound (500 ordinals ≤10s) applies to SQLite in full.** The injected-commit-latency bound (≤2 min at 300ms) proves feedback direction on both backends.
+
+Issue criteria are amended by this ruling where they conflict (liveness invariant wording, RTT framing, R6 scope). Everything else in the issue body stands. a proceeds to the Pre-Implementation Coverage Audit on this basis.
+
+
+---
+
+### Comment 5663034537
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5663034537
+
+Author: yazzaoui; created: 2026-09-14T11:11:48Z; updated: 2026-09-14T11:11:48Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Adjacent measured evidence, not2394 closure or automatic scope expansion: PR2402 reporter race workload (500 rows) still misses its unchanged cursor deadline after the test-observer optimization; same non-race workload passes35.27s. Retained non-race profile attributes52.96% cumulative samples to runforkrevision.finalize, and code inspection shows whole-run latest-fact loading plus dirty-family projection per affected transaction. This does not establish race-build cause, starvation, a master regression or the specific2394 controller/liveness mechanism. Full evidence:2386 comment5659187263. User-directed ruling now authorizes A to diagnose and absorb proven bounded history/query/serialization work reductions in2402 with exact both-store historical/rollback parity. Full pump concurrency/chunk-policy/liveness redesign remains here; no2394 closure, timeout waiver or2274 reopening implied.
+
+---
+
+### Comment 5664416525
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5664416525
+
+Author: yazzaoui; created: 2026-09-14T13:04:49Z; updated: 2026-09-14T13:04:49Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## LSF-052 controller-policy cross-record
+
+A has posted the consolidated measurements and sequencing request on [canonical LSF-052 / #2353](https://github.com/division-sh/swarm/issues/2353#issuecomment-5664411856). Production checkpoint6489c08cf includes bounded revision/query/serialization reductions; diagnostic-only272f0f311 records original verdicts without changing the workload or deadline.
+
+Normal SQLite completes all500-row plus mixed-rejection/final-readback assertions in25.90s with all20 intents at next_chunk_size9. Same-source race fails486/500 with all20 at1 and max last_chunk_ms1168. This confirms a live floor regime associated with commit cost, not a counterfactual proof that another controller alone passes, and not reproduction of this issue’s starvation/cancellation/remote-latency obligations. Exact receipts, profiled binaries and qualification limitations are in the linked record.
+
+The mandated absolute timing bands remain unchanged. Request an explicit decision on the existing controller-policy/qualification sequence; do not silently budget away the failure or infer permission for a full pump redesign. This issue currently lists2386 as a blocker; no reverse dependency, new issue, controller change or full2394 closure claim has been made. PR2402 remains unqualified until its required proof passes. Existing watchlist mapping retained pending lead disposition.
+
+---
+
+### Comment 5667674035
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5667674035
+
+Author: yazzaoui; created: 2026-09-14T17:02:32Z; updated: 2026-09-14T17:02:32Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Post-Merge Diagnosis And Design Questions
+
+Baseline: fresh detached `origin/master@486ea41611ed06fa2932fb43892f8e7f4e1dbefe`, containing merged #2402. This is diagnosis, **not a Pre-Implementation Coverage Audit or implementation approval**. Production files were unchanged. Temporary test-only probes and timer observations are preserved outside the worktree; the worktree is clean again.
+
+### Merge Accounting
+
+#2386 is closed as completed by #2402. #2353 LSF045/048/052/053 are fixed with original failures and qualification receipts retained. #2381 now retains #2394/#2395, not #2386, as blockers. D2 is implemented and removed from remaining #2394 work; #2436/B has the merged handoff. Broader parents and deferred #2452 remain open. No whole #2394 closure is claimed.
+
+### What Remains On Current Master
+
+| Area | Evidence and disposition |
+| --- | --- |
+| D2 sizing | Already implemented. Existing cap/range/retry controls pass3/3. The unchanged 20x25 reporter workload proves twenty successful25-item publication chunks for500 items on both stores, not one-item collapse. |
+| D1 concurrency | `pipeline/coordinator.go:415-460` calls one synchronous `serveFanOutTurn`, on the same maintenance goroutine as draft/human-task expiry. No backend-specific fan-out worker capacity exists here. PostgreSQL claim SQL already uses `FOR UPDATE SKIP LOCKED`; its ability to support independent claims is not used by a single coordinator's serial loop. This is source inspection, not an executed multiworker throughput proof. |
+| D3 recovery interval | Production remains `time.Minute` at coordinator.go:444. `TestIssue2394ProductionSweepClaimOpportunity` observes the real maintenance loop: initial examination succeeds; no next examination within ruled1s plus200ms observation allowance,3/3. Explicit wake and10ms controls pass. This proves missing periodic claim opportunity, not the historical15-minute stall. |
+| D3 sustained backlog | There is also a concrete coalescing defect: `serveFanOutTurn` returns whether the **just-served intent** remains open (fan_out_pump.go:161); RunMaintenance only re-signals on that boolean. After a short intent closes, the loop can sleep despite other eligible intents. The bounded queue of one wake token coalesces arrivals. `TestIssue2394ClosedIntentLeavesCoalescedBacklog` uses a real admitted pipeline/evaluator/publication path with a three-intent selected-owner test double: exactly two of three short intents execute, then the third waits,3/3. The same setup with10ms sweep passes3/3. This establishes the current mechanism and test masking; it does not reconstruct the historical database or prove all field stalls share this cause. |
+| D4 diagnostics | Current RunSummary exposes aggregates and blocked-intent details, not a paginated view of eligible/leased intents with per-intent cursor/lease/last-served state. The requested investigation surface is still missing. |
+| D5 cancellation | Existing claimed-suffix stop, stale fencing, exact-bundle eligibility and API committed-stop replay controls pass3/3. A new selected-store probe with20 open25-item intents, including one held claim, stops and cancels all500 on SQLite/PostgreSQL,3/3. That is real lifecycle/store execution, **not a served HTTP20-intent reproduction**. R6's failing invariant remains unidentified; do not add a second cancellation owner or declare R6 fixed from these controls. |
+| Local throughput | Added only two elapsed-time observations around the unchanged reporter test. First batch submission to500 durable outcomes: PostgreSQL20.008s, SQLite16.229s. Through runtime settlement:20.785s/16.598s. All original semantic assertions pass. These exceed the10s target at this measurement boundary even with the retained10ms test maintenance interval. They are one local non-race baseline, not production-interval or injected-latency qualification and not proof that worker concurrency alone fixes SQLite. |
+
+The reported symptoms therefore must not be grouped as another numeric defect. D2 is complete; scheduling/eligibility, operator visibility and throughput still need work. The late August cancellation/stall evidence remains separately unproven.
+
+### Recommended Direction
+
+Keep one durable FanOutObligationOwner for intent selection, generation-fenced claims, cursor/outcomes and cancellation. After **every completed turn**, available worker capacity should continue asking that owner for eligible work until exhausted; a completed current intent must not imply an empty global queue. Do not replace durable ordering with a per-intent process queue. Independently scheduled1s scans recover missed wakes, rather than owning one-chunk-per-tick throughput. Slow mailbox expiry must not stall pump admission.
+
+Use one named selected-store capacity owner, shared across loaded runtime/bundle consumers; preserve one SQLite commit lane and bounded PostgreSQL concurrency. Define the budget at the actual shared pool, not independently per coordinator. Retain the existing backend transaction/capacity owners and guarded claim/commit/release paths. No generic scheduler, new durable queue, schema compatibility, timer retry, or fork redesign is proposed.
+
+Expose the ruled paginated intent view from the same eligibility facts used for claims. Cancellation diagnosis stays in the existing selected-store lifecycle operation with specific typed stage/cause evidence. Candidate receipts, issued prefixes and stale-owner fencing remain mandatory.
+
+### Questions To Settle Before The Pre-Audit
+
+1. **Concrete capacity:** D1 fixes the model but not the PostgreSQL default. Proposal: internal default4, SQLite1, shared per selected store and validated against usable pool capacity after dedicated reservations. Confirm this default and scope rather than minting four workers per loaded bundle. Exact execution/commit reservation boundaries must be mapped in the pre-audit.
+2. **One-second guarantee under slow stores:** should the bound mean starting the claim attempt within1s of eligibility/free capacity, with database wait and successful lease acquisition measured separately? A successful persisted claim cannot have an unconditional1s wall-clock guarantee when the injected transaction latency itself is1s or more. Preserve the1s production scan; explicitly settle this measurement distinction instead of silently weakening D3.
+3. **Throughput stopwatch:** proposal is an already-ready runtime, first accepted batch submission through the last durable ordinal publication/rejection, with downstream settlement/cleanup separately asserted and timed. Confirm the authoritative boundary for10s/local and2min/300ms tests; exclude boot and arbitrary external-agent turns, not real pump work. The diagnostic above starts just before the first async submission and retains all20x25 content/history assertions.
+
+The existing ruled defaults on cap32, typed retry-only shrink, same-run restart and fork tuning, one-second scanning, no author knob, paginated diagnostics and one cancellation transaction are not reopened.
+
+### Test And Artifact Plan
+
+Pre-audit should retain separate small controls, real EventBus/selected-store integration and supported HTTP/operator tests. Cover coalesced wakes with several completed short intents; one long plus many short intents; exact cross-bundle eligibility; blocked/retrying intent next to healthy work; expiry work held while pump capacity remains available; actual production sweep interval; crash before/after chunk commit; expired/stale claims; stop while idle/claimed/committing; idempotent HTTP stop; paginated readback through concurrent progress; both stores and injected commit delays. Prove capacity utilization and bounded examinations without shortening production intervals, busy loops or timing waivers. The500-row bound must keep all original content/exactly-once assertions.
+
+Watchlist mapping remains `durable_fan_out_issuance_and_progress_ownership`; its existing hot/slow-intent, lost-wakeup, multiprocess, cancellation and readback manifestations support this boundary. The pre-audit should refine it with closed-intent/coalesced-backlog evidence, not create another tracker or absorb unrelated delivery/agent concurrency.
+
+Jobflow is present at `/home/youmew/dev/packs/jobflow`. The copied logs found are August22 fork refusals, not the August28 R6/R7 failure. `REPORT-REVIEW-2026-08-28.md` and an identifiable failing R6/R7 database/log snapshot were not found. Please provide those if preserved; absence does not prevent new fresh-store diagnosis. No old database was booted or migrated.
+
+Receipts under `/home/youmew/.cache/agent-a-qualification-logs/`:
+
+- `2394-master-controls.log`: cap/range, both-store lifecycle/fairness/bundle and API stop replay controls, count3 PASS. SHA256 `d0f9053b759532a3869241c7ca95b425c0f0711db34a581cf69f55ab77529bf4`.
+- `2394-master-diagnosis.log`: production sweep FAIL3/3; explicit-wake/short-interval controls and both-store20-intent stop PASS3/3. SHA256 `f35dbc03ae4380aff3940e73ec6c9e510c1c4d19cf136b648e510d52b820924e`.
+- `2394-master-backlog.log`: closed-intent coalescing probe FAIL3/3. SHA256 `13573506c4690242508388dff86db4a30f7e4c7647e4b84021130142e43ff14b`.
+- `2394-master-backlog-control.log`: identical backlog with existing10ms control PASS3/3. SHA256 `d74e1ecaf4153e0ff03d933afc11bb071533a997e02419761b843ecf99cf8d32`.
+- `2394-master-500-timing.log`: original reporter assertions PASS47.223s package total, count1; above timer measurements do not assert10s passed. SHA256 `7d52845cc749b96b7eb91e1901cc62fdff458443c950914318a5133900767da5`.
+- Probe source retained in `2394-master-diagnostic-probes.patch` and `2394-master-backlog-probe.go.txt`. Small focused diagnosis used regular go test; no full suite, implementation branch, production edit or Gate A claim.
+
+
+---
+
+### Comment 5667888069
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5667888069
+
+Author: yazzaoui; created: 2026-09-14T17:19:44Z; updated: 2026-09-14T17:29:58Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Corrected Serving Design: Request For Lead Review
+
+User-requested consolidation of the design discussion. **This is design input, not the Pre-Implementation Coverage Audit, Gate A approval, or authorization to code.** After the decisions below are recorded, A will produce the exhaustive owner/consumer/proof pre-audit. No production changes accompany this comment.
+
+**Revision September 14:** incorporates the user's first feedback: explicit SQLite transaction efficiency, a production incident for the precise D3 violation rather than waiting age, operator-configurable backend capacity, and a proposed separately tracked downstream-backpressure class. The transaction count below corrects the earlier conflation of reads, write transactions and revision capture.
+
+Governing context: [August30 D1-D5 ruling](https://github.com/division-sh/swarm/issues/2394#issuecomment-5471507787), [D2 absorption and success-to-cap correction](https://github.com/division-sh/swarm/issues/2386#issuecomment-5664494977), merged #2402, and [current-master diagnosis with exact receipts](https://github.com/division-sh/swarm/issues/2394#issuecomment-5667674035). This proposal corrects the newly discussed EWMA/AIMD, five-second polling, pool-sized concurrency, worker-claim cancellation and threshold-incident suggestions; it does not silently supersede an existing ruling.
+
+## Outcomes And Current Evidence
+
+The target is a continuously serviced durable queue: no timer-paced backlog when eligible work and capacity exist; bounded use of real backend capacity; fair turns; preserved exactly-once outcomes and cancellation; understandable per-intent progress; measured backend-parity performance.
+
+At diagnosed master486ea4161, the merged cap-first policy already produces twenty25-item publication chunks for500 rows. It is not still shrinking to one. Remaining source inspection shows a serial maintenance loop, a60-second production sweep and aggregate-only progress diagnostics. Independent diagnosis-only execution showed:
+
+- Three short intents with coalesced wakes: two execute, then the third remains idle,3/3. The loop interprets completion of the current intent as a reason not to seek the next one. The same bounded pipeline/evaluator/publication probe with the existing10ms test sweep passes3/3.
+- The real maintenance loop misses the ruled one-second periodic claim opportunity,3/3; explicit-wake and shortened-interval controls pass.
+- Twenty open25-item intents, including one held claim, stop through the existing lifecycle/store owner on both backends,3/3. This is not a served HTTP reproduction of the historical R6 failure.
+- First batch submission through500 durable outcomes currently takes20.008s PostgreSQL and16.229s SQLite in one non-race run, despite the accelerated test sweep. Existing semantic/history assertions pass. These measurements do not establish the historical stall's complete cause or promise the proposed workers alone meet10s.
+
+## Proposed Ownership And Execution
+
+### 1. Continuous Work Seeking, Durable Eligibility
+
+Retain the existing typed FanOutObligationOwner, selected backend transactions, immutable source/capsule, structured intent identity and generation-fenced claim protocol. After every completed turn, free capacity asks the durable owner for another eligible intent until exhaustion. Completion of one intent never means the queue is empty.
+
+Wake notifications remain coalescible hints. They need not count intents, and no process-local per-intent queue becomes progress authority. Atomic claims preserve least-recently-served ordering and exact source scope. Eligibility and diagnostics must consume one definition, including valid persisted status/claim evidence and applicable run/source execution authority. The abbreviated SQL predicate alone is not the complete admission contract. Contradictory rows fail closed rather than vanishing as apparent exhaustion.
+
+Retry, blockage, cancellation, confirmed completion and uncertain outcome remain distinct results. A failed turn must not become an unrestricted immediate retry loop. Preserve current typed failure/readback semantics; the pre-audit must explicitly account for healthy work behind a retrying or blocked intent.
+
+### 2. Bounded Backend Capacity
+
+One named operator-configurable fan-out capacity budget is shared by loaded runtime/bundle consumers of the selected store. Proposed defaults: **PostgreSQL 4, SQLite 1**. This is deployment configuration, not an authored flow or chunk-sizing knob. Validate settings against supported backend capacity; SQLite retains its single writer lane. Do not allocate the full PostgreSQL connection pool to pump workers or multiply the budget once per bundle. Boot validation must use usable capacity with dedicated session reservations accounted for, preserving room for control/read and other required operations; exact accounting belongs in the pre-audit. Invalid settings fail with a teaching error rather than silently resizing the pool or clamping the requested budget.
+
+PostgreSQL serves independent intents concurrently under bounded claims. SQLite retains one commit lane and continuously available work seeking; no fake parallel-write strategy or arbitrary sleep between chunks. A single intent retains ordinal order and claim fencing. Release after one bounded turn and compete again through the durable fairness owner.
+
+Separate fan-out progress scheduling from potentially slow draft/human-task expiry while keeping both under the existing admitted runtime lifetime. Shutdown/reset must stop admission and join owned work; lease expiry or process-local cancellation is not permission for a stale worker to commit.
+
+### 2a. Transaction-Efficient Publication, Especially SQLite
+
+Workers alone cannot close SQLite's measured throughput gap. Make **write transactions per successful publication chunk** a named metric and design target: **two on the clean serving path, one claim transaction and one atomic publication-plus-successful-release transaction**. Initial intent creation, downstream settlement, retries, semantic bisection, uncertain-outcome readback and exceptional cleanup are separately attributed, not hidden by the denominator. Report all workload write transactions as well as this serving-path count.
+
+At the diagnosed baseline, `ClaimFanOutIntent` commits a claim, `LoadFanOutEvaluation` performs reads, `CommitFanOutChunk` commits publication, and `finishFanOutSuccessfulTurn` performs a separate write transaction. Revision capture is already inside the publication transaction; it is not a fifth independent commit. Count SQL calls/reads separately from write transactions and publication chunks. SQLite does not have network round trips, although transaction/commit and query costs still matter.
+
+The proposed correction folds successful release, fairness bookkeeping and success-to-cap restoration into publication while preserving ordinal outcomes, cursor advancement, revision capture and generation/state fencing atomically. Return claim-bound immutable evaluation inputs with acquisition where this safely removes redundant reads. Do not hold SQLite's writer through evaluation, planning or external work. Preserve stop races, stale-worker rejection, post-commit handoff and uncertain-commit reconciliation; fewer transactions is not permission to weaken those owners.
+
+The current release also records duration measured after commit. Define that diagnostic explicitly when folding: never relabel a pre-commit measurement as complete commit latency, or add a mandatory telemetry-only transaction that defeats the target. Its representation and consumer accounting must be settled in the pre-audit; commit duration remains diagnostic, not a chunk-control signal.
+
+Measure SQL calls, write transactions, revision-capture time, full commit latency and end-to-end elapsed time. Two transactions per chunk is a concrete optimization target, **not evidence that it alone achieves 10 seconds**. Profile remaining per-ordinal query/serialization work if necessary, within mapped owners and unchanged semantics. Keep both-store performance acceptance unchanged.
+
+### 3. Keep The Merged Chunk Policy
+
+Initial/maximum budget32, bounded by remaining cardinality. Confirmed success restores32. Only typed retryable failures halve the budget. Same-run restart preserves valid tuning; fork resets operational tuning without losing its inherited issued prefix. Uncertain commits require canonical readback before deciding success or retry; timeouts are not automatically safe failures.
+
+No EWMA, fixed/marginal cost estimator, latency-derived floor, growth calibration, generic AIMD or author knob. Slow commits must not shrink successful batches. Acceptance is **large batches remain large despite latency**, not "batch size grows with latency" when it already starts at the cap. Semantic bisection remains separate.
+
+### 4. Independent One-Second Recovery
+
+Continuously refill free capacity during normal work. A production one-second level-triggered scan recovers missed wakes, newly eligible work and expired claims. Do not back idle recovery off to five seconds or reserve expired-lease discovery for a60-second timer. Polling is recovery, not one-chunk-per-tick pacing.
+
+The liveness target is a claim attempt starting within one second of eligible work and free pump capacity coexisting, while that condition persists. Starting means entering the actual claim operation, not merely scheduling a callback or enqueuing a wake. Database wait and durable acquisition are measured separately. A nominal one-second ticker alone is not proof of the bound: include dispatch delay and scheduling behavior in the execution proof. No shortened-test-only interval can satisfy the production proof.
+
+### 5. Canonical Diagnostics And Fairness
+
+Use the ruled **eligible / leased / blocked** projection for outstanding obligations, with executing evidence beneath leased and explicit terminal dispositions outside that set. Aggregates stay in run status. A paginated per-intent surface exposes cursor, owed count, budget, last-served time, lease expiry/owner and typed blocked diagnosis. Age must have a defined durable basis, not reset on observation or restart. Diagnostics are readers, not a second scheduler.
+
+Readable state alone is insufficient: an intent labeled eligible forever can still be starved. Add a production runtime incident for the precise D3 violation: **eligible work and free capacity persist, but no claim attempt starts within one second**. Legitimate capacity waiting, typed blockage and a claim already awaiting database completion are not this incident. Expose their ages/latencies separately; an attempt-start guarantee is not proof of successful acquisition or fair progress.
+
+The detector must run independently of the serving loop and consume evidence from the canonical eligibility, capacity and attempt owners, not reconstruct a second scheduler. Record exact scope, qualifying interval, capacity and last attempt in the diagnostic. Include run pause/terminality and shutdown in eligibility; unknown/unreadable store state is not affirmative eligibility evidence. Missing observability must not be reported as healthy progress. The pre-audit must specify detector lifetime, evidence synchronization and incident deduplication through the existing incident owner. Test a stuck serving loop producing the incident and legitimate saturation/slow acquisition not producing it.
+
+Retain durable least-recently-served one-chunk turns and prove large/small-run fairness, including cross-bundle sharing. A strict per-run worker cap is not assumed: it could strand capacity when only one run has work. If fairness evidence requires an additional policy, its work-conserving behavior must be ruled rather than inferred from "oldest waiting first."
+
+### 6. Preserve Atomic Run Cancellation
+
+run.stop remains with the existing selected-store run-lifecycle transaction, atomically preserving the issued prefix and canceling the remaining suffix, including blocked and currently leased intents. Stale workers must fail their generation/state fence after stop wins. Do not route cancellation through ordinary serviceability claims: those exclude exactly the blocked/held work that cancellation must terminate and can introduce partial stop or lease-expiry waiting.
+
+Diagnose the original HTTP failure and retain specific typed operation-stage/cause evidence. No second cancellation path, generic SQL-error parsing, lease-wait workaround or claim that the existing passing store control closes historical R6. Distinguish API idempotency replay from a new command against an already-terminal run; preserve the supported contract rather than making all repeated calls succeed indiscriminately.
+
+## Decisions Requested
+
+1. **Capacity:** ratify operator-configurable PostgreSQL 4 / SQLite 1 defaults, shared across loaded bundles per selected-store runtime owner and validated against usable backend capacity. The no-author-knob chunk ruling remains unchanged. Multi-process ownership and the exact budget/reservation lifetime must be enumerated before Gate A; this is not approval to claim a distributed global cap from a local semaphore.
+2. **Liveness and incident:** ratify actual claim-attempt start within one second of persistent eligible work plus free capacity, with database wait and durable lease acquisition reported separately. Add the production D3-violation incident described above, not an arbitrary waiting-age alarm. No interval inflation or unconditional one-second durable-commit promise is proposed.
+3. **Throughput and transaction efficiency:** ratify an already-ready runtime, timing immediately before the first batch submission through the last required durable ordinal outcome. Include actual ingress/trigger/pump work; exclude boot and unrelated external-agent turns. Downstream settlement, exact content and teardown remain required separate assertions, not waived. Preserve 500 rows <=10s locally and <=2min under 300ms injected commit latency, on both backends. Add the two-write-transactions-per-clean-publication-chunk target and complete transaction/query accounting above. SQLite may need this fold and further measured in-owner efficiency work to pass; workers alone are not the performance plan. Performance and race-correctness results are separately named; do not silently redefine the latency injection as network RTT.
+4. **Downstream backpressure:** split to the named separate class **dependency-safe downstream delivery backpressure**, without blocking #2394 implementation on that feature. Pump capacity is not a guarantee that issuance never outruns delivery. Before Gate A, map an existing tracker or create a dedicated one and record its backlog owner, bounded resource, typed capacity condition, release signal, cancellation behavior and dependency-safe progress obligation. A raw unsettled-delivery threshold can deadlock flows whose draining depends on later emissions. Qualify #2394 closure accordingly; the broader requirement remains open. This comment proposes the split but does not claim the tracker repair is complete; no new tracker is created by editing this design.
+
+## Acceptance To Carry Into The Pre-Audit
+
+- Preserve the original500-row and mixed-rejection workload/content/history assertions. Instrument clean serving-path write transactions per publication chunk with the target of two; also report all workload write transactions, SQL calls/reads, revision-capture time and commit latency. Revision capture must remain inside publication, not be counted as a fictional separate commit or deferred to obtain a lower number. For clean issuance, compare publication chunk count with the sum of per-intent ceiling(cardinality/32); retries and semantic bisection receive separate accounting.
+- Prove the transaction fold through claim/stop races, stale generations, concurrent acquisition, restart, pre-commit rollback and lost acknowledgement after commit. Assert no duplicate ordinals, no partial publication/revision capture, no stranded successful claim and correct one-turn fairness. Preserve truthful latency diagnostics without a required extra success-path telemetry transaction.
+- Add the checked-in #2448 scatter/gather corpus at the requested100-item scale. #2448 explicitly did not claim that load qualification. Retain its existing safety variants; replace "seconds" with an explicit reviewed bound, not an inferred pass.
+- Add the proposed1,362-row/~100ms network-latency case if its fixture and injection boundary are retained, without substituting it for the existing500-row/300ms commit-delay obligation. Network RTT and one delay per commit are not equivalent workloads. Keep cap32 rather than asserting latency-driven growth.
+- Deterministically coalesce/drop wakes with several short intents closing, one long intent beside many short ones, repeatedly arriving new work, a blocked/retrying intent beside healthy work and exact cross-bundle scopes. Assert continued work seeking and fairness, not just nonempty timestamps.
+- Hold one PostgreSQL worker and prove other independent intents progress up to the named capacity; prove no budget multiplication across loaded bundles and no starvation of control/read work. Exercise operator overrides, invalid capacity rejection and lifetime cleanup. SQLite proves continuous single-lane progress plus the transaction target, without writer contention tricks.
+- Run an actual production-interval recovery test. Test missing wake after an empty scan, expiry of an abandoned claim and slow unrelated maintenance. A15-minute22-intent soak is supplemental, not a substitute for deterministic liveness counterexamples; sampling alone cannot prove the state/progress laws.
+- Stall the serving loop while eligibility and free capacity persist: assert a D3 incident from the independent detector with exact scope/timing evidence. Controls cover saturated capacity, typed blockage, run pause/stop, healthy idle, and a started claim delayed by the database. Verify incident deduplication and restart/reset lifetime. Attempt-start, durable-acquisition and actual fairness/progress proofs remain distinct.
+- Prove stop through supported HTTP with20 open intents, mixed issued/unissued/blocked/held work, commit races, stale lease generations, repeat idempotency keys and subsequent public readback. Inject failures before commit, after commit and before acknowledgement; retain exact outcomes with no duplicate ordinals or partial cancellation.
+- Exercise paginated diagnostics during progress/restart and terminality; show distinct queue age, capacity waiting, lease ownership and typed failure. Cursor consistency and state precedence must be explicit.
+- Re-prove both stores, restart/crash and relevant race matrices, with exact supported-surface receipts. Preserve existing budgets/assertions; large/full runs use swarm-test, small diagnosis uses go test. No retry-to-green or unavailable-proof-as-pass.
+
+Implementation should remain a bounded correction of serving/capacity/eligibility, chunk transaction boundaries and their diagnostic consumers, not a new generic scheduler, durable queue, value framework, fork redesign, compatibility layer or third-party vendoring. Existing `durable_fan_out_issuance_and_progress_ownership` remains the mapped watchlist node; the pre-audit will refine and account for the corrected boundary and the downstream-backpressure split after disposition. All original failure evidence and the distinction between current reproduction and historical hypotheses remain intact.
+
+**Requested next step:** lead design disposition on the four decisions, then the full pre-audit and independent Gate A. No implementation starts from this comment alone.
+
+
+---
+
+### Comment 5668053207
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5668053207
+
+Author: yazzaoui; created: 2026-09-14T17:33:15Z; updated: 2026-09-14T17:33:15Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Design Feedback, Not A Gate Ruling
+
+Read the complete issue/thread, the September 14 diagnosis and corrected proposal, and the current maintenance, claim/publication/release, fairness and revision-finalization code. **The direction is sound.** Continuous work seeking, a shared bounded capacity owner, atomic publication/release, production-interval recovery and the existing cancellation owner are preferable to another adaptive controller or scheduler framework. This comment does not approve implementation or replace the required pre-audit.
+
+The following points should be made concrete in that pre-audit, rather than discovered after coding:
+
+1. **Fairness needs an actual ordering correction or a defensible policy, not just preservation of today's ordering.** Both claim queries place never-served intents before every previously served intent (`fan_out_owner.go:129-165`: PostgreSQL `last_served_at ASC NULLS FIRST`, SQLite equivalent CASE). A partially served long intent can consequently keep losing to newly arriving short intents. The existing fairness test checks a finite set of arrivals; it does not establish the sustained-arrival property. This is a source-derived counterexample, not a newly executed field reproduction. Give never-served work a finite durable fairness position, not permanent priority over already-served work, and prove bounded overtaking/progress under continuing arrivals. Also resolve cross-bundle arbitration: the SQL claim is filtered to one bundle, so a shared semaphore alone does not create global least-recently-served ordering. Keep exact runtime/source authorization; do not fix fairness by allowing the wrong runtime to claim a bundle.
+
+2. **Four PostgreSQL workers do not imply four fully parallel same-run commits.** `runforkrevision/postgres.go:41-51` locks the run's revision head, and `finalizer.go:41` takes that lock before loading/comparing the affected projections. Different intents in the same run still share that critical section. Retain this correctness owner and measure it: distinguish evaluation/planning overlap, claim overlap, revision-lock wait and actual commit throughput. Benchmark both one-run/many-intent and many-run workloads. Do not assume the 20x25 workload scales by four, or remove the lock to make a benchmark pass. The transaction fold is useful, but two clean-path transactions is a cost target, not the performance result.
+
+3. **Bind the capacity unit and lifetime precisely.** Specify whether one permit spans claim, evaluation, publication and required post-commit handoff, and ensure the holder cannot wait on another permit from the same exhausted budget. State the shared identity across loaded bundles and distinct handles to the same selected store. Prefer an honest process/store-runtime budget unless distributed admission is actually required: per-intent database fencing protects correctness across processes but does not make a local semaphore a database-global capacity cap. PostgreSQL 4 is a reasonable starting default to qualify, not a measured optimum. Boot pool arithmetic alone also does not guarantee control/read headroom under contention; preserve the named capacity owner and prove that behavior.
+
+4. **Keep the D3 detector small, scoped and epistemically honest.** An unrelated bundle's claim attempt must not reset a stalled bundle's timer. Define where the qualifying interval starts, the source/generation and local capacity it describes, and how paused/retired runtimes reset that evidence. A once-per-second observer cannot infer an exact continuous eligibility history from disconnected samples. Use canonical observations/transitions with explicit observation timestamps and monotonic local elapsed time; retain a separate unknown/unavailable state when the database cannot be read. A stopped process cannot diagnose itself, and an in-process one-second target is not an unconditional real-time guarantee through OS suspension. Test the specified operating assumptions without hiding dispatch delay or silently expanding the bound. Reuse the existing incident owner; do not build a second durable eligibility scheduler to monitor the first.
+
+5. **Retrying work must yield without monopolizing continuous refill.** The proposal correctly rejects an unrestricted immediate retry loop, but the exact mechanism remains undecided. Enumerate retry readiness and permit release, including one retrying intent alone and one beside healthy work. Use the existing typed retry/capacity owners; never make retries permanently blocked or reset fairness on every failed claim in a way that hides starvation. This is part of the present serving class, not downstream backpressure.
+
+6. **Make telemetry explicitly non-transactional where necessary.** Folding success release into publication is a useful simplification and removes a post-commit failure seam. Complete commit latency, however, is only known after that transaction ends. Keep it as truthful runtime metrics or explicitly best-effort evidence rather than recreating a third mandatory write. Durable cursor, ordinal outcomes, successful release, generation fencing and revision capture stay atomic. Claim-returned evaluation data must be bounded to the chunk; avoid moving unbounded source hydration into SQLite's write lock just to reduce read-call counts.
+
+7. **The backpressure split is defensible, but narrow its claim and finish tracking.** Pump concurrency limits simultaneous issuance work; it does not bound downstream backlog or memory. Keep existing downstream resource bounds and demonstrate that the faster pump does not introduce unbounded in-memory buffering. The separate dependency-safe delivery-backpressure feature can remain out of #2394, provided its tracker is created/mapped before Gate A as proposed. Do not add a naive unsettled-count threshold that can prevent the later emissions needed to release a barrier. Keep this distinct from retry readiness in point 5.
+
+The original stop failure should remain honestly unreproduced until a supported HTTP proof or retained artifact identifies it. Passing current store cancellation controls is encouraging, not a reason to invent a new cancellation path.
+
+Verification in this design pass: static owner/consumer inspection and the focused existing cap-first/range/retry tests (`go test ./internal/runtime/fanoutobligation -run '^TestFanOutChunk(BudgetStartsAtCap|RangeAndRetryBudget)$' -count=1`) passed. No new throughput or multiworker performance result is claimed. No production edits made.
+
+**Suggested next step:** incorporate these specific owner/policy decisions into the proposed pre-audit, especially the current NULL-first fairness counterexample, bundle arbitration and same-run revision-lock measurement. Then request the independent gate. Keep the implementation bounded; nothing here calls for the deferred value-model or fork redesign. These concerns are recorded on existing #2394; its watchlist refinement should carry the fairness manifestation during the pre-audit. The separate backpressure tracker remains a proposed design disposition, not created or approved by this feedback.
+
+
+---
+
+### Comment 5668255316
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5668255316
+
+Author: yazzaoui; created: 2026-09-14T17:49:40Z; updated: 2026-09-14T17:49:40Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Pre-Implementation Coverage Audit
+
+## Status, Baseline And Authority
+
+**Issue #2394. Category: failure-class / semantic-drift / backend and supported-surface parity / performance. Implementation has NOT started. Independent Gate A is requested, not self-approved.** The latest [lead comment](https://github.com/division-sh/swarm/issues/2394#issuecomment-5668053207) explicitly says "Design Feedback, Not A Gate Ruling". This audit incorporates its seven points as concrete proposals for gate disposition.
+
+Freshly fetched `origin/master` is still `486ea41611ed06fa2932fb43892f8e7f4e1dbefe`, merged #2402. Diagnosis worktree `/tmp/swarm-2394-diagnosis` is clean after removing the temporary test-only probe below. No production file, authoritative spec, implementation branch or PR was changed. Re-read the complete issue/thread, `IMPLEMENTER_GUIDELINES.md` and `SEMANTIC_DRIFT.md` from swarm-docs. Other agents' dirty docs checkout was not edited; watchlist repair uses a separate worktree.
+
+Binding context:
+
+- [August 30 D1-D5 ruling](https://github.com/division-sh/swarm/issues/2394#issuecomment-5471507787), as amended by [D2 absorption/success-to-cap](https://github.com/division-sh/swarm/issues/2386#issuecomment-5664494977). D2 is already implemented; its preservation is mandatory, not a new adaptive controller project.
+- [Current-master diagnosis and original receipts](https://github.com/division-sh/swarm/issues/2394#issuecomment-5667674035) and [corrected design with user feedback incorporated](https://github.com/division-sh/swarm/issues/2394#issuecomment-5667888069). The latter is a proposal, not authority to code.
+- Exact governing spec: `platform-spec.yaml`, `handler_specification.handler_fields.fan_out.durable_issuance` (3877 onward), especially `trigger_transaction`, `immutable_sources`, `evaluation_capsule`, `progress`, `claim_and_fairness`, `chunk_policy` (3924), `failure_isolation`, `lifecycle`, `fork`. Also handler `atomicity` (3266), `on_complete_vs_rules` (3275).
+- Adjacent binding contracts: `process_local_work_lifetime_authority` (36303), retained `process_capability`/generation-grant contract (36829 onward), API `run.stop` (34075), `run.pause`/`run.continue`, `run.diagnose` (34302), and `runtime.incidents` (35856). Historical fork admission remains unchanged, including #642 restrictions.
+- There is no exact current spec section for the proposed capacity setting, finite newcomer fairness rule, retry-readiness timestamp, per-intent page, or D3 detector. Those are explicit proposed additions below; the independent gate must ratify them. Implementation must promote their approved review draft into authoritative `platform-spec.yaml` in the same PR. No spec-only change on master.
+
+The proposed local review draft is `/tmp/swarm-docs-2394-preaudit/docs/specs/swarm-platform/platform/review/platform-spec.fan-out-serving-2394.yaml`. It parses as YAML, remains uncommitted review input, and is not an authoritative merge artifact. The complete proposed decisions are also recorded below so the GitHub audit does not depend on local-file access.
+
+## Class Model And Closure Commitment
+
+Observed symptoms: historical controller collapse, starvation and unclassified stop; current master has a serial maintenance loop, coalesced-wake backlog loss, 60-second recovery, NULL-first newcomer priority, costly three-transaction successful turns, and missing eligible/leased per-intent diagnostics. Current local 500-row measurements exceed 10 seconds even with an accelerated test sweep.
+
+**Chosen working failure class:** incomplete ownership of durable fan-out serving opportunities and turn settlement, across admission/capacity, cross-intent/source fairness, retry readiness, continuous refill, recovery, atomic successful release, operator diagnosis and run cancellation evidence. This PR aims to eliminate that entire chosen class, not fix only the boolean at `fan_out_pump.go:161`.
+
+Immediate conceptual parent: durable deferred fan-out progress across trigger, issuance, delivery settlement/barriers, restart, cancellation and historical reconstruction, recorded by #2337 and the existing watchlist node. **#2337 is CLOSED as a design record**, not an open implementation umbrella; it is not reopened here. Live serving obligations are tracked in #2394 and the proposed distinct backlog obligation in #2453. Broader parent: production-shaped runtime capacity/liveness/correctness gaps (#107, verified OPEN and audit-only; field-review umbrella #2381, verified OPEN). These parents are not identical to the selected serving class.
+
+Framing: the original report was symptom-shaped and several acceptance statements are superseded; the corrected class is broad enough, not an arbitrary first slice. The observed line/helper/reproducer was an entry point, not the boundary. Absorb the lead's newcomer ordering, bundle arbitration, retry and same-run contention obligations now. Proposed closure level: **failure class eliminated for the chosen class**, contingent on all proofs below. No claim to eliminate all downstream backpressure or complete every #2381 finding.
+
+Closure feasibility: one coordinated PR is plausible because intent/progress/claims/publication already have selected-store owners; this work corrects their composition rather than creating another queue. A boolean-only fix, a semaphore-only fix, or a SQLite-only transaction fold would leave live same-concept interpreters and cannot close this issue. The full proposal moves all enumerated serving consumers. If another live interpreter is discovered, repair this audit/gate before implementing it.
+
+## Execution Path And Gates
+
+The closure-bearing journey is ordered as follows. No upstream gate is replaced with an unconditional-success stub in the supported proof.
+
+| Step / prerequisite to the next step | Classification and proof |
+| --- | --- |
+| Select fresh SQLite/PostgreSQL store, strict current schema, retained process capability, exact bundle source set; load/verify compiled contracts | Different semantic concept: schema/source/process authority; preserve real binary startup and `TestProcessCapabilityLiveOwnerRefusalParity`, hostile source/old-schema refusal. Capacity setting validation is same chosen class. |
+| Register runtime generation, settle topology/readiness probes, admit work occurrence; bind source-qualified executor | Same chosen class for pump registration/retirement; existing grant and topology semantics unchanged. M06/M07 prove no unregistered or retired source can receive work. |
+| Authenticated HTTP run start and event/batch ingress, canonical request hashing/idempotency, actual routing to the triggering node | Different semantic concept: ingress and receiver authority. S01/S02 run the actual supported path; existing numeric/receiver assertions remain intact. No WebSocket execution of HTTP-only commands. |
+| Rule or on_complete executes; transaction commits immutable source/capsule, cardinality, intent and revision with normal handler state | Same chosen class as creation producer of fairness/retry facts; preserve existing constant-size trigger/source semantics. M15/M23 cover all source families. |
+| Post-commit wake OR production recovery scan; durable eligibility and exact runtime/source arbitration; reserve free capacity; claim one intent | Same chosen class. M01-M09/M12/M13 prove refill, fairness, opportunity and lifecycle. |
+| Load bounded immutable chunk, evaluate pinned plan, prepare real EventBus publications and claims | Same chosen class for permit lifetime and failure yield; different preserved concepts for schema/routing/receiver semantics, execution-proven by S01/S03 and M15-M18. |
+| Atomically commit publications, ordinal outcomes, cursor, revision, success tuning and release; then finalize/dispatch durable handoffs | Same chosen class. M10/M11/M18-M22/M29. Revision serialization is retained, never bypassed. |
+| Actual recipients execute and settle; direct intent barrier folds its own outcomes; run completion/quiescence consumes canonical summaries | Different semantic concepts: delivery settlement/barrier membership. S03 and M24 preserve end-to-end effects. #2453 separately tracks dependency-safe backlog admission; it does not excuse memory growth or failed final assertions. |
+| Operator intent page, run diagnosis/status, logs/incidents; HTTP pause/continue/stop; restart or permitted fork | Same chosen class for current serving state/diagnosis/cancellation evidence; existing fork and lifecycle admission remain binding, with exact refusal controls M25/M26. |
+
+## Proposed Decisions For Gate A
+
+### A. One Admission/Capacity Owner, Exact Scope
+
+Compose one fan-out serving owner under the existing selected-store **process capability / worklifetime process occurrence**, not a new global registry keyed by DSN, filename, backend pointer or bundle. Existing selected-store process possession already excludes a second ordinary serving process (`startupownership/owner.go:73-147`). All loaded bundles and handles admitted through that capability share the same budget. A separately opened handle must either attach through that same capability or fail admission; it cannot mint a second budget. Direct store-owner concurrency tests still prove claim fencing, not distributed capacity.
+
+Proposed operator setting: `runtime.fan_out_workers`, absent -> backend default PostgreSQL 4 / SQLite 1; supplied value positive, SQLite exactly 1, PostgreSQL checked against usable pool capacity with retained session reservations and at least one non-pump connection. Conflicting settings on one process owner fail boot. No author chunk knob, no silent clamp/pool enlargement, no "4 workers is optimal" claim. Existing capacity reservations retain their own owner. Prove actual control/read access under contention, not just arithmetic.
+
+One permit covers claim attempt, immutable evaluation read, evaluation/planning, publication, mandatory finalization/handoff or exact failure/uncertainty disposition. It is released exactly once after the turn; business recipients do not acquire this permit. No holder may wait for a second permit from this same exhausted budget. Pump machinery holds a standing work lease; each real turn holds finite exact runtime/standing/selected execution authority. Runtime replacement unregisters and joins only its generation; process retirement joins all workers/detectors before releasing the store. No goroutine-per-intent queue and no claim held while waiting for a worker.
+
+### B. Finite Fairness Across Admitted Bundles
+
+Replace permanent NULL-first priority with one finite durable ordering: effective fairness time is `last_served_at` when present, otherwise `created_at`; tie-break by creation time and the full structured intent identity. Successful/retry/yield turns advance their fairness position using the selected-store turn observation; new work is born at a finite position, not ahead of all previously served work forever. These are owner-generated facts, not author timestamps or map iteration order. Test ties and clock handling explicitly; no client-controlled/backdated priority.
+
+The shared owner selects the least eligible durable position across its **complete admitted source/runtime set**, then executes only through the exact matching runtime generation. Proposed store claim request carries that sealed set, not an arbitrary list of bundle strings, and returns exact source evidence with the claimed intent. Recheck authorization and run dispatch state at claim/commit. No per-bundle semaphore race masquerading as global fairness; no removing bundle checks. Multiple exact run execution modes for the same bundle remain distinct via existing execution authority.
+
+Progress claim: work ahead of a ready intent is finite at its opportunity; strictly later arrivals cannot repeatedly overtake it, and serviced competitors move back. Bounded overtaking is measured in turns, not a promise that slow database transactions finish in fixed wall time. One run may use available permits when alone; no hard per-run cap that strands capacity. Across processes the retained possession owner fences normal execution; raw competing store claims remain generation-fenced and ordered.
+
+### C. Retry Readiness, Not Hot Refill
+
+Proposed concrete rule for review: typed safe retry releases its claim and permit, preserves cursor/outcomes, applies the existing half-budget rule, and stores `retry_ready_at = selected turn time + 1s`. Until that time the public admission projection is **blocked with typed temporary retry-wait diagnosis and due time**, not invariant-failure `StatusBlocked` and not eligible for D3. At due time the same owner returns eligible without a separate repair worker. Existing permanently blocked failures never auto-retry. Unknown or outcome-uncertain commits retain their existing fail-closed/readback rules.
+
+This timed condition must be represented by one typed serving projection consumed by SQL admission, diagnostics and the detector; no field-presence heuristic or local retry map. Same-run restart preserves due time; a fork resets operational retry readiness with its claims/tuning while preserving semantic prefix/source facts. A retrying intent alone does not spin; one beside healthy work yields immediately. Direct read/query failure without an acquired intent yields the scan until the next ruled sweep and is unknown, not a manufactured blocked row. Gate must explicitly ratify this retry-state refinement; it is not already specified.
+
+### D. Two Transactions And Truthful Metrics
+
+Clean serving-path target: two write transactions per publication chunk, claim then publication-plus-successful-release. Publication atomically owns event/routes, ordinal outcomes, cursor, successful release, fairness position, budget restoration and revision capture. Delete `finishFanOutSuccessfulTurn` as a mandatory post-commit writer. Revision finalization already lives inside publication; it is not a fifth separate transaction.
+
+Keep complete commit latency as runtime metrics with exact owner/scope and availability, not durable success-path telemetry requiring a third write. Retire durable `LastChunkMS`/`last_chunk_ms` and their misleading summary representation consistently across schema/model, readers and fork validators; do not return fabricated zero as a measured duration after restart. Durable last-served/cursor/budget remain. This is an explicit proposed semantic projection change requiring same-PR spec/schema updates; old selected stores fail strict admission, no compatibility/migration machinery.
+
+A claim may return already-read intent metadata and a bounded chunk descriptor. Do not move whole source JSON hydration into SQLite's writer lock merely to reduce read counts. Evaluation remains outside the write transaction; any redundant read removal must preserve immutable source validation. Count all write transactions, reads/SQL calls, retries/bisection, revision time and complete commit duration separately. Initial ingress/trigger and downstream settlement remain in the full-workload accounting. Same-run revision-head locking remains mandatory; compare one-run/many-intent and many-run workloads and measure lock wait separately from evaluation/claim overlap.
+
+### E. D3 And Its Incident Are Exact, Limited Observations
+
+Production recovery interval is 1s; continuous refill owns backlog throughput. A service opportunity is bound to selected-store process authority, runtime/source generation and an exact eligible candidate/order observation. Record monotonic local observation/attempt times and capacity transitions. An unrelated bundle's attempt cannot discharge another opportunity. Attempt-start means entry to the actual claim operation, not callback scheduling. Acquisition/database wait, completion and fairness are separate measures.
+
+Independent standing detector consumes the same opportunity/capacity transitions; it is not run inline with workers or mailbox expiry. After an observed qualifying opportunity remains outstanding for 1s without its claim attempt, record typed `fan_out_claim_opportunity_missed` through existing runtime logging/failure owners. Before asserting current eligibility after an interval, validate the exact current source/run/generation/candidate evidence; stale/contradictory/unknown observations cannot become a positive incident or healthy progress. Disconnected samples are not proof of continuous database eligibility. The spec should describe an **observed missed opportunity**, not omniscience about intervals before first observation. Tests separately prove actual production sweep discovery latency and dispatch latency.
+
+This contract assumes a running, schedulable process; it is not a hard real-time guarantee through OS suspension or process death. Store read failure exposes unknown/unavailable diagnostics with its own typed evidence. Capacity saturation, timed retry wait, pause/terminality and a started-but-slow database claim are not D3 violations. Runtime retirement clears only its occurrence's evidence. Emit once per unresolved scoped episode; recovery permits a later episode. No new durable eligibility scheduler or in-memory unbounded incident history.
+
+**New readback discrepancy requiring explicit gate disposition:** PostgreSQL `ListOperatorRuntimeIncidents` aggregates canonical logs and applies bundle/horizon/cursor; SQLite's `sqlite_runtime_observability.go:279-304` projects one incident per log, ignores several options and returns no pagination. `runtime.incidents` requires aggregation and pre-aggregation bundle filtering. Source inspection establishes the mismatch, not a new executed malicious leak. Proposed absorption: share the bounded canonical incident filter/aggregation/cursor projection between both existing read adapters, preserving their API, and test D3 plus unrelated-log controls. No D3-only reader bypass or generic incident redesign. If the lead splits this instead, identify the prerequisite tracker and do not claim supported incident parity until it lands.
+
+### F. Read Surface And Stop
+
+Proposed read-only API `run.fan_out.list` under `read:runs`, with CLI `swarm run fan-out list`: one bounded keyset page of exact structured intent IDs, observed-at, durable cursor/cardinality/owed, eligible/leased/blocked or terminal state, retry-ready-at/typed cause, budget, last-served, lease owner/generation/expiry; runtime capacity/latency availability explicitly distinguished from durable facts. Bind cursor to run/filter/order. Stable identity ordering prevents progress updates from moving rows between pages; pages are current observations, not a cross-page snapshot. Expose generation retirement/runtime-unavailable separately; never interpret absence as completion. Preserve existing `run status` aggregates and `run.diagnose` semantics.
+
+run.stop continues through API idempotency -> runcontrol.Controller -> selected RunLifecycle owner -> pipeline cancellation fold -> post-commit timer reconciliation. Prefix retained, suffix canceled atomically, including held/blocked/retry-wait intents. Preserve a committed result even if reconciliation fails. Raw in-scope cancellation errors must acquire typed operation-stage/cause evidence before API normalization, without parsing SQL strings or fabricating a successful transition. Original R6 stays historically unreproduced unless its artifact or the served workload identifies it. Replay the same idempotency key exactly; a new command against a terminal run may correctly return RUN_ALREADY_TERMINAL.
+
+## Canonical Owners And Exhaustive Known Consumption Census
+
+Census at the pinned head searched production Go/SQL for `FanOutObligationOwner`, claim/load/commit/release/block/cancel methods, `fan_out_intents`, `fan_out_outcomes`, `FanOutRunSummary`, `LastChunkMS`, `RunMaintenance`, `signalFanOutWork`, process/grant/lifetime composition, runtime incident writers/readers and run-control handlers. Tests/generated forwarders were also inspected as consumers, not counted as new semantic owners. Dialect SQL is allowed representation, not an independently chosen policy.
+
+Status legend below uses the required dispositions. "Moved" means planned in this work, not already implemented. Proof IDs refer to the next section.
+
+| Canonical owner and currently known seam(s) | Disposition | Removal/preservation and named execution proof |
+| --- | --- | --- |
+| `runtime/fanoutobligation/model.go`: Request/Intent/Claim/Outcome validation, chunk policy and summary; new serving projection belongs here | moved to the canonical owner in this work | One typed eligibility/retry/fairness projection replaces per-reader interpretation. D2 algebra preserved. M03/M08/M09/M14/M23. |
+| `pipeline/fan_out_obligation.go` and `workflow_instance_store.go` owner port; runtimepersistence generated forwarders/composition | moved to the canonical owner in this work | Carry exact admitted source set/claim result and page/metrics contracts; forwarding never reinterprets identity. M05-M07/M14 and compiler-resolved owner guard. |
+| `pipelinepersistence/fan_out_obligation.go`: ordinary intent insertion; engine transaction/effect producers for rules/on_complete and zero/nonzero fan-out | moved to the canonical owner in this work | Produce initial finite fairness/retry facts through same model; immutable source/cardinality semantics remain. M15/M23/S01. |
+| `pipelinepersistence/fan_out_owner.go`: BOTH Claim queries and row decoder | moved to the canonical owner in this work | Delete NULL-first and one-runtime-string arbitration; one exact admitted-set selection/fencing contract, bounded query result. M03-M09. |
+| Same owner: LoadFanOutEvaluation; event-payload/entity-mutation/resource source branches, JSON/JSONL collection readers | already consumes the canonical owner | Keep immutable source validation and bounded returned chunk outside writer; no mutable current-state fallback. M15/M16/M23. Read optimization only if execution proof preserves this contract. |
+| Same owner: commitFanOutChunk, successful-turn finish, retry release, ordinary release, block, uncertain readback; owner.go transaction wrappers | moved to the canonical owner in this work | Delete separate successful-release writer; retry/release/block all update the same fairness/readiness model. Preserve typed failures/atomicity/readback. M08-M11/M18-M22. |
+| `pipeline/fan_out_pump.go`: evaluator, planner, semantic rejection/bisection, every precommit/commit failure branch, finalize/dispatch | moved to the canonical owner in this work | Delete open-current-intent boolean as global queue truth; structured turn result and permit ownership on all exits. M01/M08-M11/M16/M18-M22. |
+| `pipeline/coordinator.go` maintenance and engine_adapter.go wake producers after commit/recovery | moved to the canonical owner in this work | Split expiry from serving under existing lifetime; wake remains advisory, continuous refill plus production scan. M01/M02/M06/M07/M12/M13. |
+| Runtime composition `runtime.go`, `runtime_ownership.go`, process capability/generation grants, worklifetime process/runtime/standing/selected occurrences; live and test runtime assembly | moved to the canonical owner in this work | Add shared serving registration/permit owner under existing capability; no pointer/path-derived identity or second process queue. M05-M07/M25/M26/M30. |
+| `config.RuntimeConfig`/ValidateOperationalControls, CLI runtime_config.go, PostgreSQL backend capacity reservations, retained startup owner | moved to the canonical owner in this work | Single operator setting/default resolver and boot validation; keep actual possession and reservation authority. M04-M07/M30. |
+| `runforkrevision` Effects/finalizer, PostgreSQL revision-head lock, SQLite runtime mutation wrapper and FanOutObligations projection | already consumes the canonical owner | Retain semantic revision lock/atomicity; remove operational telemetry field only if present in a projection, never omit semantic facts. M10/M11/M17/M25. |
+| `runfork` obligation decode/validation, `runforkpersistence/run_fork_fan_out_materializer.go` insertion AND duplicate validation, selected-contract discard, origin readback | moved to the canonical owner in this work | Reset new operational due/fairness facts coherently, retire duration field; preserve source lineage, exact prefix and selected-execution refusal. M25/M26. |
+| Selected RunLifecycle stop and pipeline `cancelRunFanOut`; controller/API idempotency/error projection | moved to the canonical owner in this work | Same atomic cancellation owner, cover new operational states and typed stage/cause errors; no worker-claim cancellation. M19-M22/S02. |
+| FanOutRunSummary/SummarizeFanOutRunTx and per-intent fold; operatorsurface owner/run_debug_read_surface, operatorread models, apiv1/operator_read, CLI diagnostics | moved to the canonical owner in this work | Shared current serving diagnosis, explicit unavailable latency, bounded page; no obsolete duration or state interpreters. M14/M27/S04. |
+| `pipelinepersistence/owner_operations.go` GlobalWorkPresence on BOTH dialects | moved to the canonical owner in this work | Current open/run-status SQL is not complete serving eligibility. Consume canonical serving projection for fan-out readiness; distinguish owed-but-waiting from runnable. M09/M24. |
+| RunLifecycle obligation aggregate, runquiescence/stalled classification, fanoutbarrier direct-intent settlement fold | already consumes the canonical owner | Owed suffix blocks completion even when not currently claimable. Do not equate eligibility with owed work or change barrier membership. M09/M24/S03. |
+| `pipeline.Bus.LogRuntime` -> runtime logging/FailureEnvelope -> canonical log decode -> operatorsurface PG/SQLite -> runtime.logs/incidents, CLI incidents and dashboard forwarding | moved to the canonical owner in this work | New D3 detector produces existing typed evidence; propose shared bounded incident read projection to remove discovered dialect drift. M12/M13/M28/S04. Explicit gate disposition required. |
+| Platform schema/catalog/DDL, strict schema admission, destructive reset cleanup catalog/adminpersistence, fork discard | moved to the canonical owner in this work | Retire obsolete column, admit retry facts/indexes; reset deletes same family and joins workers before store release. No upgrade/backfill/export compatibility. M07/M23/M25. |
+| EventBus `outbox.go` Prepare/Finalize/DispatchPostCommit, readiness activation, committed outbox and delivery handoff/recovery | different semantic concept, with proof | Own publication/recipient work, not fan-out fairness. Preserve synchronous/durable handoff and bounded per-turn staging. M18/M29/S01/S03 show real final consumers and no nested permit dependency. |
+| Generic schedules, join/barrier timers, candidate completion executor, delivery retry queues, agent/provider concurrency | different semantic concept, with proof | Their due/lease/lifecycle owners are not replaced by pump retry or scan. Existing controls plus M24/M26/S03 preserve them. #1449 owns provider cap; #2453 owns downstream capacity/dependency policy. |
+| Data-source import/resources (#2281/#2295) and all three immutable fan-out sources | already consumes the canonical owner | Resource rows feed canonical intent source; no resource-specific serving loop. M15/M23/S01 preserve exact pins/schema and row identity. |
+
+No currently known serving consumer is intentionally left with a competing interpreter. The incident-reader discrepancy and proposed retry/admission grammar are explicitly before Gate A rather than quietly implemented. A shared helper by itself is not proof: every census row names execution obligations.
+
+## Manifestation Coverage And Exact Planned Proof
+
+Tests prefixed `Issue2394` below are **planned names**, except the explicitly identified diagnosis probes. Each row must receive an exact final-head proof and one post-audit disposition (reproduced and fixed / execution-proven through corrected path / split as separate class). This pre-audit does not label planned tests as passed.
+
+| ID | Known manifestation / boundary | Exact planned proof and oracle |
+| --- | --- | --- |
+| M01 | Closed short intent plus coalesced/dropped wake strands another | Preserve `TestIssue2394ClosedIntentLeavesCoalescedBacklog`; add real-store `TestIssue2394ContinuousRefillBothStores`: 3 short, long+short, no further wake, exact all outcomes before sweep rescue. |
+| M02 | 60s production scan hidden by 10ms tests | Preserve production sweep probe; `TestIssue2394ProductionRecoveryBothStores` uses production interval, drops wake after empty scan, records discovery/attempt-start timestamps separately with no widened bound. |
+| M03 | NULL-first newcomer starvation | Preserve new `TestIssue2394SustainedArrivalFairnessProbe`; permanent `TestIssue2394FiniteFairnessBothStores` continuously introduces later work, asserts long intent progress/bounded overtaking, stable ties, no backdating. |
+| M04 | Serial PG execution / SQLite fake parallelism | `TestIssue2394CapacityOverlapBothStores`: hold one turn, prove PG permits up to 4 across independent runs and SQLite 1; track actual concurrent phases, not goroutine count. |
+| M05 | Cross-bundle arbitration and handle budget multiplication | `TestIssue2394CrossBundleArbitrationBothStores`: hot A/cold B, duplicate local declaration names, handle aliases, exact source sets, one shared cap and finite global ordering; hostile foreign source cannot claim. |
+| M06 | Runtime reload/retirement or source change leaves stale worker | `TestIssue2394GenerationRetirementBothStores`: block before claim/evaluation/commit, retire A while B continues, source-set replacement, old commit refusal, exact permit/lease join. |
+| M07 | Shutdown/reset/process capability loss with in-flight work | `TestIssue2394ProcessLifetimeBothStores`: pause worker/detector, revoke capability, concurrent reset/teardown, no new admission/store use after join; second ordinary process refuses. |
+| M08 | Safe retry monopolizes continuous refill or never resumes | `TestIssue2394RetryReadinessBothStores`: solo/beside healthy, no claim before due, one due retry after wake loss, permits returned, restart preserves due, cursor unchanged and cap halves. |
+| M09 | Paused/terminal/retry-wait/blocked state misclassified as eligible or settled | `TestIssue2394ServingStateProjectionBothStores`: complete typed state table through direct claim/global work/run completion/page/detector; corrupted evidence fails rather than disappears. |
+| M10 | Three transactions, post-success release failure seam | `TestIssue2394SuccessfulTurnAtomicityBothStores`: count exactly 2 clean serving writes, inject rollback at every publication/release/revision stage, one atomic result and no stranded claim. |
+| M11 | Lost commit acknowledgement and stale claim duplicate outcomes | Existing fairness/stale controls plus `TestIssue2394CommitUncertaintyBothStores`: before/after commit faults, canonical readback, no second issuance, release does not steal next generation. |
+| M12 | Missed opportunity silent in production | `TestIssue2394D3IncidentBothStores`: stall dispatch but keep observer live, exact eligible candidate and free permit, one scoped typed episode visible through logs/incidents; irrelevant B attempts cannot reset A. |
+| M13 | False D3 incidents from sampling, saturation or unavailable DB | `TestIssue2394D3EvidenceControlsBothStores`: unrelated attempt, pause/retire between observations, slow admitted SQL, failed reads, source change, healthy idle/saturation; unknown stays unknown, no false continuous-history claim. |
+| M14 | No paginated eligible/leased/blocked public state | `TestIssue2394IntentPaginationBothStores`: multi-page stable IDs during progress/new arrival/stop/restart, filter-bound cursor, wrong-run cursor refusal, precise durable versus runtime-only availability. |
+| M15 | Sources and producers drift under deferred concurrent execution | Existing source controls plus `TestIssue2394SourceProducerMatrixBothStores`: event payload, exact entity revision including same-handler write, pinned resource; rules vs on_complete separate contracts, numeric values and duplicate-content ordinals retained. |
+| M16 | Evaluation/planner errors mistaken for semantic rejection | Existing closed failure algebra plus `TestIssue2394ConcurrentFailureIsolationBothStores`: typed emit rejection mixed with good items, planner/auth/unknown error blocks, safe aggregate lower-half bisection, no cursor advancement from unknown. |
+| M17 | PG same-run revision-head contention defeats expected speedup | `TestIssue2394RevisionContentionBothStores`: one run/20 intents versus 20 runs, exact history/publication outcomes; separate planning overlap, claim wait, revision-lock wait, transaction duration and throughput. Never remove lock. |
+| M18 | Required post-commit handoff waits on same capacity or leaks staging | `TestIssue2394PostCommitPermitBothStores`: capacity1, nested child produces another intent; finalization/dispatch complete or durable handoff returns without acquiring another pump permit; retained memory/plans bounded by active turns x cap. |
+| M19 | Historical run.stop with 20 intents unclassified | S02 `TestIssue2394ServedStopTwentyBothStores`: real HTTP, 20 open intents, partial prefix/blocked/held/retry states, exact typed cancellation/readback. Historical cause remains unproven unless reproduced. |
+| M20 | Stop/commit race violates prefix/suffix accounting | `TestIssue2394StopCommitRaceBothStores`: both transaction winners, stale writer loses, exactly-once committed prefix and compact canceled suffix, no pending owed work. |
+| M21 | Stop succeeded but reconciliation failure causes replay | Existing API control plus S02 lost response/restart/same key replay/conflicting key/new terminal command; exact stored response, no repeated transition or changed assertions. |
+| M22 | Raw store cancellation failure loses cause | `TestIssue2394StopFailureEnvelopeBothStores`: injected validation/statement/commit-uncertain failures on in-scope owner stages; typed class, stable stage, preserved cause, rollback or committed evidence. No SQL text classification. |
+| M23 | Empty/small/chunk boundary/extreme/malformed state | `TestIssue2394CardinalityAndSchemaBothStores`: 0/1/31/32/33/64/500, mixed rejection, corrupt source/count/cursor/claim/retry facts; strict old-schema refusal, same output regardless of chunk boundaries. |
+| M24 | Nested fan-out/barrier/terminal consumers confuse issued with settled | S03 extend `TestScatterGatherSafetyBothStores`: 100-item parent -> child fan-out -> barrier, siblings and duplicate IDs across flows, exact direct membership/no descendant flattening, cancel held child, all final business/readback assertions. |
+| M25 | Restart/fork copies operational claims or loses prefix | Existing two-level restart and fork controls plus `TestIssue2394RestartForkServingBothStores`: crash before/after chunk commit, reclaim due lease, exact ancestor source and issued prefix; fork resets claims/retry/runtime metrics, no replay prefix. |
+| M26 | Ordinary versus selected execution accidentally broadens fork policy | Existing `TestSelectedForkFanOutDeferredWorkRefusalBothStores` and allowed ordinary fork/origin controls; exact unsupported refusal/no mutations, no #642 deferred-execution expansion. |
+| M27 | Duration telemetry becomes another mandatory transaction or false restart zero | `TestIssue2394LatencyEvidenceBothStores`: full post-commit timing under delay, unavailable after runtime loss explicitly represented, no telemetry-only success transaction, schema/model/public consumers consistent. |
+| M28 | SQLite/PG incident filters, grouping and paging diverge | `TestIssue2394IncidentReadbackParityBothStores`: repeated D3 episodes + unrelated errors across two bundles/horizons, bounded pages/filter parity, exact sample log detail, malformed evidence fails. New source-found discrepancy; absorption requires gate. |
+| M29 | Faster pump introduces unbounded in-memory buffering | `TestIssue2394BoundedHandoffBothStores`: delayed downstream consumers, many intents, bounded active plans/carriers owned by existing limits, no task-per-ordinal escape; retain eventual exact effects. Does not claim durable backlog cap. |
+| M30 | Config invalid/default/pool/headroom/lifetime mistakes | `TestIssue2394CapacityConfig`: absent/default, explicit positive PG values, SQLite>1/zero/negative rejection, pool reservation constraints, multiple bundles disagree, actual control/read progress under load, release exactly once. |
+| M31 | Original 500-row local/latency targets missed | S01 original reporter scenario, unmodified 20x25 payloads/mixed rejections/final readback: first submission -> 500 durable outcomes <=10s local and <=2min at 300ms per-commit delay, both stores. Also 1s delay preservation case with no throughput promise smuggled in; cap never shrinks from duration. |
+| M32 | Historic 2x10 final suffix stall / long sustained workload | `TestIssue2394SustainedServingBothStores`: exact 2x10 finishes with lost wakes; 22-intent/15min soak records attempts, states, progress and failure causes. Deterministic M01-M13 remain primary; soak is not historical-cause proof. |
+| M33 | 1362-row network RTT variant not equivalent to commit delay | Optional additional retained fixture with explicit ~100ms network injection; report separately and never substitute for M31. No proof claim until fixture/injection boundary is reviewed. |
+| M34 | Downstream backlog can outrun issuance / naive throttle deadlock | split / escalated as separate class to #2453 (proposed split for Gate A). Its own real nested/barrier proof required; #2394 still owns M29 memory safety. |
+
+S01 is the existing `TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends` workload promoted to production serving timing, plus real supported HTTP ingress/start and operator readback. S02 is the complete authenticated HTTP stop/restart/idempotency journey. S03 uses the checked-in #2448 scatter/gather fixture and real nodes/recipients/barriers, not lifecycle stubs. S04 exercises `run.fan_out.list`, run diagnosis/status, runtime logs/incidents and the CLI clients through their supported read surfaces. Both SQLite and PostgreSQL are mandatory; unsupported transports receive refusal/no-mutation controls rather than new behavior.
+
+Testing organization: small deterministic owner/failure tests first; shared fixture setup for table-driven both-store integration; build the served binary once per test group, isolated stores/runs, no unrelated parallel workloads during timing. Qualify the combined targeted race matrix at `-race -count=3`, normal deterministic matrix at `-count=3`; retain first failures rather than retry-to-green. Long/large matrices and whole suite run through `go run ./cmd/swarm-test -- ...`; small focused probes use `go test`. No reduced workload, raised deadlines, race skips or fewer assertions. Full-suite and supported-surface results are implementation obligations, not pre-audit claims.
+
+## Executed Pre-Audit Evidence
+
+Earlier current-master evidence remains linked above: coalesced backlog FAIL3/3, production sweep opportunity FAIL3/3, accelerated/wake controls PASS3/3, selected-store 20-intent stop PASS3/3, and one 500-row timing baseline (PG20.008s/SQLite16.229s). Those are distinct from the future tests.
+
+New temporary **real-store** `TestIssue2394SustainedArrivalFairnessProbe`:
+
+1. Commit one 32-item prefix of an older 64-item intent through the real owner.
+2. Before each next claim, create one strictly later one-item intent.
+3. Three consecutive newcomers win and commit while the original stays at32/64.
+4. Fails3/3 on SQLite and3/3 on PostgreSQL. This proves repeatable overtaking at current master; combined with the unchanged NULL-first query it establishes the sustained-arrival mechanism, not the historical15-minute workload's exact cause.
+
+Command: `go test ./internal/store/internal/runtimepersistence -run '^TestIssue2394SustainedArrivalFairnessProbe$' -count=3 -timeout=3m`. Log `/tmp/2394-fairness-preaudit.log`, SHA256 `8dc5b01920630d5254d83785822a7ec2633ef2a33ca2b00427529a7b59f5540d`; preserved source `/tmp/2394-fairness-probe.go.txt`, SHA256 `72995901f57592e428355e62430251a034e7468c02bc47a4e01ac960a7e6a4ce`. Temporary repo file removed, not committed as implementation.
+
+Focused controls rerun at `-count=3`: cap-first/range; acknowledged-claim error cleanup; precommit retry release; both-store finite fairness/lease/stale fencing; exact bundle admission; stop claimed suffix; retained-process live-owner refusal; API committed-stop reconciliation/idempotency. All pass: fanoutobligation0.004s, pipeline0.008s, runtimepersistence3.795s, apiv1 1.731s. Log `/tmp/2394-preaudit-controls.log`, SHA256 `ce4702bcfdc5040ecffebc7fda0c3265bb78a58c22ac8eb303a7e399f4edb049`.
+
+No new race, complete served matrix, throughput qualification or full-suite run in this pre-audit. No old selected store was booted or migrated. Missing August28 jobflow failure snapshot/report remains optional diagnostic evidence, not a coding blocker or permission to call its cause fixed.
+
+## Parent Probe, Tracker And Watchlist Decisions
+
+Parent-class sibling probe: current D2 creation/retry/restart/fork policy is already corrected by #2402; immutable source and ordinary historical owners remain with their existing tests; completion/barrier folds already consume durable intent facts, not event counts. Live same-class siblings uncovered now (NULL-first fairness, cross-bundle arbitration, retry readiness, global-work eligibility, mandatory release telemetry and incident reader discrepancy) are proposed for absorption, not hidden tail. #2453 is different: dependency-safe downstream backlog admission. #1449 bounds provider/role execution, not this pump. #2395 concerns grammar diagnostic batching, unrelated to serving. No proposed generic scheduler or wholesale fork redesign.
+
+**Parent action:** aim to close the full #2394 serving class; leave #107/#2381 open for their separately tracked operational findings, and record the residual backlog obligation under #2453 rather than pretending closed design record #2337 is an active tracker. #2453 now exists as the proposed backpressure follow-up; its implementation must not become a prerequisite to this serving repair. The gate must ratify this split. #2381 remains open for #2394/#2395 and explicitly records the broader #2453 relationship, without claiming that a worker cap fulfills backpressure.
+
+**Tracker-state decision: current issue must be updated before coding; that body repair is now done.** The canonical #2394 body contains the current class, D2-complete status, new evidence, proposed decisions and #2453 relation while retaining the historical report. Parent #2381's canonical body also has the new coordination record. #2453 is OPEN. No older stream is superseded; merged #2402/#2386 stay closed. These paper repairs do not assert design approval.
+
+**Watchlist-backed promotion check:** mapped node `durable_fan_out_issuance_and_progress_ownership` already names hot/new/slow/retrying starvation, process loss, per-source/fork consumers, cancellation and readback. That evidence argues for absorbing all serving siblings now rather than a boolean/semaphore first slice. It does not justify absorbing delivery/agent concurrency or backlog dependencies, which its too-broad guidance explicitly separates. Refined it with executed newcomer/coalescing evidence, process-scoped capacity, same-run revision lock, transaction fold, retry readiness and D3/readback. Added `dependency_safe_delivery_backpressure` for #2453. Watchlist repair is committed and pushed to swarm-docs origin/master as `bac576d`; YAML parsing and diff checks pass. Other agents' dirty checkout and unmerged review drafts were preserved.
+
+Remaining tail estimate **after this PR**, not a guarantee: chosen serving class0 known child slices if all proofs pass; immediate broader fan-out operational parent at least1 named separate class (#2453), estimated1-2 implementation slices after its design, medium-low confidence because dependency-safe admission is not yet audited. Broad #2381 still has #2395 (one separately tracked finding); #1449/#2281 are broader program consumers, not silently absorbed. No claim this audit inventories every future runtime defect.
+
+Architecture smell: durable intent authority exists, but scheduling, local permits, SQL eligibility, diagnostic readers and successful release are not composed under one exact owner. Long-run better direction is the bounded typed admission/turn-result projection and process-owned capacity described here, not another generic work framework. **Tracking decision: update existing #2394 and watchlist now; #2453 tracks the distinct concrete backlog obligation.** Rough effort: coordinated serving/store/diagnostic correction and substantive proof several engineer-days to roughly1-2 weeks, medium-low confidence; high ROI because it removes starvation and a post-commit failure seam across every existing fan-out source. Performance results, not this estimate, decide closure.
+
+## Gate Request / Blocking Decisions
+
+Please record an independent Gate A outcome on this issue. Specifically ratify or repair: finite global admitted-source fairness; process-scoped operator capacity and permit lifetime; typed1s retry readiness; atomic release plus retirement of durable commit-duration telemetry; observed-opportunity D3 semantics and incident-reader absorption; the new paginated API/CLI projection; and #2453's distinct-class split. These are explicitly proposed, not inferred from favorable design feedback.
+
+If the incident-reader mismatch is judged a different prerequisite, record that split and tracking before coding; do not drop supported-surface proof. If full admission/capacity correspondence cannot be expressed through the existing capability and exact source/run owners, pause and revise this gate rather than inventing identity heuristics. No broad generic refactor is proposed; the mapped coordinated correction must nevertheless be independently approved.
+
+**Current gate result: awaiting independent pre-audit review. No implementation may start.** Posting this artifact and tracker/watchlist repairs does not manufacture the required independent approval.
+
+
+---
+
+### Comment 5668445427
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5668445427
+
+Author: yazzaoui; created: 2026-09-14T18:05:02Z; updated: 2026-09-14T18:05:02Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# Independent Gate A: approved
+
+**Outcome: `approved`. A may begin implementation of the complete amended #2394 class.** This ruling incorporates the bounded coverage repair below; no replacement audit or second gate round is required for the enumerated work. This is Gate A pass 1, not a PR proof audit or merge approval.
+
+Reviewed [pre-audit 5668255316](https://github.com/division-sh/swarm/issues/2394#issuecomment-5668255316), complete issue/thread and preceding decisions, governing spec, current code at `486ea41611ed06fa2932fb43892f8e7f4e1dbefe`, parent/sibling records and docs/watchlist. The diagnosis worktree is clean at that head, no #2394 implementation branch was found, and the only local review draft is uncommitted design input. Reviewer probes are isolated in `/tmp/review-gate2394`; they are not implementer production changes.
+
+## Failure-Class Verdict
+
+**Category confirmed:** failure-class / semantic drift / backend and supported-surface parity / performance. An independent pre-audit gate is required and is satisfied by this recorded ruling.
+
+**The repaired chosen class is broad enough**, not merely acceptable as a first slice. It is durable fan-out serving opportunity and turn-settlement ownership across admission, shared capacity, exact source/runtime selection, continuous refill, finite fairness, retry readiness, lease fencing, atomic release, recovery and operator/cancellation evidence. The original line, wake token and slow workload are entry points, not boundaries.
+
+The audit credibly challenges the first local framing and moves all named same-concept consumers. A boolean-only fix, a semaphore beside independent per-bundle schedulers, or an isolated SQLite transaction optimization is explicitly not approved as closure. The existing durable obligation model is the real owner substrate, not a nearby helper chosen for convenience.
+
+Immediate parent is the durable deferred-obligation model recorded by CLOSED design issue #2337; live serving work is #2394. Broader operational parents #107 and #2381 remain OPEN. Dependency-safe downstream backlog admission is a distinct class under OPEN #2453: it chooses whether additional issuance may be admitted against downstream resource/dependency constraints, rather than which already-admitted obligation gets a serving opportunity. **The #2453 split is ratified, and its implementation is not a prerequisite to #2394.** #2394 retains no-new-unbounded-memory proof; a worker cap is not a backlog cap.
+
+Closure is feasible as one coordinated PR with existing owners, although the <=10s result is an implementation proof obligation, not established by the proposed architecture. No new generic scheduler, queue framework, whole-value migration, fork redesign, legacy-store migration or dependency vendoring is authorized.
+
+## Independent Adversarial Results
+
+| Probe / checked seam | Independent result and implication |
+|---|---|
+| Reran preserved `TestIssue2394ClosedIntentLeavesCoalescedBacklog` using the actual coordinator/evaluator/publication path and its explicitly bounded selected-owner double | FAIL: only 2 of 3 short intents progress; the identical 10ms-sweep control PASS. Confirms queue exhaustion is incorrectly inferred from the just-finished intent. Not a served historical 15-minute-stall reproduction. |
+| Reran preserved real-store fairness probe as `TestReviewer2394SustainedArrivalFairness` | FAIL on SQLite and PostgreSQL: 3 newer intents overtake the older intent, which remains at 32/64. Confirms the NULL-first policy defect; a shared semaphore alone cannot repair it. |
+| Independently authored `TestReviewer2394IncidentProjection`, using real diagnostic publication and store readers | PostgreSQL PASS. SQLite FAIL: includes the other bundle and out-of-horizon row, emits two singleton rows instead of one count-2 aggregate, and accepts a malformed cursor. This confirms the audit's source finding with execution evidence. It is a filtering/aggregation contract violation, not a claim of an independently established tenant-authorization exploit. |
+| Independently authored `TestReviewer2394ExpiredUnreclaimedClaim` | FAIL on BOTH stores: after waiting beyond the actual lease expiry, committing with the old turn-start timestamp returns nil and records the ordinal. No competing claimant is needed. This specific temporal manifestation was missing from the audit's concrete rows; it is absorbed as M35 below. |
+| `TestFanOutFairnessLeaseRecoveryAndStaleFencingAcrossOwnersOnBothStores`, exact-bundle claim control | PASS on both stores. The existing test proves stale-generation rejection after another owner reclaims, not rejection of an expired but unreclaimed claim. Those are different proof obligations. |
+| `TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores`, nested cancellation, two-level restart controls | PASS on both stores. Supports preserving current cancellation/owed-work owners; does not identify historical HTTP R6's cause. |
+| `TestProcessCapabilityLiveOwnerRefusalParity` and source inspection of startup possession / generation grants | PASS on both stores. Existing retained process possession rejects a second ordinary serving process. A process-capability-owned shared budget is a real boundary; no invented database-global semaphore is required. |
+| `TestFanOutClaimErrorSettlesAcknowledgedOwnershipWithoutRetry`, `TestFanOutPrecommitRetryReleasesPlansAndAdaptivelyReleasesClaim` | PASS, including cancellation/release-error and no-work branches. New refill must preserve acknowledged ownership cleanup rather than losing those exits behind a boolean. |
+| `TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailure` | PASS for pending/failed reconciliation. Preserve committed response truth; do not turn post-commit failure into replay of the transition. |
+| Production code sweep | Confirmed 60s shared maintenance timer, bundle-filtered claims, synchronous turn scheduling, separate successful-release writer, all current `LastChunkMS` production references, same-run revision-head locking, global-work readiness SQL, incident read adapters, runtime generation/standing work admission, ordinary and selected-fork boundaries. |
+
+All executions above were focused `go test` at `-count=1`; real PostgreSQL cases ran and were not skipped. I did not rerun the 500-row performance proof, race matrix or full suite for this pre-audit. Their completion belongs to implementation. The earlier diagnosis's measured 16.229s/20.008s results remain baselines, not projected success.
+
+The independent code check substantially matches the audit claims. **One additional missed temporal interpreter was found:** the mutation fence treats caller-supplied old command time as lease-validity time. This does not require a broader parent or redesign; the existing selected claim/turn owner already belongs to this class.
+
+## Reviewer Coverage Repair: M35 And Temporal Clarifications
+
+At `pipeline/fan_out_pump.go`, a turn captures `now` before evaluation and passes it to the chunk command. `pipelinepersistence/fan_out_owner.go:842` checks `lease_expires_at > command.Now`, not the current mutation-admission time. The existing stale-after-reclaim test is insufficient to catch this.
+
+**M35: expired but unreclaimed ownership, delayed admission and stale command time. Classification: direct reproducer and fix.** Preserve the reviewer probe and add production-caller execution proof that blocks evaluation beyond lease expiry without a successor claimant. The selected mutation owner must establish current lease validity when it admits the mutation under its lock, not trust a saved tick/turn timestamp. Keep audit/event time separate from authorization time. Also exercise claim acquisition delayed behind database/writer admission, expired evaluation reads, and the exact release/retry/block cleanup distinctions. No arbitrary lease extension, blind refresh, or timer renewal framework is authorized as a shortcut. A transaction admitted while its lease is valid is not required to violate SQL atomicity merely because wall time passes during commit; define the admission linearization precisely.
+
+**M11 clarification, execution proof through the corrected path:** after folding release into publication, another generation may acquire/advance the intent before a lost-acknowledgement readback finishes. Reconciliation must validate the exact immutable outcomes of the earlier command without demanding that every current mutable header still equals the earlier result, and must never release the successor's claim. Preserve cancellation and revision history in both orderings. This is a required race of the proposed fold, not a claim that the new implementation already exists or fails.
+
+**M09 clarification:** pause is not stop. New turns are not admitted while paused; an already-admitted turn follows the binding in-flight completion/rollback contract. Stop, lost process/runtime authority and stale claim generation remain mutation fences. Do not make an undifferentiated `run.status` check silently redefine accepted in-flight work.
+
+For the pre-audit's requested classification vocabulary, carry these explicit planned dispositions into the proof audit:
+
+- **Direct reproducer and fix:** M01-M05, M10, M12, M14, M17, M27, M28, M31 and added M35. Some are source-established missing surfaces/cost mechanisms rather than already executed failures; their named red/green implementation proofs remain required.
+- **Execution proof through the same corrected path:** M06-M09, M11, M13, M15-M16, M18-M26, M29-M30 and M32. M19/M32 cover current supported paths and historical-shaped workloads; no root-cause reconstruction of lost historical evidence is implied.
+- **Split / escalate as separate class:** M34 to #2453. M33 is supplemental only until its actual fixture/network injection is retained and specified; it cannot replace mandatory M31 commit-delay proof or become an unexplained closure blocker.
+
+M28 must separately assert pre-aggregation bundle filtering, horizon filtering, repeated-code aggregation, valid page traversal and malformed-cursor refusal. Do not collapse those independently failing contracts into only a single successful D3 sample. Apart from this additive repair, the audit's consumer sweep and M01-M34/S01-S04 matrix are extensive enough to start coding. Planned proof is not being misrepresented as completed merge proof.
+
+## Binding Decisions For Implementation
+
+1. **Promote the bounded shared serving owner now.** Put shared fan-out capacity and exact runtime/source registration under the existing selected-store process capability and typed work-lifetime ownership. Defaults PostgreSQL 4 / SQLite 1, operator setting `runtime.fan_out_workers`, positive values only and SQLite exactly 1. Validate usable capacity and required reservations/headroom without resizing or silently clamping. No per-bundle budget multiplication, DSN/path/pointer global registry, or unrestricted bundle-string list as executable authority. One permit spans the finite turn and required disposition/handoff; recipients never recursively need that permit to let it finish.
+
+2. **Finite durable fairness is approved.** Replace NULL-first priority with finite last-served-or-created position plus deterministic structured identity ties, over the complete admitted execution/source set. Exact matching runtime/run execution authority still decides who may execute the selected work. Preserve one chunk per turn and bounded overtaking under ongoing arrivals; test timestamp ties/clock handling and no author backdating. Do not claim PostgreSQL same-run linear speedup: keep the revision-head lock and measure it, along with cross-run overlap.
+
+3. **Typed one-second retry readiness is approved.** Safe retry releases the permit/claim, preserves semantic outcomes/cursor, retains the existing half-budget policy and persists due time. Before due it projects temporary typed retry-wait, not permanent invariant blockage and not D3 eligibility. Same-run restart preserves due time; fork resets operational waiting under the existing policy. Due-time recovery consumes the same owner. Preserve the SQLite backend's own admission/busy-recovery boundary; this is not permission for SQL-string classification or a second backend retry loop.
+
+4. **Fold successful release into publication and retire durable duration telemetry.** Event/outcome/cursor/revision/fairness/success-budget/release must commit atomically; delete the mandatory `finishFanOutSuccessfulTurn` writer. Retire `LastChunkMS`/`last_chunk_ms` consistently rather than fabricating a post-restart zero. Complete latency remains truthful runtime metrics with explicit availability; no extra mandatory metrics write. Bound evaluation inputs to a chunk where possible without moving whole source hydration into SQLite's writer lock. Two clean serving write transactions is the target; count every other workload transaction/query separately and preserve uncertain outcomes/post-commit handoffs.
+
+5. **Approve continuous refill, 1s production recovery and the scoped observed-opportunity D3 incident.** Wakes are hints, not task counts. Expiry maintenance cannot block pump scheduling. The incident uses canonical observed eligibility/capacity and monotonic local timing for the exact occurrence/candidate; unrelated attempts do not clear it. Retain the real production interval and measure discovery and actual claim-entry latency, not callback scheduling. The observed-opportunity definition is a diagnosis contract, not permission to hide an additional one-second scheduling delay or claim an unconditional durable-acquisition bound through slow SQL. Unknown database/source state remains unknown. The detector is independently scheduled, generation-owned and episode-deduplicated, not a second scheduler.
+
+6. **Absorb the complete enumerated incident-reader parity repair in this PR.** The independently reproduced SQLite mismatch is closure-bearing for supported D3 diagnosis. Share the filter/group/page interpretation across the two existing adapters, including unrelated incident controls and precise source-log detail. Do not add a D3-only bypass, truncate logs before computing aggregates, or copy PostgreSQL code into a second semantic owner. Broader unrelated observability features are not promoted.
+
+7. **Approve the bounded `run.fan_out.list` / `swarm run fan-out list` surface.** Keep it read-only under `read:runs`, with filter/run/order-bound identity keyset cursors, per-page observation time and explicit unavailable runtime metrics. Preserve current aggregate APIs and direct-delivery barrier membership. Encode all field/default/limit/state precedence decisions in authoritative `platform-spec.yaml` with matching API/CLI schema/tests before PR review; no local draft is a merge artifact.
+
+8. **Keep cancellation at the selected run-lifecycle owner.** Cover unissued, partially issued, leased, permanent-blocked and retry-wait intents atomically. Keep exact committed idempotent replay separate from a new request against an already-terminal run. Absorb proven in-class operation-stage/cause repairs needed for S02/M19-M22; no second cancellation service or lease-expiry wait. The unavailable historical R6 artifact is not a reason to invent its cause or block all current implementation, and passing a new control is not proof of that old cause.
+
+9. **Qualification remains unchanged.** Original 500-row/mixed-rejection contents and final assertions, <=10s normal local execution and <=2min with 300ms per-commit injection on both stores, measured immediately before real first submission through required durable ordinal outcomes. Downstream settlement/teardown remain separately asserted. Preserve existing race budgets; normal throughput targets are not fabricated race-build promises. Carry the checked-in 100-item scatter/gather composition, deterministic missing-wake/fairness/retirement/stop/uncertainty tests, original production sweep and supported HTTP/CLI readback. No shortened-interval-only closure, assertion/deadline weakening, or retry-to-green. Large/full qualification uses swarm-test.
+
+## Tracker, Watchlist And Architecture Disposition
+
+**Architecture disposition: promote now** within #2394. The smell is split ownership between scheduling, eligibility, capacity, temporal claim checks, successful release and diagnostic readers. The repair is real owner/API/state movement and removal of the redundant writer, not prose reconciliation. Whole-system scheduler/fork/value refactoring is not warranted by this gate.
+
+Independently verified: #2394/#2453/#2381/#107/#1449 OPEN; #2337 CLOSED as design; #2386 closed after merged #2402; #2288 CLOSED through merged #2380; #1456/#1457 CLOSED through merged #1516/#1642. #1449 is a split parent/watchpoint, not authority to add agent-role caps. #642 remains OPEN for unsupported selected deferred execution; this PR must preserve its refusal tests. #2448 is merged safety corpus, not existing 100-item performance qualification.
+
+The audit's watchlist was genuinely pushed at `bac576d`, but retained stale '#2288 active' and misleading '#1449 owns role/provider concurrency' wording. **I repaired those narrowly myself** and added the executed expired-unreclaimed-claim manifestation. Updated swarm-docs default branch: `b2e44c51f24c4c8db76e628513c4e10b8130be6d`; YAML parsing and diff checks pass. Decisions: refine `durable_fan_out_issuance_and_progress_ownership`; retain/refine the existing `dependency_safe_delivery_backpressure` node. No new issue or POTENTIAL_ISSUES entry is needed; M35 belongs to #2394 and the separate backlog tracker already exists.
+
+Tracker action: this ruling is the additive pre-audit coverage repair; #2394's current summary and the #2453/#2381 records are reconciled to the approved scope/split. The reviewer-only probe files remain accessible under `/tmp/review-gate2394/internal/store/internal/runtimepersistence/reviewer_2394_{fairness,incidents,expiry}_test.go` and `/tmp/review-gate2394/internal/runtime/pipeline/reviewer_2394_backlog_test.go`. Preserve their assertions when moving them into permanent tests; they intentionally fail on the baseline.
+
+**A's next step:** start the implementation, first with the canonical serving-state/claim contract and red tests, including M35 and the publication/release uncertainty race. Then implement shared capacity/refill and its exact lifecycle, and migrate every diagnostic consumer. Finish with supported surfaces and measured load qualification. These listed repairs and proof expansions are already authorized; do not request another routine scope ruling for them. Return only for a genuinely new class/contract conflict or evidence that the performance target requires an unapproved architecture change.
+
+Gate A is **approved**. No failure-class elimination or merge-readiness claim is made before those implementation proofs pass.
+
+
+---
+
+### Comment 5670808264
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5670808264
+
+Author: yazzaoui; created: 2026-09-14T21:06:19Z; updated: 2026-09-14T21:10:00Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Implementation Escalation: M31 Publication Handoff Cost
+
+Gate A's serving repair remains implemented and preserved. This is a request
+for a bounded owner-boundary disposition, not a request to relax the workload,
+deadlines, claim fences, or injected-delay scope. No publication batching or
+changed pipeline settlement/revision semantics has been implemented.
+
+## Evidence
+
+Base `486ea41611ed06fa2932fb43892f8e7f4e1dbefe`, worktree
+`/tmp/swarm-2394-diagnosis`, branch `agent-a/issue-2394-serving-owner`.
+The current implementation is uncommitted and not PR-ready.
+
+The unchanged 20x25 reporter workload, all500 original numeric rows and the
+mixed-rejection/final readback assertions, ran through the real shared serving
+owner. The latest normal execution retained all correctness assertions:
+
+- SQLite final durable-cursor observation:9.691875028s, within10s in this run.
+- PostgreSQL:10.714166483s, FAIL the10s assertion.
+- Both stores:20 claim commits +20 atomic publication/release commits;
+  zero separate success-release writes; all budgets32, no duration shrink.
+- Whole-workload transaction-owner receipt through valid-run quiescence:
+  PostgreSQL1746 acknowledged transactions (595 read /1151 write), of which
+  retained sessions account for1060 (520 read /540 write).
+  SQLite1615 (81 read /1534 write). These are actual owner commits, not method
+  call estimates. Background transactions in flight are reported separately.
+-667 committed run revisions and2279 fact revisions remain preserved.
+
+Log:`/tmp/2394-500-serialization-integrated.log`.
+
+The first strict300ms SQLite experiment injected delay immediately before
+every actual transaction-owner Commit, including read transactions and retained
+sessions where present. This is not a network-RTT experiment. Implicit-autocommit
+SQL outside those transaction owners is explicitly not delayed/counted, so the
+experiment is not being advertised as complete database-call instrumentation.
+
+`go run ./cmd/swarm-test -- ./internal/runtime/conformance -run '^TestIssue2394ReporterFiveHundredDelayedCommitsBothStores$/sqlite$' -count=1 -v`
+
+FAIL after342.080s: the unchanged5min cursor-wait assertion expired at425/500.
+All500 rows were admitted; progress100/200/300/400 was observed; no budget
+collapse (all32). This is not a passing later-final-consumer proof.
+Log:`/tmp/2394-500-delay-all-commits-sqlite.log`.
+
+The corresponding PostgreSQL delayed proof ran in an isolated test window:
+FAIL238.801s overall; final500 durable-cursor observation3m23.333067012s,
+above2min. All500 publications, original mixed-rejection and final readback
+assertions completed. Through valid-run quiescence the collector records1749
+transactions (773 reads /976 writes), including520 per-event pipeline
+settlements and1060 retained-session commits. All20 valid chunk commits remain
+25 items, all budgets32. This is a measured PostgreSQL failure, not an inference
+from SQLite. Log:`/tmp/2394-500-delay-all-commits-postgres.log`.
+
+Small allocation fixes already preserve the previous revision equality/key-byte
+oracles, and a per-call duplicate producer-census build is removed without any
+cross-source cache or routing decision change. Those optimizations do not erase
+the following serialized commit lower bound.
+
+## Concrete Owner Boundary
+
+Actual path:
+
+`pipeline.claimAndServeFanOutTurn`
+-> `bus.engineDispatcher.DispatchPostCommit`
+-> per-event `dispatchPendingOutboxOperation` / `dispatchAndRecord`
+-> `pipelinePublicationClaim.Settle`
+-> selected `pipelinepersistence` pipeline-obligation `Settle`
+-> exact receipt + delivery handoff + completion-candidate request + revision
+finalization in one transaction, then release and handoff.
+
+The current caller performs those event settlements sequentially, and the
+fan-out permit correctly remains held through mandatory disposition/handoff.
+On SQLite's single worker,19 complete25-item turns precede the final turn:
+475 required per-event settlement commits alone cost142.5s at300ms each, before
+ingress, planning, chunk commits, completion execution, or any reads. Thus even
+delaying only these writes already exceeds120s. Merely adding workers, reducing
+read overhead, or repeating the timing run cannot remove that lower bound.
+This lower-bound claim is SQLite-specific; PostgreSQL overlap must be measured.
+
+PostgreSQL additionally uses retained-session parent-fence/read admission per
+publication and canonical retained claims. A batch cannot arbitrarily choose
+one session or treat multiple concrete claims as interchangeable authority.
+
+These owners were enumerated as preserved publication/recipient semantics in
+the approved audit, not as an approved change to their settlement/revision unit.
+The binding per-turn handoff requirement must not be bypassed to make the
+stopwatch green.
+
+## Requested Bounded Direction
+
+Please disposition absorption of bounded, exact-claim publication handoff and
+settlement amortization through the existing pipeline-obligation owner, with
+all producers/consumers audited before implementation. No sink-only bypass,
+generic scheduler, new queue, arbitrary retained session, or per-event semantic
+validation removal is proposed.
+
+The unresolved semantic decision is whether completed per-event dispositions
+within one existing bounded publication chunk may share a transaction/revision
+boundary while retaining each exact claim, receipt, delivery handoff, failure,
+and causal identity. If that conflicts with an individually committed-history
+contract, identify that prerequisite/split explicitly rather than quietly
+changing history or narrowing delay injection.
+
+Required proof expansion for an approved batch path: mixed node/agent/no-route
+publications, exact claim/set identity, duplicate and uncertain acknowledgement,
+failure in each member, both stop/commit winners, process death before/after
+commit, recovery without prefix replay, exact source/run isolation and existing
+fork/history readback. Both backends must execute it. Keep M01-M35/S01-S04,
+original500 contents, performance targets, and all final assertions.
+
+I am continuing independent approved cancellation/diagnostic and missing
+integration-proof work. Publication ownership changes remain paused pending
+this disposition. This is not a merge-readiness or whole-suite claim.
+
+## S03 Integration Update
+
+The retained100-item reverse-completion scatter/gather assertion also remains
+red: both stores reach64/100 then hit the unchanged20s deadline. This is a real
+recipient/materialization fixture, unlike the reporter's500 no-route outputs.
+Log:`/tmp/2394-scatter-hundred-census-reuse.log`; combined42.551s.
+The targeted PostgreSQL profiling run also fails at64/100 (21.797s).
+Its16.83s sampled CPU includes4.05s in endpoint-census construction and3.29s
+in full active-flow route-topology derivation. These overlapping cumulative
+samples are not additive wall-clock cost or a proof that this is the only
+bottleneck. The operation-local duplicate-census optimization preserves source
+isolation and reduces redundant work, but does not qualify S03.
+Profile:`/tmp/2394-scatter-hundred-census-reuse.cpu`.
+No route-topology caching, reconstruction bypass, or materialization change
+has been made to turn this red journey green. This receipt must remain visible
+alongside M31, rather than treating the reporter benchmark as all-recipient
+performance proof.
+
+
+---
+
+### Comment 5670837156
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5670837156
+
+Author: yazzaoui; created: 2026-09-14T21:08:50Z; updated: 2026-09-14T21:08:50Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## New off-spec discovery: runtime.logs filter parity
+
+Request explicit **separate-class split** from #2394's approved bounded `runtime.incidents` repair. No production fix or new issue has been made pending lead disposition.
+
+**Class:** selected-backend runtime-log content/bundle filtering diverges before bounded row selection. SQLite's `ObservabilitySQLite.ListOperatorRuntimeLogs` ignores ErrorCode and BundleHash; PostgreSQL applies them in SQL. The governing `platform-spec.yaml` API `runtime.logs` accepts `error_code` and requires canonical `runs.bundle_hash` selection AND-composed with other filters. Owners are `internal/operatorread.ObservabilityReader` and the existing `internal/store/internal/operatorsurface` adapters; API/CLI are consumers, not repair owners.
+
+**Actual minimal both-store receipt:** three canonical diagnostic-direct runtime logs, two admitted run/bundles, same component/level, two distinct failure codes. Real diagnostic publication/store readers; no synthetic incident and no compensating client filter. Unfiltered persistence/code-decode controls passed on both stores.
+
+```sh
+go test ./internal/store/internal/runtimepersistence -run '^TestRuntimeLogFilterParityBothStores$' -count=1 -v -timeout=60s
+```
+
+Executed **once**, exit 1, **1.057s** package time. SQLite 0.24s; PostgreSQL 0.80s. No skips.
+
+| Exact subtest | SQLite | PostgreSQL |
+| --- | --- | --- |
+| error_code | FAIL: 3 rows instead of 2 | PASS |
+| run_and_error_code | FAIL: 2 rows instead of 1 | PASS |
+| error_code_before_limit | FAIL: newest wrong-code row replaces older matching row at LIMIT 1 | PASS |
+| absent_error_code | FAIL: 2 rows instead of 0 | PASS |
+| bundle | FAIL: includes foreign bundle, 3 rows instead of 2 | PASS |
+| run_and_foreign_bundle | FAIL: contradictory selectors return 2 rows instead of 0 | PASS |
+| bundle_and_error_code | FAIL: 3 rows instead of 1 | PASS |
+
+Reproducer retained unchanged in `internal/store/internal/runtimepersistence/runtime_log_filter_split_test.go`. This is a filtering contract failure, not an independently established tenant-authorization exploit.
+
+**Sibling accounting:** `runtime.subscribe_logs` forwards the same filters to the same reader; `swarm logs --error-code` consumes snapshot/follow APIs. Those are source-established consumers, not separately executed transport proofs here. Internal ActionOrEventType selection and Since-boundary differences remain static census items, not additional tested failures or newly approved public features. **Cursor caveat:** `platform-spec.yaml`'s `operator_trace_event_log_read_rows` explicitly reserves cursor-rich production reads to PostgreSQL unless separately promoted. SQLite cursor refusal is not automatically off-spec and is not part of this repro or proposed silent promotion.
+
+**Why separate:** gate A decision 6 and M28 authorize the enumerated incident source-filter/group/page repair, not arbitrary log-selection changes. Incidents aggregate source rows; runtime.logs selects individual rows. Shared diagnostic input does not make those the same implementation class. Broader parents are operator read-model drift (#101) and backend parity (#2275). Tracker searches found no dedicated open filter-defect child; closed #1150 concerns persistence/visibility, #1369 source-field shape, and #1810 construction/parity guards. Propose a focused log-selection child only after lead disposition.
+
+**Assertion integrity:** the original reviewer incident bundle/horizon/count-2/malformed-cursor assertions remain preserved in the parent's expanded incident test. The unexpected ErrorCode assertion was in the newly authored D3 test; it was replaced there with component/level selection plus returned-code validation. That removal is now explicitly retained as this independent failing repro, not lost or represented as filter conformance. No claim that S04 is fully closed. Keep the failing test and evidence parked pending lead disposition; do not weaken it or repair production opportunistically.
+
+
+---
+
+### Comment 5671140757
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5671140757
+
+Author: yazzaoui; created: 2026-09-14T21:36:16Z; updated: 2026-09-14T21:36:16Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Lead Disposition: Absorb Bounded Publication Settlement; Split Log Filtering
+
+User-authorized direction following the M31/S03 escalation and log-filter discovery:
+- https://github.com/division-sh/swarm/issues/2394#issuecomment-5670808264
+- https://github.com/division-sh/swarm/issues/2394#issuecomment-5670837156
+
+## Decision And Immediate Next Work
+
+**Absorb bounded exact-claim publication handoff/settlement amortization into #2394.** This is an approved direction and scope amendment, not yet approval of an unspecified transaction/history contract. A should post one focused additive pre-audit covering the exact batch operation and transaction/history semantics below, then obtain independent approval before changing settlement boundaries. The existing Gate A remains valid for already-approved work; do not restart the whole audit or park independent cancellation/diagnostic/proof work. Preserve M01-M35 and S01-S04.
+
+Architecture disposition: **promote now within the existing pipeline-obligation owner**, with this issue as tracker. No new batching issue, generic scheduler, extra queue, sink-only fast path, fake retained authority, or compatibility/migration layer.
+
+The reported SQLite lower bound is decisive for the requested direction: 475 sequential mandatory settlement commits at 300ms each already require 142.5 seconds, before other work. More workers, cheaper reads, or timing retries cannot satisfy the 120-second SQLite target. These are implementer measurements reviewed for this disposition, not newly rerun reviewer tests. PostgreSQL's different retained-session costs and concurrency must be measured independently.
+
+## Required Focused Audit Amendment
+
+1. Name the real owner and every producer/consumer of the settlement operation, including ordinary publication, fan-out, recovery, retained claims/sessions, delivery handoff, completion candidacy, cancellation, and historical fork readers. Explain which use the batch operation, which remain legitimate singleton operations through the same semantics, and why. No parallel semantic implementation.
+2. Define the exact bounded set/claim contract: immutable event/causal identity, source/run and runtime-generation authority, per-member fencing, unique membership, deterministic ordering where required, and how PostgreSQL retained-session authority is validated. Never select an arbitrary member session as authority for the others. Work remains bounded by the existing publication chunk, not an unbounded collection of pending work.
+3. Cite the exact governing spec for transaction visibility and committed history. State whether independently completed per-event dispositions may share one physical transaction/revision, which intermediate states disappear, and what historical selection/fork can observe. Do not silently replace an individually committed-history guarantee. If such a guarantee exists, explicitly propose its spec change for approval or a contract-preserving alternative; no implementation first and prose reconciliation later. The authoritative `platform-spec.yaml` must be updated in the implementation PR for any changed architecture/runtime semantics.
+4. Specify atomic rollback, semantic failure per member, infrastructure failure, duplicate/uncertain acknowledgements, exact receipts and post-commit handoff recovery. Preserve each event's delivery outcome and identity even when storage work is amortized. Show that no durable prefix is replayed, no successor claim is released, no completion candidate is lost and no handoff is detached merely to shorten permit occupancy.
+5. Add named both-store proofs for mixed node/agent/no-route members, wrong/stale/mixed claim sets and source/run isolation, failure at each member, duplicate and lost acknowledgement, both stop/commit winners, crash before/after commit and during handoff, restart/recovery, and historical/fork readback. Include existing temporal-lease/generation protections. Distinguish actual supported-path execution from doubles or bypassed gates.
+
+One concrete amendment with the owner map, transaction/history decision and proof matrix is the next deliverable. This is not permission for an open-ended publication rewrite. If the map shows that a bounded operation cannot preserve the contract, expose that specific contradiction rather than repeatedly making local fixes.
+
+## S03 Is Still Required
+
+The 100-item real-recipient scatter/gather failure remains independently blocking; a green 500-row no-route benchmark does not close it. Continue profiling and eliminate demonstrably redundant operation-local topology/census computation through its existing owners, preserving exact admitted source, runtime generation and receiver/materialization decisions. This bounded reuse of an unchanged operation input is authorized; no cross-operation mutable topology cache, stale snapshot, reconstruction bypass or routing-semantics change is authorized. Classify any wider owner-boundary change in the same focused amendment before coding it. Do not assume batching alone fixes the 64/100 failure.
+
+## Qualification Is Unchanged
+
+Retain all original 500 rows, mixed rejections, final readbacks, normal <=10s and delayed-commit <=2min targets, existing race budgets, and the unchanged 100-item journey assertions. Keep the same transaction-owner delay injection scope, with reads/retained sessions and uninstrumented implicit autocommits honestly identified. Report cursor/publication time separately from downstream completion and teardown, while proving both. No shortened workload, timeout relaxation, hidden handoff, narrowed delay injection or retry-to-green. Full qualification is still outstanding; this comment is not PR readiness or merge approval.
+
+## Separate-Class Disposition: Runtime Logs
+
+**Approved split; tracked by #2454**, under verified-open #101 and #2275. It is not a prerequisite to #2394 and does not authorize its production repair. Preserve and pin the independent seven-case reproducer for handoff; keep the original #2394 incident and D3 assertions. Clearly record this split in proof/qualification rather than deleting evidence or claiming full log-filter conformance. No automatic waiver of required CI checks is implied; if the parked reproducer affects qualification, identify it explicitly and use the recorded split rather than weakening assertions.
+
+The separate log-filter child needs its own focused audit/gate and watchlist mapping. This is individual log selection, distinct from incident aggregation; SQLite cursor support is not silently promoted. #2453's previously approved backlog-control split remains unchanged. No additional architecture issue is needed for the bounded settlement work.
+
+
+---
+
+### Comment 5671347660
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5671347660
+
+Author: yazzaoui; created: 2026-09-14T21:55:38Z; updated: 2026-09-14T21:55:38Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Pre-Implementation Coverage Audit: #2394 Additive Publication Settlement Amendment
+
+**Gate request, not implementation or merge proof.** This is the single focused amendment requested by [lead disposition 5671140757](https://github.com/division-sh/swarm/issues/2394#issuecomment-5671140757). It retains the [approved original audit](https://github.com/division-sh/swarm/issues/2394#issuecomment-5668255316), [Gate A and M35 repair](https://github.com/division-sh/swarm/issues/2394#issuecomment-5668445427), and every M01-M35/S01-S04 obligation. Independent approval of the exact operation below is pending. Already-approved serving, cancellation, diagnostics and operation-local computation reuse continue. No publication settlement boundary has been changed.
+
+Audited source: `486ea41611ed06fa2932fb43892f8e7f4e1dbefe` plus the preserved, uncommitted #2394 implementation in `/tmp/swarm-2394-diagnosis`. References below use repository-relative paths and exact YAML keys rather than relying on shifting worktree line numbers. Re-read IMPLEMENTER_GUIDELINES.md and SEMANTIC_DRIFT.md. No dependency vendoring, compatibility, migration or new queue is proposed.
+
+## Class, Evidence And Closure Boundary
+
+**Category:** failure-class, semantic ownership, backend parity and performance. **Observed symptom:** bounded fan-out issuance still incurs one mandatory platform-pipeline settlement transaction per emitted event. This is not a claim that the receipt SQL itself is a separate transaction: receipt, route disposition, successful delivery handoff, candidate request and revision already share the existing per-event transaction.
+
+The retained M31 run measured 520 PostgreSQL `pipeline_settlement` commits. On SQLite, 475 earlier-range settlements alone cost at least 142.5 seconds at the required 300ms per actual transaction-owner commit, above the entire 120-second budget. The normal 500-row run reached its original content/rejection/readback assertions on both stores; SQLite measured 9.691875s and PostgreSQL 10.714166s. The delayed runs remain red. The separate real-recipient S03 reaches 64/100 at its unchanged deadline on both stores. These are the prior [execution receipts](https://github.com/division-sh/swarm/issues/2394#issuecomment-5670808264), not new executions or evidence of qualification.
+
+**Chosen working class remains complete #2394:** durable fan-out serving opportunity and bounded turn settlement across admission, capacity, finite fairness, retries, claim fencing, recovery and diagnosis, now including the mandatory exact-publication handoff cost. The immediate parent is the deferred-obligation model recorded by closed design record #2337; broader operational parents #107/#2381 remain open. The failure spot is an entry point, not the boundary: this amendment audited every pipeline disposition writer, its exact claim/session lifetime, recipient handoff, candidate, cancellation and history consumers.
+
+**Framing:** broad enough, not a first slice. Complete closure requires both the 500-row no-route workload and S03's real recipients. It does not require amalgamating node/agent execution transactions, changing decision convergence, bulk recovery, or redesigning all deferred work. Those are different semantic operations with named preservation proofs below, not hidden old settlement implementations.
+
+## Binding Governing Context
+
+Exact authoritative `platform-spec.yaml` sections re-read:
+
+| Reference | Binding contract and consequence |
+| --- | --- |
+| `durable_pipeline_processing_obligation_authority.durable_facts`, `.claim_contract.publication` | Exact event claim before visibility; retain it through dispatch/disposition/release. A fan-out claim or event UUID is not a replacement publication capability. |
+| `durable_pipeline_processing_obligation_authority.claim_contract.current_claim`, `.release` | Private PostgreSQL SessionAuthority owns connection, transaction, advisory leases, references and phased terminalization. Same-session siblings from one mutation are allowed; independently acquired sessions cannot substitute for each other. Retry release writes no success receipt. |
+| `durable_pipeline_processing_obligation_authority.claim_contract.scan`, `.scan_result` | One recovery item per mutation-ordered scan step, with eligibility rechecked after mutation. No bulk preclaim/recovery reinterpretation. |
+| `durable_pipeline_processing_obligation_authority.disposition_contract.atomicity`, `.decision_route_contract.ordering` | Receipt/disposition atomicity; processed decision acknowledgement and later route completion are deliberately separate. Preserve processed-plus-pending visibility. |
+| `durable_pipeline_processing_obligation_authority.parent_terminalization`, `.process_local_handoff`, `.receipt_family_boundary` | Exact current claims fence parent mutation. Accepted occurrence lifetime spans disposition/release. Platform-pipeline receipts are not node/agent delivery completion. |
+| `run_model.fork.fixed_event_revision_and_workset.selector`, `.write_contract`, `.read_contract` | An event UUID selects its first persisted inclusive revision. One finalizer after all domain writes, one changed revision per affected run, no revision for exact no-change, and rollback publishes neither domain nor history. Thirteen-family repeatable-read reconstruction, never current-row fallback. |
+| `run_model.fork.parallel_safety`, `.timestamp_precision` | A source transaction publishes one commit-serialized revision per run. Timestamps cannot recreate removed transaction cuts. |
+| `platform_tables.tables.run_fork_revision_heads`, `.run_fork_revisions`, `.run_fork_fact_revisions` | Deterministic parent/revision lock order, canonical changed-family projection, no auxiliary temporal ledger. |
+| `engine.runtime_core_persistence_store_contracts.selected_contracts`: `executable_event_delivery_obligation_rows`, `platform_pipeline_receipt_rows` | Successful pipeline handoff and receipt commit together; delivery continuation requires actual committed handoff. Handler/agent delivery outcomes retain their separate owners. |
+| `handler_specification.handler_fields.fan_out.durable_issuance`, `handler_specification.atomicity`, `process_local_work_lifetime_authority.admission_and_settlement` | Fixed bounded issuance, exact source/generation, per-ordinal outcomes, atomic handler work, serving permit held through required handoff. No detached tail to improve measurements. |
+
+The general disposition clause does not require distinct physical transactions for unrelated events. It also does not yet define a bounded multi-event settlement operation. **Request explicit approval of that new named mutation and its history visibility below, then update these authoritative sections in the implementation PR.** Do not simulate per-event revisions inside one transaction to preserve old counts: that would contradict the existing one-finalizer law.
+
+## Canonical Owners And Ordered Execution Path
+
+Real semantic owners, not first local helpers:
+
+- `runtime/fanoutobligation`, selected `pipelinepersistence/fan_out_*`, process capability/worklifetime: exact intent/range, source, generation, serving permit and ordinal outcome authority.
+- `runtime/pipelineobligation/model.go` and selected `pipelinepersistence/owner_operations.go`: publication claim, typed disposition, atomic settlement and release. Add the bounded operation here; singleton and group share the same validated private write kernel.
+- `backend/postgres/session_authority.go` and existing selected claim registries: physical session, token/purpose/current-pointer validation, lock/ref/capacity retirement. No bus-owned substitute.
+- `runtime/bus/pipeline_publication_claim.go`, `outbox.go`, `eventbus_publish.go`: exact prepared/committed publication transfer and dispatch lifecycle, not SQL or history authority.
+- `backend/delivery` and `internal/runhandoff/candidate_handoff.go`: committed continuation facts and owned completion-candidate transfer.
+- `backend/runforkrevision` and `backend/runforkpersistence/run_fork_revision_snapshot.go`: closed family effects, revision finalization and historical admission/readback.
+- `runtime/runcontrol` and `backend/runlifecycle`: parent stop/completion authority, not a special batch bypass.
+
+Full relevant flow and gates:
+
+| Order | Gate / execution step | Classification |
+| --- | --- | --- |
+| 1 | Authenticated source submission, exact bundle/schema/row admission and run creation | Different concept, preserved original 500-row supported HTTP/input/rejection proof. No change to input validation or import semantics. |
+| 2 | Handler admits durable fan-out intent with immutable source and exact causal delivery | Same chosen class; preserve all payload/entity/resource/literal and rule/on_complete tests. |
+| 3 | Selected process capacity, exact runtime/source registration, readiness and intent claim | Same chosen class; current M35 mutation-time lease fence still required. |
+| 4 | Bounded source evaluation, event preparation, exact publication claims before visibility | Same chosen class; new group lifetime starts here, not after claim authority has been lost. |
+| 5 | Fan-out chunk publication/outcomes/cursor/release/fairness/revision commit | Same chosen class; existing atomic fold remains. Its intent lease may now be released; later settlement must not require that old lease. |
+| 6 | `FinalizeEnginePublications` -> `DispatchPostCommit` -> staged exact outbox operations | Same chosen class; transfer each committed plan/claim/delivery proof unchanged. |
+| 7 | Receiver admission, interceptors, node/agent/materialization and nested publications | Different execution/ownership concepts, preserved real S03 plus mixed/nested B proofs below. Only settlement lifetime plumbing and authorized operation-local identical-input reuse change here. No receiver/routing decision change. |
+| 8 | Typed completed member dispositions -> bounded canonical settlement | Same chosen class; exact receipt, route state, handoff, candidate and history commit together. |
+| 9 | Claim/session retirement, committed continuation signal and candidate transfer | Same chosen class; serving occurrence/permit cannot disappear before required ownership transfer. |
+| 10 | Downstream delivery execution, barrier completion, terminal/public readback, restart/fork | Same chosen class for owed-work accounting and preservation; underlying handler/history owners remain authoritative. S03 final assertions retained. Unsupported selected-timer execution remains split to #642, not promoted. |
+
+## Exhaustive Producer And Consumption Census
+
+Production search included `Settle`, `MarkDecisionProcessed`, `CommitInitialPipelineDispositionTx`, `TerminalizePipelineObligationTx`, claim acquisition/release, all engine preparation/finalization/dispatch callers, sweeper paths, delivery handoff/candidate writers and revision/fork readers. Unrelated methods also named Settle are not this concept.
+
+| ID | Producer / seam | Systematic consumption decision and proof |
+| --- | --- | --- |
+| P01 | `pipeline/fan_out_pump.go:claimAndServeFanOutTurn` | **Moved to canonical owner in this work:** bounded exact group, complete plan/claim lifetime, same chunk outcomes. B01-B09/B20-B26. |
+| P02 | Other `PrepareEnginePublications` / `FinalizeEnginePublications` / `DispatchPostCommit` callers | **Already consumes canonical owner:** legitimate singleton publication unless exact fan-out range membership is supplied. No ambient grouping by run or slice. B09/B21. |
+| P03 | Foreground synchronous and acknowledged/asynchronous prepared publication | **Already consumes canonical owner:** exact publication claim before event commit; public enqueue acknowledgement is not a settlement receipt. B09/B15/B21. |
+| P04 | `dispatchPendingOutboxOperation`, inserted member | **Moved to canonical owner in this work:** transfer claim into explicit bounded dispatch lifetime rather than deferred release immediately after collecting a disposition. B02/B07/B10-B15. |
+| P05 | Exact duplicate append, repeated callback, inherited missing staged operation | **Already consumes canonical owner:** duplicate does not redispatch; inherited recovery requires exact committed readback and a newly admitted recovery claim. Never manufacture group membership. B03/B11/B14. |
+| P06 | Normal node, agent, mixed and no-route success | **Moved to canonical owner in this work:** completed terminal disposition may join the same group, independent of recipient kind/count. B02/B17/S03. No no-route-only fast path. |
+| P07 | Queued, paused, blocked, incomplete delivery | **Already consumes canonical owner:** not a completed disposition. Flush prior completed members; preserve typed return and release/transfer exact unresolved ownership, no receipt. B07/B17/B18. |
+| P08 | Interceptor non-durable RetryRelease | **Already consumes canonical owner:** no receipt/decision attempt increment; flush prior completed prefix and release this exact claim. B07/B08. |
+| P09 | Terminal failure, dead-letter and quarantine | **Moved to canonical owner in this work:** terminal group members retain individual failure/reason, not a batch-success flag. B02/B08/B10. |
+| P10 | Durable Deferred disposition and processed-then-completed decision route | **Different semantic operation, with proof:** preserve singleton durable attempt and the two named decision mutations through the same kernel. Flush prior group members before these transitions. Uncertain attempt is not replayed to manufacture acknowledgement. B08/B09/B13 and existing mutation-ordered decision controls. |
+| P11 | Startup, periodic and resumed run-queue sweeps | **Already consumes canonical owner:** singleton `ClaimBatch` step, exact persisted scope/recipient recovery and eligibility recheck. Not an unbounded group producer. B14/B15/B21. |
+| P12 | Recovery of acknowledged pending decision; corrupt committed scope quarantine | **Already consumes canonical owner:** acknowledgement-first recovery skips handler; quarantine uses the acquired exact claim. B08/B14/B21. |
+| P13 | `eventpersistence.commitInitialSideEffectEvidence` / `CommitInitialPipelineDispositionTx`, including selected-fork paths | **Different named mutation, with proof:** initial disposition is atomic with event creation; do not re-settle it as post-dispatch work or fold its transaction. Shared disposition validation/writer only. B09/B19/B21. |
+| P14 | Parent `TerminalizeRunTx` -> `TerminalizePipelineObligationTx` and fan-out cancellation | **Already consumes canonical owner:** parent transaction and exact claim exclusion, not group claim impersonation. B16/B18. |
+| P15 | Precommit failure/bisection, `ReleaseEnginePublications`, shutdown/reset/scan close | **Moved to canonical owner for grouped claims; singleton already consumes:** close every exact live member/reference once, never synthesize settlement or release successor. B04-B06/B12/B16/B20. |
+
+| Consumer | Systematic consumption decision and exhaustive consequence |
+| --- | --- |
+| Publication wrapper / dispatcher | **Moved:** collecting a disposition is not successful Settle and does not consume/release its capability. Return actual per-member committed and cleanup results. |
+| SQLite registry / PostgreSQL SessionAuthority and claim registry | **Moved for named group; existing singleton remains canonical:** exact token/current-pointer checks, deterministic lock order, same designated session, reference/poison retirement. |
+| Delivery continuation admission/signalling | **Already consumes canonical owner, adapted to exact member outcomes:** only committed successful handoff signals; preserve recipient-kind identities and no duplicate execution. |
+| Completion candidate request/handoff/coordinator | **Already consumes canonical owner:** request in settlement SQL, reserve lifetime before transaction, coalesce same-run requests only through existing candidate owner, transfer after known commit; retain recovery after signal loss. |
+| Recovery scans and eligibility/global-work/run summaries | **Already consumes canonical owner:** read actual per-event receipts/routes, distinguish failed/deferred/queued/retry from success, never infer group-wide exhaustion. |
+| Parent stop and claim registration | **Already consumes canonical owner:** claims remain visible throughout group construction, dispatch, commit and retirement; no acquisition gap or later overwrite. |
+| Event/receipt/delivery public projections | **Already consumes canonical facts:** no group-only success marker; maintain every event, failure and route field. B02/B11/B15/B19. |
+| Revision effects/finalizer | **Moved at transaction callsite:** union exact changed families, one finalizer after all writes, same canonical projection/key bytes. No per-member synthetic revision loop. |
+| Fork planning, fixed/as-of historical reads and selected materialization | **Already consumes canonical owner:** actual new committed transaction cuts; no current-state repair. B19 explicitly tests changed visibility, not just equal final rows. |
+| Serving worklifetime/process capacity and shutdown/replacement | **Already consumes canonical owner with group-owned lifetime:** finite accepted work through settlement/release/transfer; new admission and accepted-work drain remain distinct. B05/B12/B16/B18/B20. |
+| Diagnostic/incidents/run.fan_out.list/CLI | **Already consumes canonical owners:** exact progress remains independent of batch size; measurements cannot count cursor progress as completed downstream work. Existing M27/M28 and S04 remain. |
+
+No currently known same-concept bypass is intentionally left split. Retained singleton paths are explicit semantic operations using the same owner, not old-version compatibility.
+
+## Proposed Exact Operation: Shared Authority Before Publication
+
+**Choose group issuance before publication preparation, not retroactive adoption of already-independent PostgreSQL sessions.** Add one narrow opaque bounded publication-group lifetime to the existing pipeline-obligation owner. This is process-local ownership, not a new durable queue/history family. It is passed explicitly in the fan-out preparation/dispatch path, not selected from an ambient context or arbitrary event-ID slice.
+
+1. **Open under exact admitted turn:** bind selected-store issuer, existing intent key/source occurrence, run, bundle, runtime execution generation and claimed ordinal range/budget. Maximum is the existing cap 32, further bounded by actual range. Reserve one group-owned private PostgreSQL session before member claim acquisition; SQLite uses its existing mutation/claim owner. The group does not authorize arbitrary publication.
+2. **Bounded preparation and seal:** current plans emerge per ordinal, so use an explicit bounded open/sealed/closed lifetime. Each accepted plan registers its immutable event UUID, causal coordinates, source/route facts and exact ordinal through the canonical planner. A semantic-rejected ordinal remains its normal fan-out outcome and has no invented event/claim. Event identities cannot be supplied or rewritten by the collector. Seal the complete preparation membership before the first publication attempt; no additions after seal, duplicates/foreign/omitted accepted plans fail closed. Existing bisection occurs AFTER a failed publication attempt: only the existing typed safe aggregate failure with proven rollback may derive a reduced-prefix attempt from that sealed set. Release its excluded suffix claims exactly, preserve retained prefix identities/session, and bind a fresh finite attempt seal to the reduced existing range before retry. This is not reopening arbitrary membership. No acknowledged or outcome-uncertain attempt permits bisection, resealing or event-identity changes. Exact committed evidence selects the final accepted attempt; abandoned members stay explicitly accounted. Zero accepted events is a valid empty group requiring no settlement write.
+3. **Claim-before-visibility and PostgreSQL authority:** each member gets its own issuer/token/purpose/event claim and advisory lock on the group's designated session. Preserve parent-fence acquisition and atomic registry registration; reserve event identities briefly under registry ownership but never hold that mutex over pool/lock waits. On partial acquisition failure, retire every acquired member and reservation. Revalidate all member pointers/tokens and that every lease belongs to the already-designated live group session; never use the first member's session as authority for the rest. Preserve existing per-lease capacity reservation and idempotent retirement initially; connection reduction is not permission to silently alter capacity semantics. Shared-session references prevent an individual release from closing live siblings.
+4. **Publication and postcommit authority:** the existing fan-out chunk owner commits accepted events/outcomes/cursor/release. Only its returned exact committed publication evidence enables dispatch. Intent claim release does not invalidate retained event publication claims. The group retains the accepted occurrence through required cleanup; generation replacement must join that occurrence rather than lend a successor grant. Loss of process possession/session or invalid current authority rejects new mutations. Ordinary pause is not stop; preserve existing accepted in-flight contract. M35 still validates the intent lease at publication mutation admission, not a saved turn timestamp.
+5. **Dispatch and collection:** preserve ordinal dispatch order, exact committed routes and ordinary node/agent/no-route execution. No SQL transaction spans interceptors or recipients. Collect only terminal typed dispositions (acknowledged, terminal failure, dead-letter, quarantine) after that member's normal dispatch has produced them. Durable Deferred, MarkDecisionProcessed and unresolved RetryRelease/queued/blocked/incomplete states do not become terminal members. They flush the already-completed prefix and use their named existing singleton semantics on their own exact claim. This is disposition-based semantics, not a recipient/event-name allowlist.
+6. **Dependency boundaries:** the dispatch owner must expose one narrow internal `FlushBeforeNestedPublication` control operation and thread it explicitly through its internal dispatch calls, not infer a dependency from route names or a graph predicate. Invoke it unconditionally at the outer dispatch's `publishDeferred` calls and at recursive `dispatchCommittedInterceptorPublications` / `DispatchPostCommit` entry, before starting that nested publication/dispatch. Also flush before the named `MarkDecisionProcessed`/durable Deferred singleton transition and before returning queued/blocked/error. This conservatively publishes previously completed members without guessing which nested child needs them. It carries no raw SQL or ambient group/session authority and is not a new generic callback framework or bus-global collector. A member still executing cannot be falsely marked complete to unblock itself. Its nested effects remain in their existing transactions; nested events never join the parent's group. No recursive fan-out serving permit. B17 must prove these concrete trigger boundaries against actual nested execution; any additional synchronous wait edge not reached through them must be exposed before claiming closure.
+7. **Settle exact completed segment:** use total operation ordering: group operation lock -> participating member `operationMu` locks in deterministic event-ID order -> existing private lease/session operation -> SQL parent/revision locks in their existing order. Registry pointer validation is a short critical section after the operation locks and is released before session/SQL waits; never acquire a group/member/session operation while holding registry ownership. Grouped singleton Deferred/MarkDecisionProcessed/release uses the same group-first lock path rather than entering old member-first code recursively. Terminal callbacks only retire exact registry entries/references/capacity and mark terminal evidence; they never acquire a group/member operation lock. Revalidate every token/pointer/session and exact committed identity before writes. Settlement order is original ordinal order. Reject wrong, duplicate, stale or mixed-session claims before changing any member. A completed segment is an explicit subset of the sealed range; every omitted member remains owned with a classified disposition/lifetime. One transaction applies the same private disposition writer as singleton Settle, exact successful-delivery handoffs, candidate requests and unioned revision effects. External dispatch never runs while these operation locks are held. B05/B06 must execute concurrent poison, grouped singleton cleanup and segment settlement, not merely assert this order in comments.
+8. **Commit, transfer, close:** reserve required candidate occurrence before transaction; report closed per-member committed/handoff results only after actual commit truth. A segment flush consumes ONLY its completed claims and transfers ONLY its committed handoffs; it retains the group session's root reference, every untouched member and the serving permit. The permit is released only after the entire outer turn has dispatched/settled or explicitly released/transferred all remaining ownership and the group closes. No nested prefix flush may close the group or reacquire capacity recursively. On PostgreSQL poison, use existing phased whole-session terminalization after unwinding the session operation boundary; callbacks cannot take sibling/group operation locks, and no sibling lease lock is synchronously acquired under the triggering lease lock. The poisoned authority rejects future segments. Cleanup failures are joined without relabelling a known commit as rollback.
+
+The builder is justified solely by existing per-ordinal preparation and exact pre-visibility claims; it cannot outlive the finite turn or collect work from future chunks. Required guards cover every constructor/caller, no raw SQL/session accessor, no unsealed settlement, no ambient group authority, and no success-returning collector masquerading as Settle.
+
+## Transaction, Failure And History Decision Requested
+
+**Choose one physical transaction and one combined revision finalization for each submitted completed segment.** Per-event receipt/delivery/route/cause/failure identity remains, but intermediate independently committed settlement prefixes inside that segment disappear. Semantic failures remain individual terminal failure dispositions alongside healthy members. An invariant, stale claim, SQL/member-write or finalizer failure rolls back all submitted member settlement facts and revision facts, not their already-committed original publications or prior handler effects. It does not roll back earlier independently committed segments.
+
+Example: chunk creates events A and B at revision R. Their dispatches finish; group settlement publishes both receipt/handoff changes at R+1 (assuming no intervening mutation). A historical read sees neither new receipt before R+1 and both at R+1, never a fabricated A-only subrevision. If dispatch of B creates event C before group settlement, C's first revision sees only transactions actually committed by that point. A dependency flush can make A visible before C; without a required flush, C cannot be promised the old individually settled prefix. Concurrent same-run mutations keep their actual commit-serialized ordering. First-event UUID selection, all thirteen family identities, frozen business data and timestamp irrelevance do not change. **This is a visibility change requiring this gate and an authoritative spec update, not a claim of identical old history.** Existing decision processed/pending and one-item recovery transaction cuts do not change.
+
+The recorded 667 revision / 2279 fact rows are measurements of the old execution, not a promised future count. Preserve those receipts. Any test expecting an individually committed cut must be identified and replaced only with the gate-approved exact group-history oracle while retaining fact-identity/fork assertions; do not weaken counts or compare only final tables to obtain green.
+
+**Duplicate/uncertain acknowledgement:** a consumed group capability cannot authorize another write or release a successor. Add one bounded read-only `ReadPublicationSettlement` operation to the existing pipeline-obligation owner, not dispatcher SQL. Its request retains the exact sealed committed-event identities and submitted terminal dispositions as observation evidence, never live mutation authority. In one consistent selected-store read snapshot it validates each event/run/source identity, exact platform receipt/disposition and applicable decision-route/successful-delivery handoff facts. Its closed per-member result distinguishes `satisfied`, `pending` and `conflict`; read/admission failure returns unavailable/error, never pending or success. `satisfied` means observed durable satisfaction, NOT acknowledgement that this process's transaction committed, and must not construct the existing `CommittedSettlement` result. All present/matching means no redispatch; absent members remain canonical recovery work; contradictions fail closed. A mixture can exist after later legitimate singleton recovery and is resolved per member, not falsely labelled a partial group commit. Receipt readback alone does not mint executable handoff authority: existing durable continuation/candidate recovery consumes its own facts and current occurrence. Do not blindly resubmit a segment or borrow a successor claim. Durable Deferred remains singleton precisely because an identical-looking pending row is not an idempotency journal for a retry-attempt increment.
+
+**Crash window honesty:** buffering finished dispatches enlarges the interval before their platform acknowledgement. No durably acknowledged prefix may be replayed. Unacknowledged members can require recovery; arbitrary unreceipted external effects do not acquire a new exactly-once guarantee from batching. For node/agent paths, prove their existing durable delivery/effect ownership prevents repeating acknowledged effects. If a supported consumer requires a distinct independently committed prefix before the next dispatch, flush at that named boundary rather than weaken its guarantee. A genuinely new requirement discovered here is a stop/escalation condition, not permission for another local exception.
+
+**Parent/replacement winners:** claims remain registered from preparation through settlement. Parent-first admission forbids incompatible new publication/settlement; settlement-first retains committed member truth and parent stop cancels only still-owed work. Concurrent release/poison/shutdown cannot leave an unreachable claim or release a successor. Lost postcommit signals recover through the existing durable handoff/candidate obligations, not a new batch queue. No publication or downstream completion is declared finished merely because cursor advanced.
+
+## Manifestation-Level Proof Plan
+
+These are **planned tests**, not claims that grouped code exists or passes. Add under the existing pipelinepersistence, runtimepersistence, bus, runfork and conformance suites, using their real selected owners. Each B row will have named SQLite and PostgreSQL subtests; backend-required cells may not skip. Fault injection is explicitly at the existing private owner/driver boundary, never a fake successful mutation. Public journeys use real serving/dispatch/persistence; doubles prove only their named unit property.
+
+| ID / proposed test suffix (`TestFanOutPublicationGroup...`) | Exact manifestation and required proof |
+| --- | --- |
+| B01 `SealedRangeIdentityBothStores` | Empty/1/32 groups, fewer accepted events due to semantic rejections, >cap, duplicate ordinal/event/token, omitted accepted member, post-seal addition and wrong committed range; refuse malformed set before domain/history writes. |
+| B02 `MixedRecipientsBothStores` | Real node-only, agent-only, mixed node+agent and typed no-route members in one range; exact events/routes/receipts, terminal delivery outcomes and public readback, no ownerless delivery. |
+| B03 `ForeignClaimSetBothStores` | Foreign issuer/store/run/bundle/source occurrence/runtime generation/purpose/causal identity, same event text but different capability; zero changed rows, receipts, handoffs and revisions. |
+| B04 `PreparationFailureBothStores` | Fault at each member's claim/plan preparation and seal, semantic rejected cells, aggregate bisection and exact duplicate append; prefix/suffix claims and capacity fully accounted, no invented rejected event. |
+| B05 `SessionAuthority` | PostgreSQL real designated shared session, reject independent/mixed session claims, parent contender on independent connection, loss of session retires all members/capacity; no session adoption or sibling deadlock. SQLite counterpart exercises current registry/operation locking. |
+| B06 `ReleaseRaceBothStores` | Concurrent exact release, shutdown/reset and settlement at every member position; no stale mutation, leaked claim or successor release. Repeat under race. |
+| B07 `NonterminalMembersBothStores` | Queued, pause, blocked, incomplete and RetryRelease between healthy members; exact no-receipt behavior, prefix flush, bounded lifetime and later canonical recovery. |
+| B08 `TypedFailureMembersBothStores` | Terminal/dead-letter/quarantine preserve each failure/reason alongside healthy members; Deferred executes its singleton attempt without double increment or synthetic success. |
+| B09 `SingletonPreservationBothStores` | Ordinary sync/async/outbox, initial disposition, processed-pending decision and final convergence remain through same kernel; assert real intermediate processed/pending state. Preserve existing retry-release and decision-eligibility controls. |
+| B10 `RollbackAtEveryMemberBothStores` | Driver/private writer fault at each receipt/route/handoff/candidate member plus finalizer/commit-known-rollback; no partial settlement/history or candidate submission; original event publication remains. |
+| B11 `DuplicateAcknowledgementBothStores` | Repeated postcommit callback, exact duplicate event, consumed group/claim, successor claim; one receipt/handoff per event, no new dispatch or revision from duplicate acknowledgement. |
+| B12 `UncertainCommitBothStores` | Lost commit response before and after actual commit; canonical readback distinguishes observed satisfaction from acknowledged commit, pending, conflict and unavailable; later recovery can produce a mixed observation without implying partial group commit. Poison exact session, no dispatcher SQL, blind resubmission or successor release. |
+| B13 `DeferredUncertainControlBothStores` | Singleton deferred attempt with lost response; preserve uncertainty, no repeat attempt increment to make a test green. Group rejects durable Deferred as a terminal-member payload. |
+| B14 `ProcessDeathBothStores` | Actual child SIGKILL after chunk commit, after each completed dispatch, before settlement commit, after commit before acknowledgement; reopen/recover exact unacknowledged work, never redispatch durably acknowledged prefix. |
+| B15 `HandoffCrashBothStores` | Crash/failure after group commit before continuation signal and before candidate submission; ordinary startup restores actual durable owed work, reaches final public readback, no detached/unowned task. |
+| B16 `StopWinnersBothStores` | Deterministic parent-first and settlement-first interleavings, foreign process/advisory contender, stop during partially dispatched range; typed result, exact cancelled suffix, no committed prefix rewrite. |
+| B17 `NestedDependencyBothStores` | Real fan-out-to-fan-out, nested/deferred emission, mixed receivers and capacity=1; flush required predecessor handoff, preserve direct barrier membership, no recursive permit deadlock. |
+| B18 `PauseGenerationAndExpiryBothStores` | Pause vs stop, replacement drain/process loss, delayed evaluation beyond intent lease and stale old command time; retain M35 unreclaimed-expiry and newer-generation checks, no borrowed successor authority. |
+| B19 `HistoryAndForkBothStores` | Read before/after group commit in independent snapshots; exact one-revision changed-family set, no partial visibility or rollback history; interleaved nested C/concurrent same-run writes; supported static fork and fixed-event readback, unsupported-policy refusal unchanged. |
+| B20 `CapacityAndLifetimeBothStores` | Bounded actual live claims/plans, one group session with existing per-lease accounting, no registry lock across connection wait, reference cleanup once, permit retained through mandatory handoff; PG independent-run overlap and SQLite serialized writer. |
+| B21 `RecoveryMutationOrderBothStores` | Existing one-item scan changes next eligibility; acknowledged decision skips handler; corrupt scope quarantines only its exact claim; no bulk preclaim or current-topology reconstruction. |
+| B22 `CandidateCompletenessBothStores` | Many successful and failed members for same run; request absorption through existing owner, exact candidate wake/restart and terminality proof; no completion lost to coalescing or early exhaustion. |
+| B23 `OperationLocalTopologyInputs` | Mutation-sensitive source/generation/input isolation, repeated calls and alias protection around reused immutable census/topology inputs; no reuse after input changes, no cross-operation cache. Existing pinrouting/semanticview race controls retained. |
+| B24 `Original500LocalBothStores` | Original M31 500 rows, mixed rejection/readback assertions, <=10s from first submission to last durable ordinal outcome; all required downstream completion/teardown asserted and timed separately. |
+| B25 `Original500DelayedCommitsBothStores` | Same M31 workload and <=120s at 300ms on every actual transaction-owner commit, including settlement and retained-session transactions; per-phase transaction/SQL coverage and uninstrumented implicit autocommits disclosed. No narrower injection. |
+| B26 `RealRecipient100BothStores` | Unchanged S03 reverse-completion 100-item scatter/gather and all terminal/barrier/readback assertions at original deadlines. A green no-route benchmark cannot replace this. |
+
+Preserve and compose existing named controls including `TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack`, `TestPipelineRetryReleasePreservesReplayAcrossDispatchSurfacesOnSQLiteAndPostgres`, `TestPipelineScanRechecksDecisionEligibilityAfterEachMutationOnSQLiteAndPostgres`, `TestSuccessfulPipelineSettlementSignalsDeliveryContinuationsAfterCommit`, `TestPipelineGracefulWriteOutcome`, `TestPipelineProcessSIGKILLRecovery`, `TestRunStopPreservesForegroundClaimFenceBothStores`, `TestRunStopDrainsRecoveryBeforeMutationAndRequiredPublicationBothStores`, `TestPostgresParentTerminalizationLinearizesClaimRegistration`, `TestPostgresPipelineClaimLeaseExcludesIndependentStoreUntilRelease`, and `TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan`. Passing these alone cannot discharge new B rows.
+
+Run focused correctness matrices at `-count=3` and the concurrency/lifetime matrix at `-race -count=3`, preserving existing performance/race budgets. Use direct `go test` for small targeted work and `go run ./cmd/swarm-test -- ...` for large matrices/full suite. First complete deterministic small failing/green cells; run expensive composed/soak/performance proof in controlled slots, not simultaneously competing workloads. Required original M/S soak remains required, not replaced by shorter pressure controls. Final exact-head proof audit must list actual commands, backend execution, durations, skips/failures and named per-row evidence.
+
+## Invalid Paths, Parent Action And Tracking
+
+Retire mandatory per-event platform settlement commits **inside the admitted bounded terminal segment**, immediate claim release after only collecting a disposition, and duplicate singleton/group SQL/finalization interpretations. No arbitrary same-run/event-ID grouping, first-member session authority, synthetic subtransaction revisions, batch-only success rows, hidden handoff or cross-operation topology cache is valid. Keep legitimate singleton recovery, decision stages, initial dispositions and parent terminalization as named operations through shared validation/writer owners.
+
+**Parent sibling probe/action:** actual full producer/consumer census found decision-route ordering, initial publication, recovery, node/agent delivery and historical forks; absorb the affected claim/write/handoff interfaces now and prove each retained semantic distinction. The existing watchlist already names publication ownership, retained-session sibling terminalization, atomic history, barrier/nested/cancellation and source identity; this is evidence for promoting bounded settlement now, not for a sink-only slice. No whole-fork or scheduler rewrite is justified.
+
+**Tracker decision:** #2394 remains the implementation tracker; this amendment updates its approved class model before settlement coding. No new batching issue. #2337 remains fulfilled design context, not reopened implementation work. #107/#2381 stay open, not claimed closed by this PR. #2453 is the ratified dependency-safe downstream-backpressure split. [#2454](https://github.com/division-sh/swarm/issues/2454) is the separately approved runtime-log selection split, not a prerequisite or implementation authorization; its seven-case red reproducer must have a durable handoff reference. No CI waiver follows from the split. Original incident/D3 assertions remain with #2394.
+
+**Watchlist decision and completed repair:** refined existing `semantic-correctness.yaml/durable_fan_out_issuance_and_progress_ownership` and `runtime-operations.yaml/delivery_and_replay_ownership` with the bounded settlement/history/retained-session manifestations and this gate state. Docs commit **`9a06eb641e881e6256c2fe0b4ff3e43885dace20`**, branch `agent-a/2394-settlement-amendment`, is pushed to the docs origin and **not merged into its default branch**. Both YAML files parse with Ruby YAML and `git diff --check` passes. The unrelated dirty docs checkout is untouched. #2454's own audit must map its operator-read node before its code changes.
+
+**Completed split handoff:** unchanged seven-case log-selection reproducer is pushed in test-only commit [99ddef4b10420cf9ae5775b1b86fbddcd4712cb5](https://github.com/division-sh/swarm/commit/99ddef4b10420cf9ae5775b1b86fbddcd4712cb5), recorded on [#2454](https://github.com/division-sh/swarm/issues/2454#issuecomment-5671315885). Its clean-base execution fails the seven SQLite cases and passes the seven PostgreSQL controls (1.065s). The same source remains preserved in the #2394 worktree. No production repair or waiver is implied.
+
+**Remaining parent tail:** zero deliberately deferred same-class settlement interpreters in this proposed #2394 closure. At least two separate known operational siblings remain (#2453 backlog admission, #2454 log selection), each requiring its own bounded work/gate; medium confidence in that grouping, no claim to have bounded all of #107/#2381. The history/claim correction increases this PR's proof work, not a new child-slice tail.
+
+**Architecture feedback/tracking:** transaction granularity and exact retained ownership must be established together at the existing pipeline-obligation owner, not reconstructed by a fast-path dispatcher. Promote this bounded correction now under #2394 and the two refined watchlist nodes. No generic batch framework, durable batch journal, new history family, compatibility or migration. This is a multi-day implementation/qualification risk rather than a guaranteed one-pass timing win; ROI is removal of a proven O(events) mandatory commit lower bound without weakening durability.
+
+**Chosen-class commitment/feasibility:** aim to eliminate the complete approved #2394 class in one PR. The proposed bounded same-session operation and canonical finalizer can close this finite settlement seam; fixing only the local loop or no-route endpoint cannot. Both-store performance and S03 feasibility remain to be established by execution. Do not claim closure because the owner is shared.
+
+**Blocking gate:** request independent approval of (1) bounded pre-publication shared-session claim issuance and sealing, (2) terminal-segment settlement plus explicit singleton/dependency flush rules, and (3) one-transaction/one-run-revision visibility with the named historical tradeoff. Settlement production changes remain paused until the ruling is recorded. A new mandatory per-event committed-history guarantee, unaccounted synchronous dependency, inability to validate exact source/session authority, or need for another durable acknowledgement ledger is a stop/escalation condition. No renewed gate is requested for the already-approved independent work.
+
+
+---
+
+### Comment 5671541564
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5671541564
+
+Author: yazzaoui; created: 2026-09-14T22:14:23Z; updated: 2026-09-14T22:14:23Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# Independent Gate A Amendment: approved
+
+**A may implement the settlement amendment now. No replacement audit or further pre-coding ruling is required for the work enumerated below.** This approves [audit5671347660](https://github.com/division-sh/swarm/issues/2394#issuecomment-5671347660), including its transaction/history choice, not merely its direction. Original Gate A, M01-M35/S01-S04 and B01-B26 remain in force. This is the first independent review of this additive amendment, not a failed repeat audit or merge approval.
+
+## Contract Decisions
+
+1. **Approve the bounded pre-publication group.** Bind the exact admitted turn/source/run/generation/range before claims become visible. The selected pipeline-obligation owner designates the private PostgreSQL session and mints each exact member claim on it; SQLite retains its canonical registry. Open/sealed/closed lifetime, safe proven-rollback prefix bisection, per-lease retirement and bounded empty groups are approved as specified. Do not retrofit arbitrary independent claims into a group. Ordinary independent publication claims remain independent; preserve `TestPostgresPipelineClaimsOwnIndependentPrivateSessions` for that path and add the intentional group-sharing counterpart.
+2. **Approve terminal-segment settlement with the specified flush rules.** One shared private validation/write kernel serves legitimate singleton and grouped operations. Preserve decision processed/pending stages, durable Deferred attempt semantics, one-item mutation-ordered recovery, initial dispositions and parent terminalization. Flush completed predecessors at the named nested-publication/dispatch and nonterminal boundaries. A still-executing member is never acknowledged to unblock itself; nested events never join its group. No SQL transaction or group/member operation lock spans recipient/interceptor execution.
+3. **Approve one physical transaction and one canonical revision per affected run for a completed segment.** Intermediate per-member settlement prefixes within that transaction cease to be historical cuts. Every receipt, disposition, failure, route, delivery handoff and causal identity remains exact. First-event inclusive revision selection remains unchanged. Intervening nested/concurrent mutations retain their actual committed order; no synthetic subrevisions, timestamp reconstruction, or old-count compatibility. Earlier committed segments remain committed if a later segment fails. The amendment's A/B/C history example is approved. Update the authoritative `platform-spec.yaml` claim/disposition and fork write/read contracts in the same PR; this comment is not a substitute merge artifact.
+4. **Approve exact observation readback, not fabricated commit acknowledgement.** Bounded consistent-snapshot readback may report satisfied/pending/conflict or an error/unavailable result. Observed satisfaction does not mint `CommittedSettlement`, a live claim, or a delivery handoff capability. Mixed observations after independent recovery are not proof of a partial group commit. No blind retry of uncertain Deferred attempts or release of successor authority.
+
+## Independent Assessment And Narrow Census Repair
+
+Category is correctly failure-class / semantic ownership / parity / performance. The chosen class is **broad enough**, not an approved first slice. The actual owners support the proposed composition: `pipelineobligation`, selected `pipelinepersistence`, private PostgreSQL `SessionAuthority`, canonical delivery/candidate handoff and `runforkrevision`. No generic scheduler, queue, durable batch journal or new history family is justified. Architecture disposition: **promote now under #2394** because scheduling improvements cannot remove the measured sequential per-event commit lower bound.
+
+I checked preparation/dispatch, foreground and recovery settlement, nested deferred/interceptor publication, decision acknowledgement, initial event disposition, parent stop, session release/poison, completion candidates and thirteen-family revision/fork consumers. Source and existing tests support the audit's distinctions, including the real one-finalizer law and legitimate singleton paths. I found no additional independent settlement interpreter requiring scope escalation.
+
+There is one concrete census omission, repaired here rather than sending A back for another audit: **P16, directive/provider-origin parent mutations**. `agentpersistence/directive_operations.go` success/failure finalization and `provider_directive_origin.go` supersession/prelaunch abandonment call `TerminalizePipelineObligationTx` too, not only RunLifecycle. Classification: **already consumes the canonical owner, different enclosing named mutation preserved**. Keep directive operation state, receipt and history atomic; do not absorb provider execution or directive finalization into a fan-out group. Fold these consumers into B09/B16 accounting and retain their existing success, abandonment, rollback and origin controls. This is a preservation obligation within the shared-owner change, not another feature or gate.
+
+The audit is extensive enough to start coding. Its B rows are still planned proof, not execution evidence. Performance feasibility and complete closure remain to be demonstrated, especially S03; approval does not promise batching alone solves it.
+
+## Independent Probes And Results
+
+Inspected A's dirty diagnosis tree at base `486ea41611ed06fa2932fb43892f8e7f4e1dbefe`. Bus dispatch/publication wrapper and pipeline model have no group implementation yet; settlement changes inspected in owner/session files are existing instrumentation and separately approved work, not the proposed new boundary. I did not edit A's worktree.
+
+Repo-wide production searches for `Settle`, `MarkDecisionProcessed`, `CommitInitialPipelineDispositionTx`, `TerminalizePipelineObligationTx`, claim/session operations and nested publication calls yielded the owner map and P16 above. Compared it with `durable_pipeline_processing_obligation_authority`, `run_model.fork.fixed_event_revision_and_workset`, the private finalizer, and implementer/semantic-drift guidelines.
+
+Independently executed targeted controls on the stable same-base reviewer worktree with direct `go test`, exact-name selection, `-count=1 -v -timeout=120s`:
+
+- Runtimepersistence claim/history selection: SQLite settle/decision versus release/scan-close serialization, PostgreSQL parent/claim registration, independent private sessions, attach-to-registry poison, and revision reuse/rollback: **PASS, 1.690s**.
+- Bus selection: `TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack`, `TestSuccessfulPipelineSettlementSignalsDeliveryContinuationsAfterCommit`, and real both-store foreground/postcommit/recovery `TestPipelineRetryReleasePreservesReplayAcrossDispatchSurfacesOnSQLiteAndPostgres`: **PASS, 1.507s**. The first two are unit controls, not new grouped supported-surface proof.
+- Runtimepersistence P16/session selection: `TestDirectiveFailureFinalizationRollsBackReceiptAndOperationTogether`, `TestProviderDirectiveOriginCurrentSuccessParity`, `TestProviderDirectiveOriginPrelaunchAbandonmentParity` on both stores, plus `TestPostgresPipelineClaimUsesExactSessionAcrossCommitAndRollback`: **PASS, 2.187s**.
+- Runtimepersistence recovery/acquisition selection: `TestPipelineScanRechecksDecisionEligibilityAfterEachMutationOnSQLiteAndPostgres` and `TestPostgresAmbiguousAdvisoryAcquireDiscardsBorrowedSessionAfterTransaction`: **PASS, 1.163s**.
+
+No skips in these executed selections. No new batching implementation, race/full-suite, SIGKILL or throughput proof was run by this review; these are preservation baselines, not B-row closure. Existing 500-row/S03 failures remain visible.
+
+## Tracking And A's Next Step
+
+Independently verified #107/#2381 OPEN, #2337 CLOSED design context, #2453 and #2454 OPEN separate classes. Verified #2454's unchanged reproducer branch points to `99ddef4b10420cf9ae5775b1b86fbddcd4712cb5`. Neither split blocks #2394 or waives CI. No new issue is needed.
+
+Watchlist action: refined the existing fan-out/delivery nodes, incorporated A's `9a06eb6` amendment and P16, and published the approval state to docs default master at **`33508806e74b91342d70588427124d492abc111a`**. Both YAML files parse; diff-check passes. No new POTENTIAL_ISSUES entry or architecture stream.
+
+**Implement in this order:**
+
+1. Land the authoritative spec delta and the narrow owner/group contract with small deterministic identity, sharing, rollback, lifetime and exact-history tests. Share the singleton write kernel rather than clone it.
+2. Wire dispatch collection/flush and exact postcommit ownership; prove mixed recipients, nested capacity=1, stop/replacement/poison and uncertain acknowledgements. Preserve directive/provider and one-item recovery controls.
+3. Rerun the original 500-row normal/delayed-commit workload and real-recipient 100-item S03; use measured operation-local identical-input topology reuse where needed. Then complete B/M/S race/crash and exact-head qualification in controlled test slots. No altered deadline, contents, delay scope or final assertion.
+
+To reduce friction, **do not pause again for a newly enumerated caller or fixture failure that fits these approved owners, exact semantics and proof families**: add the row/evidence and repair it in this work. This is explicit authorization for bounded same-class implementation repairs, not a blanket approval of unknown semantic changes. Escalate only a concrete incompatible guarantee, a genuinely different ownership/behavior change, or a need for an unapproved queue/cache/history family or revised acceptance target. Keep unaffected approved work moving. The next normal checkpoint should be code and proof, not another request to restate this design.
+
+
+---
+
+### Comment 5672527671
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5672527671
+
+Author: yazzaoui; created: 2026-09-14T23:57:27Z; updated: 2026-09-14T23:58:02Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## S03 performance boundary decision requested; unaffected proof continues
+
+The approved serving/group implementation and original500 local/delayed-commit development proofs stand. This is **not** a request to waive S03, change its workload/deadline, add a cache, or call the PR ready.
+
+### Evidence
+
+- Latest unchanged both-store S03 command: `go run ./cmd/swarm-test -- ./internal/runtime/cataloge2e -run '^TestScatterGatherSafetyBothStores$/[^/]+/hundred_reverse_completion$' -count=1 -v -cpuprofile=/tmp/2394-s03-codec-and-retirement.cpu -timeout=180s`.
+- FAIL59.356s. SQLite completes initial100-child creation, then `batch.finished` issuance remains32/100 at the original20s phase deadline. PostgreSQL initial creation remains96/100 at20s. The latest run has no stale-claim teardown errors; the separate reset/group retirement race has a deterministic both-store regression and repair.
+- Profile build ID `2e55144ad392df725e8001e3d25a54360d02a4fa`,59.31wall/63.51sampledCPU seconds across both subtests: `runforkrevision.finalize`28.77CPU seconds; `loadCanonicalProjection`18.53CPU seconds. These are cumulative CPU samples, not an additive wall-time lower bound or a mathematical impossibility claim.
+- Earlier SQLite-only profile:51.72CPU seconds, finalizer25.17s, canonical projection16.28s, historical delivery validation7.69s, latest-fact read4.92s. The actual child execution path repeatedly invokes this owner through mandatory claim renewal, workflow engine mutations, and publication/settlement. The competing costs are not fixed by more SQLite serving workers.
+- Implemented/retained bounded reductions: grouped terminal settlement and batch claim admission, operation-local topology reuse, joint strict event decode, completion refutation through canonical pending-work summaries, owner-local nested codec admission reuse, removal of a redundant scanned-byte copy, and cheaper equivalent test observation. Hostile/differential controls pass, including91,392 connect-codec fuzz executions and real both-store fresh/corrupt event reads. They have not discharged S03.
+
+### Actual contract boundary
+
+`run_model.fork.fixed_event_revision_and_workset.write_contract` and `platform_tables.tables.run_fork_fact_revisions` currently specify closed affected-run/family declarations and comparison of complete declared canonical projections. `runforkrevision.Effects.Add`, `finalize`, `loadCanonicalProjection`, and the canonical family writers implement that contract. Each small delivery mutation can therefore re-read, normalize, encode and validate every delivery in the run. `delivery/lifecycle.go` claim/renew/settlement and `pipelinepersistence/workflow_engine_mutation_commit.go` are concrete hot consumers, not proposed independent new owners.
+
+Simply trusting equal historical bytes, skipping untouched-row validation, changing lease renewal, deleting historical cuts, or raising20s would silently alter a governing guarantee. I have not done those things.
+
+### Decision requested
+
+May this work refine the **existing private revision effect owner** to admit exact affected fact coordinates for exact-key mutations, alongside an explicit whole-family arm for genuine bulk operations? The same canonical family projection/key/validation and one-finalizer transaction would remain authoritative. This would make ordinary capture proportional to changed facts, rather than repeatedly serializing an entire growing family.
+
+This is a real effect-admission boundary change, not another caller being wired to the existing group API: exact-key producers would become responsible for complete affected-key declarations. It also requires an explicit decision about validation of unrelated untouched rows during an ordinary mutation. Full consistency validation and historical/fork admission would still read/validate all thirteen families. No new queue, cache, history family, migration, deferred capture, synthetic revision or changed fork cut is proposed.
+
+If approved in principle, the implementation must first record the finite writer/consumer census and exact-key versus whole-family partition; use one closed owner rather than caller predicates; prove full-projection equivalence after every operation on both stores, including additions, updates, deletions/tombstones, no-ops, rollback, multi-run/nested/concurrent mutations, corruption, and fixed-revision/fork readback; then rerun unchanged S03 and both original500 workloads. An incomplete key declaration cannot be accepted as an optimization.
+
+If the full-family per-mutation validation obligation must remain unchanged, please rule that explicitly; I will keep that contract and continue owner-local optimization rather than silently narrowing validation. The profile establishes the dominant repeated work, not proof that every possible local optimization has been exhausted.
+
+Only this proposed revision-effect boundary is paused. Already-approved mixed-recipient, crash, shutdown/lifetime, uncertainty, race and liveness proofs continue. No merge-readiness or full-suite claim.
+
+
+---
+
+### Comment 5742461639
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5742461639
+
+Author: yazzaoui; created: 2026-09-19T13:59:59Z; updated: 2026-09-19T13:59:59Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Qualification integration: mandatory soak versus CI scheduling
+
+The original M32 obligation remains unchanged: at least 22 unfinished intents
+for 15 minutes on each backend, then exact final drain/readback. The current
+real both-store execution is running; this comment is not a passing receipt.
+No soak duration, functional deadline, S03 deadline or 500-row target was changed.
+
+Static integration review found a concrete scheduling contradiction:
+
+- `TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores` is an ordinary
+  top-level test in `internal/runtime/conformance`. Its two sequential backend
+  windows require at least 30 minutes before setup/drain.
+- `.github/test-proof-plan.yaml` routes it into `conformance-2` through the
+  `Test` complement of F/H. That unit has `budget_class: broad`.
+- `.github/test-timing-budgets.yaml` sets the broad command ceiling to 240s.
+- `.github/workflows/ci.yml` gives every ordinary proof-unit job 18 minutes and
+  does not supply a Go test timeout override, so the Go default also expires
+  before this proof can finish.
+
+This is source-proven scheduling incompatibility, not a newly executed CI
+failure. The current development soak uses an explicit 35-minute package
+envelope; that envelope does not change its internal 15-minute pressure,
+1-second claim-start, 15-second no-progress or 90-second drain assertions.
+
+Proposed integration for review: one explicit **mandatory soak proof lane**,
+with both backend cells and unchanged assertions, exact-head evidence and a
+command budget reflecting its deliberate duration. Ordinary partitions must
+exclude exactly that separately owned test, and partition guards must prove
+the complete disjoint union rather than silently omit it. Backend-isolated CI
+cells may run concurrently, but each must actually execute its full 15-minute
+window. Keep the existing 240s/540s ordinary proof budgets unchanged. No short
+mode, environment skip, nightly-only substitution, or waiver of mandatory CI
+is proposed.
+
+Please confirm that qualification organization or name the desired mandatory
+lane. I have not changed CI budgets/selection or weakened the test. Independent
+approved implementation/proof work continues; the separately recorded S03
+revision-effect boundary decision remains pending. Neither issue is a
+merge-readiness claim.
+
+
+---
+
+### Comment 5742933257
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5742933257
+
+Author: yazzaoui; created: 2026-09-19T15:09:14Z; updated: 2026-09-19T15:09:14Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Implementation evidence: bounded lifecycle and public-surface repairs
+
+Continuing under the existing [settlement amendment approval](https://github.com/division-sh/swarm/issues/2394#issuecomment-5671541564), including its explicit authorization for bounded same-class caller/fixture repairs. This is not a final-head proof audit or a merge-readiness claim. Base remains `486ea41611ed06fa2932fb43892f8e7f4e1dbefe` plus the preserved implementation.
+
+### New execution-backed lifecycle finding
+
+The original M06/M07 cross-source lifecycle obligations exposed a missing composition:
+
+- `TestFanOutIdleSourceClosePreservesOtherSourceSelectionBothStores` in `internal/store/internal/runtimepersistence/fan_out_source_local_selector_close_test.go` exercises two real admitted sources. B is selected before idle A closes, becomes invisible after A's local registration closes while A's durable grant remains admitted, then returns after only A's grant retires. Both stores reproduce; log `/tmp/2394-source-local-selector-close-red.log`, package FAIL2.997s. This is actual selector evidence, not a claimed served deadlock.
+- `TestRuntimeShutdownRetainsFailedGrantRetirementForRetry` separately reproduces loss of the only grant handle after a failed durable retirement. The narrow runtime correction retains that exact handle/error for a later shutdown retry; new and retained fan-out shutdown controls pass normal3, package0.062s. Race qualification is pending.
+
+The serving correction stays in the existing process/registration and selected-store owners: retain acknowledged closing-registration evidence separately from its eligibility, validate the complete acknowledged grant census, and only then exclude closed registrations from serving. Selection, opportunity detection and readback consume the same projection. Never-registered/starting gaps still fail closed. No early generation retirement, second registry, partial-grant admission, new scheduler or widened execution authority. Accepted finite turns still join before dependencies retire. This is currently implementation work, not a passing receipt.
+
+### Other receipts and remaining red evidence
+
+- Original500 plus original mixed-four now passes through actual HTTP ingress and public readback: SQLite6.236600773s / PostgreSQL8.505810282s from first batch submission to last durable chunk acknowledgement, both under unchanged10s. The separate300ms delayed proof remains required. Surrounding test-local boot wiring is disclosed; fan-out input/content/assertions are unchanged.
+- New exact missing-agent-route recovery passes both stores at normal3/race3. Mixed16-member completion wake/startup-discovery passes normal3/race3. Real nested predecessor settlement failure now passes both stores through deferred output, direct publish and engine preparation, with no child mutation and exact rollback/reclaimability; its race proof remains pending.
+- SQLite completed the full15-minute pressure window and exact drain:682 intents,503 samples, all682 wakes dropped. PostgreSQL failed at181.20s with `stale fan-out claim`; the complete package is RED. The test-only pressure reservation wait is being instrumented to distinguish fixture-induced hold from production lease behavior. No lease, pressure floor, progress bound or duration was changed.
+- Full API/spec/CLI/config package qualification is RED on stale exact consumer inventories and the retired-spelling guard's treatment of the new approved command. Bounded inventory/grammar classification repairs are underway; no blanket exceptions or live-command-as-historical workaround.
+
+The [S03 revision-effect boundary decision](https://github.com/division-sh/swarm/issues/2394#issuecomment-5672527671) and [mandatory soak CI scheduling decision](https://github.com/division-sh/swarm/issues/2394#issuecomment-5742461639) remain pending. Neither boundary was changed. Original targets/assertions, failed receipts, #2453/#2454 splits and full-suite obligations remain intact.
+
+
+---
+
+### Comment 5743245229
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5743245229
+
+Author: yazzaoui; created: 2026-09-19T15:52:39Z; updated: 2026-09-19T15:52:39Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Preparatory writer census for the pending S03 decision
+
+This supplements [request 5672527671](https://github.com/division-sh/swarm/issues/2394#issuecomment-5672527671), not a replacement audit or an inferred approval. No exact-key effect admission, unrelated-row validation change, cache, lease change or acceptance-target change has been implemented. Independent approved proofs continue.
+
+Current `runforkrevision.Effects.Add` admits only run/family pairs. Its finalizer still loads and validates the complete declared canonical projection, compares the current ledger, emits additions/updates/tombstones and allocates one revision per changed run per physical transaction. The following is available writer knowledge, not an implemented alternate contract.
+
+| Family | Canonical key | Current producer knowledge and important boundary |
+| --- | --- | --- |
+| events | event_id | Event-record append has the admitted ID/run; duplicate append is not automatically a new revision. Retained-run discard deletes a whole family. |
+| entity_mutations | mutation_id | Mutation writers mint per-diff IDs below callers. Entity ID is not the fact key; fan-out source snapshots also have exact mutation IDs. |
+| entity_metadata | entity_id | Entity creation/scenario/fork materialization know IDs. Mutable entity fields are not this projection; whole-run deletion remains distinct. |
+| event_deliveries | delivery_id | Claim/renew/settlement know exact IDs. Current-attempt and selected-rule joins also affect this fact. Receiver-dependent siblings and event-wide handoff require all changed delivery IDs; authority activation currently retains only affected run IDs. |
+| committed_replay_scopes | event_id | Pipeline scope writer has exact event/run; publication/fork activation compose it. |
+| event_receipts | receipt_id | The private receipt writer generates the ID but returns only error. Event ID or pipeline claim cannot substitute for the actual inserted receipt ID. Group and singleton settlement share this writer. |
+| dead_letters | dead_letter_id | Insert result retains new or duplicate persisted ID. Joined delivery-outcome evidence is a transitive dependency, not merely a base-row insert. |
+| timers | timer_id | Timer owners know loaded/created activation IDs. Replacement can affect both old and new IDs; multi-run cancellation already enumerates activations. |
+| agent_sessions | session_id | Lifecycle/rotation knows session IDs, but current effect plumbing reduces results to runs. Run-wide quiescence is broader. Provider-head/message/lease churn is excluded from this particular family. |
+| agent_turns | turn_id | Completion target owns the exact turn/run/session; settlement composes other families too. |
+| agent_conversation_audits | session_id | Stateless audit ensure has exact session identity; its included updated_at means an UPSERT need not be a no-op. |
+| reply_contexts | opaque reply_context_id | Create/claim owns the exact key/run. This key is not UUID-only and must not be rewritten. |
+| fan_out_obligations | fact kind + triggering delivery + declaration coordinates; outcome also ordinal | Chunk/barrier/cancellation/fork operations know concrete identities or enumerate them. Intent, each ordinal outcome and changed barrier are separate facts. Operational claim/retry/budget churn remains excluded. Never split the serialized key to recover declaration coordinates. |
+
+### Shared owners and non-negotiable completeness
+
+- `runforkrevision/projection.go` owns canonical columns, joins, normalization and ordering. `fact_key.go` owns existing key admission/bytes. Delivery projection still consumes the canonical historical delivery validator. A key alone does not admit a fact body or its run ownership.
+- The existing singleton/group settlement kernel, delivery lifecycle, mutation log, timer, reply, LLM/session and fork materialization writers supply the effects. No SQL-string inference or new consumer-local key interpreter is proposed.
+- A primary input key is not necessarily the complete affected set: receipt/mutation IDs are generated lower down; delivery siblings, attempts, selected-rule joins, dead-letter outcome joins and replacement timers must be accounted for. Any lawful key/run move needs both old removal and new presence.
+- Genuine whole-family retained-fork discard currently declares ten families after its deletions and depends on tombstones. Whole-parent deletion/cascade is different: it does not finalize a removed parent. Neither may be treated as a single-key hot path.
+- No-op remains canonical projection equality, not merely rows affected. Multi-run effects still union under sorted parent/head locks and the single outer finalizer. Nested committed order and first-event inclusive cuts stay intact.
+- Full consistency validation and historical/fork admission remain whole-family consumers across all thirteen families. The unresolved decision is specifically whether ordinary exact-key mutations may cease validating unrelated untouched rows. Their corruption disposition must be explicit; this census does not claim equivalence for that behavior.
+
+If this boundary is approved, proof must cover exact-key/full-family differential results after additions, updates, deletions, no-ops, rollback, nested/concurrent/multi-run operations and historical/fork readback; missing/wrong-run/transitive effects and untouched corruption need explicit hostile cases. The existing physical-writer guard and thirteen-family parity tests are starting points, not proof of a future complete-key admission model.
+
+Full read-only census: `/tmp/2394-revision-effect-writer-census.md`, inspected base `486ea41611ed06fa2932fb43892f8e7f4e1dbefe` plus preserved dirty implementation (base alone is not a content pin). No new test execution is credited by this supplement. S03 remains red, the mandatory-soak CI decision remains pending, and there is no full-suite or merge-readiness claim.
+
+
+---
+
+### Comment 5743323725
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5743323725
+
+Author: yazzaoui; created: 2026-09-19T16:04:19Z; updated: 2026-09-19T16:04:19Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# Lead Ruling: Preserve Arbitrary Historical Forks; Approve Exact-Fact Capture And Mandatory Soak CI
+
+**Approved for implementation within #2394. A may proceed now.** This resolves the [S03 boundary request](https://github.com/division-sh/swarm/issues/2394#issuecomment-5672527671), [mandatory soak scheduling request](https://github.com/division-sh/swarm/issues/2394#issuecomment-5742461639), and [thirteen-family writer census supplement](https://github.com/division-sh/swarm/issues/2394#issuecomment-5743245229). The user explicitly reaffirmed arbitrary earlier-event forking as a major required feature and authorized this ruling. No new issue or replacement pre-audit round is required for the exact scope below. Maintain an additive proof table as implementation proceeds; this is not merge approval.
+
+## Product Contract: No Reduction In Historical Fork Capability
+
+Forking at any supported earlier event remains required, with the existing first-persisted inclusive event-revision semantics, thirteen-family reconstruction, exact causal/receiver identities and existing execution-policy boundaries. Current-state-only forks, sparse checkpoints replacing event selection, timestamp selection, deferred history capture and removal of historical cuts are not acceptable substitutes. This ruling changes how an existing transaction discovers and captures its affected facts, not which committed historical state a user can select. The prior explicit bounded publication-segment transaction contract remains unchanged; do not introduce further batching of business transactions under this approval.
+
+## Exact-Fact Revision Effects: Approved
+
+Refine the existing private `runforkrevision` effect owner into explicit exact-fact and whole-family capture selections. They must use the same canonical projection, key, validation, equality, tombstone and finalization owners. This is one semantic implementation with different selection scopes, not a second history subsystem or compatibility path.
+
+- Canonical writers contribute the complete affected fact coordinates while they still own the mutation and generated IDs. Never derive receipt_id from event_id, mutation_id from entity_id, delivery_id from event_id, or fan-out coordinates by parsing the serialized key. Validate exact owning-run/key/body relationships through their existing owners.
+- Include transitive projection dependencies: current delivery attempts and selections, receiver-dependent siblings, event-wide handoffs, dead-letter outcome joins, old/new timer and session identities, and all affected fan-out intent/outcome/barrier facts. A primary input key alone is not a complete write set. Any admitted run/key move contributes both old removal and new presence; do not create new move capabilities.
+- Known exact/enumerated mutations use exact effects once their full set is established. Genuinely broad operations retain an explicit whole-family selection. Whole-family selection dominates exact selections for the same run/family when effects compose. No arbitrary caller SQL predicate, automatic full-scan fallback hiding a missed declaration, ambient inference, or cache. Preserve whole-parent deletion versus retained-run tombstoning distinctions.
+- Keep one outer finalizer and existing deterministic parent/revision locking, atomic domain/history commit and rollback, canonical no-op equality, unchanged payload/key bytes, and exact selected historical cuts. Select both current projection facts and latest ledger facts by the affected set; merely filtering after loading the whole family is not the intended optimization. Exact deletion compares the prior fact and writes its tombstone even after the live row is gone.
+- Exact projection must reuse canonical column/join/normalization/validation logic, not duplicate thirteen handwritten alternative codecs. It must not hide duplicate or wrong-owner projection rows with LIMIT 1 or accept a nonexistent/wrong-run key as a harmless deletion.
+
+**Explicit validation decision:** an ordinary exact-fact mutation is not required to scan or discover corruption in unrelated untouched facts. It must validate all affected facts and dependencies. Existing full consistency and historical/fork admission retain whole-run, all-thirteen-family validation and fail closed on malformed, contradictory or unrevisioned state. No new background scrubber or periodic validation service is required. Untouched corruption may remain undiscovered by an unrelated write; that is the intentionally approved behavioral distinction, not a claim of equivalent detection timing. Do not exempt omitted affected facts by calling them untouched.
+
+Completeness belongs at the actual private writers, not in a fallible top-level caller list. Update the physical writer/contributor guard, including joined-table contributors, and supply exact/full-projection differential tests. No universal runtime detection of every omitted key is claimed without proof; structural writer enforcement plus adversarial execution coverage is required. Keep genuine whole-family operations explicit while using one shared semantic owner. No blanket requirement to turn every cold bulk writer into an exact-key writer before shipping.
+
+**Mandatory proof additions, on both stores:** exact versus full capture after additions, updates, generated-ID inserts, deletes/tombstones, duplicates and no-ops; excluded-column churn; joined/indirect effects and sibling changes; nested/multi-run/concurrent mutations; rollback and finalizer failure; fixed-event history and actual supported fork readback. Hostile cases must include missing, foreign-run, duplicate and malformed coordinates, omission of a transitive contributor, and untouched corruption. For the last case prove the newly permitted unrelated-write behavior and continued full-validation/fork refusal. Preserve the existing named history/key/payload/claim tests. Declare exact/full differential equivalence for valid complete writes, not for the deliberately changed untouched-corruption detection timing.
+
+Update authoritative `platform-spec.yaml` sections `run_model.fork.fixed_event_revision_and_workset.write_contract` / `.read_contract` and `platform_tables.tables.run_fork_fact_revisions` in this PR. The posted census plus these binding decisions is sufficient to start coding; the final proof audit must map actual writer coverage and evidence, not just repeat the census.
+
+## Mandatory Soak CI: Approved
+
+Create a dedicated required soak lane for `TestIssue2394TwentyTwoIntentFifteenMinuteSoakBothStores`, with explicit SQLite and PostgreSQL cells. Each cell must execute its full 15-minute window with at least 22 unfinished intents, then exact final drain/readback. They may run concurrently on appropriately isolated CI workers. Retain the 1-second claim-start, 15-second no-progress and 90-second drain assertions and all original contents/controls.
+
+Provide a separate duration-appropriate command budget, explicit Go timeout and job timeout that accommodate the deliberate window plus bounded setup/drain. Record the concrete envelopes and rationale in the proof plan; this mechanical configuration does not require another lead ruling. Keep ordinary 240s/540s command budgets unchanged. Add the lane to required aggregation and exact-head evidence, and prove complete/disjoint partition coverage including both backend cells. Exclude exactly this separately executed test from ordinary partitions; do not skip it, omit it from required checks, run it nightly-only, or weaken its assertions. A failing PostgreSQL soak remains a real failure, not something this scheduling correction fixes or waives.
+
+## Implementation Order And Remaining Obligations
+
+1. Implement the shared exact/whole effect contract and spec delta. Prove small deterministic differential/hostile cases, then wire the measured hot writers and all transitive contributors. Preserve explicit broad-operation coverage.
+2. Rerun unchanged real-recipient S03 and original500 normal/delayed-commit proofs. The measured profile justifies the direction but does not prove this alone will meet the deadlines. Preserve all M/B/S correctness, race, crash and historical proofs.
+3. Integrate the mandatory soak lane and complete both actual soak cells, including diagnosis/repair of the recorded PostgreSQL stale claim. Finish the already-authorized source-registration/lifetime and API/CLI inventory repairs, then qualify the final head.
+
+Bounded repairs inside these owners and proof families are authorized without another pause for each newly enumerated caller or fixture. Escalate only a concrete incompatible contract, genuinely new semantic owner/feature, or proposed weakening of acceptance. No generic history rewrite, new queue/cache/history family, migration, legacy behavior, relaxed lease or deadline is authorized.
+
+Architecture disposition: **promote this existing-owner correction now under #2394**. It preserves the product feature and removes redundant work; it is not a case for dropping arbitrary historical forks. #2453/#2454 remain the explicit separate classes and no CI waiver follows. No new issue is needed.
+
+Review basis: latest thread/census and source inspection of `Effects.Add`, `finalize`, canonical joined projections, `validateComplete` and its fork consumers, plus actual CI partition/budget/timeout and soak source. No new test execution or passing performance/full-suite receipt is claimed by this ruling. Implementation and qualification remain A's next deliverables.
+
+
+---
+
+### Comment 5743786822
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5743786822
+
+Author: yazzaoui; created: 2026-09-19T17:09:57Z; updated: 2026-09-19T17:09:57Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Additive Implementation Proof Record: Exact-Fact Capture
+
+Continuation under the binding approval in https://github.com/division-sh/swarm/issues/2394#issuecomment-5743323725. This is a worktree proof checkpoint, not an exact-head qualification or review-readiness claim. Base: `486ea41611ed06fa2932fb43892f8e7f4e1dbefe`; implementation remains uncommitted in `agent-a/issue-2394-serving-owner`.
+
+The same thirteen-family projection/finalizer now accepts exact writer-owned coordinates alongside explicit whole-family effects. Both current projection and latest-ledger reads select the affected set before hydration. No historical cut, payload/key encoding, business transaction boundary, execution policy, deadline, or workload has been removed.
+
+### Additional Defects Found And Bounded Repairs
+
+| Manifestation | Repair and current execution evidence |
+| --- | --- |
+| SQLite transaction retries can retain generated keys from a rolled-back attempt in an outer effects collector. | Outer transaction owners reset to their explicit pre-attempt declarations at callback entry; generated contributions are attempt-local. Native callback/commit BUSY probes and stale-collector control are checked in; full proof matrix accounting is still underway. |
+| A globally keyed event moved to a foreign run could be mistaken for a deletion from its prior run. | The canonical projection relation also checks absent exact keys. Existing presence elsewhere requires both old-removal and new-presence effects for an already-supported move. Entity metadata and fan-out keys remain genuinely run-scoped. Both-store hostile, thirteen-family differential, and actual fixed-event materialization selection passed (`-count=1`, 1.978s). No new move capability. |
+| PostgreSQL accepts uppercase/compact UUID input but stores canonical UUID bytes; an exact effect using input spelling then fails despite whole capture succeeding. | Actual physical writers contribute returned/loaded stored coordinates, not a global key rewrite or stricter input admission. Event and entity probes reproduced the mismatch; entity spelling plus actual generated receipt/mutation writer proofs now pass both stores at `-count=3` (5.420s). Remaining writer-specific receipts are being collected. SQLite spelling remains unchanged. |
+| Lifecycle rotation affects both predecessor and successor sessions. | Both IDs contribute to the same finalizer. Actual rotation tests require one shared revision, terminal predecessor/current successor readback, and no history change on duplicate replay or rollback. Lifecycle plus stop/commit/retained-group races passed both stores where supported at `-race -count=3` (40.908s). |
+| Existing reply-context claim test labelled backend parity only executed PostgreSQL. | Added SQLite without replacing assertions, plus durable history count/state checks after create, conflict, competing claims and idempotent replay. Both-store `-count=3` passes (1.758s). |
+
+### Performance And Retained Proof
+
+- Unchanged S03 real-recipient suite: every SQLite cell now passes, including the original 100-item reverse-completion journey. PostgreSQL's other cells pass, but its 100-item initial issuance still stops at 96/100 at the original 20-second deadline. The suite remains **red** (69.079s); no partial result is being reported as closure.
+- A follow-up PostgreSQL profile reproduces that failure. Across the measured phase, revision finalization consumes approximately 1.05s cumulatively, while 420 run-ownership inspections and 423 source-set loads perform separate owner transactions. Synchronous readiness and dispatch remain on the next-chunk critical path. We are investigating bounded redundant work in those existing owners, without skipping authority validation, adding cached permission, changing scheduling semantics, or batching additional business mutations.
+- Retained ordinary/fork-of-fork fan-out origin, current/historical/no-loop and hostile cases pass both stores (`-count=1`, 10.391s); repetition and race qualification remain separate obligations.
+- The original two-store 15-minute soak passed before exact-fact migration (1901.343s total). That is **not** evidence for the current integrated binary or the newly required isolated CI cells. The mandatory lane and partition/receipt guards are implemented; final-head execution remains required.
+- Compilation interruptions during coordinated private-writer signature changes remain recorded as build failures, not test passes. The fixture adapters retain deliberately unrevisioned test setup only; production collectors/finalizers stay mandatory.
+
+Authoritative `platform-spec.yaml` is updated in the working change, including exact absence, stored coordinate ownership and retry-attempt isolation. The final proof audit will name all actual contributors, explicit broad operations, hostile guards and manifestation-level receipts. #2453/#2454 remain separate; there is no CI waiver. PostgreSQL performance, complete retained race/crash/integration coverage, and full-suite/final-head qualification are still outstanding.
+
+
+---
+
+### Comment 5744182017
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744182017
+
+Author: yazzaoui; created: 2026-09-19T18:04:27Z; updated: 2026-09-19T18:04:27Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Additive Performance And Preservation Record, 2026-09-19
+
+Continuation under Gate A comment5743323725. Base486ea41611ed06fa2932fb43892f8e7f4e1dbefe plus dirty shared implementation; not an exact-head or review-ready receipt.
+
+## Repairs And Evidence
+
+- Source/run inspection now validates the full admitted source-set plan inside the existing run inspection transaction, retaining generation/process locks and selected-fork fencing. Owner normal3/race3 controls pass; standalone PG100 still misses its original20s initial issuance gate before the later route changes.
+- PostgreSQL instance-route upsert selects the same oldest matching active wildcard and writes the concrete route in one SQL statement. Multiple topology sets reuse active-run admission only for the exact run inside the same held transaction. Missing foreign-run admission still rejects and rolls back prior sets. No business transaction batching or new authority.
+- New both-store route-source test exposed a pre-existing SQLite UUID scan into sql.NullInt64. The read error was ignored, storing0 instead of the source rule UUID. Repaired with sql.NullString and error propagation. Three-run red preserved in `/tmp/2394-route-source-projection-normal3.log`; corrected normal3 PASS2.571s and race3 PASS23.653s in `/tmp/2394-route-source-and-topology-fixed-{normal3,race3}.log`. Physical PostgreSQL one-statement/error-preservation test PASS0.006s.
+- Settlement sorting precomputes the identical existing composite comparison key once per candidate; shuffled mixed agent/node candidates, duplicate/conflicting identity, immutable input and nil behavior are covered. Direct record decoding consumes the existing sealed strict codec rather than adding a redundant outer JSON decoder. Focused normal3 PASS(events0.388s/eventrecord0.012s), race3 PASS(events3.895s/eventrecord1.017s). Required-array key-spelling parity is under independent review; these receipts do not establish that pending check.
+- Prepared publication readback now uses the existing joint LoadAdmitted owner on both stores; duplicate validation uses DecodeWithSettlement. No cache, aggregate-validation bypass or raw record admission. Existing exact-payload, joint-source freshness and corrupt-aggregate duplicate controls normal3 PASS(runtimepersistence3.240s/bus1.647s). New public-reader corruption/freshness proof PASS1.679s normal3 after correcting its hostile fixture to reach decoder admission rather than fail SQL constraints.
+
+## Unchanged Performance Proofs
+
+- Original500 local both-store HTTP workload PASS23.164s; SQLite issuance5.345744106s, both stores meet10s. `/tmp/2394-s01-original500-exact-integrated-normal1.log`. This precedes the newest loader change, not final qualification.
+- Full S03 after direct-codec/sort change FAIL80.639s. Every SQLite and small PostgreSQL case passes; PostgreSQL reverse completion stops96/100 at its20s gate. `/tmp/2394-s03-direct-codec-sort-normal1.log`.
+- PG100 after joint prepared-event loader change remains FAIL41.738s, initial issuance succeeds, reverse completion96/100 at20s. `/tmp/2394-s03-pg100-joint-prepared-read-normal1.log`. Loader redundancy was real but its removal is not sufficient performance closure.
+- M29 unchanged18-account/20-intent race3 remains FAIL106.531s: all six backend repetitions miss the5s child-entry gate. No race warning, package timeout or assertion relaxation. `/tmp/2394-m29-post-fold-bothstores-race3.log`. Causal profile is pending, no speculative scheduler change.
+
+Original500 delayed300ms current integration, required final-head15-minute soak cells, complete race/correctness matrix and full-suite qualification remain outstanding. Prior passing soak is pre-exact-binary evidence only. #2454 remains open and explicitly separate; no CI waiver.
+
+## Later Integrated Evidence (Additive, Not Final-Head)
+
+- The independent codec parity check found nine admission differences caused by replacing required raw-map keys with decoded nil-slice checks. The original exact-key checks are restored; direct decoding and candidate-key sorting remain. Required-array adversarial normal3/race3 now pass: `/tmp/2394-eventcodec-strictness-repaired-{normal3,race3}.log`. This records and fixes an implementation regression; the earlier codec passes did not prove this property.
+- Prepared publication, receiver-materialization and public singleton event readback consume the existing joint admitted-event/settlement loader. Exact corruption/freshness plus aggregate duplicate and receiver controls pass race3: `/tmp/2394-joint-read-final-consumers-race3.log`, runtimepersistence54.576s / bus12.186s. No cache or aggregate validation removal.
+- Completion's negative preflight now additionally consumes canonical entity summary after delivery/pipeline blockers are clear. Mandatory barrier advancement stays before that preflight; positive completion still consumes all full summaries. Both-store expiry rearming, dirty/stale candidates, corrupt barrier, and eventual terminal full-owner controls pass normal3/race3: `/tmp/2394-completion-entity-preflight-stage-corrected-{normal3,race3}.log` and `/tmp/2394-completion-pipeline-preservation-race3.log`. Spec updated. Initial assertion-prefix and overlong combined-command failures remain in the proof record.
+- Executable identity key/accessor encoding avoids repeating validation of the same immutable private fields within one call. Existing key bytes and admission remain unchanged. Forged field/invalid flow/family/path and deep-flow reference-equivalence tests pass normal3/race3: `/tmp/2394-identity-encoding-parity-{normal3,race3}.log`.
+- Latest full unchanged S03 is still RED: `/tmp/2394-s03-identity-single-validation-normal1.log`, FAIL74.010s. SQLite all cells pass. PostgreSQL100 reaches the initial exact durable frontier16.141s/public hydration16.627s; reverse frontier19.072s/public hydration20.787s, then fails the retained20s context. Durable completion alone is not being substituted for the whole assertion. No deadline or final assertion is moved.
+- M29's race profile now identifies a concrete blocker: 3.336s of the five-second child-entry window is spent in fifteen parent claim waits for the author-activity lock while completion candidates repeatedly read/strictly decode eighteen parent outcome events. Evidence: `/tmp/2394-m29-pg-race-profile-diagnosis.md`. Bounded batched physical reads under the same canonical fold/lock/transaction are being implemented; no barrier skip, cached summary, new scheduler, or changed direct-membership semantics.
+- Actual SQLite retry injection exposed rolled-back completion-candidate handoffs escaping into a later attempt. Session/history/summary assertions pass, handoff assertions fail in six cases: `/tmp/2394-llm-reset-retry-receipt.md`. The correction is in the existing runhandoff attempt owner; no new retry semantics or compatibility path. Repair and qualification remain in progress.
+- The all-repository compile-only command completed successfully: `/tmp/2394-integrated-compile-all-20260919.log`. This is not a whole-suite execution and precedes later changes.
+
+Current integration and tests continue under the existing bounded-repair authorization. S03, M29, retained M17 race partitions, final original500 delayed proof, both mandatory soak cells and full-suite qualification are not yet complete. No PR or merge-readiness claim.
+
+
+---
+
+### Comment 5744401294
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744401294
+
+Author: yazzaoui; created: 2026-09-19T18:36:09Z; updated: 2026-09-19T18:36:09Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Additive Preservation And Retry Evidence
+
+Continuation under Gate A ruling 5743323725. Base `486ea41611ed06fa2932fb43892f8e7f4e1dbefe` plus the shared working changes, not a frozen final head or review-readiness claim.
+
+## Performance And Public Readback
+
+- The original PostgreSQL 100-item reverse-completion journey passes for the first time: `/tmp/2394-s03-pg100-canonical-batched-read-normal1.log`, PASS39.332s. Initial durable frontier15.951s/public hydration16.253s; reverse frontier18.762s/public hydration19.928s. This is one PostgreSQL cell with a narrow margin, not repeated or whole-suite qualification. The original20s assertion, full100-item workload and final public assertions remain unchanged.
+- Event and delivery batch reads use the existing canonical record decoders, inherited-owner validation, direct membership reconciliation and full settlement projection. Public pagination hydrates no candidate beyond the consumed matching lookahead, does not push semantic filters into child hydration, and retains all delivery/dead-letter evidence. Dead-letter reads now share one bounded physical reader for scalar and batch callers. No cache, extra business transaction, snapshot guarantee or weakened corruption admission was introduced.
+- Both-store public preservation passes normal3 (11.684s) and race3 (89.685s): `/tmp/2394-operator-event-batch-preservation-final-normal3.log`, `/tmp/2394-operator-event-batch-preservation-race3.log`. Covers129-event boundary/order/cursors, corruption in consumed versus unconsumed candidates, foreign-run exclusion, complete dead-letter evidence, exact claim enrichment, direct membership corruption, cancellation and fresh canonical mutations. Detailed receipt: `/tmp/2394-operator-event-batch-preservation-proof.md`. Later scalar delivery-adapter delegation is being separately qualified, not retroactively credited here.
+- M29 remains red after the batch barrier change: `/tmp/2394-m29-batch-postgres-race1.log`, FAIL14.215s, original5s child-entry assertion. Its parent18-delivery dispatch competes with completion candidates for the author-activity lock; repeated strict18-event barrier decoding holds that lock. Optimization of the existing private codec is under differential testing. No barrier omission, early serving-permit release, deadline increase or success claim.
+
+## Retry Correctness And Historical Preservation
+
+- The six native SQLite retry failures were real: rolled-back attempts retained completion-candidate reservations. `CandidateHandoff.ResetAttempt` now cancels attempt-local admissions/barriers while retaining the outer occurrence lease. Failed cancellation remains visible and blocks new admission/commit; tokens are not silently discarded.
+- The exhaustive callback census identifies32 retryable outer transaction callbacks. All now consume the reset before mutation, including fan-out commit. Fan-out also resets its publication result and completion flag so aborted-attempt state cannot escape. This is not a reset inside lower candidate producers, which would erase valid same-transaction siblings. Full named callback guard and fan-out-specific injected retry proof are still being completed.
+- Native LLM/lifecycle retry and real cancellation/occurrence controls pass race3: `/tmp/2394-handoff-retry-census-race3-20260919T1824-v1.log`, runtime lifecycle1.011s/runhandoff1.012s/runtimepersistence102.610s. This covers13 selected roots, not32 independent fault injections; it predates the final fan-out callback integration. Exact census/limits: `/tmp/2394-candidate-handoff-retry-census.md`.
+- All five original publication-history roots plus the raw-seed negative control pass both stores normal3 (12.762s) and race3 in complete/disjoint partitions (57.330s and42.940s). Atomic cuts, rollback, nested cuts, independent writers and actual materialized forks retain their original assertions. The repaired fixture now finalizes only its raw source-event/trigger-delivery seed before execution; production exact writers do not backfill unrelated facts. `/tmp/2394-group-history-seed-repair-receipt.md`.
+- Historical-consumer guards now name the new exact readers/finalizers/group consumers and retain compiler-resolved hostile controls for arbitrary receiver names, wrong receiver types and extra calls inside approved functions. The complete guard passes normal3 (17.356s): `/tmp/2394-final-consumer-historical-guard-complete-normal3.log`.
+
+## Remaining Qualification
+
+One complete ordinary store-runtime unit executed220 roots:216 passed, four failed (`/tmp/2394-store-runtime-full-05-discovery-normal1-after-import.log`, FAIL131.805s). The entity-source fixture's canonical timestamp/history precondition and exact EventBus/ResetAll guards are repaired with scoped passing receipts; the seven SQLite runtime-log filters remain the separately tracked #2454 failure. The original full-unit failure is retained, not relabeled green.
+
+Remaining obligations include M29, current/repeated S03, retained contention/nested matrix, current original500 delayed-commit proof, both mandatory15-minute soak cells and complete final-head full-suite qualification. #2453/#2454 remain explicit separate classes with no CI waiver. No acceptance assertion was removed, no failed test was retried merely to obtain green, and no PR is claimed ready.
+
+
+---
+
+### Comment 5744441131
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744441131
+
+Author: yazzaoui; created: 2026-09-19T18:42:55Z; updated: 2026-09-19T18:42:55Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Governing-Context Clarification: Public Event Snapshot Scope
+
+This is an adjacent pre-existing contract-scope question, not a request to stop approved serving, exact-history, retry or performance work. No public read transaction change or spec weakening has been made.
+
+During preservation review of bounded event read batching, we found that `platform-spec.yaml` `backend_neutral_runtime_mutation_write_boundary.rules` says a standalone pure selected-store read executes in one transactionally consistent read-only transaction. The same section preserves read-only projections as a separate concept unless independently gated. The wording predates #2394.
+
+The originating #2363 [binding ruling](https://github.com/division-sh/swarm/issues/2363#issuecomment-5433755883) enumerated ten SQLite readers and seven PostgreSQL counterparts routed through mutation-only owners and prohibited a repo-wide read migration. Public event list/get were outside that census. PR #2365's [later review](https://github.com/division-sh/swarm/pull/2365#issuecomment-5442391210) required a repeatable snapshot for the enumerated PostgreSQL readers. Their exclusion from that repair is established; a permanent exemption from snapshot consistency is not.
+
+## Exact Current Consumers
+
+| Public projection | Existing composition, before and after the current physical batching |
+| --- | --- |
+| PostgreSQL `ListOperatorEvents` | ID windows, admitted events, delivery membership and dead letters through separate backend-pool queries. |
+| SQLite `ListOperatorEvents` | The same separate query composition. |
+| PostgreSQL `LoadOperatorEvent` | Admitted event, dead letters and delivery snapshots through separate pool reads. |
+| SQLite `LoadOperatorEvent` | The same separate query composition. |
+
+Facade construction adds no transaction. None consumes mutation admission, candidate handoff, author-activity or revision ownership, so this is not the #2363 reader-as-writer defect. Historical PR-tree inspection confirms the pre-existing composition. This is code/spec evidence, not an executed torn-read failure or proven cross-run leak.
+
+Current batch preservation tests intentionally prove exact consumed prefix/lookahead, ordering, full evidence, strict canonical admission, fresh independent reads and no partial results. They do **not** claim page-wide snapshot consistency. Their passing results cannot settle this separate question.
+
+## Requested Disposition
+
+Please clarify whether the generic snapshot rule governs these public event projections. If yes, the bounded implementation direction is the existing private backend `RunReadTransaction` owner (PostgreSQL read-only repeatable read; SQLite pinned read snapshot), threaded through these four operations and their same-result helpers. That changes the observation boundary and needs explicit concurrency proof, not merely a batching-parity label. If separately tracked, record that scope without silently weakening the generic spec or treating current preservation tests as proof of snapshot atomicity.
+
+No generic transaction framework, new mutation authority, fallback, cache or broader read-API migration is proposed. Approved unaffected #2394 work continues; no merge-readiness claim.
+
+
+---
+
+### Comment 5744547384
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744547384
+
+Author: yazzaoui; created: 2026-09-19T19:01:44Z; updated: 2026-09-19T19:01:44Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Additive Qualification Record
+
+Continuation under #2394 Gate A comment 5743323725. Base `486ea41611ed06fa2932fb43892f8e7f4e1dbefe` plus the shared, uncommitted implementation. These are discovery/preservation receipts, not final-head or review-ready proof.
+
+## Correctness Repairs Qualified
+
+- All 32 retryable outer transaction callbacks now reset attempt-local candidate admissions before mutation, while retaining the outer operation lease. The fan-out callback also clears publications and completion state from an aborted attempt. Real SQLite COMMIT-busy injection proves old admissions are canceled, only the acknowledged retry submits, and a refused second attempt cannot leak prior success. Normal3 PASS1.695s and race3 PASS22.835s: `/tmp/2394-handoff-all32-fanout-{normal3,race3}-20260919-v1.log`. Exact census and coverage limits: `/home/youmew/2394-handoff-all32-final-receipt.md`.
+- Scalar delivery snapshots now consume the same bounded canonical reader as batched snapshots. Independent per-delivery readback, rather than scalar-versus-batch self-comparison, proves complete fields/order, PostgreSQL UUID normalization, SQLite physical spelling, corrupt direct membership and query bounds. Race3 receipts: `/tmp/2394-delivery-singleton-independent-race3.log` PASS16.059s; `/tmp/2394-delivery-singleton-membership-race3.log` PASS14.804s.
+- The complete events package now passes after replacing test-only direct constructors with the existing admitted fixture helper and removing forbidden zero-event literals from production error returns. `/tmp/2394-events-complete-after-fixture-guard-repairs-normal1.log` PASS2.237s. The actual both-store preparation-failure matrix passes all 30 cases after the fixture change: `/tmp/2394-group-preparation-eventtest-helper-normal1.log` PASS5.670s. No refusal or rollback assertion was relaxed.
+
+## Performance Remains Unclosed
+
+- Existing private settlement ledger/plan decoding now shares one decoder across the plans array. Frozen original decoder differential tests, all required-key cases, receiver atomicity, normal/race controls and 5,011 finite fuzz executions pass. Same-binary 18-recipient race benchmark improves from approximately 1.72ms to 1.09ms. `/tmp/2394-settlement-wire-array-receipt.md` contains exact scope and commands; a microbenchmark is not runtime closure.
+- Original PostgreSQL M29 still fails its unchanged five-second child-entry gate: `/tmp/2394-m29-wire-array-pg-race1.log`, FAIL13.988s. Cleanup later shows all 18 parent routes delivered, but that sequential dump is not an atomic deadline observation. Held-child, direct-barrier, sibling-isolation and final lifetime assertions remain unreached in this run. No repeated unchanged retry was scheduled.
+- Full original S03 remains red in `/tmp/2394-s03-batched-reader-wire-codec-normal1.log`, FAIL70.171s: reverse public completion20.398s exceeds20s. Diagnostic-only PG100 profile passes with only17ms margin, not reliable qualification. The exact critical path is documented in `/tmp/2394-s03-current-joint-read-diagnosis.md`; serial execution is dominated by database protocol waits, while final public hydration is predominantly canonical event-decoding CPU. Inclusive profiles are not added together as claimed savings.
+- Further bounded corrections are being evaluated within existing owners: avoid redundant canonical parsing, batch already-validated revision INSERTs inside the same transaction, and consume handler-selection INSERT RETURNING without a redundant successful-insert reread. No extra business transaction batching, cached admission, barrier omission, lease change or acceptance relaxation is proposed.
+
+## Full-Suite Discovery
+
+- Canonical broad-03 completed all52 packages within240s: exit0, wall95.094s, 1,011 root passes and five existing skips. Source manifests matched before/after. `/tmp/2394-broad03-discovery-receipts.md` names the skipped behaviors explicitly; they are not execution-proven.
+- Broad-01 completed within240s but is red: `/tmp/2394-broad01-discovery-normal1.log`, wall117.205s. Several SQLite pipeline execution tests fail while PostgreSQL counterparts pass. Diagnosis is in progress; these are not being dismissed as fixture problems or converted into green based on focused controls.
+- The canonical store-runtime-full-03 discovery partition is in progress. No full-suite success is claimed.
+
+The public-event snapshot contract question in comment5744441131 remains a separate, explicitly recorded scope ambiguity. Approved unrelated work continues without changing that observation boundary. #2453/#2454 remain tracked separately, with no CI waiver. Original500 delayed-commit proof, retained contention/nested matrix, both mandatory15-minute soak cells and complete exact-head qualification remain outstanding. No PR is claimed ready.
+
+
+---
+
+### Comment 5744561520
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744561520
+
+Author: yazzaoui; created: 2026-09-19T19:04:01Z; updated: 2026-09-19T19:04:01Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# Lead Ruling: Absorb Consistent Public Event Reads In #2394
+
+**Approved for implementation now.** This resolves the clarification in https://github.com/division-sh/swarm/issues/2394#issuecomment-5744441131 following the user's explicit approval. Absorb the bounded repair in the current #2394 work; no new issue, replacement pre-audit, or additional gate before coding is required.
+
+## Contract And Boundary
+
+The consistent-read rule governs `ListOperatorEvents` and `LoadOperatorEvent` on both PostgreSQL and SQLite. Their exclusion from #2363's reader-as-writer census was a scope exclusion from that repair, not a permanent consistency exemption.
+
+One invocation must assemble its result from one transactionally consistent database view: ID selection/windows, consumed lookahead, admitted events, delivery membership/settlement/claim enrichment, and dead-letter evidence contributing to that result. Do not return a mixture of separately observed database states. The snapshot is established by the database read, not promised at HTTP arrival time.
+
+This is per invocation/page only. A later request, including a later cursor page, takes a fresh snapshot and may observe newer committed state. No snapshot is retained across requests, no history/fork snapshot is introduced, and no cross-page frozen traversal guarantee is added.
+
+## Implementation
+
+1. Reuse the existing private backend `RunReadTransaction`: PostgreSQL read-only `REPEATABLE READ`; SQLite a read transaction pinned to the same connection/snapshot. These helpers already exist and were source-checked for this ruling. All same-result helper queries must use that transaction, not escape to the pool or open independent nested transactions.
+2. Keep this a pure read. No mutation admission, candidate handoff, author-activity ownership, revision effects, write reservation, or process-wide locking. Keep the transaction caller-scoped and short; close it before unrelated work/network response transmission.
+3. Preserve canonical admission, complete evidence, ordering, filters, exact consumed prefix/lookahead, pagination, cancellation/error behavior and no-partial-result semantics. Batching remains a physical optimization, not permission to weaken validation or hydrate unrelated candidates.
+4. A single equivalent SQL statement would also satisfy the observation contract, but there is no requirement to rewrite these projections into one large query. Use the existing transaction owner and canonical readers; no generic framework, cache, compatibility path, or repo-wide read migration.
+
+## Proof And Record
+
+- Add deterministic concurrent-writer tests for list and get on both stores. Coordinate a real committed change between component reads; show that one response retains the coherent pre-change snapshot, and a fresh invocation sees the committed change. Assert exact returned evidence, not merely that a transaction helper was called. For list, exercise candidate selection plus hydration/lookahead, not only singleton payload reads. Verify actual WAL writer progress for the SQLite concurrency case.
+- Preserve existing corruption, cross-run exclusion, evidence completeness, pagination and freshness controls. Prove cancellation/read failure releases the transaction and returns no partial successful response. Run focused both-store normal/race repetition; retain the existing unchanged performance and final-head qualification requirements.
+- Add these four entry points and transitive same-result readers to the additive consumer/proof accounting. Clarify this boundary in authoritative `platform-spec.yaml` in the same PR and refine the existing watchlist mapping; do not invent a new tracker for this absorbed manifestation.
+
+Current evidence establishes separate-query composition and a contract gap, not an executed torn-read incident or cross-run leak. Do not retrospectively label earlier preservation passes as snapshot-consistency proof. The new tests must establish that property.
+
+**A's next step:** implement and qualify this bounded repair alongside already approved work. Do not pause for mechanical helper threading or same-contract fixture repairs. No new approval is implied for unrelated read surfaces or changed execution semantics. The latest qualification record still reports S03/M29 and broader qualification failures; this ruling does not waive those or claim merge readiness.
+
+
+---
+
+### Comment 5744700050
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744700050
+
+Author: yazzaoui; created: 2026-09-19T19:27:23Z; updated: 2026-09-19T19:27:23Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Watchlist accounting for the approved public-event snapshot repair (ruling 5744561520) is committed and pushed in swarm-docs at `92fb292`, branch `agent-a/2394-public-event-snapshot`. Both existing mapped nodes name all four list/get entry points and their transitive snapshot readers, fresh later invocations, and deterministic concurrency/cancellation proof requirements. Both YAML files parse and `git diff --check` passes. This branch is not merged into the docs default branch; this is tracking repair, not implementation or merge qualification. The unrelated dirty docs checkout is untouched.
+
+---
+
+### Comment 5744718141
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744718141
+
+Author: yazzaoui; created: 2026-09-19T19:30:43Z; updated: 2026-09-19T19:30:43Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Qualification Checkpoint: Preserved Admission And Current Bottleneck
+
+Continuation under rulings 5743323725 and 5744561520. Base `486ea41611ed06fa2932fb43892f8e7f4e1dbefe` plus shared working changes. This is not final-head qualification or the required final PR proof audit.
+
+## Preserved Correctness
+
+- The proposed handler-selection `INSERT RETURNING` shortcut was rejected and removed. Native PostgreSQL AFTER-trigger probes demonstrated that the returned row can differ from canonical subsequent readback, including rewritten, corrupt or deleted facts. Both stores retain the post-insert canonical SELECT. New hostile tests and existing controls pass normal3/race3; no round-trip saving is claimed. Receipt: `/tmp/2394-handler-selection-returning-receipt.md`. This supersedes the proposed optimization, not the strict admission requirement, in comment5744547384.
+- PostgreSQL claim renewal folds the two dependent UPDATEs into one statement inside the same existing transaction, preserving separate attempt/delivery mutation counts, current database-clock admission and final canonical readback. Native suppression/error/rollback and lock-order controls pass normal3 (2.492s) and race3 (13.510s); actual historical-root preservation passes race3 (15.910s). SQLite is unchanged. Receipt: `/tmp/2394-delivery-renewal-fold-receipt.md`.
+- Revision fact INSERTs are bounded to 128 already-validated facts per statement inside the existing transaction and revision. Native 257-fact tests prove three statements and full rollback when the last chunk fails; all thirteen families, tombstones, no-op and multi-run controls remain. Normal3 (7.984s) and race3 (72.707s) pass. Receipt: `/tmp/2394-revision-fact-batch-proof.md`. No additional business transaction batching or historical cuts were introduced.
+- The public event snapshot repair is implemented under ruling5744561520. Deterministic both-store list/get writer interleaving and mid-read failure/cancellation controls pass race3 (46.082s); combined normal3 preservation passes (17.566s). Independent consumer review and remaining controls are still in progress, so these are scoped receipts only. Watchlist branch `agent-a/2394-public-event-snapshot`, commit `92fb292`, is pushed but not merged.
+
+## Current Performance Evidence
+
+Original M29 PostgreSQL race1 remains red: `/tmp/2394-m29-root-combined-pg-race1.log`, FAIL13.294s at the unchanged five-second child-entry assertion. A single separately authorized diagnostic run of the same retained binary also fails. It does not replace qualification.
+
+The trace places parent dispatch completion at +4.743s, child creation at +4.755s, and the deadline at +5.001s. Parent claim-lock waits total 2.535s; a further final settlement lock wait is 0.180s. These waits overlap completion transactions' canonical barrier admission, so the durations must not be added as independent potential savings. The child reaches publication commit preparation but not handler entry before the deadline. All later held-child, direct-barrier, sibling-isolation and final lifetime assertions remain required and unreached in this run.
+
+The residual profile points to repeated canonical record reconstruction/equality under the required ordering lock, not a lost wake or a fixture gate left closed. Bounded serialization work is being measured with frozen original implementations and hostile byte/error/alias tests. No equality bypass, cached admission, barrier omission, lock-boundary change or deadline increase is authorized or implemented. Exact binary, source-manifest limitations and timings: `/tmp/2394-m29-root-combined-receipt.md`.
+
+S03's last complete workload remains red. Neither microbenchmarks nor the prior narrow-margin diagnostic pass close it. Current original500 delayed proof, retained nested/contention repetitions, both final-head mandatory soaks and complete full-suite qualification remain outstanding.
+
+## Suite Discovery
+
+Canonical broad04 passes all52 packages and1,228 roots, no skips, wall34.558s within240s, with unchanged before/after source manifests. Broad03 previously passed52 packages with five explicitly recorded existing skips. The original broad01 and store-runtime-full03 reds remain in the ledger; their fixture defects have scoped passing repairs, not silently relabeled full-unit greens. Remaining canonical units are being run without reducing selections or retrying unchanged failures for green. #2454 remains separately tracked, without a CI waiver or an invented implementation prerequisite.
+
+
+---
+
+### Comment 5744884513
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744884513
+
+Author: yazzaoui; created: 2026-09-19T19:58:41Z; updated: 2026-09-19T19:58:41Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Qualification Checkpoint: Original Workloads Pass; Nested Timing Remains Open
+
+Continuation under rulings5743323725 and5744561520. Base
+`486ea41611ed06fa2932fb43892f8e7f4e1dbefe` plus the shared uncommitted implementation;
+origin/master matched that base at the latest fetch. These are scoped development
+receipts, not a final-head proof audit or review-ready claim.
+
+## Completed Workload Proof
+
+- Full `TestScatterGatherSafetyBothStores`, all twelve scenarios, count1:
+  PASS67.744s. The original100 reverse-completion scenario reaches public readback
+  at9.943s SQLite and19.149s PostgreSQL, both within the unchanged20s assertion.
+  Source manifests before/after are identical. Receipt:
+  `/tmp/2394-s03-snapshot-owned-record-receipt.md`; raw
+  `/tmp/2394-s03-snapshot-owned-record-normal1.log`. Earlier failures remain recorded.
+  One pass is not repeated or final-head qualification.
+- Original500 delayed300ms both-store workload:
+  `TestIssue2394ServedOriginalReporterFiveHundredDelayedBothStores`, count1,
+  PASS231.893s. First submission to last durable ordinal outcome: SQLite102.917s,
+  PostgreSQL90.412s, both under120s. All500 rows, mixed refusal, readback and normal
+  shutdown assertions remain intact. Delay applies to instrumented transaction-owner
+  commits, not every implicit SQL autocommit. Receipt:
+  `/tmp/2394-s01-original500-exact-delayed300ms-receipt.md`.
+  Concurrent unrelated fixture/CLI/guard edits prevent a frozen-source claim;
+  runtime/store production endpoint hashes were unchanged.
+- Original three M18 nested roots complete both-store normal3 and all six
+  root/backend race3 cells. No internal deadline/assertion changes or race reports.
+  A queued command interrupted before any execution is retained separately, not
+  presented as a failing test. Current evidence is in
+  `/tmp/2394-b-matrix-final-census.md`.
+- Public list/get snapshot controls now also execute real inherited-fan-out
+  lineage mutation: old invocation stays coherent while a committed writer changes
+  ancestry, fresh invocation refuses corrupted lineage with no partial DTO. Both
+  stores and both entrypoints pass normal3(2.821s)/race3(19.247s), in addition to the
+  earlier paging, cancellation, error and evidence controls. Receipt:
+  `/tmp/2394-operator-event-snapshot-proof.md`.
+
+## Remaining Causal Failures
+
+- M29 PostgreSQL race1 still fails its unchanged five-second child-handler-entry
+  assertion. Exactly one diagnostic execution of the same retained binary also
+  fails. The parent exits at+4.475s, the child starts at+4.493s and commits, then
+  required readiness finalization waits behind completion/barrier processing's
+  author-order transaction. This same owner accounts for2.298s of earlier parent
+  claim-lock waits. It is not a lost wake or a held test gate. The later held-child,
+  direct-barrier, sibling-isolation and lifetime assertions remain required.
+  `/tmp/2394-m29-json-equal-combined-diagnosis.md` records exact trace evidence.
+  Physical work inside existing owners is under investigation; no lock, barrier,
+  business transaction or acceptance weakening is proposed.
+- M17 SQLite independent20x25 race3 still reaches the180s package timeout after
+  two complete passes(61.92s/59.10s); the third is incomplete. This is distinct from
+  M29's operation-level five-second failure. PostgreSQL one-run and independent-run
+  race3 cells pass39.111s/45.634s. A separately labeled new-binary count1 diagnostic
+  is authorized for SQLite because Go removed the failed binary; it cannot be
+  called a same-binary comparison or substitute for the required race3 proof.
+
+## Suite And CI Coverage
+
+Broader discovery caught and repaired a real CI selector omission: the new
+`TestScatterGatherFrontierAggregatePreservesRefusalsBothStores` root was absent
+from catalog-runtime. Its exact name is now selected in that existing unit, with
+the same count/budget. The existing complete/disjoint catalog CI census passes
+count3(0.375s); this is selection proof, not scenario execution.
+
+The suite also found canonical fixture schema omissions, a missing CLI status
+projection and fixture materialization outside the canonical owner. Scoped repairs
+preserve the original assertions. Exact-byte fixture parity caught and corrected
+one transcription error rather than accepting a changed fixture. Original red
+receipts are retained. Remaining canonical ordinary units continue one at a time
+through swarm-test, with queue time recorded separately from test execution.
+
+Final-head mandatory soaks, remaining race gaps and complete suite qualification
+are outstanding. #2453 and #2454 remain separately tracked; no CI waiver follows.
+The snapshot watchlist branch92fb292 is pushed but not merged. No implementation
+PR or merge-readiness claim is made by this checkpoint.
+
+
+---
+
+### Comment 5744978523
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5744978523
+
+Author: yazzaoui; created: 2026-09-19T20:13:35Z; updated: 2026-09-19T20:13:35Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Qualification Clarification: M17 Aggregate Race Envelope
+
+Approved implementation and unaffected qualification continue. No deadline, test
+count, workload, driver dependency or production behavior has been changed here.
+This is a proof-envelope question, not a request to waive a failing assertion.
+
+The required original20x25 M17 SQLite independent-runs race3 command repeatedly
+reaches its180s **whole-package** alarm. Latest: two complete repetitions at61.92s
+and59.10s, then the third completes all20 turns but reaches only19/20 final history
+readbacks before the package timeout. PostgreSQL race3 cells pass; SQLite one-run
+race3 previously passed178.984s. These narrow margins are not robust qualification.
+
+One separately authorized diagnostic executes the unchanged independent-runs
+case on a retained new binary, race/count1/CPU+trace: PASS63.732s, all20 turns,
+all20 exact histories and original internal wait assertions. This is explicitly
+not same-binary evidence for the removed failed executable, nor a race3 substitute.
+
+Measured selected-test phases: setup11.799s; ingress/first held turn5.923s;
+released serving41.627s; exact final readback2.771s; final cleanup0.078s. Serving
+goroutines spend41.577s running and only7.3ms waiting in the trace. This failure
+is not demonstrated lost work, sleeping on an eligible queue, a stuck lease,
+or slow teardown. Native SQLite SQL preparation dominates sampled serving CPU.
+
+The straightforward physical lever, operation-local prepared-statement reuse,
+does not work with pinned modernc.org/sqlite v1.40.1: its driver statement retains
+SQL text but calls native prepareV2 again on every execution. No speculative
+statement wrapper, driver upgrade, vendored patch, race disable, workload reduction
+or repeated retry for green has been introduced. Smaller SQL-expression changes
+do not have evidence of enough savings to claim closure.
+
+Exact diagnostic source/binary/commands and phase attribution:
+`/tmp/2394-m17-sqlite-independent-newbinary-diagnostic-receipt.md`.
+
+Please distinguish whether the binding180s aggregate race3 envelope is itself an
+acceptance requirement that must drive further physical execution optimization,
+or an implementation-test envelope requiring an explicit reviewed correction
+while preserving same-process count3, all original per-operation assertions,
+20x25 contents and the existing ordinary CI command ceilings. I will not silently
+increase it or partition away same-process repetition. No correction is presumed
+approved by this comment.
+
+M29 is separate: its current failure is the actual five-second child-entry
+assertion, with completion/barrier work delaying readiness. That assertion remains
+unchanged and under repair; this question does not request its relaxation.
+Original500/100 performance targets, final-head soaks and complete suite proof
+remain mandatory. Claim-lock correctness investigation, bounded fold-query work
+and remaining ordinary/matrix qualification continue without waiting here.
+
+
+---
+
+### Comment 5745057212
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5745057212
+
+Author: yazzaoui; created: 2026-09-19T20:26:31Z; updated: 2026-09-19T20:26:31Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# Parent-fence source review: unexecuted conditional risk
+
+2026-09-19, shared #2394 implementation. This is source review, not a reproduced
+failure, test result, or proof of an ordinary writer's identity collision.
+
+The publication-group acquisition retains PostgreSQL parent-fence transactions
+through claim registry installation. TerminalizePipelineObligationTx holds the
+registry mutex while waiting for its PostgreSQL parent advisory fence. Registry
+checks use exact event identity; the PostgreSQL fence uses hashtext of the named
+parent-fence key.
+
+The first proposed same-event cycle is not established for lawful fresh group
+admission: new event IDs are unpublished, ordinary finalizers discover persisted
+events, and recovery does not recreate the publication group. Do not label that
+source-only conjecture as a reproduced same-event deadlock.
+
+A distinct-event hash collision could instead couple the database fence while
+bypassing the exact-ID registry check, forming a database-wait/mutex-wait cycle.
+This conditional source concern has not been executed. The delegated native
+probe was stopped by a tool safety filter before execution. No collision fixture
+or production repair was written, and the blocked operation will not be rerouted
+through another tool or agent. No native reproducer, race, or timing receipt is
+claimed. Independent verification remains a coverage limitation.
+
+All existing noncollision claim-fence and group-preservation receipts retain
+their actual scope; none discharges this unexecuted concern. No generic lock,
+identity, scheduler, or fork redesign is authorized or implemented by this note.
+
+
+---
+
+### Comment 5745372680
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5745372680
+
+Author: yazzaoui; created: 2026-09-19T21:18:17Z; updated: 2026-09-19T21:18:17Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Qualification Checkpoint: Crash Coverage And Guard Accounting
+
+Shared development tree at base486ea41611ed06fa2932fb43892f8e7f4e1dbefe; not a
+frozen final head, final PR proof audit, or review-ready claim.
+
+## Completed Finite Work
+
+- Original warm-prefix SIGKILL recovery now has actual same-process count3 and
+  race/count3 receipts on both stores. Normal SQLite96.373s/PostgreSQL100.224s;
+  race SQLite178.788s/PostgreSQL143.034s. Both before-commit and
+  after-commit-before-ack cuts retain original65 rows,32/64 prefixes,30s lease,
+  suffix-only takeover and exact final outcome/history assertions. SQLite race
+  aggregate margin is narrow, not robust timing evidence. Receipt:
+  `/tmp/2394-m25-crash-repetition-receipt.md`.
+- Compiler-resolved persistence authority registry refreshed and explicitly
+  classified368 exact changed findings. The guard itself is unchanged. Current
+  registry plus effective-method, hostile alias/carrier/context and extra-query
+  controls PASS5.052s. No file exemption or raw capability escape. Original
+  store-full red remains recorded. Receipt:
+  `/tmp/2394-authority-registry-repair-receipt.md`.
+- Approved ordinary-test organization now executes all207 original full02 roots:
+ 102-root remainder PASS104.484s,105-root mandatory fan-out unit PASS150.925s.
+ Complete/disjoint census and all four CI profiles retain every root, count,
+ backend, assertion and original240s unit ceiling. No omitted slow crash cases.
+- Strict schema/selected-fork refusal and exact2x10 lost-wake repetition gaps
+  have named normal3/race3 receipts. M13 negative readers and both fork/reset
+  roots also have completed repetitions. The manifestation ledger is reconciled
+  rather than scheduling duplicate proof from stale pending prose.
+
+## Preserved Reds And Current Repairs
+
+M15 SQLite race still fails its unchanged10s drain envelope. One retained-binary
+diagnostic runs continuously through physical serving work, with9.760s serving
+goroutine Running and2.14ms Waiting in the final window; it reaches quiescence
+but then times out during canonical summary readback. It does not reproduce the
+original two-lease error verbatim and does not prove all102 final assertions.
+Native SQLite preparation is a measured cost, not a demonstrated lost wake.
+
+An offline profile breakdown puts grouped-member validation preparation at only
+0.31 sampled CPU seconds, so a new batching/admission API is not justified as
+closure. One short query-shape benchmark finds effectively identical current
+window/grouped medians (3.798/3.796ms); candidate rejected and temporary benchmark
+removed. No production query, driver, cache or admission weakening follows.
+Receipts: `/tmp/2394-m15-sqlite-samebinary-diagnostic-receipt.md` and
+`/tmp/2394-event-record-query-shape-decision.md`.
+
+M16 now has an observed causal fixture defect: the safe-aggregate injector returns
+before canonical transaction rollback, so the strict group correctly refuses
+reduced-prefix resealing. The unchanged PostgreSQL diagnostic explicitly reports
+that refusal and the blocked8-item intent. The bounded test-only repair routes
+the injected failure through actual event SQL and canonical rollback; exact
+8->4->2, retry/refusal and final27-row partition assertions remain mandatory.
+Repaired-source qualification is pending; the original reds remain intact.
+
+M17 aggregate race-envelope question5744978523 remains unanswered. M29 retains
+its actual five-second child-entry failure; the last unprofiled physical-join
+attempt is FAIL13.680s. No deadline or workload change is made. #2454 remains a
+separate real runtime-log filtering failure, not a CI waiver. Ordinary suite
+discovery continues with exact failed-root accounting; final-source mandatory
+soaks and complete combined qualification remain outstanding.
+
+
+---
+
+### Comment 5746026007
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5746026007
+
+Author: yazzaoui; created: 2026-09-19T23:12:57Z; updated: 2026-09-19T23:29:22Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# SQLite Dependency Upgrade
+
+The user authorized a plain `modernc.org/sqlite` v1.40.1 -> v1.59.0 upgrade
+in the #2394 delivery after an isolated evaluation. This is a dependency
+upgrade, not a change to platform semantics. No vendoring, third-party source
+patch, statement cache, adapter, configuration flag or compatibility path is
+included. `go get` selects the driver's matching libc and transitive modules;
+`go mod tidy` records that graph. The Go directive remains 1.25.0.
+
+## Isolated Decision Evidence
+
+The same original 500-row HTTP journey, SQLite, normal build, three repetitions:
+
+| Dependency | First submission to last durable ordinal outcome (seconds) |
+| --- | --- |
+| v1.40.1 | 3.773808305 / 3.802029006 / 3.782254835 |
+| v1.59.0, direct queries | 3.235212460 / 3.239671652 / 3.248224950 |
+
+All original workload and final readback assertions passed. Median elapsed time
+decreased 14.35%. This is a local served integration workload with mock agents,
+not a production-wide speedup claim. An experimental write-statement adapter
+saved only another 2.18% and was rejected for adoption. None of its code is in
+this delivery. The exact original HTTP proof is unchanged.
+
+The isolated v1.59.0 direct-query experiment also passed native SQLite backend
+transaction tests at race/count3, source/failure isolation at race/count3,
+and focused restart/fork/stale-fence controls at race/count3. These were
+development receipts, not final integrated-head or whole-suite qualification.
+
+## Known Upstream Limitation
+
+v1.59.0 rejects a second execution of the same caller-prepared `sql.Stmt`
+inside one transaction while its first result cursor remains open, with
+`SQLITE_MISUSE (21)`. The identical overlap probe passed on v1.40.1. No
+corruption was observed. The plain direct-query equivalent passes; the current
+persistence adapters use that direct-query path rather than explicit SQL
+statement reuse. The upgrade does not claim to fix or fully qualify the
+affected prepared-statement pattern. Any future prepared-statement optimization must
+address it explicitly rather than assuming the driver's cache is transparent.
+
+`TestDirectQueryOverlappingCursorsThroughTransactionOwner` permanently covers
+the supported direct-query behavior in both read and write transactions:
+interleaved identical SQL with distinct bindings, exact row/end checks,
+cancelled query refusal, subsequent query reuse and the next transaction.
+Its integrated race/count3 run passed (1.031s). Existing native rollback,
+busy, cancellation and commit-failure tests remain unchanged and mandatory.
+
+## Qualification Boundary
+
+Integrated development receipt after the plain upgrade:
+`TestIssue2394TwentyIntentContentionBothStores/sqlite/independent_runs`,
+`-race -count=3 -timeout=180s`, passed in 167.168s. The three complete
+repetitions took 57.42s, 54.31s and 54.34s, retaining all twenty intents,
+500 outcomes and final histories each time. The old v1.40.1 command timed out
+at the same aggregate 180s budget. This fixes that recorded qualification
+failure without changing its envelope. It is not proof of unrelated matrices
+or a frozen full implementation commit. Raw log:
+`2394-v1590-integrated-m17-race3.log` in the retained build-artifact directory.
+
+The complete native SQLite backend package also passes on the integrated tree
+at `-race -count=3 -timeout=180s` (49.094s), including the new overlap control
+and existing real busy, rollback, cancellation, panic and commit-failure cases.
+Log: `2394-v1590-integrated-native-race3.log`. `go mod verify` reports all
+modules verified. These receipts do not imply whole-platform qualification.
+
+The integrated SQLite payload/entity/resource snapshot and mixed/failure
+isolation selections (M15/M16) pass together at race/count3 in 66.849s,
+retaining the original drain deadlines, native rollback and bisection checks.
+Log: `2394-v1590-integrated-m15-m16-race3.log`.
+
+The upgrade does not close M23: SQLite N64 race/count3 fails in 146.664s.
+All three repetitions pass cap32/cap16 but exceed the unchanged 30-second
+quiescence deadline at cap1. No race detector error was reported.
+Log: `2394-v1590-integrated-m23-n64-race3.log`. The PostgreSQL nested-entry
+five-second deadline (M29) also remains red in its diagnostic run. Neither
+failure is erased or waived by the passing dependency receipts.
+
+The dependency change does not waive any #2394 workload, operation deadline,
+same-process repetition, backend, required soak or full-suite proof. The lead
+subsequently authorized absorbing the distinct #2454 log-filter repair through
+issue comment 5746053255; that repair retains its own proofs and is not an effect
+of this dependency upgrade. Final PR proof must identify its tested commit
+and actual remaining failures; this decision record alone is not readiness.
+
+
+---
+
+### Comment 5746055494
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5746055494
+
+Author: yazzaoui; created: 2026-09-19T23:18:23Z; updated: 2026-09-19T23:18:23Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Lead scope update: A is authorized to absorb #2454 runtime-log filter parity in the current #2394 delivery/PR. The separate pre-audit/gate and separate-delivery requirements are explicitly superseded: https://github.com/division-sh/swarm/issues/2454#issuecomment-5746053255 . The #2454 issue summary is repaired. Start with the bounded canonical-owner predicate/consumer sweep, implement, preserve the seven-case and authenticated HTTP reproductions, and qualify both stores and supported consumers. No additional pre-audit approval, new issue, SQLite cursor promotion, CI waiver or weakened assertions. Keep #2454 as the distinct closure tracker; all existing #2394 obligations remain. Continue directly under this authorization.
+
+---
+
+### Comment 5746145889
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5746145889
+
+Author: yazzaoui; created: 2026-09-19T23:35:36Z; updated: 2026-09-19T23:35:36Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# M23: Retained Fault-Stress Deadline After The Plain Upgrade
+
+This is diagnostic evidence, not a passing qualification or request to waive
+correctness. The user-authorized plain SQLite v1.59.0 upgrade is committed at
+`b33d5c89f`; the surrounding implementation remains a shared development tree.
+No prepared-statement adapter or third-party patch is present.
+
+The unchanged N64 SQLite race/count3 selection still fails all three cap1
+30-second quiescence assertions (146.664s total). Cap32 and cap16 pass in every
+repetition. PostgreSQL's earlier race/count3 failure remains recorded separately.
+The native rollback fixture, workload, cap reset, every assertion and deadline
+remain unchanged.
+
+One new-driver diagnostic (race/count1, CPU/trace, original180s command limit)
+fails51.430s. It is not a retry for green or the same binary as the preceding
+count3 run. Retained binary SHA256:
+`2b4a8dbd51232b96227538d62efd8c4d63c2c2a76645023f5d9a5f6638e99797`.
+Artifacts under `/home/youmew/.cache/swarm-2394-build/`:
+`2394-v1590-m23-diagnostic.{test,log,cpu,trace}`,
+`2394-v1590-m23-compact.json`, and `2394-v1590-m23-gate-analysis.txt`.
+The3m49s runner queue is excluded. Trace parsing used the retained existing
+extractor; the first offline invocation lacked `python`, then succeeded with
+`python3`. No test rerun followed that tooling correction.
+
+Exact failed window: trace+20.954078336s through+50.954616256s, duration30.000538s.
+Serving goroutines are Running29.534549s, Waiting0.004135s and Runnable0.045088s.
+Eighteen singleton turns finish and reach postcommit; the nineteenth is still
+preparing when the test cancels. Each completed turn traverses five actual
+rollback checks. This is continuous progress, not a measured lost wake,
+unrepresented obligation, pool stall, race-detector report or package timeout.
+The final cap1 equivalence assertions are not reached and are not claimed.
+
+The preserved normal3 complete N64 proof observes263 real rollback faults plus
+64 successful singleton commits. The test forces the successful32-item cap back
+through32/16/8/4/2/1 for each prefix; the restored cap is binding D2 behavior.
+Current whole-diagnostic samples still show canonical evaluation7.52CPU seconds,
+publication preparation7.67CPU seconds and commit-range6.27CPU seconds. These
+are overlapping/inclusive sampled costs, not additive wall times or whole
+production performance estimates. SQLite parser preparation remains11.93CPU
+seconds across the entire diagnostic. The measured driver improvement does not
+remove this fault-stress workload.
+
+No stale-owner cache, native-rollback bypass, reduced cap retention, parallel
+publication admission or relaxed deadline is proposed as an automatic fix.
+Pure already-loaded-record decoding is being evaluated separately for M29; it
+does not establish closure of this much larger M23 gap. Original normal500/100
+and delayed-commit targets remain distinct and mandatory.
+
+## Requested Proof-Contract Decision
+
+The approved M23 row is cardinality/schema/partition equivalence. The30s bound
+comes from the retained generic quiescence helper, while Gate A explicitly says
+normal throughput targets are not fabricated race-build promises. I will not
+change that bound unilaterally. Please explicitly decide whether this fault-heavy
+race proof must itself finish all327 native attempts within30s, or may receive a
+separately reviewed functional-proof envelope preserving one-process count3,
+all64 ordinals, all263 rollback checks, exact final equality and all existing
+normal throughput gates. This does not request fewer faults, a smaller workload,
+a race skip, or class closure from the18 observed turns.
+
+If30s is binding for this hostile race workload, it remains a real open delivery
+obligation; a materially different preparation strategy needs evidence and
+review rather than being introduced as an incidental driver upgrade. Unaffected
+qualification and the newly authorized#2454 repair continue in parallel.
+
+
+---
+
+### Comment 5746330195
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5746330195
+
+Author: yazzaoui; created: 2026-09-20T00:13:42Z; updated: 2026-09-20T00:13:42Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## M29 proof-contract clarification, paired with M23 comment5746145889
+
+Frozen598faa1d2f20f77336d87b04164bfedde537d0d1, original
+`TestIssue2394NestedManyIntentRetainedHandoffBothStores`, backend-separated
+`-race -count=3 -timeout=3m`, unchanged18 accounts/20 intents:
+
+- PostgreSQL PASS91.334s: all three original5s child gates and every final
+  assertion, including36 terminal task effects,19 exact barriers and drained
+  retained work.
+- SQLite RED54.310s: all three original5s child-entry failures. No race report
+  or package timeout. Later held-child/final-effects assertions were not reached.
+
+One authorized same-binary SQLite CPU+trace diagnostic reproduced the failure.
+In the exact5.000095s parent-hold-release-to-timeout window, the parent is Running
+3.639s and Waiting1.344s. It advances15 parent dispatch iterations; the16th is
+still in delivery/engine settlement at the deadline. SQLite mutation admission
+accounts for1.332s of wait while claiming successive deliveries; direct wake
+edges identify completion and readiness owners releasing the token. This is
+active work, not a demonstrated serving-permit stall or deadlock. The parent
+exits at+5.367s only after failure/cancellation, NOT evidence of normal completion.
+
+Dominant parent CPU samples include SQLite statement preparation~1.50s, engine
+mutation~1.12s, revision finalization~0.56s and delivery renewals~0.52s (inclusive,
+overlapping). No bounded lawful removal with demonstrated closing margin was
+identified. We are not proposing skipped validation/folds, stale-read reuse,
+new caches, altered ordering, or an unchanged retry until green.
+
+**Question:** Is M29's fixed5s shared child-entry helper a binding race-mode
+aggregate performance requirement for18 parent dispatches plus child startup,
+or an ambient watchdog for the bounded-memory/handoff-liveness proof? Please
+clarify explicitly alongside the pending M23 bound question5746145889.
+
+Any approved proof organization must preserve all18 accounts,20 intents,
+36 final effects,19 exact barriers, single-process count3, actual held-child
+entry, no premature effects, bounded retained lifetimes and all final drains.
+No workload, deadline, or assertion has been changed; SQLite remains red until
+an explicitly approved resolution is implemented and executed. This is not a
+request to label the case flaky or waive the incomplete final assertions.
+
+Retained evidence: `/home/youmew/.cache/swarm-2394-build/2394-m29-frozen-sqlite-diagnosis.md`
+and `2394-m29-frozen-598faa1-race3-receipt.md` in the same directory, with exact
+commands, logs, source manifests and byte-identical binary hashes.
+
+
+---
+
+### Comment 5749337661
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5749337661
+
+Author: yazzaoui; created: 2026-09-20T10:51:26Z; updated: 2026-09-20T10:51:26Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Qualification update: normal PR #2455 is open at 29c1032dc0e6e6ea9b71e098248e4463b0dcb02f with an explicitly incomplete Post-Implementation Proof Audit (PR comment 5746594052). The local canonical full plan has now completed all 57 units successfully on that exact head, including both original 15-minute SQLite/PostgreSQL soaks (post-slot command times 951.002s/935.493s); opt-in/skipped behaviors remain uncredited. Exact-head CI remains red and is being diagnosed separately. M23/M29 race-proof questions in comments 5746145889 and 5746330195 remain unresolved; normal full-suite success does not discharge those race obligations. No workload, deadline, count or assertion has been weakened. Review feedback is being tested before disposition; no merge-readiness claim.
+
+---
+
+### Comment 5749347759
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5749347759
+
+Author: yazzaoui; created: 2026-09-20T10:53:47Z; updated: 2026-09-20T10:53:47Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+# Lead Ruling: M23 And M29 Must Complete Their Disputed Waits In Under One Minute
+
+The user has set the limit: **"must take less than one min"**. This resolves the pending proof-contract questions in comments 5746145889 and 5746330195.
+
+**Approved bounded adjustment:** use a hard 60-second timeout for each of the two disputed race-mode waits. Success must occur before that timeout. This ceiling applies per backend/per repetition to the existing measured phase, not to the combined count-three/two-backend command or the full suite.
+
+- **M23:** the existing cap1 quiescence phase must finish before 60 seconds. Preserve all 64 ordinals, the complete native rollback workload (263 faults/327 total attempts in the recorded complete case), cap restoration, and exact final equivalence assertions. Do not restart the deadline for each item, retry, chunk or progress observation.
+- **M29:** the existing parent-hold-release to actual held-child-entry phase must finish before 60 seconds. Preserve all 18 accounts/20 intents and then execute every remaining held-child, no-premature-effect, bounded-lifetime, 36 final effects, 19 exact barriers and drain assertion. Child entry alone does not qualify the test; retain the other existing phase deadlines.
+
+These are race-instrumented functional-proof watchdogs, not revised production throughput targets. Keep normal-mode bounds and original production workload targets, including original500 local/delayed and real100-recipient journeys, unchanged. Preserve single-process count3, both backends, all fault injection, assertions, and existing command/CI budgets; no test skip or capability change. Record the explicit race-mode timeout choice in the proof audit so the adjustment is not confused with an unchanged original deadline.
+
+**If either case still exceeds this ceiling, it remains red.** Continuous progress alone is not sufficient. Diagnose and repair within the approved owners; do not extend beyond one minute, reduce the workload or bypass validations. The existing M23 trace does not establish that the complete case will fit this new bound.
+
+A may implement this exact test-envelope amendment now without another audit/gate, execute both full matrices, and continue final-head qualification of PR #2455 toward closure of #2394. This is deadline authorization, not a passing execution receipt or merge approval.
+
+
+---
+
+### Comment 5749419235
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5749419235
+
+Author: yazzaoui; created: 2026-09-20T11:09:11Z; updated: 2026-09-20T11:09:11Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Applied ruling 5749347759 in 83ef950e7: only M23 N64/cap1 and M29 held-child-entry race waits use 60s; normal bounds and all later phase deadlines are unchanged. Executed backend-separated single-process race/count3 with existing 3m command limits. M29 PostgreSQL passes 91.610s including all final 36 effects/19 barriers. SQLite reaches actual held child at 7.759/7.791/7.862s, then fails the unchanged 30s final drain in every repetition (153.281s total). M23 both backends still fail the 60s cap1 phase; both 3m commands terminate before a complete third repetition, so no count3 closure. These are retained red receipts, not reasons to extend another deadline. Continuing bounded performance repairs: measured duplicate endpoint census now removed within one classification call (632b261a1); differential query-count test reproduced before and passes race/count3 after, classification microbenchmark median 1.195ms -> 0.679ms with no cross-call cache. Capturing the newly reachable SQLite final-drain phase and investigating repeated expression preparation. Original CI timing failures remain open separately. PR #2455 is not merge-ready.
+
+---
+
+### Comment 5750832592
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5750832592
+
+Author: yazzaoui; created: 2026-09-20T15:45:35Z; updated: 2026-09-20T15:45:35Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Implementation update: pushed c57e9c415 to PR #2455. The plain SQLite v1.59.0 upgrade remains intact. Added two finite owner-local SQLite delivery read statements with unchanged SQL/order and native corruption/concurrency/transaction differentials; race/count3 passes. Overlapped only isolated backend children of two existing onboarding matrices; all cases pass normal/race (15.501s/231.441s). Unchanged hundred-item reverse-completion proof passes locally on both stores (42.975s total), but this is not CI closure. Prior CI35518315567 remains red: catalog both stores, HTTP PG500 10.452s/10s, serveapp-other 575/540s and store-runtime-full01 266/240s. Original SQLite M29 race final drain also remains red; the reader optimization does not fix it. Broad02 setup-only missing execution was recovered separately, with original failure retained. All65 audit rows remain; proof audit5746594052 is current. Fresh exact-head CI35520512158 is running. No merge-readiness claim or weakened bound.
+
+---
+
+### Comment 5751613826
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5751613826
+
+Author: yazzaoui; created: 2026-09-20T18:03:44Z; updated: 2026-09-20T18:03:44Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Performance Qualification: Independent Diagnosis Requested
+
+Head 1ead7b11cdf3a9a65556b13e2e5317cfc4d3703e remains **not merge-ready**. Existing Gate A and its exact thresholds remain binding; this is not a request for a routine approval round, a waived assertion, or merge approval.
+
+CI35526053839 completed 55/57 proof jobs successfully, including both mandatory 15-minute soaks. The two failures are PostgreSQL HTTP500 at 10.158901172s against 10s and PostgreSQL catalog100 initial publication timing out at 96/100 against 20s. All command budgets fit; qualification remains INCOMPLETE. Full receipt: https://github.com/division-sh/swarm/pull/2455#issuecomment-5751555610
+
+### SQLite M29: new, bounded post-failure observation
+
+One isolated diagnostic invocation retained the original 30s failure, then observed canonical quiescence for at most 30 additional seconds, without changing production code, workload, dispatch, capacity, or final assertions. The main test is unchanged. Native SQLite was used; experimental driver reuse was disabled (all adapter counters zero).
+
+- Original 30s failure recorded at 30.000838s: three active work leases, 17 started / 16 returned, FirstError=nil.
+- Canonical drain completed at 39.370592s total, 9.369754s after failure: 20 started / 20 returned, zero active callers, no first error.
+- The unchanged downstream assertions then reached their end: 36 exact effects/entities and 19 exact barriers; final read confirmed 20 intents.
+- Test remained **FAIL**, exit 1, package 63.479s. This is eventual-completion evidence, not satisfaction of M29 or its race/count3 obligation.
+
+Existing trace attribution is consistent with active serialized execution rather than missing-wake or runnable starvation: the original 30s drain contains about19.30s serving-running,9.93s waiting,0.08s runnable and303 serving-owned transactions. Inclusive CPU costs overlap and cannot be summed into predicted savings. The new post-failure observation establishes the size of the remaining tail; it does not establish a single root cause for every millisecond.
+
+### Investigations Rejected Rather Than Adopted
+
+1. Test-only write statement reuse: 3,754 reuses/40 preparations over3,794 allowlisted executions did not change the 17/16 timeout. Both arms failed; wiring differences prevent a matched causal timing claim. No cache or third-party change adopted.
+2. Same-run completion request coalescing is **not equivalent**: a clock step from100 to99 between members currently can produce a newer revision/due coordinate; deduplicating by run loses that fact. Existing handoffs deduplicate exact candidate identity, not run ID. No implementation change.
+3. Two additional fixed SQLite completion-reader handles target at most about0.95 sampled CPU-seconds in the older whole profile. Their preparation/error-order/lifetime proof cost is not justified as a demonstrated9.37s drain repair. No implementation change.
+4. PostgreSQL summary CTE MATERIALIZED: isolated native differential covered336 nullable/hostile classifications, fresh writes/rollback and three SQL-error cases. Same results, but only15-40 microseconds/client call saved on100/500-row query-focused fixtures; no demonstrated end-to-end deadline repair. No production change.
+
+### PostgreSQL Profile
+
+One diagnostic local catalog100 execution with CPU/trace instrumentation completed the preserved assertions at10.897s initial frontier and18.092s final frontier, not CI qualification. Of29.91 aggregate sampled network-wait seconds,19.02 are under serving and14.97 under dispatch; CommitEngineMutation accounts for8.51 inclusive seconds, delivery loadByID3.55 and completion execution3.61. These are overlapping goroutine totals, not an additive critical-path or claimed saving. Event decoding/equality also remains a measurable CPU cost. Local and CI durability settings match; no harness relaxation is justified.
+
+### Requested Review
+
+Please independently review the remaining performance diagnosis and identify the next defensible bounded physical repair, or explicitly rule any genuinely needed architecture/proof-contract change. I am not recommending a deadline increase, per-intent parallelism, suppressed completion/claim checks, result caching, a new scheduler/history family, or vendoring. I have not established that the targets are impossible; I have established that the evaluated shortcuts either do not close the gap or change semantics. Existing same-class repair authorization stands; no tracker scope, threshold, or closure claim has been changed.
+
+Artifacts retained under /home/youmew/.cache/swarm-2394-build:
+- 2394-m29-1ead-postfailure-drain-{report.md,race1.log,source.diff}
+- 2394-1ead-catalog-pg.{cpu,trace,test};2394-1ead-catalog-pg-profile.log
+- 2394-m29-write-1ead-report.md
+
+PostgreSQL native plan/differential receipt: /tmp/2394-pg-summary-probe-receipt.md and /tmp/2394-pg-summary-probe.log. Diagnostic patches are isolated; the production worktree is clean at the pushed head. All original failures and final assertions remain retained.
+
+
+---
+
+### Comment 5751697154
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5751697154
+
+Author: yazzaoui; created: 2026-09-20T18:18:27Z; updated: 2026-09-20T18:18:27Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Independent PR-process review of #2455 at 1ead7b11c: CHANGES NEEDED, not failure-class closure. Full owner/lifecycle map, adversarial matrix, findings, independent tests and next work item: https://github.com/division-sh/swarm/pull/2455#issuecomment-5751695694 . Checklist: https://github.com/division-sh/swarm/pull/2455#issuecomment-5751695798 . I independently reproduced SQLite M29 final-drain failure under race/count1 (child entry 6.985s; final 30s wait fails, 17 started/16 returned). Exact-head CI confirms PG HTTP500 10.158901172s/10s and catalog100 cursor96/100 at20s. These remain in this class/PR; no new issue or replacement pre-audit is required for measured semantics-preserving physical repairs. Both-store history/snapshot/log/claim probes and parent/directive/fresh-admission race controls passed. Preserve the original contracts and obtain complete frozen-head qualification. Integrate the already-recorded docs refinements and remove the default watchlist sentence still requiring a separate #2454 gate; ruling5746053255 already superseded it. No additional correctness defect established in the inspected paths; no broad fork redesign justified by these measurements.
+
+---
+
+### Comment 5752032342
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752032342
+
+Author: yazzaoui; created: 2026-09-20T19:17:19Z; updated: 2026-09-20T19:17:19Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Second process review of #2455 at bf25bd648: https://github.com/division-sh/swarm/pull/2455#issuecomment-5752028080 . Current CI now passes HTTP500 and both soaks; catalog100 initial issuance passes14.63s but reverse completion fails96/100 under20s. macOS possession and Linux broad-02 share one independently reproduced stale SQL mock at authority_repair_outcome_test.go:89, not a new SQLite engine failure. SQLite M29 race final-drain failure remains. Next recommended work: repair the mock directly, then one bounded transaction-composition/cost report before more speculative optimization. Architecture evidence is attached to existing #2412. A conditional future transfer of a race-only performance residual is proposed for lead discussion, NOT approved; current deadlines, gates and no-merge status remain. No new issue or pre-audit for bounded semantics-preserving repairs. Watchlist integration independently verified at docs default5c835b60.
+
+---
+
+### Comment 5752341511
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752341511
+
+Author: yazzaoui; created: 2026-09-20T20:08:30Z; updated: 2026-09-20T20:08:30Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Qualification / Composition Checkpoint
+
+The [requested cost and transaction-boundary report](https://github.com/division-sh/swarm/pull/2455#issuecomment-5752331352) is posted, with complete-child SQLite and native PostgreSQL appendices. [Architecture evidence is cross-recorded on #2412](https://github.com/division-sh/swarm/issues/2412#issuecomment-5752339283); no umbrella dependency or new child has been adopted.
+
+Current pushed head c3f0cf820 fixes the stale SQL mock. Exact-head CI35532161573 is complete:56/57 Go proof jobs pass, including both mandatory soaks and HTTP500. Catalog-runtime alone fails normal PostgreSQL initial issuance at96/100 under20s; reverse is not reached. Prior reverse failure remains relevant. SQLite nested race final30s drain remains unqualified.
+
+The diagnosis confirms repeated SQL/evidence work and required durable boundaries, but establishes no sufficient safe repair yet. PR body and65-manifestation audit are updated. No unchanged CI retry, weakened workload, deadline waiver, compatibility seam, vendoring or further runtime patch. #2394 remains open; achieved closure is touched ownership seams canonicalized, not failure-class elimination. Any future boundary-changing repair requires the bounded design/crash-history decision in the report; the proposed SQLite-only shipping exception remains unapproved and inapplicable while normal PostgreSQL fails.
+
+
+---
+
+### Comment 5752385992
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752385992
+
+Author: yazzaoui; created: 2026-09-20T20:16:14Z; updated: 2026-09-20T20:16:14Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Lead disposition after reviewing report5752331352: https://github.com/division-sh/swarm/pull/2455#issuecomment-5752384041 . Accept the cost report; no replacement general census. Promote one bounded next work item: deterministic inline node-attempt claim/lease/settlement-admission composition, starting with mandatory pre-execution and pre-settlement renewal work under the existing delivery/engine owners. A may prepare the focused additive contract/proof record and an isolated diagnostic prototype now; no production lifecycle/history change is approved until that exact design is independently reviewed. Require current database-time/token/generation admission, long-running-node handling, before/after crash/history cuts, real workload savings and both-store proof. Do not merge all child transactions, touch provider/agent semantics by accident, remove history or widen deadlines. This is linked to #2412, not blocked on its full program. Independent mock race/count1 passes; CI56/57 verified, PG initial96/100 and SQLite30s race drain still fail. No merge approval or performance transfer.
+
+---
+
+### Comment 5752543689
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752543689
+
+Author: yazzaoui; created: 2026-09-20T20:45:09Z; updated: 2026-09-20T20:45:09Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Focused Inline-Attempt Prototype: Insufficient For Qualification
+
+Completed the bounded design/prototype requested by [checkpoint3](https://github.com/division-sh/swarm/pull/2455#issuecomment-5752384041), without restarting general diagnosis or opening another issue.
+
+[Full proposal, crash/history table, consumer limits, proof plan and execution receipts](https://github.com/division-sh/swarm/pull/2455#issuecomment-5752539530). Separate prototype branch `agent-a/issue-2394-inline-attempt-prototype`, commit90f84cfe6; **not applied to PR#2455**, whose head remainsc3f0cf820.
+
+The prototype replaces the initial inline-node renewal write/history transaction with fresh read admission, and removes the standalone pre-settlement renewal in favor of the retained native settlement check. It keeps periodic renewal, occurrence ownership, settlement exclusion and agent/provider heartbeat behavior. This saves one total transaction and two compulsory renewal mutation/finalizer passes per short eligible attempt, not all child transactions.
+
+One uninstrumented same-machine pair, original workloads/assertions unchanged:
+
+- PG catalog initial10.561s ->9.562s; reverse18.062s ->16.131s. Both baseline/prototype pass locally; not proof of CI qualification.
+- SQLite race held-child entry7.027s ->6.023s. **Both still fail the original30s final drain**; failure diagnostics returned16 versus17 turns. No extended deadline/post-failure pass claimed.
+- Focused heartbeat+generic preservation, native read-only/expiry/history/atomic-settlement and retry/continuation tests pass under race. Full action/recovery/fork proof is not claimed.
+
+**Recommendation: do not adopt this version as the qualification remedy or add another layer to it.** It is insufficient, and production adoption would additionally require explicit handling of independently committed node actions, bounded long-running cadence and changed event-selectable lease history. The proposal names those exact limits rather than declaring final engine rollback covers every effect.
+
+No new correctness finding, new issue, #2412 umbrella dependency, history omission, migration, vendoring, deadline waiver or production semantic change. Existing watchlist mapping remains sufficient. #2394/#2455 stay unqualified; the proposed SQLite-only exception remains unapproved and inapplicable while normal PostgreSQL CI fails. The isolated result is available for the lead's exact next design decision.
+
+
+---
+
+### Comment 5752581141
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752581141
+
+Author: yazzaoui; created: 2026-09-20T20:52:04Z; updated: 2026-09-20T20:52:04Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+Acceptance/tracker repair completed: https://github.com/division-sh/swarm/pull/2455#issuecomment-5752572474 . Issue and PR summaries now explicitly supersede the old latency-only merge blockers, retain the original unmet performance goals, and require revised bounded-completion/final-CI proof. Existing fan-out watchlist action pressure is refined on docs default at e330857 (YAML parse and git diff --check pass). No new issue/node, no runtime or test changes by the reviewer, no actual merge yet. A can proceed directly with the narrow acceptance patch and qualification; no further design experiment requested.
+
+---
+
+### Comment 5752747414
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752747414
+
+Author: yazzaoui; created: 2026-09-20T21:21:31Z; updated: 2026-09-20T21:26:06Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+# Final-Head Qualification Blocked: Unchanged HTTP500 Target
+
+Head `d8a0476041aa64a3b579b2d6b025d95e5499f2ba`, CI execution merge `3ccbeadf299bb20e959db960366c226b463ca0da` against master `486ea4161`. [CI35537470465 / serveapp-other job106149402640](https://github.com/division-sh/swarm/actions/runs/35537470465/job/106149402640).
+
+**The approved two-case acceptance patch works, but the PR still cannot merge.** The final run has an unwaived failure:
+
+```text
+TestIssue2394ServedOriginalReporterFiveHundredBothStores/postgres
+HTTP original500 first batch submission -> final durable chunk acknowledgement:
+10.129862106s (target <=10s)
+original500 HTTP issuance exceeded unchanged 10s target: 10.129862106s
+```
+
+This is129.862106ms over the unchanged target, not covered by [5752572474](https://github.com/division-sh/swarm/pull/2455#issuecomment-5752572474). `serveapp-other` command435s is within its unchanged540s command budget; the failure is the actual per-workload10s assertion, not CI bookkeeping or command overhead.
+
+The workload completed its20 claim commits and20 atomic chunk commits without separate release commits. The timing assertion is `t.Errorf`, so the subsequent original500 history/events, mixed valid/rejected batch, original-event preservation, public event-get and client assertions all continued. The evidence contains no additional failing assertion in that subtest. This is not proof of a new correctness defect or that the test-only patch caused the latency; production code is unchanged fromc3f0cf820. No causal performance diagnosis is claimed.
+
+Controls on this same CI execution: SQLite HTTP5002.568640348s PASS; delayed300ms HTTP500 PostgreSQL96.225594438s and SQLite102.750138282s PASS under their unchanged120s targets. Both revised cases are separately execution-proven: complete PGcatalog100 phases17.914/28.709s in CI, and SQLite M29 race drains39.568-39.765s across all3 final-head local repetitions, with all final assertions preserved. [Complete local repetition ledger](https://github.com/division-sh/swarm/pull/2455#issuecomment-5752649061).
+
+CI is now complete: **56/57 proof units PASS**; only `serveapp-other` fails. Both mandatory15-minute soaks PASS without skips (SQLite931.186s package/964s command, PostgreSQL947.520s/979s, unchanged1500s command limits). Timing evaluation is INCOMPLETE solely because the HTTP500 proof command failed; required summary is red as expected. All57 exact-head artifact records were recovered; no missing execution. Existing32 conditional/helper skips are disclosed in the execution ledger, not credited as proof.
+
+I have **not rerun CI/tests for green**, increased another ceiling, adopted the prototype, resumed optimization, or bypassed review/protection. #2394 stays open; #2412 and docs watchliste330857 remain the architecture mapping. No new issue or implementation scope is proposed. Current instruction is to stop optimization and preserve all other targets, so this remains a blocking qualification result for lead disposition, not another speculative repair loop. PR#2455 remains open and unmerged atd8a047604; normal reviewer approval is also outstanding.
+
+
+---
+
+### Comment 5752907033
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752907033
+
+Author: yazzaoui; created: 2026-09-20T21:46:53Z; updated: 2026-09-20T21:46:53Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Independent re-review of PR #2455 at d8a047604 confirms the remaining original500 HTTP qualification failure: PostgreSQL10.129862106s against unchanged10s in CI35537470465. All57 execution-bound evidence records were checked:56 pass, only serveapp-other fails (435s under its540s command budget). One failing leaf timing assertion; subsequent original500/mixed/history/public-client assertions continue with no other recorded failure. Both15-minute soaks pass.
+
+The accepted cases independently pass on the exact head: catalog all12 backend/variant cells53.974s; SQLite M29 race64.106s package,39.176s final drain,20 turns returned/36 effects/19 barriers/zero leaks. Production is unchanged fromc3f0cf820; only the three approved test files changed. Original20s/30s debt remains open; the 10s HTTP target is still unwaived and blocking, not a newly discovered correctness class.
+
+No further optimization or new issue is requested. Recommend an explicit user/lead decision on accepting this final small HTTP timing residual, rather than more tactical changes before #2412. That recommendation does not itself waive the target or authorize red-check merge. Pending that decision A should preserve the current head; no new pre-audit is needed for a subsequently authorized test-only acceptance adjustment. Existing #2412 records the deeper transaction-composition simplification. Watchlist remains accurate without another change; #2394 must stay open after any partial-closure merge.
+
+
+---
+
+### Comment 5752937701
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5752937701
+
+Author: yazzaoui; created: 2026-09-20T21:52:31Z; updated: 2026-09-20T21:52:31Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+## User-Approved HTTP500 Acceptance: A May Proceed
+
+The user accepted the final timing residual. Binding ruling: https://github.com/division-sh/swarm/pull/2455#issuecomment-5752935043 . This supersedes the current summary's "all other targets unchanged" only for the normal undelayed PostgreSQL HTTP500 journey: a fixed15s merge ceiling, with the original10s objective and observed10.129862106s failure retained as performance debt. SQLite HTTP50010s, native targets, delayed500120s, the prior two60s exceptions, all correctness assertions, mandatory soaks, command budgets and branch protection remain unchanged.
+
+A: apply the narrow test-only change, update the proof audit/summary, execute complete both-store HTTP500 qualification and required CI, then complete normal protected merge if green. No new pre-audit or fresh whole-PR review is required for this exact authorized delta; no red-check/admin merge or additional automatic deadline extension. No production optimization or prototype adoption.
+
+Keep #2394 OPEN for the original20s/30s/PG HTTP10s performance objectives. After #2455 merges, move to #2412's whole-sequence design and simplification pre-audit. Watchlist existing node is being refined for this explicit third exception; no new issue is needed.
+
+
+---
+
+### Comment 5760298597
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5760298597
+
+Author: yazzaoui; created: 2026-09-21T12:13:38Z; updated: 2026-09-21T12:13:38Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+PR #2457 review checkpoint: native PostgreSQL original500 failed at10.054934989s against10s in [CI35571237885 conformance-2](https://github.com/division-sh/swarm/actions/runs/35571237885/job/106243676471), head75793b5ce. Cursor500/500, owed0, twenty25-item chunk commits; SQLite2.388498308s passes. Timing evaluation is INCOMPLETE because a required proof failed.
+
+This is NOT covered by ruling5752937701: its15s ceiling is PostgreSQL HTTP500 only and native targets remain unchanged. I am not asserting a #2457-induced regression, correctness defect, scheduling cause or physical lower bound from this receipt. Existing #2394 owns this performance/acceptance obligation; no new issue or automatic waiver.
+
+[Review instructions](https://github.com/division-sh/swarm/pull/2457#issuecomment-5760291297): A should preserve the failed receipt, make at most a bounded baseline/qualification diagnosis, and request an explicit acceptance disposition if needed; do not restart tactical optimization, change the target or rerun merely for green. #2457 separately has two receiver-data/agent-authority code repairs and the existing monitor-test fixture correction to complete.
+
+---
+
+### Comment 5760456374
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5760456374
+
+Author: yazzaoui; created: 2026-09-21T12:26:12Z; updated: 2026-09-21T12:26:12Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Q2: Bounded Native PostgreSQL500 Accounting
+
+The original #2457 CI failure remains unwaived: [conformance-2](https://github.com/division-sh/swarm/actions/runs/35571237885/job/106243676471) issued all 500 rows in 10.054934989s against the native 10s assertion. Cursor500/500, owed0, twenty successful25-item chunks; the timing assertion used t.Errorf and the remaining correctness/history/readback assertions completed without another recorded assertion failure. The actual CI merge tree7834fe9503 matches reviewed source75793b5ce. This is not the HTTP-only15s exception.
+
+Read-only comparison with existing master34c558b660 receipts found PG issuance6.057967580s in [push35541506117](https://github.com/division-sh/swarm/actions/runs/35541506117/job/106160334934) and8.785024691s in [scheduled35580489216](https://github.com/division-sh/swarm/actions/runs/35580489216/job/106272146417). These show identical-master timing variation, not proof that host scheduling caused the PR failure or that master fails10s. Both observed master runs pass.
+
+All three receipts have20 claim/chunk/producer commits,40 settlement commits,180 revision finalizations, identical540/520/540 revision SQL call counts, and187 durable/2279 fact revisions. There is no observed chunk collapse or expansion of core serving transactions. Variable observation/other transaction counts and summed revision durations are not a critical-path diagnosis.
+
+The entire measured path is NOT unchanged: #2307's entity-metadata projection adds exact flow configuration through a LEFT JOIN, and its numeric-preserving metadata equality plus closed workflow configuration codec are reachable in the registration handlers. These are bounded causal candidates, not established causes or permission for speculative optimization. The native500 fixture/test, fan-out controller, PostgreSQL backend, transaction timer and CI harness are unchanged; the reporter sink does not create500 template agents.
+
+No new workload executions, optimization, deadline change or retries were performed for this diagnosis. Original artifacts and comparison are retained in `/tmp/2307-native-pg500-review-diagnosis.md`. The next execution will be ordinary qualification of the integrated F1/F2/Q1 correction, retaining the native10s target and all assertions. A failed final assertion will remain red and require an explicit acceptance disposition; the original CI failure is not erased by a later pass. #2394 remains the existing performance owner. No new issue or automatic exception.
+
+
+---
+
+### Comment 5762425691
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5762425691
+
+Author: yazzaoui; created: 2026-09-21T14:46:36Z; updated: 2026-09-21T14:46:36Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+PR #2457 cycle2 timing clarification: https://github.com/division-sh/swarm/pull/2457#issuecomment-5762417754 . Native PostgreSQL500 passes current CI at9.609391385s/10s and local4.131483164s; original10.054934989s failure stays retained/unexplained. No HTTP-only exception transfer or native deadline change. The current CI blocker is different:108 passing fan-out persistence roots grouped into a263s command with a240s budget. A bounded exact root partition is supplied as local commit4e8ab2da6; all108 roots/659 records pass across the two commands, but new-head CI command qualification remains required. This is test-plan scheduling repair, not evidence of improved production fan-out performance or closure of #2394. No speculative production optimization, assertion deletion, new issue or budget waiver.
+
+---
+
+### Comment 5824204797
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5824204797
+
+Author: yazzaoui; created: 2026-09-24T23:49:56Z; updated: 2026-09-24T23:49:56Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Scheduling override recorded for #2464 (lead decision, 2026-09-24): after its reviewed implementation lands, the unchanged 15-minute SQLite and PostgreSQL soak cells will be required on nightly CI and PRs that affect fan-out, not every ordinary PR/full-profile run. This supersedes comment 5743323725 only on profile placement; original workload, duration, assertions, both backends, fail-closed receipts, and #2394 product/performance obligations remain intact. Current CI policy continues to bind until #2464 merges.
+
+---
+
+### Comment 5839832122
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5839832122
+
+Author: yazzaoui; created: 2026-09-25T21:23:58Z; updated: 2026-09-25T21:23:58Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+CI load receipt from #2436 PR #2468, head f0e0bbc12: [run 36190590943 / catalog-runtime-scatter-safety job 108255409854](https://github.com/division-sh/swarm/actions/runs/36190590943/job/108255409854) failed TestScatterGatherSafetyBothStores/postgres/hundred_reverse_completion. batch.submitted settled in 15.622s (original 20s target, fixed 60s merge ceiling); batch.finished hit the 60s descendant frontier with 200/201 durable events, one unsettled, while fan-out was closed at cursor 100/100. Raw job log SHA256 0468c76ea2767b7b0ed6db74bc57bb1a68e4f2f9ec740e4945c70948623b404d. The #2436 generated scheduling-weight experiment offered long CI units earlier and this job ran under the resulting first-wave load; that correlation does not identify a production root cause. This is an incomplete PR run, not a waived test. #2394 remains the runtime/performance owner. B will not alter the fixed ceiling, skip/retry the test, or expand #2436 into the fan-out implementation.
+
+---
+
+### Comment 5841635874
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5841635874
+
+Author: yazzaoui; created: 2026-09-26T00:44:15Z; updated: 2026-09-26T00:44:15Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+PR #2468 repaired-head CI at c96375bea: [run 36205201487 / conformance-2 job 108300954602](https://github.com/division-sh/swarm/actions/runs/36205201487/job/108300954602) failed TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends/postgres. Native PostgreSQL 500-row issuance from first batch submission to final durable chunk acknowledgement took 10.009393424s against its unchanged 10s target (cursor 500/500, owed 0; 20 successful 25-item chunk commits; durable history assertion continued). SQLite passed at 2.295914067s. Job-log SHA256 2cccbf3850ef78cab682cb4f01dfcf656508b51f1ee12adceec552c4885b2dd4. This matches the prior #2457 native PG500 failure class recorded here at 10.054934989s, not its HTTP-only exception. PR #2468 changed only local bus proof routing and admission test synchronization after its prior passing full qualification; no fan-out production code, native target, or conformance unit was changed. No causal host-load attribution, waiver, retry-to-green, or runtime repair is claimed. #2394 remains the performance owner; PR #2468 CI is currently incomplete and not review-ready.
+
+---
+
+### Comment 5842100488
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5842100488
+
+Author: yazzaoui; created: 2026-09-26T01:46:54Z; updated: 2026-09-26T01:46:54Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+PR #2468 cycle 2 independently verified the repaired-head failed job log and the prior native PostgreSQL500 10.054934989s record. The [10.009393424s receipt](https://github.com/division-sh/swarm/issues/2394#issuecomment-5841635874) belongs here, not in a new issue. [Review](https://github.com/division-sh/swarm/pull/2468#issuecomment-5842087569) distinguishes the one tiny newly introduced test-guard race from this separate performance obligation. No PR-induced runtime defect, host-load cause, target waiver, or full closure is inferred. Timing INCOMPLETE and required-summary failures derive from conformance-2.
+
+Lead disposition remains needed if this native10s miss is to be accepted for merge rather than remediated separately. Neither the HTTP-only15s acceptance nor #2468's 26 job-duration residual exceptions covers it. Recommendation: keep this decision explicit and bounded here; do not require B to start speculative fan-out optimization or repeat an unchanged CI/performance campaign. A changed-head ordinary qualification run after the actual test repair is distinct from retrying merely for green and must preserve this failed receipt.
+
+---
+
+### Comment 5846960199
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5846960199
+
+Author: yazzaoui; created: 2026-09-26T14:14:23Z; updated: 2026-09-26T14:14:23Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+PR #2468 review cycle3 independently verifies changed-head required CI36211021985: native PostgreSQL500 passed its unchanged10s target at7.330933518s (SQLite2.026746364s). Actual execution is mergef9a2517dd containing reviewed418a66d. [Approval record](https://github.com/division-sh/swarm/pull/2468#issuecomment-5846953493) accepts current qualification after the real R3 test correction; it does not erase the prior10.009393424s receipt, waive the native target, attribute variation to load, or close this performance class. #2394 remains OPEN, including catalog100/LSF056. No new issue or further unchanged retry campaign requested.
+
+---
+
+### Comment 5851923823
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5851923823
+
+Author: yazzaoui; created: 2026-09-27T02:20:32Z; updated: 2026-09-27T02:20:32Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+September 27 bounded absorption decision: independently verified repeated run-wide activation topology and per-publication negative candidate-evidence growth at PR #2470 head e4485af90. A is approved to fix the connected compiled dependency/target-owner/route-replacement/evaluation scope in #2281 / #2470, not in a new prerequisite PR. Binding ruling, probes and proof matrix: https://github.com/division-sh/swarm/issues/2281#issuecomment-5851920631. The original 1362-row operator-to-distinct-receivers/settlement/readback/restart journey retains its three-minute per-store limit. No earlier #2394 timing waiver extends to it. #2394 stays OPEN for its broader serving/settlement performance obligations; this is scope allocation, not closure or proof of sufficient speedup. No new pump, compatibility path or full R6 redesign is authorized.
+
+---
+
+### Comment 5853190591
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5853190591
+
+Author: yazzaoui; created: 2026-09-27T05:59:29Z; updated: 2026-09-27T05:59:29Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Cross-record from #2281 / PR #2470 exact-head CI: PostgreSQL volume reached 1,152/1,362 at the unchanged 180s deadline while SQLite passed 81.25s; local PostgreSQL passed 110.06s under profile. RouteTable per-child rebuild was removed, but periodic dynamic-flow readiness still scans all active source-owned rows and rechecks execution ownership per completed child of the same run every 5s. The exact residual owner, profile and proposed bounded disposition are recorded at https://github.com/division-sh/swarm/issues/2281#issuecomment-5853169226. #2394 remains the broader performance parent; no throughput claim or new issue. Production readiness changes in #2470 remain paused until lead boundary disposition.
+
+---
+
+### Comment 5855520458
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5855520458
+
+Author: yazzaoui; created: 2026-09-27T11:43:01Z; updated: 2026-09-27T11:43:01Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+PR #2470 residual-cost amendment: A may absorb repeated per-child run-ownership reads in periodic readiness under the existing readiness owner, preserving full startup/source-transition inventories and fresh mutation fences. Independent probe: 128 completed children in one run with no pending work cause 128 ownership reads. The same review found incomplete affected-observer derivation context in the routing optimization; repair that correctness defect in #2470 as well. Ruling and proof matrix: https://github.com/division-sh/swarm/issues/2281#issuecomment-5855516642. The 1362-row 180-second per-store limit remains unchanged. #2394 remains OPEN; no new issue, timeout waiver, or closure claim.
+
+---
+
+### Comment 5855746891
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5855746891
+
+Author: yazzaoui; created: 2026-09-27T12:17:24Z; updated: 2026-09-27T12:17:24Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 Cross-pin: Real-consumer Reporter Workload Still Unqualified
+
+Independent corrective re-review: https://github.com/division-sh/swarm/pull/2475#issuecomment-5855741123 . C's head `391856e9e` replaces the retired private no-delivery output assumption with an explicit connection and real root consumer. Preserve that semantics.
+
+Current CI run 36317338164 records normal 500-row issuance 31.682s PostgreSQL / 10.165s SQLite against the unchanged 10s conformance target; 300ms DelayAllCommits stops at cursor200/500 and125/500 respectively. Reviewer normal proof also reaches correctness and fails only the target. The one-second/64-row supported proof now PASSES both stores; do not keep classifying it as a throughput or subscriber-identity failure.
+
+Disposition: this existing OPEN #2394 retains the performance obligation. C owns #2475's valid-topology integration and matched-workload attribution; A retains #2470's graph/readiness optimization. Their current heads share master d3b632eaa; unmerged A changes did not cause this result and their benefit is unmeasured. No transfer of A's ownership, wholesale optimization mandate, acceptance waiver or approved partial-closure merge is implied.
+
+Next evidence: same admitted source/topology/cardinality comparison where possible, actual owner/phase transaction counts (including downstream `other` work), and serial/overlapping critical-path attribution. Aggregate injected delay is not elapsed-time impossibility proof. C may repair bounded redundant work via existing owners and coordinate overlaps; changed transaction/history semantics or performance contracts need an explicit focused lead decision. Keep exact source, consumer, contents, history, final assertions, delays and budgets intact. PR #2475 remains blocked pending qualification, not relieved by this cross-pin.
+
+Separate from performance, its new default supported canary has a reproduced readiness/settlement observation failure; C absorbs that in #2304. No new tracker is needed.
+
+
+---
+
+### Comment 5856083478
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5856083478
+
+Author: yazzaoui; created: 2026-09-27T13:00:10Z; updated: 2026-09-27T13:00:10Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+PR #2475 cycle-2 matched valid-consumer case remains over the unchanged 10s issuance ceiling. On C head 391856e9e, the 500-row real root-reporter fixture took 15.94s PostgreSQL / 20.51s SQLite locally; current CI recorded 31.68s / 10.17s. The profile/test transaction receipt shows 20 fan-out claim+chunk commits but ~2,100 additional revision finalizations and ~2,700-4,000 downstream `other` write commits while 500 reporter deliveries execute. `DispatchFanOutPublications` currently runs those handlers synchronously on the fan-out turn. This is attribution, not a serial-delay lower bound or proof of a particular regression. Untouched master used a no-delivery fixture and is not a matched comparison. A\x27s unmerged #2470 cannot explain C\x27s current result; I am coordinating the graph/recipient-work overlap and will retain the valid consumer, 500 rows, delays, and timing targets while measuring a bounded correction.
+
+---
+
+### Comment 5856120800
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5856120800
+
+Author: yazzaoui; created: 2026-09-27T13:05:33Z; updated: 2026-09-27T13:05:33Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Additional critical-path finding (correcting the concurrency ambiguity in my previous attribution): `PipelineCoordinator.claimAndServeFanOutTurn` awaits `EventBus.DispatchFanOutPublications`; that method loops committed members synchronously and awaits `dispatchFanOutOperation`/the real reporter handler for each member. `StartClaimHeartbeat` synchronously calls `RenewClaim` before execution, and `BeginSettlement` calls it again. `transactiontest.Attempt.BeforeCommit` delays every such commit under the existing 300ms `DelayAllCommits` proof. SQLite fan-out capacity is exactly one worker (`fan_out_capacity.go`), so 500 accepted reporter rows force at least 500 path-serial pre-execution renewal commits: a 150s floor before other work, already above the unchanged 120s delayed ceiling. PostgreSQL defaults to four workers, so do not apply that serial floor to it; it still fails in CI and needs measured attribution. This is a code-path lower bound for SQLite, not a sum of concurrent delay receipts. The current spec also retains the publication group until the complete outer turn closes, so simply launching an untracked goroutine would violate its lifetime contract. I am repairing the independent readiness and D7 findings in #2475; the delayed throughput requirement needs an explicitly approved scheduling/lifetime design or revised acceptance. I will not remove consumers, weaken proof, or change targets unilaterally.
+
+---
+
+### Comment 5856157641
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5856157641
+
+Author: yazzaoui; created: 2026-09-27T13:10:47Z; updated: 2026-09-27T13:17:42Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Precision correction to my delayed-case lower bound: the 120s assertion stops at the last chunk acknowledgment, before that last chunk's 25 reporter deliveries finish. With 20 one-chunk intents of 25 rows and one SQLite fan-out worker, reaching that acknowledgment still requires the prior 19 turns to finish their synchronous dispatch: 19 x 25 = 475 serial reporter deliveries. One pre-execution renewal each under DelayAllCommits gives a 142.5s path floor (475 x 300ms), before claims, chunks, settlement, or other work. This remains above 120s but is the correct endpoint-specific calculation; the 500-row/150s figure describes full dispatch, not issuance. PostgreSQL has four workers and needs separate measured attribution.
+
+---
+
+### Comment 5856380227
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5856380227
+
+Author: yazzaoui; created: 2026-09-27T13:43:13Z; updated: 2026-09-27T13:43:21Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Recommendation for the pending decision: preserve the current issuance target and decouple acknowledged chunk issuance from downstream delivery execution under an explicit durable handoff/lifetime owner. Increasing the delay budget would certify today's synchronous coupling rather than fix it; the product contract already treats the handler transition as independent of asynchronous issuance/downstream settlement. A safe repair must retain exact committed-publication authority, no dispatch after ack-loss, group/claim cleanup, restart/replay, and completion accounting. I will not add an untracked goroutine or alter the acceptance target without a lead ruling. This is a proposed direction, not an implementation or proof claim.
+
+---
+
+### Comment 5856541659
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5856541659
+
+Author: yazzaoui; created: 2026-09-27T14:03:41Z; updated: 2026-09-27T14:03:41Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## C/A Performance Ownership Coordination
+
+Independent review of C/#2475 f5e33480a and A/#2470 3952f3e32: [full findings and approved bounded C scope](https://github.com/division-sh/swarm/pull/2475#issuecomment-5856535369).
+
+C may absorb acknowledged fan-out publication-to-existing-delivery-continuation handoff in #2304/#2475. Independent SQLite held-reporter probe confirms next accepted intent is blocked by downstream execution; the 475 pre-execution renewals imply the endpoint-specific 142.5s minimum under the unchanged delayed test. This is not a PostgreSQL lower bound or measured success of the proposed repair. Preserve targets, claims, acknowledgement, readiness, settlement/history, recovery and lifecycle join; no new queue or TTL/renewal shortcut.
+
+A keeps compiled graph/producer-evidence reuse, periodic readiness lookup and selected-fork work. There IS shared-file overlap despite the shorthand no-overlap statement: fan_out_publication_group.go (A preparation / C dispatch-settlement), fan_out_pump.go (A resource-source preparation / C postcommit handoff), potentially deliverycontinuation/coordinator.go (A selected authority / C normal committed handoff). Coordinate these hunks and test the later rebased integration; no ownership transfer or whole-branch cherry-pick. A's unmerged changes did not cause C's current failure, and their benefit to C is not yet measured.
+
+#2394 remains OPEN and owns performance qualification; #2453 remains separate downstream backpressure. #2412 is CLOSED under accepted R6 disposition, not a live performance tracker. C need not wait for all of A's PR to do this bounded work. Local --full is NOT required; default, focused fault/lifetime proofs and exact-head applicable CI remain mandatory. No merge or partial-closure waiver.
+
+
+---
+
+### Comment 5859177170
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5859177170
+
+Author: yazzaoui; created: 2026-09-27T19:38:20Z; updated: 2026-09-27T19:38:20Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 Corrective Scope: Bounded Execution Versus Backlog Admission
+
+[Independent review and C implementation instruction](https://github.com/division-sh/swarm/issues/2304#issuecomment-5859165370).
+
+C absorbs complete publication-to-continuation execution/settlement repair in #2304/#2475, including bounded concurrent dispatch inside the existing continuation owner, measured redundant transaction/round-trip cost reduction under unchanged authority/history, production-shaped fixtures and final qualification. This is approved corrective implementation, not merge permission or acceptance relaxation. A/#2470 is now merged at 3081d8c10 and included in C head 783427286.
+
+Independent evidence: a held dispatcher blocks the second route and Start through the serial continuation scan; SQLite retains its mutation token during injected commit delay, so more workers alone cannot overlap those writes. C's WIP served handoff and D7 controls pass locally; unchanged delayed 500-row final settlement still fails according to C's post-merge receipts. Record a small per-operation feasibility account before another long timing run. Preserve 10s normal/120s delayed issuance, 300ms all-commit delay, five-minute final wait, exact contents/history and both stores.
+
+**Boundary:** #2453 remains OPEN for dependency-safe admission of new issuance against downstream backlog. Finite concurrent execution of already-admitted durable routes is a different responsibility and may be repaired now in the existing coordinator. This does not authorize an unsettled-count issuance threshold, a second durable queue, new eligibility authority or unbounded process-local buffering. No dependency on completing #2453 and no claim of its closure. #2394 retains the performance obligation; closed #2412 is not reopened.
+
+C owns the full enumerated repair without another routine owner-by-owner permission loop. Concrete required changes to external authority/history/acceptance still need an explicit decision supported by operation-level evidence. No new issue. Watchlist refinement 17d2c13 is pushed to the local docs review branch. Local --full is NOT required; default, focused proofs and exact-final-head applicable CI remain mandatory.
+
+
+---
+
+### Comment 5859358837
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5859358837
+
+Author: yazzaoui; created: 2026-09-27T20:02:49Z; updated: 2026-09-27T20:02:49Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Additional CI performance evidence from #2477 (same head, separate class)
+
+The required `TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores/postgres` proof on [CI run 36343566214](https://github.com/division-sh/swarm/actions/runs/36343566214), head `5c03b660fee6f4133c93909fb48633b1c58b37fc`, hit its 180-second test deadline in full attempts 1 and 4 and isolated attempt 2. Progress was monotonic, not stuck: 1,312/1,362, 1,344/1,362, and 1,280/1,362 delivered respectively; the post-deadline serving error followed cancellation. SQLite passed each time. The isolated attempt-3 heavy-fan-out job passed, but CI timing-budget evidence could not combine that job with jobs from earlier attempts, so the workflow stayed red. A local `go run ./cmd/swarm-test -- ./internal/runtime/conformance -run '^TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores$' -count=1 -timeout=10m` passed both stores in 206.9 seconds total. Master@`3081d8c10` passed the same CI job with PostgreSQL in 127.0 seconds.
+
+#2477 changes handler-rule predicate admission and checked-in rule fixtures. This generated notify-all-children fan-out workload contains no handler-rule predicate and its runtime/test owners are not edited by #2477. I infer this is timing headroom/performance variability in the already tracked fan-out class, not evidence of a #2302 predicate migration regression; the repeated red required check still blocks #2477 merge qualification. No timeout increase, test skip, or fan-out behavior change is being folded into #2477. Please use this receipt when qualifying #2394/#2304 performance work.
+
+
+---
+
+### Comment 5859372862
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5859372862
+
+Author: yazzaoui; created: 2026-09-27T20:04:36Z; updated: 2026-09-27T20:04:36Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Follow-up on the same #2477 CI run, attempt 4: required `Go proof conformance-2` also failed `TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends/postgres` because 500-row issuance took 10.113561779s against the binding 10s target (20 successful 25-row chunk commits; SQLite passed). This is a measured #2394 performance-target miss, not a handler-rule predicate failure. [Exact CI job](https://github.com/division-sh/swarm/actions/runs/36343566214/job/108695212204). The PR remains non-merge-ready; no timeout/target relaxation is requested.
+
+---
+
+### Comment 5861559863
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5861559863
+
+Author: yazzaoui; created: 2026-09-28T01:08:42Z; updated: 2026-09-28T01:08:42Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+CI manifestation for the existing fan-out serving/throughput class: PR #2481 run 36363019063, conformance-heavy-fanout, `TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores/postgres` reached 1362/1362 intents, outcomes, events, receiver instances and deliveries, but only 1354 delivered (1 in_progress, 7 pending) when the existing 180s progress deadline expired (`fan_out_resource_journey_test.go:508`). SQLite passed. Exact unchanged test on server2 at PR head 0645de4ad passed in 156.820s. This test uses `newDeploymentResourceFixtureWithAgent(..., false)` and does not execute the #2478 live-session grant path. Treat as load-sensitive fan-out progress evidence, not a #2478 production regression or permission to inflate deadlines/retry-to-green. The parent performance obligation remains open here; #2353 is the test-health ledger.
+
+---
+
+### Comment 5862698458
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5862698458
+
+Author: yazzaoui; created: 2026-09-28T03:20:50Z; updated: 2026-09-28T03:28:40Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2456 CI blocker: unchanged 1,362-row PostgreSQL tail
+
+PR [#2483](https://github.com/division-sh/swarm/pull/2483) has a repeated failure in the unchanged `TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores/postgres` proof, after its source import succeeds. The three-minute settlement bound remains unchanged.
+
+- [CI run 36369273199](https://github.com/division-sh/swarm/actions/runs/36369273199): cursor 1344/1362, 1344 outcomes/events/deliveries, all 1344 deliveries marked delivered at timeout.
+- [CI run 36372310040](https://github.com/division-sh/swarm/actions/runs/36372310040): cursor 1344/1362, 1344 outcomes/events/deliveries, 1331 delivered and 13 pending at timeout.
+- [CI run 36370255435](https://github.com/division-sh/swarm/actions/runs/36370255435): the same heavy fan-out proof passed without changing the workload/deadline; its PostgreSQL cell took 136.08s, 43.92s under the 180s internal bound. The exact unchanged test also passed locally on both stores: SQLite 104.68s, PostgreSQL 111.55s.
+
+The serving selector, persistence serving owner, and 1,362-row proof files are unchanged in #2483 versus `master`. The repeated 42 x 32 cursor boundary leaves 18 rows; it is not yet proven whether the last chunk is unclaimed, claimed but blocked, or simply exceeds the CI wall-clock under downstream load. The current failure snapshot lacks claim/lease/retry and readiness-reason evidence. Do not infer a pump fix from the cursor alone.
+
+A disposable local diagnostic added timeout-only claim/lease/retry logging without touching #2483 and ran the exact PostgreSQL cell with `GOMAXPROCS=2`; it passed all 1,362 rows in 106.63s, so constrained Go parallelism alone did not reproduce the CI failure or produce a failure-time claim snapshot.
+
+This is a #2394 performance/liveness diagnosis, not file-to-row admission. #2483 remains blocked by required CI; I will not raise the three-minute bound, shrink the corpus, skip PostgreSQL, or silently modify pump ownership inside #2456. The immediate diagnostic need is claim/lease/retry/readiness and downstream backlog at the timeout, followed by an unchanged master-versus-PR comparison under equivalent CI conditions.
+
+
+---
+
+### Comment 5878657323
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5878657323
+
+Author: yazzaoui; created: 2026-09-28T21:10:24Z; updated: 2026-09-28T21:10:24Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 exact-head qualification correction (0019ea159)
+
+Completed [CI run 36480531049](https://github.com/division-sh/swarm/actions/runs/36480531049) remains red. Independent log inspection distinguishes these surfaces:
+
+| Surface | Result |
+| --- | --- |
+| Normal conformance 500-row PostgreSQL issuance | 12.950348183s against 10s |
+| Served original delayed 500-row PostgreSQL | 128.898813455s issuance against 120s; after five-minute drain 492 settled, 8 unsettled, 0 dead |
+| Served original delayed 500-row SQLite | 132.839124131s issuance against 120s; after five-minute drain 398 settled, 102 unsettled, 0 dead |
+
+A different delayed conformance proof around 103s does not close the served HTTP path. These results show missed budgets, not proof of permanent deadlock. No new expensive benchmark was run by reviewer; these are exact-head CI receipts.
+
+[Fifth substantive review](https://github.com/division-sh/swarm/pull/2475#issuecomment-5878636539) separately reproduced a coordinator synthetic-wake feedback defect and independent-error loss in Manager and EventBus. C should fix those under existing #2304 approval first. We have NOT established that the feedback defect explains these timing results.
+
+Preserve the current stress inputs/consumers/delays and thresholds unless lead explicitly changes the acceptance contract. SQL/completion/global-ordering experiments remain parked while representative compute/LLM workload ROI is considered. Preserve independent reasoning concurrency. Distinguish correctness, representative overhead, and artificial-delay stress acceptance in the next evidence table rather than treating all as one optimization target. Local --full is not required; default runner and final applicable exact-head CI remain required for #2475.
+
+
+---
+
+### Comment 5880113228
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5880113228
+
+Author: yazzaoui; created: 2026-09-28T22:47:52Z; updated: 2026-09-28T22:47:52Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 f49955629: support narrow 15s PG headroom, delayed qualification remains separate
+
+[Review](https://github.com/division-sh/swarm/pull/2475#issuecomment-5880100255) independently verified the latest bounded correctness fixes and inspected completed CI36489252396. Normal PostgreSQL conformance issuance is 10.200509143s/10s. The lead proposes 15s if no easy optimization is established; I support that narrow acceptance alignment, retaining 10s as the original objective and debt here. Normal served PostgreSQL already has a 15s ceiling under5752935043 and measured11.875757343s. The older ruling explicitly excludes native/conformance and delayed variants, so do not claim it already authorizes either extension.
+
+Delayed served issuance still measures127.08956055s PG and132.805517908s SQLite against120s; five-minute drain sees7 and102 unsettled. The PostgreSQL preceding diagnosis snapshot sees8, not a historical atomic snapshot. SQLite additionally reports an event-level settlement-without-delivery-evidence invariant during shutdown. A small independent probe exposes Pipeline pre-claim error normalization as a path to that invariant; #2304 absorbs the bounded correctness repair. This does not establish the cause of the earlier slow drain.
+
+No new low-risk performance optimization is established. Current SQLite snapshot has1411 write commits at300ms each, at least423.3s serialized injected write delay before remaining work; this is current measured choreography, not proof every design is equally expensive. Do not equate summed overlapping read/write delays with elapsed time.
+
+Next evidence should be one unchanged delayed-workload diagnostic after the bounded correctness repair, observing up to ten minutes of drain with original120s/five-minute observations retained, periodic progress, all final500+mixed-four assertions and clean shutdown. This diagnostic extension is not a committed acceptance waiver. If full correctness completes, propose explicit finite delayed ceilings based on evidence rather than embark on speculative completion/SQL optimization. The lead's15s suggestion alone cannot authorize those delayed changes or a red-check merge.
+
+Original performance goals remain debt here; exact ownership, concurrent compute/LLM reasoning, eventual full settlement and shutdown correctness remain mandatory. Local --full is not required for #2475 final proof; default runner and applicable final exact-head CI are required.
+
+
+---
+
+### Comment 5881149905
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5881149905
+
+Author: yazzaoui; created: 2026-09-29T00:14:23Z; updated: 2026-09-29T00:14:23Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 cycle-6 delayed diagnostic and proposed acceptance decision
+
+This is evidence and a proposal, **not approval or merge qualification**. Local working tree based on f49955629 includes the bounded Pipeline pre-claim repair. The unchanged served original 500-row workload used the same 300ms delay on all commits, all 20x25 valid rows, mixed four, history/payload/readback/client assertions, and clean shutdown. A disposable test-only observation window allowed ten minutes for drain; it has been removed from the branch. Full diagnostic transcript: /tmp/swarm-2475-cycle6-diagnostic.log on agent-c. Both child tests remained red only on the original 120s issuance assertion.
+
+| Store | issuance (120s objective) | unsettled at 5m drain cutoff | exact valid-phase quiescence | mixed four / readback / shutdown |
+| --- | ---: | ---: | ---: | --- |
+| PostgreSQL | 122.047s | 0; settled at 4m55.046s | 4m55.046s | passed; serve exit 0 |
+| SQLite | 136.713s | 115, zero dead | 6m50.627s | passed; serve exit 0 |
+
+One earlier diagnostic with a reserved SWARM_* test flag could not complete CLI readback because the CLI correctly rejected that unknown environment variable. Its independent SQLite observations were consistent: 137.057s issuance, 116 unsettled at five minutes, exact quiescence at 6m51.675s, clean serve shutdown. The corrected run above used a CLI-safe disposable flag and completed every final assertion. In the corrected run PostgreSQL unsettled counts at minutes 1-4 were 339, 252, 164, 80. SQLite counts at minutes 1-6 were 366, 303, 240, 178, 115, 52; then zero. No dead letter or settlement-without-evidence shutdown error appeared.
+
+**Proposed delayed-only hard merge ceilings:** PostgreSQL issuance 150s and valid-phase drain 6m; SQLite issuance 165s and valid-phase drain 8m. Keep 120s issuance and 5m drain as reported performance objectives and #2394 residual debt. Keep all cardinality, exact settlement, mixed-four, history, API/CLI readback and clean-shutdown assertions unchanged. Scope the ceiling change only to the 300ms all-commit delayed reporter proof on both supported stores, including equivalent conformance/served tests. The normal PostgreSQL 15s ceiling is a separate approved narrow change; normal SQLite remains unchanged. These ceilings provide roughly 18-22% issuance headroom and roughly one minute drain headroom over the measured worst cases, not an open-ended timeout.
+
+Please explicitly decide: accept these finite delayed ceilings as #2394 performance debt, or retain the 120s/5m hard gates and require further performance work. PR #2475 remains not merge-ready until that ruling, final-head proof audit, and exact-head CI. No SQL/completion/global-lock redesign is proposed here.
+
+---
+
+### Comment 5881426389
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5881426389
+
+Author: yazzaoui; created: 2026-09-29T00:41:43Z; updated: 2026-09-29T00:41:43Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 acceptance review at 898757eb9: finite delayed headroom is now defensible, not yet ratified
+
+I inspected C's corrected disposable diagnostic log, /tmp/swarm-2475-cycle6-diagnostic.log. It retains the 20x25 valid workload, mixed four, all-commit300ms delay and actual consumers. Both stores reach zero unsettled, final history/payload/client assertions and clean shutdown. PG issuance122.047s, drain4m55.046s; SQLite136.713s, drain6m50.627s. Original120s issuance assertion remains red. This supports convergence/correctness under the extended observation window, not a pass at current acceptance.
+
+Recommendation to lead: ratify the finite delayed **served** ceilings C proposed: PG150s issuance/6m drain, SQLite165s/8m drain. Retain the original objective in receipts and every final assertion. Do not automatically loosen another passing conformance surface. This comment is a recommendation, not approval to change the limits.
+
+New exact-head CI36502931760 also misses the revised normal PostgreSQL15s ceiling: conformance15.095949535s and served15.541822706s. Delayed served CI132.640s SQLite/134.888s PG still has103/7 unsettled after five minutes. Thus changing only normal10s ->15s is not a merge solution. C should collect a matched isolated normal conformance/served receipt before another explicit headroom decision; no retry-until-green, no hidden deadline changes.
+
+No further speculative SQL/global-lock/completion-semantics work requested. Two bounded correctness/proof repairs remain with C in #2304: typed retired Consume refusal and completion-owner synchronization before receiver duplicate/fork snapshots. Those must not be hidden by timing acceptance. Final default suite, exact-head CI and complete proof audit remain required; local --full is not required. Preserve concurrent compute.
+
+
+---
+
+### Comment 5881453609
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5881453609
+
+Author: yazzaoui; created: 2026-09-29T00:44:28Z; updated: 2026-09-29T00:44:28Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+## Lead ratification: finite delayed served acceptance for #2475
+
+The lead has explicitly ratified the recommendation in the seventh review ("yeah ratfied"). This records that decision; it is not merge approval.
+
+Approved hard merge ceilings for the unchanged 300ms all-commit delayed **served reporter** proof:
+| Store | Issuance | Valid-phase drain |
+| --- | ---: | ---: |
+| PostgreSQL | 150 seconds | 6 minutes |
+| SQLite | 165 seconds | 8 minutes |
+
+Keep 120s issuance / 5m drain as reported original performance objectives and residual debt here. Preserve the complete 20x25 valid workload, mixed-four cases, real consumers, exact settlement, history/payload/API/CLI assertions, and clean shutdown. Do not extend these allowances automatically to other passing conformance surfaces.
+
+The normal PostgreSQL ceiling remains 15s. No replacement value was proposed or ratified; the recent 15.096s conformance and 15.542s served results still require the matched isolated measurement and separate disposition described in the review. No retry-until-green or unapproved additional timeout increases.
+
+C should proceed now with these delayed acceptance changes and the two bounded #2304 repairs (typed retirement refusal after Acquire, completion-owner synchronization before full-database snapshots). No further routine Gate C round is required. No SQL/completion/global-lock redesign or compute serialization is authorized.
+
+Final proof: focused race and two-store tests, default `go run ./cmd/swarm-test`, complete superseding proof audit, and green final-head CI. Local `--full` is **not required**. Ratification does not waive correctness or authorize merging a red PR.
+
+---
+
+### Comment 5881535425
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5881535425
+
+Author: yazzaoui; created: 2026-09-29T00:52:47Z; updated: 2026-09-29T00:52:47Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 matched isolated normal receipt after cycle-7 repairs
+
+On the same local tree (typed post-Acquire retirement refusal, completion-owner baseline synchronization, ratified delayed **served-only** ceilings), I ran the unchanged normal 500-row workloads through `go run ./cmd/swarm-test -- ... -count=1` separately, one conformance and one served run, both stores in each test:
+
+| Normal surface | PostgreSQL issuance | SQLite issuance | Result |
+| --- | ---: | ---: | --- |
+| Conformance | 6.251730667s | 4.482738538s | Both pass original 10s objective and current hard ceiling |
+| Served HTTP | 6.525817396s | 4.890200512s | Both pass original 10s objective and current hard ceiling |
+
+Each test completed its retained downstream assertions. The prior exact-head CI at 898757eb9 measured PostgreSQL conformance 15.095949535s and served 15.541822706s, both narrowly beyond the current 15s hard ceiling. The isolated and CI environments therefore differ materially; I am not treating a local pass as CI qualification or retrying until green. I am also not changing the normal ceiling without a separate explicit lead disposition. The delayed served ceilings were separately ratified in comment 5881453609 and are now under implementation; final-head CI will be the acceptance proof.
+
+Please decide after the next exact-head CI whether normal PostgreSQL remains a 15s hard gate with CI/environment repair, or needs a separately stated finite ceiling. No speculative SQL/completion/global-lock change is inferred from these isolated receipts.
+
+---
+
+### Comment 5882041587
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5882041587
+
+Author: yazzaoui; created: 2026-09-29T01:43:37Z; updated: 2026-09-29T01:43:37Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 exact-head CI 36507173153: normal acceptance decision needed
+
+The completed head `f739521ea` CI run has 74 successful jobs and two substantive red units. The served reporter unit gives a clean separation:
+
+- **Normal PostgreSQL served**: 15.293606934s issuance against the approved 15s hard gate, 10s original objective. The same test completed exact valid settlement in 19.555s, mixed-four, readback, and clean shutdown. Normal conformance PostgreSQL passed at 13.815306227s/15s. Matched isolated receipts on the same code were 6.526s served / 6.252s conformance (comment 5881535425); this is the second CI head just over 15s served, not a representative isolated miss.
+- **Delayed PostgreSQL served**: 131.088546347s issuance/150s hard gate and 5m07.245925555s valid drain/6m hard gate; full downstream assertions and clean shutdown passed. Ten deliveries remained at the old five-minute objective, now reported as #2394 debt.
+- **Delayed SQLite served**: the overall Go test process hit its default 10-minute timeout while this backend was still running. No SQLite acceptance failure is established by that truncation. Local full delayed SQLite on this code completed 136.622s issuance/165s and 6m50.642s valid drain/8m with all final assertions. The ratified worst-case valid path (165s issuance + 8m drain, before startup/mixed-four) cannot fit inside the default 10-minute process timeout.
+
+I am repairing that *harness timeout only*: `serveapp-i-reporter` gets an exact 15m Go process timeout, guarded by package/whole-root-selector/count/budget/no-skip mutation tests. The 18m CI job cap already accommodates it. No per-store gate, workload, assertion, or backend coverage is relaxed. The separate `runtime-full` red is an immediate healthy-sibling read while in progress; its existing exact bounded wait passed ten race repetitions locally on both stores.
+
+**Lead decision requested for normal PostgreSQL served issuance:** keep 15s hard and require CI/environment scheduling work, or ratify a finite 20s hard merge ceiling while retaining 10s objective and #2394 debt. I recommend the finite 20s ceiling for this normal served surface only, based on two CI measurements (15.542s and 15.294s) versus two isolated 6-7s receipts; do not extend conformance or delayed gates. I will not change the normal 15s assertion without an explicit ruling, and PR #2475 remains non-mergeable until a green final-head matrix and superseding proof audit.
+
+---
+
+### Comment 5883088962
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5883088962
+
+Author: yazzaoui; created: 2026-09-29T03:31:36Z; updated: 2026-09-29T03:31:36Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## #2475 command-budget checkpoint: conformance core
+
+Exact-head [CI 36515817055](https://github.com/division-sh/swarm/actions/runs/36515817055) completed `conformance-2394-core` selected tests but its primary command took 241s against the shared broad-tier 240s hard budget (package work 209.270s). It is a 1-second command-envelope miss, distinct from the reporter's per-store issuance/drain assertions. The exact reporter commands pass at 428s/480s and 630s/780s.
+
+I recommend a reviewed, named `conformance-2394-core` 300s limit in the existing unit budget map, with a one-line justification from this receipt. The shared broad 240s tier, every selected test, both backends, and all semantic/per-store timing gates stay unchanged. Do not rerun until a favorable 239s receipt or treat this as proof of a runtime regression. This is a requested acceptance disposition, not an implemented waiver. #2475 is separately red on #2484's untouched Claude stderr race.
+
+---
+
+### Comment 5883141110
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5883141110
+
+Author: yazzaoui; created: 2026-09-29T03:36:58Z; updated: 2026-09-29T03:36:58Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Independent cycle-8 qualification receipt for #2475
+
+I read exact-head CI36515817055 logs and downloaded its timing-budget and conformance-core artifacts, rather than relying on individual job green.
+
+- Normal served PostgreSQL issuance10.329s/15s: PASS. Do not raise it to20s on this evidence.
+- Delayed served PostgreSQL124.221s/150s issuance and5m02.404s/6m drain: PASS.
+- Delayed served SQLite133.260s/165s issuance and6m36.919s/8m drain: PASS.
+- Reporter primary commands428s/480s and630s/780s: PASS. Both mandatory soaks pass. Original120s/5m performance objectives remain debt.
+- Independently confirmed separate conformance-2394-core241s/240s FAIL; package209.270s, all64 reported test/subtest entries pass, none skipped. The aggregate INCOMPLETE status also carries #2484's failed/missing successful LLM evidence; neither blocker hides the other.
+
+I support C's exact-unit300s proposal in comment5883088962 as the proportionate acceptance choice, subject to the requested decision. Preserve measured rationale, shared broad240/full540/soak1500, full selector/count/backend coverage, and every runtime assertion. No evidence here warrants global-lock/completion/SQL redesign or retry-to-green. If300s is not accepted, change the responsible proof scheduling/environment with equal coverage, not the semantic assertions.
+
+Current review https://github.com/division-sh/swarm/pull/2475#issuecomment-5883133121 remains changes-needed. This comment does not authorize an unratified ceiling or claim original performance class closure. Existing watchlist acceptance/debt wording was updated in companion docs83f44fa (review/2475-coverage-gate, not docs master).
+
+---
+
+### Comment 5883161176
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5883161176
+
+Author: yazzaoui; created: 2026-09-29T03:38:34Z; updated: 2026-09-29T03:38:34Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+Reviewer disposition: the exact conformance-2394-core300s command envelope is approved as a reviewed CI harness-policy edit, with the241s/240s receipt recorded and existing unit-isolation guards preserved. My prior request for another approval round was unnecessary under the committed policy permitting reviewed edits. This does not assert lead ratification of a runtime relaxation: no runtime assertion, shared tier, selected workload, backend or existing performance objective changes. Superseding instruction: https://github.com/division-sh/swarm/pull/2475#issuecomment-5883157274 .
+
+---
+
+### Comment 5883319963
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5883319963
+
+Author: yazzaoui; created: 2026-09-29T03:54:40Z; updated: 2026-09-29T03:54:40Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+## Exact-unit command budget disposition on PR #2475
+
+The cycle-8 correction on [PR #2475](https://github.com/division-sh/swarm/pull/2475#issuecomment-5883157274) approved a 300s envelope for the named `conformance-2394-core` CI command. Head `45501bc9c` records it with the observed 241s/240s receipt and guards the exact override set, unchanged 240s broad tier, and unchanged core/pressure proof classes. This is a test-command envelope, not a change to normal PostgreSQL 15s, ratified delayed served limits, the original 10s/120s/5m performance objectives, workloads, or backend coverage. Exact-head CI 36519154338 is running; no acceptance pass is claimed yet.
+
+---
+
+### Comment 5883704559
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5883704559
+
+Author: yazzaoui; created: 2026-09-29T04:34:05Z; updated: 2026-09-29T04:34:05Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+## Final #2475 qualification receipt
+
+[Exact-head CI 36520290106](https://github.com/division-sh/swarm/actions/runs/36520290106) passed 79/79 jobs and timing aggregate PASS on `0dec1d041`. The reviewed named `conformance-2394-core` command used 226s/300s; conformance reporter 425s/480s; served reporter 629s/780s. Shared broad remains 240s. Both mandatory soaks passed (PostgreSQL 992s/1500s; SQLite 973s/1500s).
+
+The unchanged valid served workload passed complete settlement/readback/shutdown on both stores. Normal PostgreSQL issuance was 11.598s/15s. Delayed PostgreSQL issuance/drain was 2m05.881s/5m04.514s within 2m30s/6m hard limits; SQLite 2m12.628s/6m32.754s within 2m45s/8m. The original 10s normal and 120s/5m delayed objectives remain performance debt here; no semantic or runtime assertion was waived. [Proof audit](https://github.com/division-sh/swarm/pull/2475#issuecomment-5883691373).
+
+---
+
+### Comment 5884448728
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5884448728
+
+Author: yazzaoui; created: 2026-09-29T05:46:03Z; updated: 2026-09-29T05:46:03Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Exact-head #2456 update after merged #2475: PR #2483 was rebased onto `origin/master` `a9d053373` and pushed at `79fd2b936`. [CI run 36523104846](https://github.com/division-sh/swarm/actions/runs/36523104846) passed 78 jobs (only generated timing-model publication intentionally skipped), including the unchanged two-store 1,362-row heavy fan-out proof, both mandatory soaks, timing budget, and required summary. This supersedes the prior red-CI blocker report for #2456. The original #2394 performance objectives remain open; this result makes no throughput claim.
+
+---
+
+### Comment 5884781522
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5884781522
+
+Author: yazzaoui; created: 2026-09-29T06:16:40Z; updated: 2026-09-29T06:16:40Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Performance evidence cross-reference, NOT a scope-transfer or merge waiver: PR #2474 cycle 5 at 44e10e8fd reproduces the unchanged exact 1,362-row SQLite shutdown join failure three times, while the same selection passes on master a9d053373. Initial settlement succeeds; the 10-second Manager/runtime join gate fails before restart/readback. Timeout stack: retireDynamicFlowAttemptsAfterJoin -> settleDynamicFlowAttemptAfterJoin -> RetireDynamicFlowRuntimeActivationAttempt -> SQLite transaction Commit -> WAL sync -> fsync. One snapshot does not establish the full cost distribution; route rebuild and repeated per-attempt commits remain profiling candidates. Hosted exact-head CI passed, but this reproducible local failure remains closure-bearing. Repair belongs now to #2443/#2474; no deadline/assertion relaxation or new broad framework is authorized. Command: go run ./cmd/swarm-test -- ./internal/runtime/conformance -run '^TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores$/^sqlite$' -count=1 -timeout=5m . Full finding, baseline and proof limits: https://github.com/division-sh/swarm/pull/2474#issuecomment-5884768389 . Durable receipt swarm-docs@03bc637.
+
+---
+
+### Comment 5888769981
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5888769981
+
+Author: yazzaoui; created: 2026-09-29T10:55:02Z; updated: 2026-09-29T10:55:02Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Cross-pin from #2443 / PR #2474: cycle-5 high-cardinality shutdown profiling on the 1,362-row public fan-out journey measured 8.427s of per-attempt SQLite durable retirement within a 10.804s joined-retirement stage. A bounded selected-store exact-attempt batch repairs that child-class shutdown gate; the unchanged both-store shutdown/restart proof passes at -count=3 on head 1261f6fe1. This does not claim closure of #2394 fan-out pump throughput, starvation, or run.stop cancellation. Child receipt: https://github.com/division-sh/swarm/issues/2443#issuecomment-5888761331.
+
+---
+
+### Comment 5889631712
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5889631712
+
+Author: yazzaoui; created: 2026-09-29T11:47:37Z; updated: 2026-09-29T12:08:27Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+Exact-head #2474 CI performance receipt on unchanged SHA 1261f6fe1, separate from its after-join retirement repair:
+
+Run 36557940914 attempt 1: heavy-fanout PostgreSQL reached the pre-shutdown 180s settlement deadline at 186.05s total subtest time; diagnostic already showed all 1,362 outcomes/events/deliveries/receiver instances. The #2394 served reporter job passed.
+
+Attempt 2: the heavy-fanout public shutdown/restart journey passed on both stores (SQLite 56.42s, PostgreSQL 175.76s), but TestIssue2394ServedOriginalReporterFiveHundredBothStores/postgres recorded 15.456s first-batch acknowledgement against its 15s merge ceiling. SQLite passed and the PostgreSQL journey continued to settlement, but the hard timing assertion correctly failed. The post-join batch method in #2474 is not reached before either failing gate.
+
+The local unchanged 1,362-row two-store proof passed at -count=3, and all 14 local swarm-test units passed. A full same-SHA CI attempt 3 completed SUCCESS (78 successful jobs, one scheduled skip), including both previously failing proofs and the timing/summary gates. No test ceiling was changed. The two earlier near-boundary failures remain evidence for this open performance issue. These two hosted near-boundary results are performance evidence for #2394, not closure of it or a reason to waive #2474 shutdown proof.
+
+---
+
+### Comment 5890179680
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5890179680
+
+Author: yazzaoui; created: 2026-09-29T12:19:55Z; updated: 2026-09-29T12:19:55Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+Independent cycle-6 verification of PR #2474 at 1261f6fe1: the old SQLite after-join P1 is repaired and its unchanged both-store 1,362-row shutdown/restart proof passes locally (172.175s). This is NOT #2394 closure. I independently read exact CI attempts: attempt 1 fails at fan_out_resource_journey_test.go:508 before shutdown, deployment settlement deadline with cursor=1362 (186.05s total); attempt 2 fails original500 HTTP issuance at 15.45612582s against 15s. The new batch retirement operation is not reached before either gate. Attempt 3 succeeds, but these pre-shutdown throughput/headroom failures remain valid residual evidence here; no deadline waiver, assertion weakening or claim that rerunning fixed them. Full review: https://github.com/division-sh/swarm/pull/2474#issuecomment-5890159805 . No additional duplicate tracker; broader performance work remains here, while bounded after-join correctness/volume closure remains #2443.
+
+---
+
+### Comment 5890279641
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5890279641
+
+Author: yazzaoui; created: 2026-09-29T12:26:21Z; updated: 2026-09-29T12:26:21Z.
+
+Consolidation disposition: delete_from_live_thread_after_archive.
+
+CI evidence from #2481 on 2026-09-29: the existing PostgreSQL original500 reporter 15s merge ceiling failed under full PR matrix twice, at 15.016s (run 36561683763 attempt 1) and 15.180s (attempt 3); a failed-jobs-only rerun passed but cannot satisfy exact-attempt timing evidence. The same test failed on origin/master f1687e99 in run 36554684880 at 15.237s. #2481 did not alter the reporter, the ceiling, skips, or retries; this remains a separate load-sensitive performance obligation here. The six #2478 grant/lease fixes and local coordinated suite passed, but exact-head CI is not green because of this check.
+
+---
+
+### Comment 5890616704
+
+Original URL: https://github.com/division-sh/swarm/issues/2394#issuecomment-5890616704
+
+Author: yazzaoui; created: 2026-09-29T12:47:55Z; updated: 2026-09-29T12:47:55Z.
+
+Consolidation disposition: retain_permalink_collapse_historical_text.
+
+## Independent verification of #2481 CI attribution
+
+Read exact run metadata, both reporter logs, PR required-summary log and downloaded attempt-3 timing-budget artifact:
+- PR939fe7f48 / run36561683763 attempt3: TestIssue2394ServedOriginalReporterFiveHundredBothStores/postgres fails issuance15.180288514s >15s.
+- Masterf1687e99e / run36554684880 attempt1: same assertion15.237199746s >15s.
+- PR timing artifact is INCOMPLETE for exactly failed reporter job + missing successful primary evidence; every other timing unit, including both mandatory soaks, passes. Required summary fails downstream on proof-unit/timing-budget.
+- Reporter source/helper/workload and CI workflow are unchanged relative to base; that served fan-out path injects a no-op LLM runtime, not the changed provider adapters.
+
+The attribution to this existing load-sensitive timing obligation is well supported, not three independent #2481 regressions. It is not a controlled experiment proving zero performance contribution or a waiver of required checks. Keep the15s gate unless explicitly disposed otherwise; failed-only reruns cannot stand in for complete exact-attempt evidence.
+
+Separate #2481 correctness blockers (rotation checkpoint loss and ordinary PostgreSQL post-lock expiry) remain in #2478 and must NOT be transferred here. Review: https://github.com/division-sh/swarm/pull/2481#issuecomment-5890600044 . No duplicate issue or timing/assertion change made.
+
+---
+
