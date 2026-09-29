@@ -221,7 +221,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestFileRow2456FreshProcessBindingAndExactWireBothStores",
 		"TestFileRow2456DefaultBundleAndHeadPinReplayBothStores",
 	}
-	want := []int{157, 14, 5, 1}
+	want := []int{158, 14, 5, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -231,6 +231,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		}
 	}
 	const preparedFaultProof = "TestSemanticProofPreparedFaultMatchesRawBothStores"
+	const nodeAdmissionProof = "TestNodeAdmissionUsesSourceValueWithoutRawDecoderFallback"
+	if i := sort.SearchStrings(groups[0], nodeAdmissionProof); i == len(groups[0]) || groups[0][i] != nodeAdmissionProof {
+		t.Fatalf("#2489 source admission proof is missing from conformance-2: %v", groups[0])
+	}
 	const checkoutProof = "TestProducerRoutingProofCensusRejectsForeignOnlyEntrypoint"
 	if i := sort.SearchStrings(groups[0], checkoutProof); i == len(groups[0]) || groups[0][i] != checkoutProof {
 		t.Fatalf("#2323 checkout proof is missing from conformance-2: %v", groups[0])

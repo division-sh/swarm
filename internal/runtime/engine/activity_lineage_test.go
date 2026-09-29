@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"gopkg.in/yaml.v3"
 )
 
 func TestActivityLoopLineageRetainsHistoryWithoutReadmission(t *testing.T) {
@@ -81,7 +80,8 @@ func TestActivityLoopLineageRetainsHistoryWithoutReadmission(t *testing.T) {
 	check(t, intent, nil, false)
 	// The selected rule, not another reachable rule or the loop's present stage,
 	// owns the transition before the activity dispatch.
-	if err := yaml.Unmarshal([]byte("loop: {admit: revision, from: working}\nadvances_to: executing\nrules:\n  - when: 'true'\n    advances_to: selected\n  - else: true\n    advances_to: unselected\n"), &handler); err != nil {
+	handler, err = loadNodeHandlerFixture("loop: {admit: revision, from: working}\nadvances_to: executing\nrules:\n  - when: 'true'\n    advances_to: selected\n  - else: true\n    advances_to: unselected\n")
+	if err != nil {
 		t.Fatal(err)
 	}
 	node, err := identity.AdmitExecutableNodeDeclaration("validation", "validator")

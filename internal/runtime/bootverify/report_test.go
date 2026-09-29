@@ -1533,7 +1533,7 @@ func TestRun_AllowsDeclaredSetsGateFromScalarAndStructuredForms(t *testing.T) {
 		},
 		{
 			name: "structured",
-			yaml: "sets_gate:\n  name: approved\n  value: true\n",
+			yaml: "sets_gate:\n  name: approved\n",
 		},
 	}
 
@@ -5001,13 +5001,11 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	clearWave1ExpressionStaticCreateEntity(t, bundle, flowID, nodeID)
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
 	handler.CreateEntity = false
-	var rule runtimecontracts.HandlerRuleEntry
-	if err := yaml.Unmarshal([]byte(`id: ready
-condition: 'entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""'
-`), &rule); err != nil {
-		t.Fatal(err)
-	}
-	handler.Rules = []runtimecontracts.HandlerRuleEntry{rule}
+	handler.Rules = mustBootHandlerFixture(t, `rules:
+  - id: ready
+    when: 'entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""'
+  - else: true
+`).Rules
 	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
 	var err error
 	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(owner, eventType, handler)
@@ -7456,11 +7454,7 @@ func gateSchemaValidationBundle(t testing.TB, gateState runtimecontracts.NodeGat
 
 func decodeGateSchemaHandler(t *testing.T, raw string) runtimecontracts.SystemNodeEventHandler {
 	t.Helper()
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
-		t.Fatalf("decode gate schema handler: %v", err)
-	}
-	return handler
+	return mustBootHandlerFixture(t, raw)
 }
 
 func reportContains(items []Finding, checkID, contains string) bool {
