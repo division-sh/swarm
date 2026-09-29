@@ -1331,7 +1331,7 @@ func (b *flowActivationTestBus) RemoveAgentRoute(token runtimeeffects.LifecycleT
 		b.removeAgentRoute(token)
 	}
 }
-func (*flowActivationTestBus) SignalDeliveryContinuations() {}
+func (*flowActivationTestBus) SignalDeliveryContinuations()                  {}
 func (*flowActivationTestBus) FenceAgentRoute(runtimeeffects.LifecycleToken) {}
 func (b *flowActivationTestBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.runtimeLogs = append(b.runtimeLogs, entry)
