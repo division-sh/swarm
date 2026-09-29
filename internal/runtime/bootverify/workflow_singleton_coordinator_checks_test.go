@@ -391,6 +391,7 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
             tool: review
             input:
               value: entity.verticals`,
+			rejection: "on_complete.activity is unsupported",
 		},
 	}
 
