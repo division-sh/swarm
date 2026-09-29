@@ -12,6 +12,26 @@ import (
 	"github.com/google/uuid"
 )
 
+func requireCurrentActionPageTx(ctx context.Context, tx *sql.Tx, resolved render.ResolvedAction, plan Plan, postgres bool) error {
+	stored, found, err := LoadRender(ctx, tx, resolved.RenderID, postgres)
+	if err != nil {
+		return err
+	}
+	if !found || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.ActionPage == nil ||
+		stored.Frozen.ActionPage.Index != plan.ActionPageIndex ||
+		stored.Frozen.Bounds != plan.Bounds {
+		return fmt.Errorf("card action page contradicts current frozen render")
+	}
+	pages, err := render.ActionPageCount(stored.Frozen)
+	if err != nil {
+		return err
+	}
+	if pages < 2 || plan.ActionPageIndex == math.MaxInt64 {
+		return fmt.Errorf("card has no additional controls")
+	}
+	return nil
+}
+
 // AdvanceActionPageTx moves one verified tap to the next immutable page
 // and settles that tap atomically with the selected plan pointer.
 func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction,
@@ -45,21 +65,8 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 		plan.CurrentRenderID != resolved.RenderID || plan.CurrentReceiptID != resolved.ReceiptOperationID {
 		return fmt.Errorf("card action page has no exact sent plan")
 	}
-	stored, found, err := LoadRender(ctx, tx, resolved.RenderID, postgres)
-	if err != nil {
+	if err := requireCurrentActionPageTx(ctx, tx, resolved, plan, postgres); err != nil {
 		return err
-	}
-	if !found || stored.Frozen.Hash != resolved.RenderHash || stored.Frozen.ActionPage == nil ||
-		stored.Frozen.ActionPage.Index != plan.ActionPageIndex ||
-		stored.Frozen.Bounds != plan.Bounds {
-		return fmt.Errorf("card action page contradicts current frozen render")
-	}
-	pages, err := render.ActionPageCount(stored.Frozen)
-	if err != nil {
-		return err
-	}
-	if pages < 2 || plan.ActionPageIndex == math.MaxInt64 {
-		return fmt.Errorf("card has no additional controls")
 	}
 	next := plan.ActionPageIndex + 1
 	query := `UPDATE channel_delivery_plans SET action_page_index=?
@@ -182,10 +189,7 @@ func EnsureRenderActionsTx(ctx context.Context, tx *sql.Tx, renderID string, fro
 	return desired, nil
 }
 
-func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
-	if err := frozen.Validate(); err != nil {
-		return nil, err
-	}
+func semanticActionsForFrozen(frozen render.Frozen) []render.Action {
 	desired := make([]render.Action, 0, len(frozen.Choices)+len(frozen.DraftChoices)+3)
 	for _, choice := range frozen.Choices {
 		desired = append(desired, render.Action{Kind: "verdict", Verdict: choice.Verdict, Label: choice.Label})
@@ -216,6 +220,14 @@ func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
 	if frozen.Page != nil && frozen.Page.Index+1 < frozen.Page.Count {
 		desired = append(desired, render.Action{Kind: "next_page", Label: "Next page"})
 	}
+	return desired
+}
+
+func actionsForFrozen(frozen render.Frozen) ([]render.Action, error) {
+	if err := frozen.Validate(); err != nil {
+		return nil, err
+	}
+	desired := semanticActionsForFrozen(frozen)
 	_, truncated, err := render.PresentationText(frozen)
 	if err != nil {
 		return nil, err

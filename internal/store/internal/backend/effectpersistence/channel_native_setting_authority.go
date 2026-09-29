@@ -111,29 +111,22 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			query += ` FOR UPDATE OF setting, consumer, activation, onboarding, binding`
 		}
 	}
-	var settingID, provider, slotID, conversation, scopeKind, memberReference, principalID, state, operationID, contract, entryCommand string
-	var packID, packVersion, packHash string
-	var desired []byte
-	var generation, consumerActivationRevision, consumerBindingRevision, consumerContextGeneration int64
-	var activationRevision, activationBindingRevision, activationContextGeneration int64
-	var activationProvider, activationPrincipal, activationConversation, activationPackID, activationPackVersion, activationPackHash string
-	var bundleHash, bundleIdentity, inventoryGeneration, runtimeInstanceID, planGeneration string
-	var targetGeneration int64
+	var snapshot nativeSettingAuthoritySnapshot
 	err := q.QueryRowContext(ctx, query, s.SettingID, s.ActivationID).Scan(
-		&settingID, &provider, &slotID, &conversation, &scopeKind, &memberReference, &principalID, &generation,
-		&state, &operationID, &contract, &entryCommand, &packID, &packVersion, &packHash, &desired,
-		&consumerActivationRevision, &consumerBindingRevision, &consumerContextGeneration,
-		&activationRevision, &activationBindingRevision, &activationContextGeneration,
-		&activationProvider, &activationPrincipal, &activationConversation,
-		&activationPackID, &activationPackVersion, &activationPackHash,
-		&bundleHash, &bundleIdentity, &inventoryGeneration, &runtimeInstanceID, &planGeneration, &targetGeneration)
+		&snapshot.settingID, &snapshot.provider, &snapshot.slotID, &snapshot.conversation, &snapshot.scopeKind, &snapshot.memberReference, &snapshot.principalID, &snapshot.generation,
+		&snapshot.state, &snapshot.operationID, &snapshot.contract, &snapshot.entryCommand, &snapshot.packID, &snapshot.packVersion, &snapshot.packHash, &snapshot.desired,
+		&snapshot.consumerActivationRevision, &snapshot.consumerBindingRevision, &snapshot.consumerContextGeneration,
+		&snapshot.activationRevision, &snapshot.activationBindingRevision, &snapshot.activationContextGeneration,
+		&snapshot.activationProvider, &snapshot.activationPrincipal, &snapshot.activationConversation,
+		&snapshot.activationPackID, &snapshot.activationPackVersion, &snapshot.activationPackHash,
+		&snapshot.bundleHash, &snapshot.bundleIdentity, &snapshot.inventoryGeneration, &snapshot.runtimeInstanceID, &snapshot.planGeneration, &snapshot.targetGeneration)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("check physical native inbox setting authority: %w", err)
 	}
-	canonical, err := canonicaljson.Canonicalize(desired)
+	canonical, err := canonicaljson.Canonicalize(snapshot.desired)
 	if err != nil {
 		return false, err
 	}
@@ -141,20 +134,68 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 	if err != nil {
 		return false, err
 	}
-	return state == "planned" && settingID == s.SettingID && provider == s.Provider &&
-		slotID == s.ResourceSlotID && conversation == s.ConversationRef && scopeKind == s.ScopeKind &&
-		memberReference == s.MemberReference && principalID == s.PrincipalID && entryCommand == s.EntryCommand &&
-		generation == s.SettingGeneration && operationID == s.EffectOperationID &&
-		contract == s.EntryContractHash && packID == s.PackID && packVersion == s.PackVersion &&
-		packHash == s.PackManifestHash && bytes.Equal(canonical, expected) &&
-		consumerActivationRevision == s.ActivationRevision && consumerBindingRevision == s.BindingRevision &&
-		consumerContextGeneration == int64(s.ContextPublicationGeneration) &&
-		activationRevision == s.ActivationRevision && activationBindingRevision == s.BindingRevision &&
-		activationContextGeneration == int64(s.ContextPublicationGeneration) &&
-		activationProvider == s.Provider && activationPrincipal == s.PrincipalID &&
-		activationConversation == s.ConversationRef && activationPackID == s.PackID &&
-		activationPackVersion == s.PackVersion && activationPackHash == s.PackManifestHash &&
-		bundleHash == s.BundleHash && bundleIdentity == s.BundleIdentity &&
-		inventoryGeneration == s.PackInventoryGeneration && runtimeInstanceID == s.RuntimeInstanceID &&
-		planGeneration == s.PlanGeneration.Diagnostic() && targetGeneration == int64(s.TargetGeneration), nil
+	return snapshot.matchesSetting(s, canonical, expected) &&
+		snapshot.matchesConsumer(s) && snapshot.matchesActivation(s), nil
+}
+
+type nativeSettingAuthoritySnapshot struct {
+	settingID                   string
+	provider                    string
+	slotID                      string
+	conversation                string
+	scopeKind                   string
+	memberReference             string
+	principalID                 string
+	state                       string
+	operationID                 string
+	contract                    string
+	entryCommand                string
+	packID                      string
+	packVersion                 string
+	packHash                    string
+	desired                     []byte
+	generation                  int64
+	consumerActivationRevision  int64
+	consumerBindingRevision     int64
+	consumerContextGeneration   int64
+	activationRevision          int64
+	activationBindingRevision   int64
+	activationContextGeneration int64
+	activationProvider          string
+	activationPrincipal         string
+	activationConversation      string
+	activationPackID            string
+	activationPackVersion       string
+	activationPackHash          string
+	bundleHash                  string
+	bundleIdentity              string
+	inventoryGeneration         string
+	runtimeInstanceID           string
+	planGeneration              string
+	targetGeneration            int64
+}
+
+func (snapshot nativeSettingAuthoritySnapshot) matchesSetting(s runtimeeffects.ChannelNativeSettingAuthority, canonical, expected []byte) bool {
+	return snapshot.state == "planned" && snapshot.settingID == s.SettingID && snapshot.provider == s.Provider &&
+		snapshot.slotID == s.ResourceSlotID && snapshot.conversation == s.ConversationRef && snapshot.scopeKind == s.ScopeKind &&
+		snapshot.memberReference == s.MemberReference && snapshot.principalID == s.PrincipalID && snapshot.entryCommand == s.EntryCommand &&
+		snapshot.generation == s.SettingGeneration && snapshot.operationID == s.EffectOperationID &&
+		snapshot.contract == s.EntryContractHash && snapshot.packID == s.PackID && snapshot.packVersion == s.PackVersion &&
+		snapshot.packHash == s.PackManifestHash && bytes.Equal(canonical, expected)
+}
+
+func (snapshot nativeSettingAuthoritySnapshot) matchesConsumer(s runtimeeffects.ChannelNativeSettingAuthority) bool {
+	return snapshot.consumerActivationRevision == s.ActivationRevision && snapshot.consumerBindingRevision == s.BindingRevision &&
+		snapshot.consumerContextGeneration == int64(s.ContextPublicationGeneration)
+}
+
+func (snapshot nativeSettingAuthoritySnapshot) matchesActivation(s runtimeeffects.ChannelNativeSettingAuthority) bool {
+	return snapshot.activationRevision == s.ActivationRevision && snapshot.activationBindingRevision == s.BindingRevision &&
+		snapshot.activationContextGeneration == int64(s.ContextPublicationGeneration) &&
+		snapshot.activationProvider == s.Provider && snapshot.activationPrincipal == s.PrincipalID &&
+		snapshot.activationConversation == s.ConversationRef && snapshot.activationPackID == s.PackID &&
+		snapshot.activationPackVersion == s.PackVersion && snapshot.activationPackHash == s.PackManifestHash &&
+		snapshot.bundleHash == s.BundleHash && snapshot.bundleIdentity == s.BundleIdentity &&
+		snapshot.inventoryGeneration == s.PackInventoryGeneration && snapshot.runtimeInstanceID == s.RuntimeInstanceID &&
+		snapshot.planGeneration == s.PlanGeneration.Diagnostic() && snapshot.targetGeneration == int64(s.TargetGeneration)
 }

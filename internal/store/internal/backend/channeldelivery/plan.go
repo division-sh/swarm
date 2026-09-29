@@ -41,6 +41,29 @@ const (
 	PlanStatePlanned = "planned"
 )
 
+func (p Plan) validateSource() error {
+	switch p.SourceKind {
+	case PlanNotice, PlanCard, PlanResponse:
+		if p.SummaryCount != 0 {
+			return fmt.Errorf("non-summary delivery plan has summary count")
+		}
+		if (p.SourceKind == PlanResponse && uuid.Validate(p.RequestActivationID) != nil) ||
+			(p.SourceKind != PlanResponse && p.RequestActivationID != "") {
+			return fmt.Errorf("channel response activation ownership is invalid")
+		}
+	case PlanSummary:
+		if p.SummaryCount < 1 {
+			return fmt.Errorf("summary delivery plan has no notices")
+		}
+		if p.RequestActivationID != "" {
+			return fmt.Errorf("summary delivery has response activation")
+		}
+	default:
+		return fmt.Errorf("stored channel delivery source kind is invalid")
+	}
+	return nil
+}
+
 func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool) (Plan, bool, error) {
 	if db == nil || uuid.Validate(deliveryID) != nil {
 		return Plan{}, false, fmt.Errorf("channel delivery plan requires a store and delivery id")
@@ -87,24 +110,8 @@ func (p Plan) Validate() error {
 		(p.Bounds != (packs.PresentationBounds{}) && p.Bounds.Validate() != nil) {
 		return fmt.Errorf("stored channel action page is invalid")
 	}
-	switch p.SourceKind {
-	case PlanNotice, PlanCard, PlanResponse:
-		if p.SummaryCount != 0 {
-			return fmt.Errorf("non-summary delivery plan has summary count")
-		}
-		if (p.SourceKind == PlanResponse && uuid.Validate(p.RequestActivationID) != nil) ||
-			(p.SourceKind != PlanResponse && p.RequestActivationID != "") {
-			return fmt.Errorf("channel response activation ownership is invalid")
-		}
-	case PlanSummary:
-		if p.SummaryCount < 1 {
-			return fmt.Errorf("summary delivery plan has no notices")
-		}
-		if p.RequestActivationID != "" {
-			return fmt.Errorf("summary delivery has response activation")
-		}
-	default:
-		return fmt.Errorf("stored channel delivery source kind is invalid")
+	if err := p.validateSource(); err != nil {
+		return err
 	}
 	switch p.State {
 	case PlanStatePlanned, "rendered", "sent", "uncertain", "retired":

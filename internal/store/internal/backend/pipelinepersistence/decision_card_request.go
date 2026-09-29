@@ -60,6 +60,26 @@ func admitDecisionCardRequest(ctx context.Context, owner decisionCardRequestSour
 	return card.RunID, fact, nil
 }
 
+func requireChannelCardMutationTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request, mutation pipeline.DecisionCardMutation, postgres, lock bool) error {
+	if err := requireChannelCardActionTx(ctx, tx, req, mutation, postgres, lock); err != nil {
+		return err
+	}
+	if err := requireChannelCardTextTx(ctx, tx, req, mutation, postgres, lock); err != nil {
+		return err
+	}
+	return requireChannelCardSkipTx(ctx, tx, req, mutation, postgres, lock)
+}
+
+func settleChannelCardMutationTx(ctx context.Context, tx *sql.Tx, mutation pipeline.DecisionCardMutation, postgres bool) error {
+	if err := settleChannelCardActionTx(ctx, tx, mutation, postgres); err != nil {
+		return err
+	}
+	if err := settleChannelCardTextTx(ctx, tx, mutation, postgres); err != nil {
+		return err
+	}
+	return settleChannelCardSkipTx(ctx, tx, mutation, postgres)
+}
+
 func requireChannelCardActionTx(ctx context.Context, tx *sql.Tx, req apiidempotency.Request, mutation pipeline.DecisionCardMutation, postgres, lock bool) error {
 	fact, present := mutation.ChannelAction()
 	if !present {
@@ -191,25 +211,13 @@ func settleChannelCardSkipTx(ctx context.Context, tx *sql.Tx, mutation pipeline.
 
 func (s *PipelinePostgresOwner) requireChannelCardAction(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) error {
 	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireChannelCardActionTx(txctx, tx, req, mutation, true, false); err != nil {
-			return err
-		}
-		if err := requireChannelCardTextTx(txctx, tx, req, mutation, true, false); err != nil {
-			return err
-		}
-		return requireChannelCardSkipTx(txctx, tx, req, mutation, true, false)
+		return requireChannelCardMutationTx(txctx, tx, req, mutation, true, false)
 	})
 }
 
 func (s *PipelineSQLiteOwner) requireChannelCardAction(ctx context.Context, req apiidempotency.Request, mutation pipeline.DecisionCardMutation) error {
 	return s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireChannelCardActionTx(txctx, tx, req, mutation, false, false); err != nil {
-			return err
-		}
-		if err := requireChannelCardTextTx(txctx, tx, req, mutation, false, false); err != nil {
-			return err
-		}
-		return requireChannelCardSkipTx(txctx, tx, req, mutation, false, false)
+		return requireChannelCardMutationTx(txctx, tx, req, mutation, false, false)
 	})
 }
 
@@ -317,16 +325,7 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 					if !current.Matches(l.source) {
 						return fmt.Errorf("card source changed at commit")
 					}
-					if err := requireChannelCardActionTx(txctx, tx, l.request, l.mutation, true, true); err != nil {
-						return err
-					}
-					if err := requireChannelCardTextTx(txctx, tx, l.request, l.mutation, true, true); err != nil {
-						return err
-					}
-					if err := requireChannelCardSkipTx(txctx, tx, l.request, l.mutation, true, true); err != nil {
-						return err
-					}
-					return nil
+					return requireChannelCardMutationTx(txctx, tx, l.request, l.mutation, true, true)
 				})
 				if err != nil {
 					return pipeline.CommittedDecisionCardMutation{}, err
@@ -334,13 +333,7 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 				return write(txctx, attempt)
 			})
 		}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
-			if err := settleChannelCardActionTx(ctx, tx, l.mutation, true); err != nil {
-				return err
-			}
-			if err := settleChannelCardTextTx(ctx, tx, l.mutation, true); err != nil {
-				return err
-			}
-			if err := settleChannelCardSkipTx(ctx, tx, l.mutation, true); err != nil {
+			if err := settleChannelCardMutationTx(ctx, tx, l.mutation, true); err != nil {
 				return err
 			}
 			return storeapiidempotency.StorePostgresCompletionTx(ctx, l.pgLease, tx, completion)
@@ -360,16 +353,7 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 				if !current.Matches(l.source) {
 					return fmt.Errorf("card source changed at commit")
 				}
-				if err := requireChannelCardActionTx(txctx, tx, l.request, l.mutation, false, true); err != nil {
-					return err
-				}
-				if err := requireChannelCardTextTx(txctx, tx, l.request, l.mutation, false, true); err != nil {
-					return err
-				}
-				if err := requireChannelCardSkipTx(txctx, tx, l.request, l.mutation, false, true); err != nil {
-					return err
-				}
-				return nil
+				return requireChannelCardMutationTx(txctx, tx, l.request, l.mutation, false, true)
 			})
 			if err != nil {
 				return pipeline.CommittedDecisionCardMutation{}, err
@@ -377,13 +361,7 @@ func (l *decisionCardRequestLease) Commit(ctx context.Context, command pipeline.
 			return write(txctx, attempt)
 		})
 	}, command, func(ctx context.Context, tx *sql.Tx, completion apiidempotency.Completion) error {
-		if err := settleChannelCardActionTx(ctx, tx, l.mutation, false); err != nil {
-			return err
-		}
-		if err := settleChannelCardTextTx(ctx, tx, l.mutation, false); err != nil {
-			return err
-		}
-		if err := settleChannelCardSkipTx(ctx, tx, l.mutation, false); err != nil {
+		if err := settleChannelCardMutationTx(ctx, tx, l.mutation, false); err != nil {
 			return err
 		}
 		return storeapiidempotency.StoreSQLiteCompletionTx(ctx, l.sqLease, tx, completion)
