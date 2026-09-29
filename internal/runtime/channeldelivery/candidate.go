@@ -2,6 +2,7 @@ package channeldelivery
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/packs"
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
@@ -109,6 +110,14 @@ type ResolvedNativeEntry struct {
 	EntryReference    string
 }
 
+type NativeEntryDisposition string
+
+const (
+	NativeEntryAccepted    NativeEntryDisposition = "accepted"
+	NativeEntryRejected    NativeEntryDisposition = "rejected"
+	NativeEntryUnavailable NativeEntryDisposition = "unavailable"
+)
+
 type ActionDisposition string
 
 const (
@@ -136,8 +145,8 @@ type Store interface {
 	GetCurrentChannelDeliveryPlan(context.Context, string) (Candidate, bool, error)
 	GetCurrentChannelSentReceipt(context.Context, string, string) (SentReceipt, bool, error)
 	PlanOpenChannelCard(context.Context, string) (bool, error)
-	FreezeAndPersistChannelRender(context.Context, string, int) (PreparedRender, error)
-	AdvanceChannelCardActionPage(context.Context, operatorchannel.InboundAction, ResolvedAction) error
+	FreezeAndPersistChannelRender(context.Context, string, packs.PresentationBounds) (PreparedRender, error)
+	AdvanceChannelActionPage(context.Context, operatorchannel.InboundAction, ResolvedAction) error
 	ResolveChannelActionFact(context.Context, operatorchannel.ActionFact) (ResolvedAction, bool, error)
 	ListPendingChannelActions(context.Context, string, int) ([]PendingAction, error)
 	SettleUnappliedChannelAction(context.Context, operatorchannel.InboundAction, ActionDisposition) error
@@ -151,6 +160,7 @@ type Store interface {
 	PreviewChannelInputSkip(context.Context, operatorchannel.InboundAction, time.Time) (ResolvedAction, decisioncard.InputFieldProgress, decisioncard.InputDraft, error)
 	AdvancePartialChannelInputSkip(context.Context, operatorchannel.InboundAction, time.Time) (decisioncard.InputFieldProgress, error)
 	ResolveCurrentNativeInboxEntry(context.Context, operatorchannel.InboundText) (ResolvedNativeEntry, bool, error)
+	RejectNativeInboxEntry(context.Context, operatorchannel.InboundText) error
 	PlanNativeInboxResponse(context.Context, operatorchannel.InboundText, ResolvedNativeEntry, string) (string, error)
 	PlanChannelTextResponse(context.Context, operatorchannel.InboundText, string, string) (string, error)
 	PlanChannelDraftChooser(context.Context, operatorchannel.InboundText, time.Time) (string, error)

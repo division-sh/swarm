@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -326,6 +327,10 @@ func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context
 		return nil
 	}
 	err := r.preflight(ctx, servePrebindingActivation{Operation: op, Candidate: candidate})
+	var collision *runtimepublicingress.SlotCollisionError
+	if errors.As(err, &collision) {
+		return channelonboarding.NewTerminalActivationError("provider_slot_collision", err)
+	}
 	var rejected *runtimeregistration.ProviderCredentialRejectedError
 	if !errors.As(err, &rejected) {
 		return err
@@ -364,6 +369,7 @@ func activateServeAfterConnectedChannelTeardownRecovery(ctx context.Context, tea
 type serveConnectedChannelReadiness struct {
 	manager     *runtime.RuntimeContextManager
 	store       channelonboarding.Store
+	native      channelnative.Store
 	identities  *operatorchannel.Service
 	credentials *runtimecredentials.SnapshotOwner
 	effects     runtimeeffects.OutcomeStore
@@ -466,7 +472,16 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 		facts.ExpectedServiceGeneration = candidate.ConnectionHealth
 		facts.SessionCurrent = false
 	}
-	return channelonboarding.ProjectReadiness(facts), true, nil
+	projection := channelonboarding.ProjectReadiness(facts)
+	if o.native == nil {
+		return projection, false, fmt.Errorf("native inbox qualification readback owner is unavailable")
+	}
+	qualification, err := o.native.ReadNativeInboxQualification(ctx, activation.ActivationID)
+	if err != nil {
+		return projection, false, err
+	}
+	projection.NativeInbox = &qualification
+	return projection, true, nil
 }
 
 func (o *serveConnectedChannelReadiness) observedAt() time.Time {
@@ -808,6 +823,10 @@ func exactChannelActivationHandoff(op channelonboarding.Operation, activation ch
 func (r *serveChannelActivationRefresher) reconcileChannelRegistrations(ctx context.Context) error {
 	if r.reconcile != nil {
 		err := r.reconcile(ctx)
+		var collision *runtimepublicingress.SlotCollisionError
+		if errors.As(err, &collision) {
+			return channelonboarding.NewTerminalActivationError("provider_slot_collision", err)
+		}
 		var failure *runtimefailures.Error
 		if errors.As(err, &failure) && failure.Failure.Detail.Code == "mock_external_effect_forbidden" {
 			return channelonboarding.NewTerminalActivationError(failure.Failure.Detail.Code, err)

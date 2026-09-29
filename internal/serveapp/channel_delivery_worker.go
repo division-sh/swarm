@@ -67,15 +67,12 @@ func (d *serveChannelDeliveryDispatcher) reconcileDeliveries(ctx context.Context
 				failures = errors.Join(failures, fmt.Errorf("channel delivery %s has unsupported state %q", candidate.DeliveryID, candidate.State))
 				continue
 			}
-			capacity := 0
-			if candidate.SourceKind == "card" {
-				capacity, err = d.selectedActionCapacity(ctx, candidate)
-				if err != nil {
-					failures = errors.Join(failures, fmt.Errorf("select channel delivery %s action capacity: %w", candidate.DeliveryID, err))
-					continue
-				}
+			bounds, err := d.selectedPresentationBounds(ctx, candidate)
+			if err != nil {
+				failures = errors.Join(failures, fmt.Errorf("select channel delivery %s presentation bounds: %w", candidate.DeliveryID, err))
+				continue
 			}
-			prepared, err := d.store.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, capacity)
+			prepared, err := d.store.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, bounds)
 			if err != nil {
 				failures = errors.Join(failures, fmt.Errorf("freeze channel delivery %s: %w", candidate.DeliveryID, err))
 				continue
@@ -181,8 +178,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 				failures = errors.Join(failures, fmt.Errorf("acknowledge channel action %s: %w", intent.PublicationID, err))
 			}
 			if resolved.Action.Kind == "open_inbox" || resolved.Action.Kind == "view_full" ||
-				resolved.Action.Kind == "next_page" || resolved.Action.Kind == "next_draft_page" ||
-				resolved.Action.Kind == "next_recovery_page" {
+				resolved.Action.Kind == "next_page" {
 				inboxText := ""
 				if resolved.Action.Kind == "open_inbox" {
 					inboxText, err = d.inboxContent(ctx)
@@ -195,8 +191,8 @@ func (d *serveChannelDeliveryDispatcher) reconcileCardActions(ctx context.Contex
 				}
 				continue
 			}
-			if resolved.SourceKind == "card" && resolved.Action.Kind == "more_controls" {
-				if err := d.store.AdvanceChannelCardActionPage(ctx, intent.Fact, resolved); err != nil {
+			if resolved.Action.Kind == "more_controls" {
+				if err := d.store.AdvanceChannelActionPage(ctx, intent.Fact, resolved); err != nil {
 					failures = errors.Join(failures, fmt.Errorf("advance channel card controls %s: %w", intent.PublicationID, err))
 				}
 				continue
@@ -308,12 +304,18 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxEntries(ctx context
 				}
 				continue
 			}
-			entry, found, err := d.resolveNativeInboxEntry(ctx, intent.Fact)
+			entry, disposition, err := d.resolveNativeInboxEntry(ctx, intent.Fact)
 			if err != nil {
 				failures = errors.Join(failures, fmt.Errorf("resolve native inbox entry %s: %w", intent.PublicationID, err))
 				continue
 			}
-			if !found {
+			if disposition == runtimechanneldelivery.NativeEntryRejected {
+				if err := d.store.RejectNativeInboxEntry(ctx, intent.Fact); err != nil {
+					failures = errors.Join(failures, fmt.Errorf("reject native inbox entry %s: %w", intent.PublicationID, err))
+				}
+				continue
+			}
+			if disposition != runtimechanneldelivery.NativeEntryAccepted {
 				continue
 			}
 			content, err := d.inboxContent(ctx)
