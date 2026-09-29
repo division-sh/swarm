@@ -390,32 +390,8 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 				continue
 			}
 			if channelClaimantConfirmationRequired(result, now) {
-				fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
-				if identity.ConversationScope == "shared" && !sharedAudienceAnnounced {
-					fmt.Fprintln(progressOut, "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.")
-					sharedAudienceAnnounced = true
-				}
-				approve := opts.yes
-				var err error
-				if !approve {
-					approve, err = confirmChannelClaimant(opts.apiOptions.input, errOut)
-					if err != nil {
-						return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-					}
-				}
-				var confirmed channelOperationEnvelope
-				if err := client.call(ctx, "channel.confirm", map[string]any{"operation_id": identity.OperationID, "expected_revision": identity.Revision, "approve": approve}, &confirmed); err != nil {
-					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
-				}
-				if !approve {
-					var settled channelOnboardingResult
-					if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": result.Operation.OperationID}, &settled); err != nil {
-						return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
-					}
-					if settled.Operation.Phase != "failed" && settled.Operation.Phase != "retired" {
-						return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel claimant was rejected but onboarding responsibility did not settle"))
-					}
-					return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel claimant was rejected; onboarding failed and its slot was released"))
+				if err := confirmChannelOnboardingClaim(ctx, client, result, opts, progressOut, errOut, &sharedAudienceAnnounced); err != nil {
+					return channelOnboardingResult{}, err
 				}
 			}
 		}
@@ -434,6 +410,38 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		result = next
 	}
+}
+
+func confirmChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
+	identity := result.IdentityOperation
+	fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
+	if identity.ConversationScope == "shared" && !*sharedAudienceAnnounced {
+		fmt.Fprintln(progressOut, "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.")
+		*sharedAudienceAnnounced = true
+	}
+	approve := opts.yes
+	var err error
+	if !approve {
+		approve, err = confirmChannelClaimant(opts.apiOptions.input, errOut)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+	}
+	var confirmed channelOperationEnvelope
+	if err := client.call(ctx, "channel.confirm", map[string]any{"operation_id": identity.OperationID, "expected_revision": identity.Revision, "approve": approve}, &confirmed); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if !approve {
+		var settled channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": result.Operation.OperationID}, &settled); err != nil {
+			return returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		if settled.Operation.Phase != "failed" && settled.Operation.Phase != "retired" {
+			return returnCLIValidationError(errOut, errors.New("channel claimant was rejected but onboarding responsibility did not settle"))
+		}
+		return returnCLIValidationError(errOut, errors.New("channel claimant was rejected; onboarding failed and its slot was released"))
+	}
+	return nil
 }
 
 func channelClaimantConfirmationRequired(result channelOnboardingResult, now time.Time) bool {
@@ -699,22 +707,7 @@ func writeChannelList(out io.Writer, result channelListResult) {
 			account = "-"
 		}
 		ready, nativeInbox, reason := "-", "-", row.Identity.Reason
-		if row.Readiness != nil {
-			ready = fmt.Sprint(row.Readiness.Ready)
-			if row.Readiness.NativeInbox != nil {
-				qualification := row.Readiness.NativeInbox
-				nativeInbox = string(qualification.State)
-				if qualification.ClientLanguage != "" {
-					nativeInbox += "/" + qualification.ClientLanguage
-				}
-				if qualification.Reason != "" {
-					footers = append(footers, fmt.Sprintf("channel %s native inbox: %s", row.Identity.Interface.ChannelPackID, qualification.Reason))
-				}
-			}
-			if row.Readiness.Reason != "" {
-				reason = string(row.Readiness.Reason)
-			}
-		}
+		ready, nativeInbox, reason, footers = channelListReadiness(row, ready, nativeInbox, reason, footers)
 		if row.Recovery != nil {
 			reason = string(row.Recovery.Reason)
 			for _, command := range row.Recovery.Commands {
@@ -742,6 +735,26 @@ func writeChannelList(out io.Writer, result channelListResult) {
 		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "NATIVE INBOX"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "BUNDLE"}, {Header: "TARGET"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
 		Rows:    rows, EmptyMessage: "No operator channels are active.", FooterLines: footers,
 	})
+}
+
+func channelListReadiness(row channelReadbackResult, ready, nativeInbox, reason string, footers []string) (string, string, string, []string) {
+	if row.Readiness != nil {
+		ready = fmt.Sprint(row.Readiness.Ready)
+		if row.Readiness.NativeInbox != nil {
+			qualification := row.Readiness.NativeInbox
+			nativeInbox = string(qualification.State)
+			if qualification.ClientLanguage != "" {
+				nativeInbox += "/" + qualification.ClientLanguage
+			}
+			if qualification.Reason != "" {
+				footers = append(footers, fmt.Sprintf("channel %s native inbox: %s", row.Identity.Interface.ChannelPackID, qualification.Reason))
+			}
+		}
+		if row.Readiness.Reason != "" {
+			reason = string(row.Readiness.Reason)
+		}
+	}
+	return ready, nativeInbox, reason, footers
 }
 
 func channelErrorClassifier() cliAPIErrorClassifier {

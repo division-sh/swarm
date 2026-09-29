@@ -69,7 +69,11 @@ func channelActionAckAuthorityCurrent(ctx context.Context, q schemaQueryer, auth
 		resolved.ActivationID != ack.ActivationID || resolved.ActivationRevision != ack.ActivationRevision {
 		return false, nil
 	}
-	query = `SELECT activation_id FROM connected_channel_activations
+	return channelActionAckActivationCurrent(ctx, q, ack, postgres, lock)
+}
+
+func channelActionAckActivationCurrent(ctx context.Context, q schemaQueryer, ack runtimeeffects.ChannelActionAckAuthority, postgres, lock bool) (bool, error) {
+	query := `SELECT activation_id FROM connected_channel_activations
 		WHERE activation_id=? AND status='current' AND principal_id=? AND binding_revision=?
 		AND activation_revision=? AND bundle_hash=? AND bundle_identity=?
 		AND pack_inventory_generation=? AND runtime_instance_id=?
@@ -85,7 +89,7 @@ func channelActionAckAuthorityCurrent(ctx context.Context, q schemaQueryer, auth
 		}
 	}
 	var activationID string
-	err = q.QueryRowContext(ctx, query, ack.ActivationID, ack.PrincipalID, ack.BindingRevision, ack.ActivationRevision,
+	err := q.QueryRowContext(ctx, query, ack.ActivationID, ack.PrincipalID, ack.BindingRevision, ack.ActivationRevision,
 		ack.BundleHash, ack.BundleIdentity, ack.PackInventoryGeneration, ack.RuntimeInstanceID,
 		ack.ContextPublicationGeneration, ack.PlanGeneration.Diagnostic(), ack.TargetGeneration).Scan(&activationID)
 	if errors.Is(err, sql.ErrNoRows) {
