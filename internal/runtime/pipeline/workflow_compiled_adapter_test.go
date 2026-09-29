@@ -679,7 +679,7 @@ func TestFallbackClaimSettlesWithoutBusinessTransitionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newCompiledAdapterFixture(t, backend, bundle, ".", "working", true)
-			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"fallback"}, Policies: map[string]WorkflowEventPolicy{"fallback": {Consume: true}}}}
+			f.pc.module.(*previewWorkflowModule).workflowNodes = []WorkflowNode{{Node: f.node, Subscriptions: []events.EventType{"fallback"}}}
 			evt := f.event("fallback")
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient(f.node),
