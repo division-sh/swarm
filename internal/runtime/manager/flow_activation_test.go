@@ -27,6 +27,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -201,6 +202,7 @@ type flowActivationTestInstanceStore struct {
 	retiredTimerEntries        []string
 	retireInitialEntry         func(string) error
 	retireAttempt              func() error
+	retirementBatches          []int
 	settleAttemptPostCommitErr error
 	readiness                  map[string]runtimepipeline.DynamicFlowRuntimeReadiness
 	activationAttempts         map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt
@@ -992,6 +994,63 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReadyFor
 
 func (s *flowActivationTestInstanceStore) RetireDynamicFlowRuntimeActivationAttempt(_ context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
 	return s.settleActivationAttempt(attempt, false)
+}
+
+func (s *flowActivationTestInstanceStore) RetireDynamicFlowRuntimeActivationAttempts(_ context.Context, attempts []runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
+	if len(attempts) == 0 || len(attempts) > runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit {
+		return errors.New("retirement batch requires a bounded nonempty attempt set")
+	}
+	for range attempts {
+		if s.retireAttempt != nil {
+			if err := s.retireAttempt(); err != nil {
+				return err
+			}
+		}
+	}
+	s.readinessMu.Lock()
+	defer s.readinessMu.Unlock()
+	seen := make(map[string]struct{}, len(attempts))
+	for _, attempt := range attempts {
+		if err := attempt.Validate(); err != nil {
+			return err
+		}
+		key := flowActivationReadinessKey(attempt.RunID(), attempt.InstancePath())
+		if _, duplicate := seen[key]; duplicate {
+			return errors.New("retirement batch contains duplicate instance")
+		}
+		seen[key] = struct{}{}
+		current, found := s.activationAttempts[key]
+		if found && current.ID() == attempt.ID() && current.PlanRevision() == attempt.PlanRevision() && current.ProcessBinding() == attempt.ProcessBinding() {
+			continue
+		}
+		if _, retired := s.retiredAttemptIDs[attempt.ID()]; retired {
+			continue
+		}
+		if _, superseded := s.foreignSupersededIDs[attempt.ID()]; superseded {
+			continue
+		}
+		if found && current.ID() != attempt.ID() && current.ProcessBinding().ProcessBootID != attempt.ProcessBinding().ProcessBootID {
+			continue
+		}
+		return errors.New("activation retirement does not own the current attempt")
+	}
+	if s.retiredAttemptIDs == nil {
+		s.retiredAttemptIDs = make(map[string]struct{})
+	}
+	for _, attempt := range attempts {
+		key := flowActivationReadinessKey(attempt.RunID(), attempt.InstancePath())
+		current, found := s.activationAttempts[key]
+		if !found || current.ID() != attempt.ID() {
+			continue
+		}
+		s.retiredAttemptIDs[attempt.ID()] = struct{}{}
+		delete(s.activationAttempts, key)
+		delete(s.committedAttempts, key)
+	}
+	s.retirementBatches = append(s.retirementBatches, len(attempts))
+	err := s.settleAttemptPostCommitErr
+	s.settleAttemptPostCommitErr = nil
+	return err
 }
 
 func (s *flowActivationTestInstanceStore) AbandonDynamicFlowRuntimeActivationAttempt(_ context.Context, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
@@ -2351,6 +2410,95 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 				t.Fatalf("resumed retirement incomplete: local=%v durable=%v route=%v", stillOwned, retired, bus.HasFlowInstanceRoute(testActivationFlowIdentity(req)))
 			}
 		})
+	}
+}
+
+func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{activationAttempts: make(map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt)}
+	am := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances)
+	am.dynamicFlowActiveAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt)
+	ctx := testAuthorActivityContext(context.Background())
+	binding := runtimeprocessbinding.Binding{
+		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "flow-retirement-test",
+		ProcessBootID: uuid.NewString(), GenerationGrantID: uuid.NewString(),
+		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
+		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
+	}
+	const count = runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit + 1
+	retiredRoutes := 0
+	for i := range count {
+		path := fmt.Sprintf("account/batch-%d", i)
+		attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), uuid.NewString(), path, 1, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		key := dynamicFlowRuntimeReadinessKey{runID: attempt.RunID(), instancePath: path}
+		am.dynamicFlowActiveAttempts[key] = &dynamicFlowActiveAttempt{
+			receipt: attempt,
+			publication: flowActivationTestPublication{retire: func() error {
+				retiredRoutes++
+				return nil
+			}},
+		}
+		instances.activationAttempts[flowActivationReadinessKey(attempt.RunID(), path)] = attempt
+	}
+	failed := false
+	instances.retireAttempt = func() error {
+		if retiredRoutes < runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit {
+			return errors.New("durable settlement preceded local route cleanup")
+		}
+		if !failed {
+			failed = true
+			return errors.New("injected batch failure")
+		}
+		return nil
+	}
+	if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err == nil || !strings.Contains(err.Error(), "injected batch failure") {
+		t.Fatalf("first joined retirement = %v, want batch failure", err)
+	}
+	if got := len(am.dynamicFlowActiveAttempts); got != runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit {
+		t.Fatalf("retained attempts after atomic batch failure = %d, want %d", got, runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit)
+	}
+	if retiredRoutes != count {
+		t.Fatalf("retired routes = %d, want %d", retiredRoutes, count)
+	}
+	if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil {
+		t.Fatalf("retry joined retirement: %v", err)
+	}
+	if got := len(am.dynamicFlowActiveAttempts); got != 0 {
+		t.Fatalf("retained attempts after retry = %d", got)
+	}
+	if retiredRoutes != count {
+		t.Fatalf("local route cleanup repeated: got %d, want %d", retiredRoutes, count)
+	}
+	if !reflect.DeepEqual(instances.retirementBatches, []int{1, runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit}) {
+		t.Fatalf("committed retirement batches = %v", instances.retirementBatches)
+	}
+	if len(instances.retiredAttemptIDs) != count {
+		t.Fatalf("durably retired attempts = %d, want %d", len(instances.retiredAttemptIDs), count)
+	}
+	attempt, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(uuid.NewString(), uuid.NewString(), "account/acknowledged", 1, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := dynamicFlowRuntimeReadinessKey{runID: attempt.RunID(), instancePath: attempt.InstancePath()}
+	am.dynamicFlowActiveAttempts[key] = &dynamicFlowActiveAttempt{receipt: attempt, locallyRetired: true, timersRetired: true}
+	instances.activationAttempts[flowActivationReadinessKey(attempt.RunID(), attempt.InstancePath())] = attempt
+	instances.settleAttemptPostCommitErr = errors.New("lost retirement acknowledgement")
+	if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err == nil || !strings.Contains(err.Error(), "lost retirement acknowledgement") {
+		t.Fatalf("acknowledged retirement response loss = %v", err)
+	}
+	if am.dynamicFlowActiveAttempts[key] == nil {
+		t.Fatal("acknowledged response loss discarded exact retry owner")
+	}
+	if _, committed := instances.retiredAttemptIDs[attempt.ID()]; !committed {
+		t.Fatal("acknowledged response loss did not simulate durable commit")
+	}
+	if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil {
+		t.Fatalf("retry acknowledged retirement: %v", err)
+	}
+	if am.dynamicFlowActiveAttempts[key] != nil || retiredRoutes != count {
+		t.Fatalf("acknowledged retry retained local owner or repeated cleanup: active=%v routes=%d", am.dynamicFlowActiveAttempts[key] != nil, retiredRoutes)
 	}
 }
 

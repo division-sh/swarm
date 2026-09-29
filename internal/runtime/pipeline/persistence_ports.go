@@ -287,6 +287,10 @@ func (pc *PipelineCoordinator) RetireDynamicFlowRuntimeActivationAttempt(ctx con
 	return pc.workflowStore.RetireDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
 
+func (pc *PipelineCoordinator) RetireDynamicFlowRuntimeActivationAttempts(ctx context.Context, attempts []DynamicFlowRuntimeActivationAttempt) error {
+	return pc.workflowStore.RetireDynamicFlowRuntimeActivationAttempts(ctx, attempts)
+}
+
 func (pc *PipelineCoordinator) AbandonDynamicFlowRuntimeActivationAttempt(ctx context.Context, attempt DynamicFlowRuntimeActivationAttempt) error {
 	return pc.workflowStore.AbandonDynamicFlowRuntimeActivationAttempt(ctx, attempt)
 }
