@@ -43,7 +43,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"gopkg.in/yaml.v3"
 )
 
 func stubSource() semanticview.Source {
@@ -1622,10 +1621,9 @@ func TestExecutor_AuthoredEmptyRuleCannotReachSelection(t *testing.T) {
 		"rules:\n  selected: {}\n",
 		"on_complete:\n  - {}\n",
 	} {
-		var handler runtimecontracts.SystemNodeEventHandler
-		err := yaml.Unmarshal([]byte(raw), &handler)
+		handler, err := loadNodeHandlerFixture(raw)
 		if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
-			t.Fatalf("yaml.Unmarshal error = %v, want pre-execution authored-row rejection for %s", err, raw)
+			t.Fatalf("source admission error = %v, want pre-execution authored-row rejection for %s", err, raw)
 		}
 		if len(handler.Rules) != 0 || len(handler.OnComplete) != 0 {
 			t.Fatalf("rejected authored row reached executable handler: %#v", handler)
@@ -1733,13 +1731,13 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 }
 
 func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.T) {
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`rules:
+	handler, err := loadNodeHandlerFixture(`rules:
   - id: attempted-rule
     when: evaluator.failure
   - id: unmatched
     else: true
-`), &handler); err != nil {
+`)
+	if err != nil {
 		t.Fatal(err)
 	}
 	node := testRootExecutableNode(t, "scoring-node")
@@ -1794,7 +1792,9 @@ func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
   - id: unsupported-condition
     %s: unsupported.condition
 `, tc.field, predicate) + fallback
-			if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
+			var err error
+			handler, err = loadNodeHandlerFixture(raw)
+			if err != nil {
 				t.Fatal(err)
 			}
 			node := testRootExecutableNode(t, "unsupported-condition-node")
@@ -4381,8 +4381,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 }
 
 func TestExecutor_PolicySheetRowsExecuteThroughRules(t *testing.T) {
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	handler, err := loadNodeHandlerFixture(`
 rules:
   - id: deep_scan
     case:
@@ -4392,8 +4391,9 @@ rules:
   - id: fallback
     default: true
     advances_to: fallback
-`), &handler); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+`)
+	if err != nil {
+		t.Fatalf("source admission: %v", err)
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        sourceWithFixtureStages(stubSource(), "flow-1", "pending", "pending", "deep_scan", "fallback"),
@@ -5312,8 +5312,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 
 func TestExecutor_FanOutDeliveryBarrierTriggerAndCompletionUseDisjointExecutionPaths(t *testing.T) {
 	node := testRootExecutableNode(t, "dispatcher")
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	handler, err := loadNodeHandlerFixture(`
 fan_out:
   items_from: payload.items
   as: fan_item
@@ -5332,7 +5331,8 @@ join:
       fields:
         total: ${join.total}
         succeeded: ${join.dispositions.succeeded}
-`), &handler); err != nil {
+`)
+	if err != nil {
 		t.Fatal(err)
 	}
 	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.requested", handler)
@@ -5444,8 +5444,7 @@ join:
 
 func TestExecutor_FanOutDeliveryBarrierStaleGenerationIsMutationFreeDiscard(t *testing.T) {
 	node := testRootExecutableNode(t, "dispatcher")
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`
+	handler, err := loadNodeHandlerFixture(`
 fan_out:
   items_from: payload.items
   as: fan_item
@@ -5460,7 +5459,8 @@ join:
     advances_to: complete
     emit:
       event: batch.completed
-`), &handler); err != nil {
+`)
+	if err != nil {
 		t.Fatal(err)
 	}
 	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefsForEvent(node, "batch.requested", handler)

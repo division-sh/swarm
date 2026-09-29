@@ -7,8 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
@@ -26,11 +24,7 @@ func TestEntityNestedPresenceAcrossBootConsumers(t *testing.T) {
 				case "guard":
 					handler.Guard = &rc.GuardSpec{Check: value + ` == "fallback"`}
 				case "rule":
-					var rule rc.HandlerRuleEntry
-					if err := yaml.Unmarshal([]byte("id: accept\ncondition: "+strconv.Quote(value+` == "fallback"`)), &rule); err != nil {
-						t.Fatal(err)
-					}
-					handler.Rules = []rc.HandlerRuleEntry{rule}
+					handler.Rules = mustBootHandlerFixture(t, "rules:\n  - id: accept\n    when: "+strconv.Quote(value+` == "fallback"`)+"\n  - else: true\n").Rules
 				case "write":
 					handler.DataAccumulation = rc.WorkflowDataAccumulation{Writes: []rc.WorkflowDataWrite{{TargetField: "captured", Value: rc.CELExpression(value)}}}
 				case "emit":
