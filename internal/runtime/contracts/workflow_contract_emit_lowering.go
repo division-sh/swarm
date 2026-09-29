@@ -191,24 +191,6 @@ func (b *WorkflowContractBundle) resolveEmitStructuralType(ctx EmitFieldLowering
 	return compiled.StructuralType()
 }
 
-func uniqueEmitFieldNames(groups ...[]string) []string {
-	seen := map[string]struct{}{}
-	for _, group := range groups {
-		for _, field := range group {
-			field = strings.TrimSpace(field)
-			if field != "" {
-				seen[field] = struct{}{}
-			}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for field := range seen {
-		out = append(out, field)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func emitPayloadTargetDeclared(fields map[string]struct{}, target string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -216,11 +198,6 @@ func emitPayloadTargetDeclared(fields map[string]struct{}, target string) bool {
 	}
 	_, ok := fields[target]
 	return ok
-}
-
-func emitSimplePayloadField(target string) bool {
-	target = strings.TrimSpace(target)
-	return target != "" && !strings.Contains(target, ".")
 }
 
 func emitLoweringError(ctx EmitFieldLoweringContext, message string) error {

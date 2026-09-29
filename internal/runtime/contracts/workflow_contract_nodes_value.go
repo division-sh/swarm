@@ -208,34 +208,39 @@ func projectNodeEmitValue(value yamlsource.Value) (EmitSpec, error) {
 		if err != nil {
 			return EmitSpec{}, err
 		}
-		var out EmitSpec
-		if event, present := fields["event"]; present {
-			out.Event, err = nodeValueText(event, "emit.event")
-			if err != nil {
-				return EmitSpec{}, err
-			}
-			out.Event = strings.TrimSpace(out.Event)
-		}
-		if from, present := fields["from"]; present {
-			out.From, err = nodeValueText(from, "emit.from")
-			if err != nil {
-				return EmitSpec{}, err
-			}
-			out.From = strings.TrimSpace(out.From)
-			if err := validateEmitFromSource(out.From); err != nil {
-				return EmitSpec{}, err
-			}
-		}
-		if payload, present := fields["fields"]; present {
-			out.Fields, err = projectNodeExpressionFields(payload, "emit.fields")
-			if err != nil {
-				return EmitSpec{}, err
-			}
-		}
-		return out, nil
+		return projectNodeEmitFields(fields, "emit")
 	default:
 		return EmitSpec{}, fmt.Errorf("emit at %s must be a scalar or mapping, got %s", value.Location(), value.Presence())
 	}
+}
+
+func projectNodeEmitFields(fields map[string]yamlsource.Value, owner string) (EmitSpec, error) {
+	var out EmitSpec
+	var err error
+	for _, entry := range []struct {
+		key    string
+		target *string
+	}{
+		{"event", &out.Event}, {"from", &out.From},
+	} {
+		if value, present := fields[entry.key]; present {
+			*entry.target, err = nodeValueText(value, owner+"."+entry.key)
+			if err != nil {
+				return EmitSpec{}, err
+			}
+			*entry.target = strings.TrimSpace(*entry.target)
+		}
+	}
+	if err := validateEmitFromSource(out.From); err != nil {
+		return EmitSpec{}, err
+	}
+	if payload, present := fields["fields"]; present {
+		out.Fields, err = projectNodeExpressionFields(payload, owner+".fields")
+		if err != nil {
+			return EmitSpec{}, err
+		}
+	}
+	return out, nil
 }
 
 func projectNodeOnSuccessValue(value yamlsource.Value) (HandlerOnSuccessSpec, error) {

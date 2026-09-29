@@ -316,24 +316,10 @@ func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string
 		}
 		return nil
 	}
-	var validateQuery func(kind string, query *runtimecontracts.QuerySpec) error
-	validateQuery = func(kind string, query *runtimecontracts.QuerySpec) error {
-		if query == nil {
-			return nil
-		}
-		if err := validateTarget(kind+".query", query.StoreAs); err != nil {
+	if handler.Query != nil {
+		if err := validateTarget("handler.query", handler.Query.StoreAs); err != nil {
 			return err
 		}
-		for i := range query.Queries {
-			if err := validateQuery(kind+".query", &query.Queries[i]); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
-	if err := validateQuery("handler", handler.Query); err != nil {
-		return err
 	}
 	if err := validateWrites("handler.data_accumulation", handler.DataAccumulation.Writes); err != nil {
 		return err

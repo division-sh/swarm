@@ -40,7 +40,11 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 	expectMissingField(t, reflect.TypeOf(HandlerTransitionSemantic{}), "ConfigFrom")
 	expectMissingField(t, reflect.TypeOf(HandlerTransitionSemantic{}), "Branch")
 
-	expectFieldType(t, reflect.TypeOf(ReduceSpec{}), "Params", reflect.TypeOf(map[string]ExpressionValue{}))
+	for _, typ := range []reflect.Type{reflect.TypeOf(ReduceSpec{}), reflect.TypeOf(ComputeSpec{})} {
+		if _, present := typ.FieldByName("Params"); present {
+			t.Fatalf("retired params carrier restored on %s", typ)
+		}
+	}
 	expectFieldType(t, reflect.TypeOf(WorkflowStageTopologyEdge{}), "From", reflect.TypeOf(""))
 	expectFieldType(t, reflect.TypeOf(WorkflowDataWrite{}), "Value", reflect.TypeOf(ExpressionValue{}))
 	expectFieldType(t, reflect.TypeOf(FlowInstanceVariables{}), "Variables", reflect.TypeOf(map[string]FlowVariable{}))
