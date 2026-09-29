@@ -143,6 +143,113 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 	})
 }
 
+func TestPostgresOrdinarySessionMutationChecksExpiryAfterRowLock(t *testing.T) {
+	for _, operation := range []string{"renew", "increment", "upsert", "watchdog"} {
+		t.Run(operation, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			store := admitTestPostgresStore(t, db)
+			fixture := newCompletionSettlementFixture(t, store, db, false)
+			ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
+			lease, record, err := store.AcquireLiveSession(ctx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var expiry time.Time
+			if err := db.QueryRowContext(ctx, `UPDATE agent_sessions SET lease_expires_at=clock_timestamp()+INTERVAL '1500 milliseconds' WHERE session_id=$1::uuid RETURNING lease_expires_at`, lease.SessionID).Scan(&expiry); err != nil {
+				t.Fatal(err)
+			}
+			before := snapshotRotationEffects(t, ctx, db, fixture.authority.Target.RunID)
+			blocker, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = blocker.Rollback() }()
+			if _, err := blocker.ExecContext(ctx, `SELECT 1 FROM agent_sessions WHERE session_id=$1::uuid FOR UPDATE`, lease.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			watchdog := runtimellm.ConversationWatchdogUpdate{
+				SessionID: lease.SessionID, AgentID: record.AgentID, Identity: record.Identity,
+				Watchdog: &runtimellm.ConversationWatchdog{State: "healthy_long_running", BlockingLayer: "session_execution", Action: "turn_long_running", Outcome: "observed", LastOutputAt: "2026-07-15T12:00:00Z", RecordedAt: "2026-07-15T12:00:30Z"},
+			}
+			record.Messages = []runtimellm.Message{{Role: "user", Content: "post-lock grant proof"}}
+			mutate := func(lease *sessions.Lease) error {
+				switch operation {
+				case "renew":
+					_, err := store.Renew(ctx, lease)
+					return err
+				case "increment":
+					_, err := store.IncrementTurnOutcome(ctx, lease)
+					return err
+				case "upsert":
+					return store.UpsertConversation(ctx, lease, record)
+				default:
+					return store.UpdateLiveSessionWatchdog(ctx, lease, watchdog)
+				}
+			}
+			done := make(chan error, 1)
+			go func() { done <- mutate(lease) }()
+			waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			for {
+				var waiting int
+				if err := db.QueryRowContext(waitCtx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%lease_grant_id%' AND query LIKE '%agent_sessions%'`).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				if waiting > 0 {
+					var observedAt time.Time
+					if err := db.QueryRowContext(waitCtx, `SELECT clock_timestamp()`).Scan(&observedAt); err != nil {
+						t.Fatal(err)
+					}
+					if !observedAt.Before(expiry) {
+						t.Fatalf("%s did not enter row-lock wait before grant expiry: observed=%s expiry=%s", operation, observedAt, expiry)
+					}
+					break
+				}
+				select {
+				case err := <-done:
+					t.Fatalf("%s returned before row lock released: %v", operation, err)
+				case <-waitCtx.Done():
+					t.Fatalf("%s never waited on exact session row", operation)
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			for {
+				var now time.Time
+				if err := db.QueryRowContext(waitCtx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+					t.Fatal(err)
+				}
+				if !now.Before(expiry) {
+					break
+				}
+				select {
+				case <-waitCtx.Done():
+					t.Fatal("grant did not expire while writer waited")
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+			if err := blocker.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-done:
+				if !errors.Is(err, sessions.ErrSessionLeased) {
+					t.Fatalf("expired %s result = %v, want exact-grant refusal", operation, err)
+				}
+			case <-waitCtx.Done():
+				t.Fatalf("%s did not settle after row unlock", operation)
+			}
+			requireRotationEffectsUnchanged(t, before, snapshotRotationEffects(t, ctx, db, fixture.authority.Target.RunID))
+			current, err := store.Acquire(ctx, fixture.authority.Target.AgentIdentity, fixture.leaseHolder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := mutate(current); err != nil {
+				t.Fatalf("current %s refused: %v", operation, err)
+			}
+		})
+	}
+}
+
 func TestPostgresSessionAcquireChecksExpiryAfterRowLock(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)

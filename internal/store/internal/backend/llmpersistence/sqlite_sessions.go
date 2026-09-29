@@ -354,6 +354,10 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, leaseInput *runtimesessions
 			newGrantID := uuid.NewString()
 			expires := now.Add(s.sessionLockTTL)
 			runtimeState := sqliteSessionRuntimeStateJSON(rotation.CheckpointSummary, retryReason, rec.sessionID)
+			conversation, err := json.Marshal(runtimellm.RotationCheckpointConversation(rotation.CheckpointSummary))
+			if err != nil {
+				return err
+			}
 			lease = &runtimesessions.Lease{SessionID: newID, Identity: identity, RetryReason: retryReason, RetriesFromSessionID: rec.sessionID, LockOwner: lockOwner, GrantID: newGrantID, ExpiresAt: expires}
 			var receiptJSON []byte
 			if rotation.OperationID != "" {
@@ -368,9 +372,9 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, leaseInput *runtimesessions
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source,
 				conversation, turn_count, runtime_state, lease_holder, lease_grant_id, lease_expires_at, status, created_at, updated_at,
 				rotation_operation_id, rotation_request_digest, rotation_result
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', 0, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, 0, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
 		`, newID, identity.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, runtimeState, lockOwner, newGrantID, expires, now, now,
+				fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, string(conversation), runtimeState, lockOwner, newGrantID, expires, now, now,
 				rotationReceiptValue(rotation.OperationID, rotation.OperationID != ""), rotationReceiptValue(request.Digest, rotation.OperationID != ""), receiptJSON); err != nil {
 				return fmt.Errorf("insert sqlite rotated successor session row: %w", err)
 			}
