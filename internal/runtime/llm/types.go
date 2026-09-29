@@ -200,6 +200,8 @@ type Session struct {
 	Tools                []ToolDefinition
 	Messages             []Message
 	claudeState          workspace.ClaudeState
+	pendingAsync         *Message
+	adoptedFromID        string
 }
 
 type UsageTokens struct {

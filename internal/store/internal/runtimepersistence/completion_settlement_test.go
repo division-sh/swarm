@@ -819,7 +819,8 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 					settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
 					settlement.ProviderHead.GrantID = replacement.GrantID
 					result, err := handle.SettleCompletion(ctx, settlement)
-					if !result.Committed || err == nil {
+					failure, typed := runtimefailures.As(err)
+					if !result.Committed || result.Disposition != runtimeeffects.CompletionSettlementEvidenceOnly || !typed || failure.Failure.Class != runtimefailures.ClassOutcomeUncertain {
 						t.Fatalf("stale launched settlement result=%+v err=%v", result, err)
 					}
 					requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
@@ -845,6 +846,137 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 			})
 		})
 	}
+}
+
+func TestCompletionLaunchChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		store := selected.selected.(completionSettlementTestStore)
+		if selected.postgres {
+			store = admitTestPostgresStore(t, selected.db)
+		}
+		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+		ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "grant-expiry-after-lock")
+		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
+		handle, err := beginManagedCompletionForTest(t, ctx, "claude_cli", []byte("expiry-wait"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		attemptQuery := `SELECT * FROM runtime_external_effect_attempts WHERE attempt_id=$1`
+		candidateQuery := `SELECT completion_due_at,completion_revision FROM runs WHERE run_id=$1`
+		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
+		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
+		beforeAttempt := snapshotRotationTableRows(t, readCtx, selected.db, attemptQuery, handle.Attempt().AttemptID)
+		beforeCandidate := snapshotRotationTableRows(t, readCtx, selected.db, candidateQuery, fixture.authority.Target.RunID)
+		beforeSession := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID)
+		beforeRevision := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID)
+		tx, err := selected.db.BeginTx(readCtx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		expires := time.Now().UTC().Add(250 * time.Millisecond)
+		query := `UPDATE agent_sessions SET lease_expires_at=? WHERE session_id=?`
+		if selected.postgres {
+			query = `UPDATE agent_sessions SET lease_expires_at=$1 WHERE session_id=$2::uuid`
+		}
+		if _, err := tx.ExecContext(readCtx, query, expires, fixture.sessionID); err != nil {
+			t.Fatal(err)
+		}
+		started := make(chan struct{})
+		finished := make(chan error, 1)
+		go func() {
+			close(started)
+			finished <- handle.MarkLaunched(ctx)
+		}()
+		<-started
+		if wait := time.Until(expires.Add(40 * time.Millisecond)); wait > 0 {
+			time.Sleep(wait)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-finished; err == nil {
+			t.Fatal("expired original grant launched after waiting for the session lock")
+		}
+		requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateAuthorized)
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, attemptQuery, handle.Attempt().AttemptID); !reflect.DeepEqual(beforeAttempt, after) {
+			t.Fatalf("expired launch changed attempt: before=%v after=%v", beforeAttempt, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, candidateQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeCandidate, after) {
+			t.Fatalf("expired launch changed candidate: before=%v after=%v", beforeCandidate, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeSession, after) {
+			t.Fatalf("expired launch changed session projection: before=%v after=%v", beforeSession, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeRevision, after) {
+			t.Fatalf("expired launch changed session revisions: before=%v after=%v", beforeRevision, after)
+		}
+	})
+}
+
+func TestCompletionSettlementChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		store := selected.selected.(completionSettlementTestStore)
+		if selected.postgres {
+			store = admitTestPostgresStore(t, selected.db)
+		}
+		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+		ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "grant-expiry-settlement-after-lock")
+		ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "expiry-settlement-wait")
+		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
+		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
+		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
+		beforeSession := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID)
+		beforeRevision := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID)
+		tx, err := selected.db.BeginTx(readCtx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		expires := time.Now().UTC().Add(250 * time.Millisecond)
+		query := `UPDATE agent_sessions SET lease_expires_at=? WHERE session_id=?`
+		if selected.postgres {
+			query = `UPDATE agent_sessions SET lease_expires_at=$1 WHERE session_id=$2::uuid`
+		}
+		if _, err := tx.ExecContext(readCtx, query, expires, fixture.sessionID); err != nil {
+			t.Fatal(err)
+		}
+		started := make(chan struct{})
+		type settlementOutcome struct {
+			result runtimeeffects.CompletionSettlementResult
+			err    error
+		}
+		finished := make(chan settlementOutcome, 1)
+		go func() {
+			close(started)
+			result, err := handle.SettleCompletion(ctx, settlement)
+			finished <- settlementOutcome{result, err}
+		}()
+		<-started
+		if wait := time.Until(expires.Add(40 * time.Millisecond)); wait > 0 {
+			time.Sleep(wait)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		outcome := <-finished
+		failure, typed := runtimefailures.As(outcome.err)
+		if !outcome.result.Committed || outcome.result.Disposition != runtimeeffects.CompletionSettlementEvidenceOnly || !typed || failure.Failure.Class != runtimefailures.ClassOutcomeUncertain {
+			t.Fatalf("expired settlement did not select evidence-only uncertainty: result=%+v err=%v", outcome.result, outcome.err)
+		}
+		requireExternalAttemptState(t, selected.db, !selected.postgres, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+		requireProviderHead(t, selected.db, !selected.postgres, fixture.sessionID, "provider-head-current")
+		requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateOutcomeUncertain, 1, 0)
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeSession, after) {
+			t.Fatalf("expired settlement changed session projection: before=%v after=%v", beforeSession, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeRevision, after) {
+			t.Fatalf("expired settlement changed session revisions: before=%v after=%v", beforeRevision, after)
+		}
+	})
 }
 
 func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothStores(t *testing.T) {
@@ -889,6 +1021,12 @@ func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothSt
 		beforeSession := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID)
 		beforeRevision := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID)
 		beforeAttempt := snapshotRotationTableRows(t, readCtx, selected.db, attemptQuery, handle.Attempt().AttemptID)
+		forged := projection
+		forged.GrantID = fresh.GrantID
+		forged.LockOwner = fresh.LockOwner
+		if err := store.(runtimeeffects.CompletionContinuationStore).ProjectCompletionConversation(ctx, handle.Attempt(), forged); err == nil {
+			t.Fatal("raw selected-store caller borrowed a replacement grant without recovery authority")
+		}
 		if err := handle.ProjectCompletionConversation(ctx, projection); err == nil {
 			t.Fatal("original handle projected under a replacement grant")
 		}
@@ -914,6 +1052,81 @@ func TestCompletionOriginalGrantFencesProjectionButRecoveredGrantContinuesBothSt
 		}
 		requireCompletionProjectionState(t, fixture, handle.Attempt().AttemptID, runtimeeffects.CompletionProjectionConversationProjected, 1,
 			json.RawMessage(`[{"role":"user","content":"start"},{"role":"assistant","content":"use tool"}]`))
+	})
+}
+
+func TestCompletionProjectionChecksGrantExpiryAfterSessionLockBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		store := selected.selected.(completionSettlementTestStore)
+		if selected.postgres {
+			store = admitTestPostgresStore(t, selected.db)
+		}
+		fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+		ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
+		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "grant-expiry-projection-after-lock")
+		handle := beginObservedCompletionForSettlementTest(t, ctx, "mock_python", "expiry-projection-wait")
+		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "mock_python", "", "")
+		settlement.ProviderHead = nil
+		payload, messages := completionSuccessorPayload(t, "mock_python", fixture, settlement, "agent-frame:v1:"+uuid.NewString())
+		if err := runtimeeffects.AttachCompletionContinuationEvidence(settlement.Settlement.Evidence, []byte("expiry-projection-wait"), payload); err != nil {
+			t.Fatal(err)
+		}
+		if result, err := handle.SettleCompletion(ctx, settlement); err != nil || !result.Committed {
+			t.Fatalf("settle response before expiry: result=%+v err=%v", result, err)
+		}
+		projectionMessages, err := json.Marshal(messages)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection := runtimeeffects.CompletionConversationProjection{
+			SessionID: fixture.sessionID, Identity: settlement.AgentTurn.Identity, Memory: settlement.AgentTurn.Memory,
+			ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages,
+		}
+		readCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		sessionQuery := `SELECT conversation,turn_count,runtime_state,lease_grant_id,status FROM agent_sessions WHERE run_id=$1 ORDER BY session_id`
+		revisionQuery := `SELECT * FROM run_fork_fact_revisions WHERE run_id=$1 AND family='agent_sessions' ORDER BY revision,fact_key`
+		phaseQuery := `SELECT completion_projection_phase,completion_successor_turn FROM runtime_external_effect_attempts WHERE attempt_id=$1`
+		beforeSession := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID)
+		beforeRevision := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID)
+		beforePhase := snapshotRotationTableRows(t, readCtx, selected.db, phaseQuery, handle.Attempt().AttemptID)
+		tx, err := selected.db.BeginTx(readCtx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		expires := time.Now().UTC().Add(250 * time.Millisecond)
+		query := `UPDATE agent_sessions SET lease_expires_at=? WHERE session_id=?`
+		if selected.postgres {
+			query = `UPDATE agent_sessions SET lease_expires_at=$1 WHERE session_id=$2::uuid`
+		}
+		if _, err := tx.ExecContext(readCtx, query, expires, fixture.sessionID); err != nil {
+			t.Fatal(err)
+		}
+		started := make(chan struct{})
+		finished := make(chan error, 1)
+		go func() {
+			close(started)
+			finished <- handle.ProjectCompletionConversation(ctx, projection)
+		}()
+		<-started
+		if wait := time.Until(expires.Add(40 * time.Millisecond)); wait > 0 {
+			time.Sleep(wait)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-finished; err == nil {
+			t.Fatal("expired original grant projected after waiting for the session lock")
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, sessionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeSession, after) {
+			t.Fatalf("expired projection changed session: before=%v after=%v", beforeSession, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, revisionQuery, fixture.authority.Target.RunID); !reflect.DeepEqual(beforeRevision, after) {
+			t.Fatalf("expired projection changed revisions: before=%v after=%v", beforeRevision, after)
+		}
+		if after := snapshotRotationTableRows(t, readCtx, selected.db, phaseQuery, handle.Attempt().AttemptID); !reflect.DeepEqual(beforePhase, after) {
+			t.Fatalf("expired projection advanced phase: before=%v after=%v", beforePhase, after)
+		}
 	})
 }
 

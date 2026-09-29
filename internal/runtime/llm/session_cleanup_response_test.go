@@ -68,6 +68,7 @@ func TestSessionCleanupErrorRetainsResponseAndDoesNotReplayProvider(t *testing.T
 				t.Fatal(err)
 			}
 			acquires, releases := registry.acquires, registry.releases
+			registry.releaseFaultAfter = releases + 2
 			cleanup := errors.New("independent session release failure")
 			registry.releaseErr = cleanup
 			if canceled {
@@ -78,7 +79,7 @@ func TestSessionCleanupErrorRetainsResponseAndDoesNotReplayProvider(t *testing.T
 			if err != nil || response == nil || response.Message.Content != "done" || response.completionHandle == nil {
 				t.Fatalf("acknowledged release cleanup displaced settled response: response=%+v err=%v", response, err)
 			}
-			if requests.Load() != 1 || registry.acquires != acquires+1 || registry.releases != releases+1 {
+			if requests.Load() != 1 || registry.acquires != acquires+2 || registry.releases != releases+2 {
 				t.Fatalf("replayed provider/lease operation: requests=%d acquire=%d release=%d", requests.Load(), registry.acquires-acquires, registry.releases-releases)
 			}
 			if err := probe.RequireState("openai_responses", runtimeeffects.StateSettled); err != nil {
@@ -102,11 +103,21 @@ func TestSessionCleanupErrorRetainsResponseAndDoesNotReplayProvider(t *testing.T
 			if _, err := registry.Registry.ReleaseOutcome(base, current); err != nil {
 				t.Fatal(err)
 			}
+			acquireCleanup := errors.New("recovery acquisition committed with cleanup failure")
+			registry.acquireErr = acquireCleanup
+			beforeAcquire, beforeRelease := registry.acquires, registry.releases
+			if _, err := conversation.RunManaged(base, draft); !errors.Is(err, acquireCleanup) {
+				t.Fatalf("recovery acquire failure=%v, want acknowledged cleanup cause", err)
+			}
+			if registry.acquires != beforeAcquire+1 || registry.releases != beforeRelease+1 || requests.Load() != 1 {
+				t.Fatalf("recovery acquire cleanup leaked grant or redispatched provider: acquire=%d release=%d requests=%d", registry.acquires-beforeAcquire, registry.releases-beforeRelease, requests.Load())
+			}
+			registry.acquireErr = nil
 			recovered, err := conversation.RunManaged(base, draft)
 			if err != nil || recovered == nil || recovered.Message.Content != "done" {
 				t.Fatalf("settled recovery failed: %+v err=%v", recovered, err)
 			}
-			if requests.Load() != 1 || probe.recoveries != 1 || registry.acquires != acquires+2 || registry.releases != releases+2 || len(probe.CompletionSettlementsForAdapter("openai_responses")) != 1 {
+			if requests.Load() != 1 || probe.recoveries != 2 || registry.acquires != acquires+4 || registry.releases != releases+4 || len(probe.CompletionSettlementsForAdapter("openai_responses")) != 1 {
 				t.Fatalf("cleanup error authorized replay: requests=%d recoveries=%d acquires=%d releases=%d", requests.Load(), probe.recoveries, registry.acquires-acquires, registry.releases-releases)
 			}
 		})

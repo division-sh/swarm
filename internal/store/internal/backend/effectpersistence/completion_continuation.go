@@ -481,21 +481,18 @@ func requireCompletionProjectionGrant(ctx context.Context, tx *sql.Tx, postgres 
 	if strings.TrimSpace(projection.GrantID) == "" || strings.TrimSpace(projection.LockOwner) == "" {
 		return errors.New("completion continuation requires an exact current session grant")
 	}
-	if !projection.Recovered && (projection.GrantID != attempt.SessionGrantID || projection.LockOwner != attempt.SessionLockOwner) {
-		return errors.New("live completion continuation cannot replace its original grant")
-	}
-	query := `SELECT 1 FROM agent_sessions WHERE session_id=? AND run_id=? AND lease_grant_id=? AND lease_holder=? AND lease_expires_at>? AND status='active'`
-	args := []any{projection.SessionID, projection.Identity.RunID, projection.GrantID, projection.LockOwner, time.Now().UTC()}
-	if postgres {
-		query = `SELECT 1 FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND lease_expires_at>clock_timestamp() AND status='active' FOR UPDATE`
-		args = args[:4]
-	}
-	var one int
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&one); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("completion continuation current session grant is stale")
+	if projection.GrantID != attempt.SessionGrantID || projection.LockOwner != attempt.SessionLockOwner {
+		recovered, ok := attempt.RecoveredContinuationGrant()
+		if !ok || recovered.SessionID != projection.SessionID || recovered.GrantID != projection.GrantID || recovered.LockOwner != projection.LockOwner {
+			return errors.New("completion continuation cannot replace its original grant without a recovered handle")
 		}
+	}
+	current, err := exactSessionGrantCurrentTx(ctx, tx, postgres, projection.SessionID, projection.Identity.RunID, projection.GrantID, projection.LockOwner)
+	if err != nil {
 		return fmt.Errorf("check completion continuation session grant: %w", err)
+	}
+	if !current {
+		return errors.New("completion continuation current session grant is stale")
 	}
 	return nil
 }

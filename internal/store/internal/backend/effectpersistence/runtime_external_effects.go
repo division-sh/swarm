@@ -511,20 +511,51 @@ func requireAttemptSessionGrant(ctx context.Context, tx *sql.Tx, postgres bool, 
 	if strings.TrimSpace(req.SessionGrantID) == "" || strings.TrimSpace(req.SessionLockOwner) == "" {
 		return fmt.Errorf("memory provider attempt requires its exact session grant")
 	}
-	query := `SELECT 1 FROM agent_sessions WHERE session_id=? AND run_id=? AND lease_grant_id=? AND lease_holder=? AND status='active' AND lease_expires_at>?`
-	args := []any{authority.Target.SessionID, authority.Target.RunID, req.SessionGrantID, req.SessionLockOwner, req.Now.UTC()}
-	if postgres {
-		query = `SELECT 1 FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND status='active' AND lease_expires_at>clock_timestamp() FOR UPDATE`
-		args = args[:4]
-	}
-	var one int
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&one); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("memory provider attempt session grant is no longer current")
-		}
+	current, err := exactSessionGrantCurrentTx(ctx, tx, postgres, authority.Target.SessionID, authority.Target.RunID, req.SessionGrantID, req.SessionLockOwner)
+	if err != nil {
 		return fmt.Errorf("check memory provider attempt session grant: %w", err)
 	}
+	if !current {
+		return fmt.Errorf("memory provider attempt session grant is no longer current")
+	}
 	return nil
+}
+
+func exactSessionGrantCurrentTx(ctx context.Context, tx *sql.Tx, postgres bool, sessionID, runID, grantID, lockOwner string) (bool, error) {
+	query := `SELECT lease_expires_at FROM agent_sessions WHERE session_id=? AND run_id=? AND lease_grant_id=? AND lease_holder=? AND status='active'`
+	if postgres {
+		query = `SELECT lease_expires_at FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND status='active' FOR UPDATE`
+	}
+	var expiresRaw any
+	if err := tx.QueryRowContext(ctx, query, sessionID, runID, grantID, lockOwner).Scan(&expiresRaw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	expires, valid, err := sqliteTimeValue(expiresRaw)
+	if err != nil {
+		return false, fmt.Errorf("decode exact grant expiry: %w", err)
+	}
+	if !valid {
+		return false, nil
+	}
+	now, err := selectedStoreGrantDecisionNowTx(ctx, tx, postgres)
+	if err != nil {
+		return false, err
+	}
+	return expires.After(now), nil
+}
+
+func selectedStoreGrantDecisionNowTx(ctx context.Context, tx *sql.Tx, postgres bool) (time.Time, error) {
+	if !postgres {
+		return time.Now().UTC(), nil
+	}
+	var now time.Time
+	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return time.Time{}, fmt.Errorf("read grant decision time after session lock: %w", err)
+	}
+	return now.UTC(), nil
 }
 
 func requireLaunchSessionGrant(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, now time.Time) error {

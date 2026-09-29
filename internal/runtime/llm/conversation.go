@@ -267,6 +267,9 @@ func (c *Conversation) prepareManagedSession(ctx context.Context) error {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_runtime_boundary_missing", "llm-conversation", "prepare_session", nil)
 	}
 	if err := runtime.PrepareManagedSession(ctx, c.Session); err != nil {
+		if _, ok := runtimefailures.As(err); ok {
+			return err
+		}
 		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_session_preparation_failed", "llm-conversation", "prepare_session", nil, err)
 	}
 	c.Messages = append([]Message(nil), c.Session.Messages...)
@@ -279,6 +282,9 @@ func (c *Conversation) attachPendingAsync() {
 		return
 	}
 	msg := *c.pendingAsync
+	if c.Session.Memory.Enabled {
+		c.Session.pendingAsync = &msg
+	}
 	c.Session.Messages = append(c.Session.Messages, msg)
 	c.Messages = append(c.Messages, msg)
 }

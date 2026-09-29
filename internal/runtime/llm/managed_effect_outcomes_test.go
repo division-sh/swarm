@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"sync/atomic"
@@ -32,6 +33,20 @@ type effectRoundTripper struct {
 type failingMonitorSink struct{ err error }
 
 type noInvocationRoundTripper struct{ calls *atomic.Int32 }
+
+type failingSessionHeartbeatRegistry struct {
+	sessions.Registry
+	acknowledged bool
+	renewed      chan struct{}
+}
+
+func (r *failingSessionHeartbeatRegistry) Renew(_ context.Context, lease *sessions.Lease) (*sessions.Lease, error) {
+	close(r.renewed)
+	if r.acknowledged {
+		return lease, errors.New("renewal committed but acknowledgement failed")
+	}
+	return nil, errors.New("renewal outcome ambiguous")
+}
 
 func (s failingMonitorSink) OpenTurn(context.Context, MonitorTurnMeta) (MonitorTurnWriter, error) {
 	return nil, s.err
@@ -108,6 +123,223 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 				t.Fatal("stale provider effect reached its primitive")
 			}
 		})
+	}
+}
+
+func TestManagedHTTPProviderInvocationStopsOnSessionCancellation(t *testing.T) {
+	for _, adapter := range []string{"anthropic_api", "openai_compatible", "openai_responses"} {
+		t.Run(adapter, func(t *testing.T) {
+			started := make(chan struct{})
+			releaseServer := make(chan struct{})
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				close(started)
+				<-releaseServer
+			}))
+			defer server.Close()
+			defer close(releaseServer)
+			harness := effecttest.New()
+			base := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "cancel-"+adapter))
+			ctx, cancel := context.WithCancel(base)
+			defer cancel()
+			managed := managedProviderCallForEffectTest(t, ctx)
+			type result struct {
+				dispatch *completionDispatch
+				err      error
+			}
+			finished := make(chan result, 1)
+			go func() {
+				var dispatch *completionDispatch
+				var err error
+				switch adapter {
+				case "anthropic_api":
+					_, _, dispatch, err = (&AnthropicAPIRuntime{httpClient: server.Client(), apiURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+				case "openai_compatible":
+					_, _, dispatch, err = (&OpenAICompatibleRuntime{httpClient: server.Client(), baseURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+				case "openai_responses":
+					_, _, dispatch, err = (&OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+				}
+				finished <- result{dispatch: dispatch, err: err}
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider HTTP primitive did not start")
+			}
+			cancel()
+			var outcome result
+			select {
+			case outcome = <-finished:
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider HTTP adapter did not finish")
+			}
+			if outcome.dispatch == nil || outcome.dispatch.invocation != completionProviderInvocationStarted || outcome.err == nil || calls.Load() != 1 {
+				t.Fatalf("provider cancellation outcome dispatch=%+v err=%v calls=%d", outcome.dispatch, outcome.err, calls.Load())
+			}
+			settleEffectTestCompletionFailure(t, context.WithoutCancel(ctx), outcome.dispatch, outcome.err, runtimeeffects.StateOutcomeUncertain)
+			if err := harness.RequireState(adapter, runtimeeffects.StateOutcomeUncertain); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestManagedHTTPProviderInvocationStopsOnSessionHeartbeatFailure(t *testing.T) {
+	for _, acknowledged := range []bool{false, true} {
+		name := "ambiguous"
+		if acknowledged {
+			name = "acknowledged"
+		}
+		t.Run(name, func(t *testing.T) {
+			started := make(chan struct{})
+			releaseServer := make(chan struct{})
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				close(started)
+				<-releaseServer
+			}))
+			defer server.Close()
+			defer close(releaseServer)
+			harness := effecttest.New()
+			base := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "heartbeat-openai-responses-"+name))
+			ctx, cancel := context.WithCancel(base)
+			defer cancel()
+			managed := managedProviderCallForEffectTest(t, ctx)
+			registry := &failingSessionHeartbeatRegistry{
+				Registry: sessions.NewInMemoryRegistry(time.Minute), acknowledged: acknowledged, renewed: make(chan struct{}),
+			}
+			lease := &sessions.Lease{
+				SessionID: "heartbeat-session", GrantID: "heartbeat-grant", LockOwner: "heartbeat-owner",
+				Identity: testMemoryIdentity("effect-test-agent", "support/inst-1"), ExpiresAt: time.Now().Add(time.Second),
+			}
+			stopHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, registry, lease, func(error) { cancel() })
+			defer stopHeartbeat()
+			type result struct {
+				dispatch *completionDispatch
+				err      error
+			}
+			finished := make(chan result, 1)
+			go func() {
+				_, _, dispatch, err := (&OpenAIResponsesRuntime{httpClient: server.Client(), baseURL: server.URL, apiKey: "test"}).sendRequest(ctx, []byte(`{"model":"test"}`), managed)
+				finished <- result{dispatch: dispatch, err: err}
+			}()
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider HTTP primitive did not start")
+			}
+			select {
+			case <-registry.renewed:
+			case <-time.After(8 * time.Second):
+				t.Fatal("session heartbeat did not attempt renewal")
+			}
+			var outcome result
+			select {
+			case outcome = <-finished:
+			case <-time.After(5 * time.Second):
+				t.Fatal("provider HTTP primitive survived session heartbeat failure")
+			}
+			if outcome.dispatch == nil || outcome.dispatch.invocation != completionProviderInvocationStarted || outcome.err == nil || calls.Load() != 1 {
+				t.Fatalf("heartbeat cancellation outcome dispatch=%+v err=%v calls=%d", outcome.dispatch, outcome.err, calls.Load())
+			}
+			settleEffectTestCompletionFailure(t, context.WithoutCancel(ctx), outcome.dispatch, outcome.err, runtimeeffects.StateOutcomeUncertain)
+		})
+	}
+}
+
+func TestManagedClaudeProcessStopsOnSessionCancellation(t *testing.T) {
+	dir := t.TempDir()
+	marker, script := dir+"/started", dir+"/docker"
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n: >"+marker+"\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness := effecttest.New()
+	base := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "cancel-claude"))
+	ctx, cancel := context.WithCancel(base)
+	defer cancel()
+	profile, model := testClaudeProviderSelection(t)
+	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatch := newCompletionDispatch(attempt, "")
+	dispatch.providerModel = model
+	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = script
+	cfg.LLM.ClaudeCLI.Command = "claude"
+	cfg.LLM.ClaudeCLI.OutputFormat = "json"
+	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "effect-test", nil, nil, nil)
+	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	finished := make(chan error, 1)
+	go func() {
+		_, runErr := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Backend: workspace.BackendDocker, Container: "effect-test", Workdir: "/workspace", ClaudeState: claudeStateStub{}}, "request", MonitorTurnMeta{}, dispatch, profile, model)
+		finished <- runErr
+	}()
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		select {
+		case err := <-finished:
+			t.Fatalf("Claude process exited before cancellation: %v", err)
+		case <-deadline:
+			t.Fatal("Claude process did not start")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case err := <-finished:
+		if err == nil || dispatch.invocation != completionProviderInvocationStarted {
+			t.Fatalf("Claude process cancellation err=%v invocation=%d", err, dispatch.invocation)
+		}
+		settleClaudeTestCompletionFailure(t, harness, context.WithoutCancel(ctx), dispatch, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Claude process survived session cancellation")
+	}
+}
+
+func TestManagedMockPrimitiveStopsOnSessionCancellation(t *testing.T) {
+	harness := effecttest.New()
+	base := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "cancel-mock"))
+	ctx, cancel := context.WithCancel(base)
+	defer cancel()
+	model := llmselection.ResolvedModel{ConcreteModel: "test-model"}
+	managed := managedProviderCallForEffectTest(t, ctx)
+	started := make(chan struct{})
+	var calls atomic.Int32
+	type result struct {
+		dispatch *completionDispatch
+		err      error
+	}
+	finished := make(chan result, 1)
+	go func() {
+		actor := runtimeactors.AgentConfig{ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock}
+		_, _, _, dispatch, err := executeMockCompletionWithExecutor(ctx, actor, nil, []byte(`{"round":1}`), model, false, managed, func(providerCtx context.Context, _ pythonmodule.Request) (pythonmodule.Result, error) {
+			calls.Add(1)
+			close(started)
+			<-providerCtx.Done()
+			return pythonmodule.Result{}, providerCtx.Err()
+		})
+		finished <- result{dispatch: dispatch, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("mock provider primitive did not start")
+	}
+	cancel()
+	select {
+	case outcome := <-finished:
+		if outcome.err == nil || outcome.dispatch == nil || outcome.dispatch.invocation != completionProviderInvocationStarted || calls.Load() != 1 {
+			t.Fatalf("mock cancellation outcome=%+v calls=%d", outcome, calls.Load())
+		}
+		settleEffectTestCompletionFailure(t, context.WithoutCancel(ctx), outcome.dispatch, outcome.err, runtimeeffects.StateOutcomeUncertain)
+	case <-time.After(5 * time.Second):
+		t.Fatal("mock primitive survived session cancellation")
 	}
 }
 
@@ -275,7 +507,7 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start claude attempt heartbeat: %v", err)
 	}
-	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{}, dispatch)
+	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{}, dispatch)
 	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
 		t.Fatalf("stop claude attempt heartbeat: %v", heartbeatErr)
 	}
@@ -327,7 +559,7 @@ func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start claude attempt heartbeat: %v", err)
 	}
-	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{AgentID: harness.Token.AgentID}, dispatch)
+	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{AgentID: harness.Token.AgentID}, dispatch)
 	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
 		t.Fatalf("stop claude attempt heartbeat: %v", heartbeatErr)
 	}
@@ -357,7 +589,7 @@ func TestManagedClaudeCLIStartedProcessIsTurnEligible(t *testing.T) {
 		t.Fatalf("start Claude attempt heartbeat: %v", err)
 	}
 	_, runErr := (&ClaudeCLIRuntime{}).runStreamingPrepared(
-		heartbeatCtx, exec.Command("sh", "-lc", "exit 23"), nil, time.Second, "request", MonitorTurnMeta{}, dispatch,
+		heartbeatCtx, heartbeatCtx, exec.Command("sh", "-lc", "exit 23"), nil, time.Second, "request", MonitorTurnMeta{}, dispatch,
 	)
 	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
 		t.Fatalf("stop Claude attempt heartbeat: %v", heartbeatErr)

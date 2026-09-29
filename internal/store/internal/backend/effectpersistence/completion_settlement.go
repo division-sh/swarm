@@ -64,11 +64,16 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 				return err
 			}
 			if permit.Kind == completionSettlementCurrent && !currentGrant {
-				outcome.providerHeadErr = fmt.Errorf("completion session grant is no longer current")
+				outcome.disposition = runtimeeffects.CompletionSettlementEvidenceOnly
+				outcome.providerHeadErr = runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "completion_session_grant_lost_after_launch", "external-effects", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
 				attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, outcome.providerHeadErr)
 			}
 			if permit.Kind == completionSettlementCurrent && currentGrant && attemptSettlement.ProviderHead != nil {
 				req := completionProviderHeadSettlement(attempt, attemptSettlement)
+				req.Now, err = selectedStoreGrantDecisionNowTx(txctx, tx, true)
+				if err != nil {
+					return err
+				}
 				if req.GrantID != attempt.SessionGrantID || req.LockOwner != attempt.SessionLockOwner {
 					outcome.providerHeadErr = fmt.Errorf("completion provider head grant differs from original attempt")
 				} else {
@@ -185,11 +190,16 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 				return err
 			}
 			if permit.Kind == completionSettlementCurrent && !currentGrant {
-				outcome.providerHeadErr = fmt.Errorf("completion session grant is no longer current")
+				outcome.disposition = runtimeeffects.CompletionSettlementEvidenceOnly
+				outcome.providerHeadErr = runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "completion_session_grant_lost_after_launch", "external-effects", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
 				attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, outcome.providerHeadErr)
 			}
 			if permit.Kind == completionSettlementCurrent && currentGrant && attemptSettlement.ProviderHead != nil {
 				req := completionProviderHeadSettlement(attempt, attemptSettlement)
+				req.Now, err = selectedStoreGrantDecisionNowTx(txctx, tx, false)
+				if err != nil {
+					return err
+				}
 				if req.GrantID != attempt.SessionGrantID || req.LockOwner != attempt.SessionLockOwner {
 					outcome.providerHeadErr = fmt.Errorf("completion provider head grant differs from original attempt")
 				} else {
@@ -285,7 +295,7 @@ func completionProviderHeadUncertainty(settlement runtimeeffects.CompletionSettl
 	return settlement
 }
 
-func completionSessionGrantCurrent(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, now time.Time) (bool, error) {
+func completionSessionGrantCurrent(ctx context.Context, tx *sql.Tx, postgres bool, attempt runtimeeffects.Attempt, _ time.Time) (bool, error) {
 	target := attempt.Authority.Target
 	if target.Kind != runtimeeffects.UsageTargetAgentTurn || !target.Memory.Enabled {
 		return true, nil
@@ -304,20 +314,11 @@ func completionSessionGrantCurrent(ctx context.Context, tx *sql.Tx, postgres boo
 	if recordedGrant != attempt.SessionGrantID || recordedOwner != attempt.SessionLockOwner {
 		return false, fmt.Errorf("completion attempt grant attachment differs from durable admission")
 	}
-	query = `SELECT 1 FROM agent_sessions WHERE session_id=? AND run_id=? AND lease_grant_id=? AND lease_holder=? AND lease_expires_at>? AND status='active'`
-	args := []any{target.SessionID, target.RunID, attempt.SessionGrantID, attempt.SessionLockOwner, now.UTC()}
-	if postgres {
-		query = `SELECT 1 FROM agent_sessions WHERE session_id=$1::uuid AND run_id=$2::uuid AND lease_grant_id=$3 AND lease_holder=$4 AND lease_expires_at>clock_timestamp() AND status='active' FOR UPDATE`
-		args = args[:4]
-	}
-	var one int
-	if err := tx.QueryRowContext(ctx, query, args...).Scan(&one); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
+	current, err := exactSessionGrantCurrentTx(ctx, tx, postgres, target.SessionID, target.RunID, attempt.SessionGrantID, attempt.SessionLockOwner)
+	if err != nil {
 		return false, fmt.Errorf("check exact completion session grant: %w", err)
 	}
-	return true, nil
+	return current, nil
 }
 
 type completionProviderHeadRequest struct {

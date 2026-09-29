@@ -68,7 +68,9 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		}
 	}()
 
-	runCtx, cancel := context.WithTimeout(heartbeatCtx, timeout)
+	providerCtx, stopProvider := completionProviderContext(ctx, heartbeatCtx)
+	defer stopProvider()
+	runCtx, cancel := context.WithTimeout(providerCtx, timeout)
 	defer cancel()
 
 	cmd, err := r.buildCommand(runCtx, args, target)
@@ -79,7 +81,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "build_command", map[string]any{"prelaunch": true})
 	}
 	if configuredCLIOutputFormat(r.cfg) == "stream-json" {
-		return r.runStreamingPrepared(runCtx, cmd, target, timeout, input, meta, dispatch)
+		return r.runStreamingPrepared(heartbeatCtx, runCtx, cmd, target, timeout, input, meta, dispatch)
 	}
 
 	var stdout bytes.Buffer
@@ -92,7 +94,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	if err := requireCompletionAttemptHeartbeat(runCtx); err != nil {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "heartbeat_attempt", map[string]any{"prelaunch": true})
 	}
-	if err := attempt.MarkLaunched(runCtx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
+	if err := attempt.MarkLaunched(heartbeatCtx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "mark_launched", map[string]any{"prelaunch": true})
 	}
 	if gateErr := completionInvocationGate(ctx, runCtx); gateErr != nil {
@@ -115,7 +117,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	}
 
 	raw := bytes.TrimSpace(stdout.Bytes())
-	if err := attempt.MarkResponseObserved(runCtx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
+	if err := attempt.MarkResponseObserved(heartbeatCtx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(raw)})
 	}
 	resp = parseCLIResponse(raw)
@@ -123,7 +125,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	return resp, nil
 }
 
-func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.Cmd, target *workspace.Target, timeout time.Duration, input string, meta MonitorTurnMeta, dispatch *completionDispatch) (*Response, error) {
+func (r *ClaudeCLIRuntime) runStreamingPrepared(settlementCtx, ctx context.Context, cmd *exec.Cmd, target *workspace.Target, timeout time.Duration, input string, meta MonitorTurnMeta, dispatch *completionDispatch) (*Response, error) {
 	if dispatch == nil || dispatch.handle == nil {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "claude-cli-adapter", "run_streaming", nil)
 	}
@@ -152,7 +154,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		defer func() { _ = monitor.Close() }()
 	}
 
-	if err := attempt.MarkLaunched(ctx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
+	if err := attempt.MarkLaunched(settlementCtx); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationLaunch) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "mark_launched", map[string]any{"prelaunch": true})
 	}
 	if gateErr := completionInvocationGate(dispatch.callerCtx, ctx); gateErr != nil {
@@ -191,7 +193,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		acc.AddLine(line)
 	}
 	resp := acc.Response()
-	if err := attempt.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
+	if err := attempt.MarkResponseObserved(settlementCtx, map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)}); !dispatch.retainCommittedMutation(err, runtimeeffects.MutationObservation) {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)})
 	}
 	if monitor != nil {
