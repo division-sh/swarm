@@ -16,6 +16,22 @@ func (s *SQLiteOwner) SetChannelClientLocale(ctx context.Context, req domain.Set
 	return setClientLocale(ctx, sqliteRunner{s}, req)
 }
 
+func requireCurrentClientLocaleOperationTx(txctx context.Context, tx *sql.Tx, d dialect, op domain.Operation) error {
+	if op.Phase == domain.PhaseFailed || op.Phase == domain.PhaseRetired {
+		return domain.ErrConflict
+	}
+	if op.Phase == domain.PhaseSucceeded {
+		activation, found, err := loadActivationBySlot(txctx, tx, d, op.SlotKey, true)
+		if err != nil {
+			return err
+		}
+		if !found || activation.OperationID != op.OperationID || activation.PrincipalID != op.PrincipalID {
+			return domain.ErrConflict
+		}
+	}
+	return nil
+}
+
 func setClientLocale(ctx context.Context, r runner, req domain.SetClientLocaleRequest) (domain.Operation, error) {
 	if err := r.require(); err != nil {
 		return domain.Operation{}, err
@@ -34,17 +50,8 @@ func setClientLocale(ctx context.Context, r runner, req domain.SetClientLocaleRe
 		if !found || op.PrincipalID != req.PrincipalID {
 			return domain.ErrNotFound
 		}
-		if op.Phase == domain.PhaseFailed || op.Phase == domain.PhaseRetired {
-			return domain.ErrConflict
-		}
-		if op.Phase == domain.PhaseSucceeded {
-			activation, found, err := loadActivationBySlot(txctx, tx, r.dialect(), op.SlotKey, true)
-			if err != nil {
-				return err
-			}
-			if !found || activation.OperationID != op.OperationID || activation.PrincipalID != op.PrincipalID {
-				return domain.ErrConflict
-			}
+		if err := requireCurrentClientLocaleOperationTx(txctx, tx, r.dialect(), op); err != nil {
+			return err
 		}
 		if op.ClientLanguage == req.Language && (op.ClientLocaleRevision == req.ExpectedRevision || op.ClientLocaleRevision == req.ExpectedRevision+1) {
 			return nil
