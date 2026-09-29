@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -93,10 +95,25 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate' AND domain='authored_field' AND path IN ('count','label','ratio','active','attributes','status','flow_path','instance_id','workflow_version')`, seed.RunID, entityID, consumed).Scan(&writes); err != nil || writes != 9 {
 				t.Fatalf("final node config-derived writes=%d err=%v", writes, err)
 			}
+			// Delivery settlement precedes the completion owner's candidate cleanup.
+			deadline := time.Now().Add(servedProofPollDeadline)
+			for {
+				var candidateSettled bool
+				if err := rt.DB.QueryRow(`SELECT completion_due_at IS NULL FROM runs WHERE run_id=$1`, seed.RunID).Scan(&candidateSettled); err != nil {
+					t.Fatal(err)
+				}
+				if candidateSettled {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("source completion candidate did not settle: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 			before := snapshotForkReceiverApplication(t, rt)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-			if duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
-				t.Fatal("source duplicate changed initialization or execution")
+			if after := snapshotForkReceiverApplication(t, rt); duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, after) {
+				t.Fatalf("source duplicate changed initialization or execution: run=%s event=%s changed_tables=%v", duplicate.RunID, duplicate.EventID, forkReceiverChangedTables(before, after))
 			}
 			for _, frontier := range []struct{ name, eventID string }{{"creating_delivery", creating}, {"settled_consumer", consumed}} {
 				t.Run(frontier.name, func(t *testing.T) {
@@ -111,8 +128,8 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 						if string(failure.Class) != "platform.dependency_unavailable" || failure.Detail.Code != "selected_contract_deferred_work_owner_unavailable" || failure.Component != "selected-contract-run-fork" || failure.Operation != "admit-deferred-work-ownership" || !failure.Retryable || failure.Deterministic || marshalErr != nil || string(capabilities) != `["dynamic_flow_instance_creation"]` {
 							t.Fatalf("wrong exact #642 refusal: %+v capabilities=%s err=%v", failure, capabilities, marshalErr)
 						}
-						if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
-							t.Fatal("refused dynamic fork mutated application/story/revision facts")
+						if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+							t.Fatalf("refused dynamic fork mutated application/story/revision facts: changed_tables=%v", forkReceiverChangedTables(before, after))
 						}
 					}
 				})
@@ -120,4 +137,22 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			t.Logf("supported source config/node consumption; fork explicitly refused: %s", wire)
 		})
 	}
+}
+
+func forkReceiverChangedTables(before, after map[string][]string) []string {
+	keys := make(map[string]struct{}, len(before)+len(after))
+	for key := range before {
+		keys[key] = struct{}{}
+	}
+	for key := range after {
+		keys[key] = struct{}{}
+	}
+	var changed []string
+	for key := range keys {
+		if !reflect.DeepEqual(before[key], after[key]) {
+			changed = append(changed, key)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }

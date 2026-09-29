@@ -757,6 +757,43 @@ func TestCoordinatorCapabilityTransfersExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestCoordinatorRetireAfterAcquirePreservesTypedRefusalAndExactReturn(t *testing.T) {
+	coordinator := &Coordinator{
+		entries: map[string]entry{"delivery": {state: ownershipCoordinator}},
+		wake:    make(chan struct{}, 1),
+	}
+	acquired, err := coordinator.Acquire("delivery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	carrier, ok := acquired.Acquired()
+	if !ok {
+		t.Fatal("delivery was not acquired")
+	}
+	if err := coordinator.Retire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, refusal := carrier.Resolve(ctx, worklifetime.DeliveryContinuationConsume)
+	if !errors.Is(refusal, errCoordinatorRetired) || !ordinaryCoordinatorStop(ctx, refusal, true) {
+		t.Fatalf("retired consumption was not a typed ordinary refusal: %v", refusal)
+	}
+	independent := errors.New("independent cleanup failed")
+	if ordinaryCoordinatorStop(ctx, errors.Join(refusal, independent), true) {
+		t.Fatal("independent failure was suppressed by retirement")
+	}
+	if resolution, err := carrier.Resolve(ctx, worklifetime.DeliveryContinuationReturn); err != nil || resolution != worklifetime.DeliveryContinuationReturned {
+		t.Fatalf("exact carrier return failed: resolution=%v err=%v", resolution, err)
+	}
+	if _, err := carrier.Resolve(ctx, worklifetime.DeliveryContinuationReturn); err == nil {
+		t.Fatal("carrier returned twice")
+	}
+	if state, ok := coordinatorOwnershipState(coordinator, "delivery"); !ok || state != ownershipCoordinator {
+		t.Fatalf("returned ownership = %v, %v; want coordinator", state, ok)
+	}
+}
+
 func TestCoordinatorCarrierReturnSignalsRedispatch(t *testing.T) {
 	authority, owner, cleanup := coordinatorTestAuthorityAndOwner(t)
 	defer cleanup()

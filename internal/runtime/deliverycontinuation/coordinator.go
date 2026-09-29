@@ -972,7 +972,7 @@ func (c *capability) Resolve(_ context.Context, intent worklifetime.DeliveryCont
 	}
 	if c.coordinator.retired && intent == worklifetime.DeliveryContinuationConsume {
 		c.coordinator.mu.Unlock()
-		return 0, errors.New("retired delivery continuation coordinator cannot admit an attempt")
+		return 0, fmt.Errorf("retired delivery continuation coordinator cannot admit an attempt: %w", errCoordinatorRetired)
 	}
 	if intent != worklifetime.DeliveryContinuationConsume {
 		c.coordinator.entries[c.deliveryID] = entry{state: ownershipCoordinator, carrier: c}
