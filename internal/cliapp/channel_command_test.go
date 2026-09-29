@@ -10,6 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/channelnative"
 )
 
 const (
@@ -18,6 +21,33 @@ const (
 	operatorChannelCLIOperation = "00000000-0000-4000-8000-000000000224"
 	operatorChannelCLIChallenge = "SWARM-AAAAAAAAAAAAAAAA"
 )
+
+func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T) {
+	for _, state := range []channelnative.QualificationState{channelnative.QualificationMissing, channelnative.QualificationInvalid, channelnative.QualificationStale, channelnative.QualificationQualified} {
+		t.Run(string(state), func(t *testing.T) {
+			language := "fr"
+			if state == channelnative.QualificationMissing {
+				language = ""
+			}
+			result := channelOnboardingResult{
+				Operation: channelonboarding.Operation{OperationID: operatorChannelCLIOperation, ClientLanguage: language},
+				Readiness: &channelonboarding.ConnectedChannelReadiness{Ready: true, NativeInbox: &channelnative.Qualification{
+					State: state, ClientLanguage: language, LocaleRevision: 2, Reason: "exact owner evidence",
+				}},
+			}
+			var output bytes.Buffer
+			writeChannelNativeQualification(&output, result)
+			text := output.String()
+			if !strings.Contains(text, "qualification: "+string(state)) || !strings.Contains(text, "exact owner evidence") {
+				t.Fatalf("qualification evidence missing: %q", text)
+			}
+			if language == "" && (!strings.Contains(text, "resume "+operatorChannelCLIOperation) ||
+				strings.Contains(text, "--client-language en") || strings.Contains(text, "--client-language fr")) {
+				t.Fatalf("missing declaration invented client language: %q", text)
+			}
+		})
+	}
+}
 
 func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 	t.Run("credential-required and list expose one exact resume path", func(t *testing.T) {

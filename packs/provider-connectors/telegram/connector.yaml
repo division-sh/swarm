@@ -214,9 +214,10 @@ tools:
     input_schema:
       type: object
       additionalProperties: false
-      required: [chat_id]
+      required: [chat_id, language_code]
       properties:
         chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+        language_code: {type: string, enum: ['', en, fr]}
     output_schema:
       type: object
       additionalProperties: false
@@ -243,6 +244,7 @@ tools:
       method: POST
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMyCommands
       body:
+        language_code: "{{input.language_code}}"
         scope:
           type: chat
           chat_id: "{{input.chat_id}}"
@@ -300,10 +302,11 @@ tools:
     input_schema:
       type: object
       additionalProperties: false
-      required: [chat_id, user_id]
+      required: [chat_id, user_id, language_code]
       properties:
         chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
         user_id: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 17}
+        language_code: {type: string, enum: ['', en, fr]}
     output_schema:
       type: object
       additionalProperties: false
@@ -330,10 +333,57 @@ tools:
       method: POST
       url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getMyCommands
       body:
+        language_code: "{{input.language_code}}"
         scope:
           type: chat_member
           chat_id: "{{input.chat_id}}"
           user_id: "{{input.user_id}}"
+  telegram.read_chat_menu_button:
+    category: provider_registration
+    description: read the private chat launcher without changing it
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [chat_id]
+      properties:
+        chat_id: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [launcher]
+      properties:
+        launcher: {type: string, enum: [commands, default, web_app]}
+    response_success: {kind: json_field_equals, path: response.body.ok, equals: true}
+    response_mapping:
+      launcher: "{{response.body.result.type}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getChatMenuButton
+      body:
+        chat_id: "{{input.chat_id}}"
+  telegram.read_default_menu_button:
+    category: provider_registration
+    description: read the default private chat launcher without changing it
+    handler_type: http
+    effect_class: read_only
+    credentials: [telegram_bot_token]
+    input_schema: {type: object, additionalProperties: false}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [launcher]
+      properties:
+        launcher: {type: string, enum: [commands, default, web_app]}
+    response_success: {kind: json_field_equals, path: response.body.ok, equals: true}
+    response_mapping:
+      launcher: "{{response.body.result.type}}"
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/getChatMenuButton
+      body: {}
   telegram.identify_bot:
     category: provider_registration
     description: identify the Telegram bot webhook slot

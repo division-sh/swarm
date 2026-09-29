@@ -1545,6 +1545,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	}
 	connectedChannelReadiness := &serveConnectedChannelReadiness{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
+		native:      stores.ChannelNative(),
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
 	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
