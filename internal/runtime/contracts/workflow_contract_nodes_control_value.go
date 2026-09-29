@@ -160,29 +160,5 @@ func projectNodeGuardEscalationValue(value yamlsource.Value) (EmitSpec, error) {
 	if err != nil {
 		return EmitSpec{}, err
 	}
-	var out EmitSpec
-	if event, present := fields["event"]; present {
-		out.Event, err = nodeValueText(event, "guard.on_fail.escalate.event")
-		if err != nil {
-			return EmitSpec{}, err
-		}
-		out.Event = strings.TrimSpace(out.Event)
-	}
-	if from, present := fields["from"]; present {
-		out.From, err = nodeValueText(from, "guard.on_fail.escalate.from")
-		if err != nil {
-			return EmitSpec{}, err
-		}
-		out.From = strings.TrimSpace(out.From)
-		if err := validateEmitFromSource(out.From); err != nil {
-			return EmitSpec{}, err
-		}
-	}
-	if payload, present := fields["fields"]; present {
-		out.Fields, err = projectNodeExpressionFields(payload, "guard.on_fail.escalate.fields")
-		if err != nil {
-			return EmitSpec{}, err
-		}
-	}
-	return out, nil
+	return projectNodeEmitFields(fields, "guard.on_fail.escalate")
 }

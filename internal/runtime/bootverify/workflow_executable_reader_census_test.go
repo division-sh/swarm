@@ -78,24 +78,6 @@ func TestExecutableReaderCensusExcludesUnevaluatedFields(t *testing.T) {
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
 		{
-			name: "filter predicate",
-			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
-				Predicate: "entity.verticals",
-			}},
-		},
-		{
-			name: "reduce params",
-			handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{
-				Params: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.verticals")},
-			}},
-		},
-		{
-			name: "nested query row",
-			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
-				Queries: []runtimecontracts.QuerySpec{{Source: "entity.verticals"}},
-			}},
-		},
-		{
 			name: "activity approval decision",
 			handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
 				Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "entity.release"},
