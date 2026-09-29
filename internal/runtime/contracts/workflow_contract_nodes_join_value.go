@@ -55,7 +55,7 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 		}
 	}
 	if completion, present := fields["on_complete"]; present && completion.Presence() != yamlsource.PresenceNull {
-		out.OnComplete, err = projectNodeJoinOutcomeValue(completion, false)
+		out.OnComplete, err = projectNodeJoinOutcomeValue(completion)
 		if err != nil {
 			return nil, err
 		}
@@ -144,12 +144,8 @@ func projectNodeJoinWindowValue(value yamlsource.Value) (*JoinWindowSpec, error)
 	return out, nil
 }
 
-func projectNodeJoinOutcomeValue(value yamlsource.Value, timeout bool) (HandlerRuleEntry, error) {
-	owner, allowed := "join.on_complete", joinOutcomeFieldOptions
-	if timeout {
-		owner, allowed = "join.timeout", joinTimeoutFieldOptions
-	}
-	fields, err := nodeValueFields(value, owner, allowed, nil)
+func projectNodeJoinOutcomeValue(value yamlsource.Value) (HandlerRuleEntry, error) {
+	fields, err := nodeValueFields(value, "join.on_complete", joinOutcomeFieldOptions, nil)
 	if err != nil {
 		return HandlerRuleEntry{}, err
 	}
