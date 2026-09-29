@@ -4,13 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/division-sh/swarm/internal/packs"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/google/uuid"
@@ -155,6 +155,31 @@ func Decode(raw []byte, hash string) (Frozen, error) {
 	return frozen, nil
 }
 
+type frozenProjectionIndex struct {
+	ProjectionVersion string `json:"projection_version"`
+	SourceKind        string `json:"source_kind"`
+	SourceID          string `json:"source_id"`
+	SourceRevision    int64  `json:"source_revision"`
+	Acknowledged      bool   `json:"acknowledged"`
+	Audience          struct {
+		PrincipalID        string `json:"principal_id"`
+		InterfaceKey       string `json:"interface_key"`
+		DeliveryEpoch      int64  `json:"delivery_epoch"`
+		ExternalAccountRef string `json:"external_account_reference"`
+		ConversationRef    string `json:"conversation_reference"`
+		ConversationScope  string `json:"conversation_scope"`
+	} `json:"audience"`
+	FullText        string                   `json:"full_text"`
+	Page            *ResponsePage            `json:"page"`
+	Prompt          *DraftPrompt             `json:"draft_prompt"`
+	Drafts          []DraftChoice            `json:"draft_choices"`
+	Chooser         *DraftChooser            `json:"draft_chooser"`
+	Recovery        *RecoveryPage            `json:"recovery_page"`
+	RecoveryChoices []RecoveryChoice         `json:"recovery_choices"`
+	ActionPage      *ActionPage              `json:"action_page"`
+	Bounds          packs.PresentationBounds `json:"presentation_bounds"`
+}
+
 func (f Frozen) Validate() error {
 	if err := f.Audience.Validate(); err != nil {
 		return err
@@ -167,33 +192,22 @@ func (f Frozen) Validate() error {
 	if err != nil || !bytes.Equal(canonical, f.Input) || f.Hash != canonicaljson.HashBytes(f.Input) {
 		return fmt.Errorf("channel render input/hash is not canonical")
 	}
-	var index struct {
-		ProjectionVersion string `json:"projection_version"`
-		SourceKind        string `json:"source_kind"`
-		SourceID          string `json:"source_id"`
-		SourceRevision    int64  `json:"source_revision"`
-		Acknowledged      bool   `json:"acknowledged"`
-		Audience          struct {
-			PrincipalID        string `json:"principal_id"`
-			InterfaceKey       string `json:"interface_key"`
-			DeliveryEpoch      int64  `json:"delivery_epoch"`
-			ExternalAccountRef string `json:"external_account_reference"`
-			ConversationRef    string `json:"conversation_reference"`
-			ConversationScope  string `json:"conversation_scope"`
-		} `json:"audience"`
-		FullText        string                   `json:"full_text"`
-		Page            *ResponsePage            `json:"page"`
-		Prompt          *DraftPrompt             `json:"draft_prompt"`
-		Drafts          []DraftChoice            `json:"draft_choices"`
-		Chooser         *DraftChooser            `json:"draft_chooser"`
-		Recovery        *RecoveryPage            `json:"recovery_page"`
-		RecoveryChoices []RecoveryChoice         `json:"recovery_choices"`
-		ActionPage      *ActionPage              `json:"action_page"`
-		Bounds          packs.PresentationBounds `json:"presentation_bounds"`
-	}
+	var index frozenProjectionIndex
 	if err := json.Unmarshal(f.Input, &index); err != nil {
 		return err
 	}
+	for _, validate := range []func(frozenProjectionIndex) error{
+		f.validateFrozenIdentity, f.validateFrozenPages, f.validateFrozenPrompt,
+		f.validateFrozenChooser, f.validateFrozenRecovery,
+	} {
+		if err := validate(index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f Frozen) validateFrozenIdentity(index frozenProjectionIndex) error {
 	if index.ProjectionVersion != ProjectionVersion || index.SourceKind != f.SourceKind ||
 		index.SourceID != f.SourceID || index.SourceRevision != f.Revision || index.FullText != f.FullText ||
 		index.Acknowledged != f.NoticeAcknowledged || (f.NoticeAcknowledged && f.SourceKind != "notice") ||
@@ -203,6 +217,10 @@ func (f Frozen) Validate() error {
 		index.Audience.ConversationScope != string(f.Audience.ConversationScope) {
 		return fmt.Errorf("channel render projection index contradicts frozen input")
 	}
+	return nil
+}
+
+func (f Frozen) validateFrozenPages(index frozenProjectionIndex) error {
 	if (f.Page == nil) != (index.Page == nil) {
 		return fmt.Errorf("channel response page contradicts frozen input")
 	}
@@ -228,11 +246,19 @@ func (f Frozen) Validate() error {
 	if f.Page != nil && (f.SourceKind != "response" || !f.Page.Valid() || *f.Page != *index.Page) {
 		return fmt.Errorf("channel response page is invalid")
 	}
+	return nil
+}
+
+func (f Frozen) validateFrozenPrompt(index frozenProjectionIndex) error {
 	if (f.Prompt == nil) != (index.Prompt == nil) || f.Prompt != nil &&
 		(f.SourceKind != "card" || *f.Prompt != *index.Prompt || uuid.Validate(f.Prompt.DraftID) != nil ||
 			f.Prompt.Verdict == "" || f.Prompt.NextFieldIndex < 0 || f.Prompt.ExpiresAt.IsZero()) {
 		return fmt.Errorf("channel draft prompt contradicts frozen input")
 	}
+	return nil
+}
+
+func (f Frozen) validateFrozenChooser(index frozenProjectionIndex) error {
 	if (f.DraftChooser == nil) != (index.Chooser == nil) ||
 		len(f.DraftChoices) != len(index.Drafts) ||
 		(f.DraftChooser == nil && len(f.DraftChoices) != 0) ||
@@ -249,6 +275,10 @@ func (f Frozen) Validate() error {
 		}
 		seenDrafts[choice.DraftID] = true
 	}
+	return nil
+}
+
+func (f Frozen) validateFrozenRecovery(index frozenProjectionIndex) error {
 	if (f.Recovery == nil) != (index.Recovery == nil) || len(f.RecoveryChoices) != len(index.RecoveryChoices) ||
 		(f.Recovery == nil && len(f.RecoveryChoices) != 0) ||
 		(f.Recovery != nil && (f.SourceKind != "response" || f.Page != nil || f.Prompt != nil || f.DraftChooser != nil ||
@@ -350,6 +380,75 @@ type DraftPrompt struct {
 
 // FreezeCard accepts the exact canonical change sequence. Dispatch is an
 // independent axis for proposed-effect cards, never inferred from a verdict.
+func orderedCardChoices(card decisioncard.Card) ([]Choice, error) {
+	choices := make([]Choice, 0, len(card.Snapshot.Outcomes))
+	if card.Status == decisioncard.StatusPending {
+		keys := make([]string, 0, len(card.Snapshot.Outcomes))
+		for key := range card.Snapshot.Outcomes {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			outcome := card.Snapshot.Outcomes[key]
+			choice := Choice{Verdict: key, Label: outcome.Label}
+			if strings.TrimSpace(choice.Label) == "" {
+				choice.Label = key
+			}
+			for _, name := range outcome.InputOrder {
+				field, ok := outcome.Input[name]
+				if !ok {
+					return nil, fmt.Errorf("card outcome %s has incomplete input order", key)
+				}
+				choice.Fields = append(choice.Fields, Field{Name: name, Type: field.Type, Required: field.Required})
+			}
+			if len(choice.Fields) != len(outcome.Input) {
+				return nil, fmt.Errorf("card outcome %s has incomplete input order", key)
+			}
+			choices = append(choices, choice)
+		}
+	}
+	return choices, nil
+}
+
+func cardDraftPrompt(card decisioncard.Card, prompt DraftPrompt) (any, string, error) {
+	var promptInput any
+	line := ""
+	if prompt.DraftID != "" {
+		if card.Status != decisioncard.StatusPending || uuid.Validate(prompt.DraftID) != nil || prompt.ExpiresAt.IsZero() {
+			return nil, "", fmt.Errorf("channel draft prompt lacks current card identity")
+		}
+		outcome, found := card.Snapshot.Outcomes[prompt.Verdict]
+		if !found || prompt.NextFieldIndex < 0 || prompt.NextFieldIndex > len(outcome.InputOrder) || len(outcome.InputOrder) == 0 {
+			return nil, "", fmt.Errorf("channel draft prompt contradicts frozen outcome")
+		}
+		promptInput = map[string]any{
+			"draft_id": prompt.DraftID, "verdict": prompt.Verdict,
+			"next_field_index": prompt.NextFieldIndex, "expires_at": prompt.ExpiresAt.UTC(),
+			"optional": prompt.Optional,
+		}
+		if prompt.NextFieldIndex == len(outcome.InputOrder) {
+			line = "Input complete; decision pending"
+		} else {
+			name := outcome.InputOrder[prompt.NextFieldIndex]
+			field, found := outcome.Input[name]
+			if !found {
+				return nil, "", fmt.Errorf("channel draft prompt field is absent")
+			}
+			label := strings.TrimSpace(field.Label)
+			if label == "" {
+				label = name
+			}
+			line = "Input: " + label + " (" + field.Type + ")"
+			if field.Required {
+				line += " required"
+			} else {
+				promptInput.(map[string]any)["optional"] = true
+			}
+		}
+	}
+	return promptInput, line, nil
+}
+
 func FreezeCard(card decisioncard.Card, revision int64, dispatchState string, audience Audience, prompt DraftPrompt) (Frozen, error) {
 	if err := audience.Validate(); err != nil {
 		return Frozen{}, err
@@ -386,31 +485,9 @@ func FreezeCard(card decisioncard.Card, revision int64, dispatchState string, au
 	if err != nil {
 		return Frozen{}, err
 	}
-	choices := make([]Choice, 0, len(card.Snapshot.Outcomes))
-	if card.Status == decisioncard.StatusPending {
-		keys := make([]string, 0, len(card.Snapshot.Outcomes))
-		for key := range card.Snapshot.Outcomes {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			outcome := card.Snapshot.Outcomes[key]
-			choice := Choice{Verdict: key, Label: outcome.Label}
-			if strings.TrimSpace(choice.Label) == "" {
-				choice.Label = key
-			}
-			for _, name := range outcome.InputOrder {
-				field, ok := outcome.Input[name]
-				if !ok {
-					return Frozen{}, fmt.Errorf("card outcome %s has incomplete input order", key)
-				}
-				choice.Fields = append(choice.Fields, Field{Name: name, Type: field.Type, Required: field.Required})
-			}
-			if len(choice.Fields) != len(outcome.Input) {
-				return Frozen{}, fmt.Errorf("card outcome %s has incomplete input order", key)
-			}
-			choices = append(choices, choice)
-		}
+	choices, err := orderedCardChoices(card)
+	if err != nil {
+		return Frozen{}, err
 	}
 	lines := []string{title, subtitle, "Run: " + shortRunID(card.RunID), "Scope: " + string(scope.Kind)}
 	if scope.FlowInstance != "" {
@@ -437,40 +514,12 @@ func FreezeCard(card decisioncard.Card, revision int64, dispatchState string, au
 	if dispatchState != "" {
 		lines = append(lines, "Dispatch: "+dispatchState)
 	}
-	var promptInput any
-	if prompt.DraftID != "" {
-		if card.Status != decisioncard.StatusPending || uuid.Validate(prompt.DraftID) != nil || prompt.ExpiresAt.IsZero() {
-			return Frozen{}, fmt.Errorf("channel draft prompt lacks current card identity")
-		}
-		outcome, found := card.Snapshot.Outcomes[prompt.Verdict]
-		if !found || prompt.NextFieldIndex < 0 || prompt.NextFieldIndex > len(outcome.InputOrder) || len(outcome.InputOrder) == 0 {
-			return Frozen{}, fmt.Errorf("channel draft prompt contradicts frozen outcome")
-		}
-		promptInput = map[string]any{
-			"draft_id": prompt.DraftID, "verdict": prompt.Verdict,
-			"next_field_index": prompt.NextFieldIndex, "expires_at": prompt.ExpiresAt.UTC(),
-			"optional": prompt.Optional,
-		}
-		if prompt.NextFieldIndex == len(outcome.InputOrder) {
-			lines = append(lines, "Input complete; decision pending")
-		} else {
-			name := outcome.InputOrder[prompt.NextFieldIndex]
-			field, found := outcome.Input[name]
-			if !found {
-				return Frozen{}, fmt.Errorf("channel draft prompt field is absent")
-			}
-			label := strings.TrimSpace(field.Label)
-			if label == "" {
-				label = name
-			}
-			line := "Input: " + label + " (" + field.Type + ")"
-			if field.Required {
-				line += " required"
-			} else {
-				promptInput.(map[string]any)["optional"] = true
-			}
-			lines = append(lines, line)
-		}
+	promptInput, promptLine, err := cardDraftPrompt(card, prompt)
+	if err != nil {
+		return Frozen{}, err
+	}
+	if promptLine != "" {
+		lines = append(lines, promptLine)
 	}
 	for _, choice := range choices {
 		line := "Action: " + choice.Label

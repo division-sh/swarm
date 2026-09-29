@@ -92,7 +92,12 @@ func PersistRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, frozen 
 	if rows != 0 {
 		return "", false, fmt.Errorf("channel render insert affected %d rows", rows)
 	}
-	query = `SELECT render_id FROM channel_delivery_renders WHERE delivery_id = ? AND render_hash = ?`
+	return readExistingRenderTx(ctx, tx, deliveryID, verified, postgres)
+}
+
+func readExistingRenderTx(ctx context.Context, tx *sql.Tx, deliveryID string, verified render.Frozen, postgres bool) (string, bool, error) {
+	var id string
+	query := `SELECT render_id FROM channel_delivery_renders WHERE delivery_id = ? AND render_hash = ?`
 	if postgres {
 		query = `SELECT render_id::text FROM channel_delivery_renders WHERE delivery_id = $1::uuid AND render_hash = $2`
 	}
