@@ -192,55 +192,53 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 			}
 		}
 	}
-	rowKeys := []string{"when", "case", "range", "lookup", "validate", "compute_module", "else", "default"}
+	if err := projectNodeRulePolicyValue(value, fields, context, &out); err != nil {
+		return HandlerRuleEntry{}, err
+	}
+	return out, nil
+}
+
+func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlsource.Value, context handlerRuleDecodeContext, out *HandlerRuleEntry) error {
 	var selected string
-	for _, key := range rowKeys {
+	for _, key := range []string{"when", "case", "range", "lookup", "validate", "compute_module", "else", "default"} {
 		if _, present := fields[key]; present {
 			if selected != "" {
-				return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: rule at %s declares multiple row types", value.Location())
+				return fmt.Errorf("POLICY-SHEET-ROW: rule at %s declares multiple row types", value.Location())
 			}
 			selected = key
 		}
 	}
 	if selected != "" && context != handlerRuleDecodeContextRules {
-		return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: %s is only supported under handler.rules at %s", selected, fields[selected].Location())
+		return fmt.Errorf("POLICY-SHEET-ROW: %s is only supported under handler.rules at %s", selected, fields[selected].Location())
 	}
+	var err error
 	switch selected {
 	case "when":
 		when, err := nodeValueRequiredText(fields["when"], "rule.when")
 		if err != nil {
-			return HandlerRuleEntry{}, err
+			return err
 		}
 		if strings.EqualFold(strings.TrimSpace(when), "else") {
-			return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: when must be a CEL predicate at %s; use else: true", fields["when"].Location())
+			return fmt.Errorf("POLICY-SHEET-ROW: when must be a CEL predicate at %s; use else: true", fields["when"].Location())
 		}
 		out.Condition = strings.TrimSpace(when)
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}
 	case "else", "default":
 		allowed, err := nodeValueBool(fields[selected], "rule."+selected)
 		if err != nil || !allowed {
-			return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: %s at %s must be true", selected, fields[selected].Location())
+			return fmt.Errorf("POLICY-SHEET-ROW: %s at %s must be true", selected, fields[selected].Location())
 		}
 		out.Condition = "else"
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}
 	case "case":
 		out.Condition, out.PolicyRow, err = projectNodePolicyCaseValue(fields[selected])
-		if err != nil {
-			return HandlerRuleEntry{}, err
-		}
 	case "range":
 		out.Condition, out.PolicyRow, err = projectNodePolicyRangeValue(fields[selected])
-		if err != nil {
-			return HandlerRuleEntry{}, err
-		}
 	case "lookup", "validate", "compute_module":
 		if !out.Emit.Empty() || out.AdvancesTo != "" || !out.Activity.Empty() || out.DataAccumulation.HasWrites() || out.FanOut != nil || out.Compute != nil {
-			return HandlerRuleEntry{}, fmt.Errorf("POLICY-SHEET-ROW: %s row at %s derives a value only and cannot declare branch outputs", selected, fields[selected].Location())
+			return fmt.Errorf("POLICY-SHEET-ROW: %s row at %s derives a value only and cannot declare branch outputs", selected, fields[selected].Location())
 		}
 		out.PolicyRow, out.Compute, err = projectNodePolicyValueRow(fields[selected], selected, out.ID)
-		if err != nil {
-			return HandlerRuleEntry{}, err
-		}
 	}
-	return out, nil
+	return err
 }

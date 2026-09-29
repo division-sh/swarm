@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -25,92 +24,103 @@ func projectNodeExpressionValue(value yamlsource.Value) (ExpressionValue, error)
 		}
 		return projectNodeLiteralValue(value)
 	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
-		items, err := value.Sequence()
-		if err != nil {
-			return ExpressionValue{}, err
-		}
-		codes := make([]string, 0, len(items))
-		literals := make([]any, 0, len(items))
-		dynamic := false
-		for _, item := range items {
-			projected, err := projectNodeExpressionValue(item)
-			if err != nil {
-				return ExpressionValue{}, err
-			}
-			code, err := expressionValueCELSource(projected)
-			if err != nil {
-				return ExpressionValue{}, err
-			}
-			codes = append(codes, code)
-			literals = append(literals, projected.Literal)
-			dynamic = dynamic || projected.HasCELValue()
-		}
-		if !dynamic {
-			return LiteralExpression(literals), nil
-		}
-		return CELExpression("[" + strings.Join(codes, ", ") + "]"), nil
+		return projectNodeExpressionSequenceValue(value)
 	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		if err := value.ValidateUniqueMappings(); err != nil {
-			return ExpressionValue{}, err
-		}
-		fields, err := value.Mapping()
-		if err != nil {
-			return ExpressionValue{}, err
-		}
-		if len(fields) == 1 {
-			switch fields[0].Name {
-			case "literal":
-				return projectNodeLiteralValue(fields[0].Value)
-			case "cel", "expression", "ref", "kind":
-				return ExpressionValue{}, fmt.Errorf("retired expression value form %q at %s; use ${...} or {literal: ...}", fields[0].Name, fields[0].IntroductionLocation())
-			}
-		}
-		for _, field := range fields {
-			if field.Name != "kind" {
-				continue
-			}
-			for _, other := range fields {
-				switch other.Name {
-				case "cel", "expression", "ref", "literal":
-					return ExpressionValue{}, fmt.Errorf("retired expression value kind form at %s; use ${...} or {literal: ...}", field.IntroductionLocation())
-				}
-			}
-		}
-		codes := make(map[string]string, len(fields))
-		literals := make(map[string]any, len(fields))
-		dynamic := false
-		for _, field := range fields {
-			if field.KeyTag != "!!str" {
-				return ExpressionValue{}, fmt.Errorf("expression value object key %q at %s must be a string", field.Name, field.KeyLocation)
-			}
-			projected, err := projectNodeExpressionValue(field.Value)
-			if err != nil {
-				return ExpressionValue{}, err
-			}
-			code, err := expressionValueCELSource(projected)
-			if err != nil {
-				return ExpressionValue{}, err
-			}
-			codes[field.Name] = code
-			literals[field.Name] = projected.Literal
-			dynamic = dynamic || projected.HasCELValue()
-		}
-		if !dynamic {
-			return LiteralExpression(literals), nil
-		}
-		keys := make([]string, 0, len(codes))
-		for key := range codes {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		items := make([]string, 0, len(keys))
-		for _, key := range keys {
-			items = append(items, strconv.Quote(key)+": "+codes[key])
-		}
-		return CELExpression("{" + strings.Join(items, ", ") + "}"), nil
+		return projectNodeExpressionObjectValue(value)
 	default:
 		return ExpressionValue{}, fmt.Errorf("unsupported expression value at %s: %s", value.Location(), value.Presence())
 	}
+}
+
+func projectNodeExpressionSequenceValue(value yamlsource.Value) (ExpressionValue, error) {
+	items, err := value.Sequence()
+	if err != nil {
+		return ExpressionValue{}, err
+	}
+	codes := make([]string, 0, len(items))
+	literals := make([]any, 0, len(items))
+	dynamic := false
+	for _, item := range items {
+		projected, err := projectNodeExpressionValue(item)
+		if err != nil {
+			return ExpressionValue{}, err
+		}
+		code, err := expressionValueCELSource(projected)
+		if err != nil {
+			return ExpressionValue{}, err
+		}
+		codes = append(codes, code)
+		literals = append(literals, projected.Literal)
+		dynamic = dynamic || projected.HasCELValue()
+	}
+	if !dynamic {
+		return LiteralExpression(literals), nil
+	}
+	return CELExpression("[" + strings.Join(codes, ", ") + "]"), nil
+}
+
+func projectNodeExpressionObjectValue(value yamlsource.Value) (ExpressionValue, error) {
+	if err := value.ValidateUniqueMappings(); err != nil {
+		return ExpressionValue{}, err
+	}
+	fields, err := value.Mapping()
+	if err != nil {
+		return ExpressionValue{}, err
+	}
+	if len(fields) == 1 && fields[0].Name == "literal" {
+		return projectNodeLiteralValue(fields[0].Value)
+	}
+	if err := rejectNodeRetiredExpressionFields(fields); err != nil {
+		return ExpressionValue{}, err
+	}
+	codes := make(map[string]string, len(fields))
+	literals := make(map[string]any, len(fields))
+	dynamic := false
+	for _, field := range fields {
+		if field.KeyTag != "!!str" {
+			return ExpressionValue{}, fmt.Errorf("expression value object key %q at %s must be a string", field.Name, field.KeyLocation)
+		}
+		projected, err := projectNodeExpressionValue(field.Value)
+		if err != nil {
+			return ExpressionValue{}, err
+		}
+		code, err := expressionValueCELSource(projected)
+		if err != nil {
+			return ExpressionValue{}, err
+		}
+		codes[field.Name] = code
+		literals[field.Name] = projected.Literal
+		dynamic = dynamic || projected.HasCELValue()
+	}
+	if !dynamic {
+		return LiteralExpression(literals), nil
+	}
+	items := make([]string, 0, len(codes))
+	for _, key := range sortedContractKeys(codes) {
+		items = append(items, strconv.Quote(key)+": "+codes[key])
+	}
+	return CELExpression("{" + strings.Join(items, ", ") + "}"), nil
+}
+
+func rejectNodeRetiredExpressionFields(fields []yamlsource.MappingField) error {
+	if len(fields) == 1 {
+		switch fields[0].Name {
+		case "cel", "expression", "ref", "kind":
+			return fmt.Errorf("retired expression value form %q at %s; use ${...} or {literal: ...}", fields[0].Name, fields[0].IntroductionLocation())
+		}
+	}
+	for _, field := range fields {
+		if field.Name != "kind" {
+			continue
+		}
+		for _, other := range fields {
+			switch other.Name {
+			case "cel", "expression", "ref", "literal":
+				return fmt.Errorf("retired expression value kind form at %s; use ${...} or {literal: ...}", field.IntroductionLocation())
+			}
+		}
+	}
+	return nil
 }
 
 func projectNodeLiteralValue(value yamlsource.Value) (ExpressionValue, error) {
