@@ -56,12 +56,13 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 }
 
 type deploymentResourceFixture struct {
-	selected notifyAllChildrenStore
-	db       *sql.DB
-	source   semanticview.Source
-	runtime  notifyAllChildrenRuntime
-	topology *notifyAllChildrenProcessTopology
-	ctx      context.Context
+	selected    notifyAllChildrenStore
+	db          *sql.DB
+	postgresDSN string
+	source      semanticview.Source
+	runtime     notifyAllChildrenRuntime
+	topology    *notifyAllChildrenProcessTopology
+	ctx         context.Context
 }
 
 type deploymentFanOutDiagnostic struct {
@@ -91,8 +92,9 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 		selected := storetest.StartSQLiteRuntimeStore(t)
 		f.selected, f.db = selected, storetest.DatabaseForTest(selected)
 	case "postgres":
-		_, db, cleanup := testutil.StartPostgres(t)
+		dsn, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
+		f.postgresDSN = dsn
 		f.selected, f.db = storetest.AdmitPostgresRuntimeStore(t, db), db
 	default:
 		t.Fatalf("unknown selected backend %q", backend)
