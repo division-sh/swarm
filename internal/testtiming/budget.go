@@ -29,9 +29,10 @@ type BudgetPolicy struct {
 }
 
 type HardBudgets struct {
-	MaxShardCommandSeconds        CommandBudget `yaml:"max_shard_command_seconds"`
-	FullConformanceCommandSeconds CommandBudget `yaml:"full_conformance_command_seconds"`
-	MandatorySoakCommandSeconds   CommandBudget `yaml:"mandatory_soak_command_seconds"`
+	MaxShardCommandSeconds        CommandBudget            `yaml:"max_shard_command_seconds"`
+	FullConformanceCommandSeconds CommandBudget            `yaml:"full_conformance_command_seconds"`
+	MandatorySoakCommandSeconds   CommandBudget            `yaml:"mandatory_soak_command_seconds"`
+	UnitCommandSeconds            map[string]CommandBudget `yaml:"unit_command_seconds,omitempty"`
 }
 
 type CommandBudget struct {
@@ -160,21 +161,35 @@ func validateBudgetPolicy(policy BudgetPolicy, document *yaml.Node) error {
 		}{"hard.mandatory_soak_command_seconds", policy.Hard.MandatorySoakCommandSeconds})
 	}
 	for _, item := range budgets {
-		if !finitePositive(item.budget.LimitSeconds) {
-			return fmt.Errorf("%s.limit_seconds must be a finite positive number", item.name)
+		if err := validateCommandBudget(item.name, item.budget, document); err != nil {
+			return err
 		}
-		justification := strings.TrimSpace(item.budget.Justification)
-		if justification == "" {
-			return fmt.Errorf("%s.justification must be non-empty", item.name)
+	}
+	for id, budget := range policy.Hard.UnitCommandSeconds {
+		if strings.TrimSpace(id) != id || id == "" {
+			return fmt.Errorf("hard.unit_command_seconds has an invalid unit ID %q", id)
 		}
-		if strings.ContainsAny(justification, "\r\n") {
-			return fmt.Errorf("%s.justification must be one line", item.name)
+		if err := validateCommandBudget("hard.unit_command_seconds."+id, budget, document); err != nil {
+			return err
 		}
-		path := strings.Split(item.name+".justification", ".")
-		node := mappingPath(document, path...)
-		if node == nil || node.Style == yaml.LiteralStyle || node.Style == yaml.FoldedStyle {
-			return fmt.Errorf("%s.justification must be a plain one-line scalar", item.name)
-		}
+	}
+	return nil
+}
+
+func validateCommandBudget(name string, budget CommandBudget, document *yaml.Node) error {
+	if !finitePositive(budget.LimitSeconds) {
+		return fmt.Errorf("%s.limit_seconds must be a finite positive number", name)
+	}
+	justification := strings.TrimSpace(budget.Justification)
+	if justification == "" {
+		return fmt.Errorf("%s.justification must be non-empty", name)
+	}
+	if strings.ContainsAny(justification, "\r\n") {
+		return fmt.Errorf("%s.justification must be one line", name)
+	}
+	node := mappingPath(document, strings.Split(name+".justification", ".")...)
+	if node == nil || node.Style == yaml.LiteralStyle || node.Style == yaml.FoldedStyle {
+		return fmt.Errorf("%s.justification must be a plain one-line scalar", name)
 	}
 	return nil
 }
@@ -454,6 +469,9 @@ func EvaluateBudget(policy BudgetPolicy, opts EvaluationOptions, evidence []Comm
 		if err != nil {
 			result.Problems = append(result.Problems, err.Error())
 			continue
+		}
+		if override, ok := policy.Hard.UnitCommandSeconds[unitID]; ok {
+			budget = override
 		}
 		surfaceResult := evaluateSurface(opts.Plan, unit, budget, grouped[unitID])
 		result.Surfaces = append(result.Surfaces, surfaceResult)

@@ -10,6 +10,13 @@ hard:
   full_conformance_command_seconds:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
+  unit_command_seconds:
+    conformance-2394-reporter:
+      limit_seconds: 480
+      justification: Exact 500-row reporter conformance proof measured 421s on CI; this bound retains every selected test without widening the broad tier.
+    serveapp-i-reporter:
+      limit_seconds: 780
+      justification: Ratified two-store delayed served reporter and full readback measured 666s on CI; this bound leaves all per-store acceptance gates unchanged.
   mandatory_soak_command_seconds:
     limit_seconds: 1500
     justification: Lead approval 5743323725 requires each isolated backend's original 900s soak and 90s drain; 22m Go timeout includes bounded setup/readback and 25m command permits compilation/provisioning without changing ordinary budgets.
