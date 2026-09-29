@@ -573,8 +573,8 @@ type AccumulateSpec struct {
 	WindowPath  paths.Path `yaml:"-"`
 	DedupBy     string     `yaml:"dedup_by"`
 	DedupPath   paths.Path `yaml:"-"`
-	WindowSet   bool       `yaml:"-"`
-	DedupBySet  bool       `yaml:"-"`
+	WindowSet   bool       `yaml:"-" json:"-"`
+	DedupBySet  bool       `yaml:"-" json:"-"`
 }
 type ComputeSpec struct {
 	Operation   ComputeOperation       `yaml:"operation"`

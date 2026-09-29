@@ -42,7 +42,7 @@ type JoinMembersSpec struct {
 	ByPath          paths.Path `yaml:"-"`
 	FromFanOut      bool       `yaml:"from_fan_out"`
 	fromFound       bool
-	BySet           bool `yaml:"-"`
+	BySet           bool `yaml:"-" json:"-"`
 	fromFanOutFound bool
 }
 
@@ -59,7 +59,7 @@ type JoinWindowSpec struct {
 	FromPath paths.Path `yaml:"-"`
 	By       string     `yaml:"by"`
 	ByPath   paths.Path `yaml:"-"`
-	BySet    bool       `yaml:"-"`
+	BySet    bool       `yaml:"-" json:"-"`
 }
 
 type JoinTimeoutSpec struct {

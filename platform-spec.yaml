@@ -341,6 +341,9 @@ contract_formats:
       node decoder or alternate node-root projection cannot supply authority.
       Typed contract validators remain the semantic owners of their supported
       operations after projection.
+      An explicit empty handler mapping is a no-op; a null handler body is
+      rejected. Admission-only field-presence flags are not serialized as
+      effective node behavior.
       Authored presence survives projection when a field is forbidden by a
       typed mode or derived from a pin; empty and aliased values cannot masquerade
       as omission. A delivery join rejects every authored timeout, including
@@ -350,7 +353,8 @@ contract_formats:
       declaration and nested values and composes with event-catalog provenance;
       neither owner replaces the other's ledger. Verification, description,
       plan construction, and retained-source reconstruction consume the same
-      admitted projection.
+      admitted projection. Public provenance uses snake_case field names and
+      omits absent optional evidence, without changing the underlying ledger.
   loader_defaults:
     canonical_owner: platform-spec.yaml#filesystem_source_model.local_root_selection
     rule: Omission on a source-aware local command selects exactly the captured invocation directory; one positional directory is the only alternate. There is no upward or fallback discovery.
