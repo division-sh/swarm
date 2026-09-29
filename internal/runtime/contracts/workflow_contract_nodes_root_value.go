@@ -146,6 +146,10 @@ func projectNodeHandlerValue(value yamlsource.Value) (SystemNodeEventHandler, er
 			out.SetsGate, err = projectNodeGateEffectValue(field)
 		case "query":
 			out.Query, err = projectNodeQueryValue(field)
+		case "accumulate":
+			out.Accumulate, err = projectNodeAccumulateValue(field)
+		case "fan_out":
+			out.FanOut, err = projectNodeFanOutValue(field)
 		default:
 			return SystemNodeEventHandler{}, fmt.Errorf("source-aware projection of %s is not yet implemented at %s", name, field.Location())
 		}
