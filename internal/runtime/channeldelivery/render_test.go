@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -67,6 +68,13 @@ func TestChannelRenderFreezesFullOrderedCardWithoutPrivateAnswerEcho(t *testing.
 	if err != nil || !bytes.Equal(frozen.Input, repeated.Input) || frozen.Hash != repeated.Hash {
 		t.Fatalf("repeated freeze changed: %#v, %v", repeated, err)
 	}
+	card.DeferredUntil = now.Add(time.Hour)
+	deferred, err := FreezeCard(card, 18, "", audience, DraftPrompt{})
+	if err != nil || !strings.Contains(deferred.FullText, "Deferred until: "+card.DeferredUntil.Format(time.RFC3339Nano)) ||
+		!strings.Contains(deferred.FullText, "Decision: pending") || len(deferred.Choices) != 2 || deferred.Hash == frozen.Hash {
+		t.Fatalf("deferral did not preserve canonical pending meaning: %#v, %v", deferred, err)
+	}
+	card.DeferredUntil = time.Time{}
 	prompt := DraftPrompt{DraftID: uuid.NewString(), Verdict: "revise", NextFieldIndex: 1, ExpiresAt: now.Add(15 * time.Minute)}
 	prompted, err := FreezeCard(card, 18, "", audience, prompt)
 	if err != nil || !strings.Contains(prompted.FullText, "Input: alpha (text) required") ||
@@ -234,23 +242,24 @@ func TestChannelRecoveryInboxPagesRetainExactChoices(t *testing.T) {
 	for index := range choices {
 		choices[index] = RecoveryChoice{DeliveryID: uuid.NewString(), Label: fmt.Sprintf("Resend card %d", index)}
 	}
-	for pageIndex, wantCount := range []int{7, 7, 2} {
-		frozen, err := FreezeRecoveryInbox(uuid.NewString(), "Inbox", choices, pageIndex, audience)
+	for pageIndex := range 3 {
+		frozen, err := FreezeRecoveryInbox(uuid.NewString(), "Inbox", choices, audience)
+		if err != nil {
+			t.Fatal(err)
+		}
+		frozen, err = WithPresentation(frozen, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}, pageIndex)
 		if err != nil {
 			t.Fatal(err)
 		}
 		decoded, err := Decode(frozen.Input, frozen.Hash)
-		if err != nil || decoded.Recovery == nil || decoded.Recovery.PageIndex != pageIndex ||
+		if err != nil || decoded.Recovery == nil || decoded.ActionPage.Index != pageIndex ||
 			len(decoded.RecoveryChoices) != len(choices) || decoded.Audience != audience ||
 			!strings.Contains(decoded.FullText, "The first message may have arrived") {
 			t.Fatalf("recovery page %d changed on readback: %#v, %v", pageIndex, decoded, err)
 		}
-		if got := strings.Count(decoded.FullText, "- Resend card "); got != wantCount {
-			t.Fatalf("recovery page %d has %d visible choices, want %d", pageIndex, got, wantCount)
+		if got := strings.Count(decoded.FullText, "- Resend card "); got != len(choices) {
+			t.Fatalf("recovery page %d lost full semantic choices: %d", pageIndex, got)
 		}
-	}
-	if _, err := FreezeRecoveryInbox(uuid.NewString(), "Inbox", choices, 3, audience); err == nil {
-		t.Fatal("out-of-range recovery page was admitted")
 	}
 }
 
@@ -263,6 +272,10 @@ func TestChannelViewFullPagesRetainExactFrozenUnicode(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceRenderID := uuid.NewString()
+	source, err = WithPresentation(source, packs.PresentationBounds{Actions: 2, TextRunes: 512, LabelRunes: 24}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var reconstructed strings.Builder
 	for index := 0; ; index++ {
 		page, err := FreezeResponsePage(uuid.NewString(), source, sourceRenderID, index, audience)
@@ -275,7 +288,7 @@ func TestChannelViewFullPagesRetainExactFrozenUnicode(t *testing.T) {
 			t.Fatalf("frozen page %d changed on readback: %#v, %v", index, decoded, err)
 		}
 		presentation, truncated, err := PresentationText(decoded)
-		if err != nil || truncated || len([]rune(presentation)) > ChannelExcerptRunes {
+		if err != nil || truncated || len([]rune(presentation)) > source.Bounds.TextRunes {
 			t.Fatalf("page %d exceeds provider presentation bound: %d, truncated=%t, err=%v", index, len([]rune(presentation)), truncated, err)
 		}
 		parts := strings.SplitN(page.FullText, "\n", 2)
@@ -323,8 +336,12 @@ func TestChannelRenderExcerptPreservesFullHashAndTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	frozen, err = WithPresentation(frozen, packs.PresentationBounds{Actions: 2, TextRunes: 512, LabelRunes: 24}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	excerpt, truncated, err := PresentationText(frozen)
-	if err != nil || !truncated || len([]rune(excerpt)) > ChannelExcerptRunes ||
+	if err != nil || !truncated || len([]rune(excerpt)) > frozen.Bounds.TextRunes ||
 		!strings.Contains(excerpt, "TAIL") || strings.Contains(excerpt, strings.Repeat("a", 4000)) ||
 		frozen.Hash != canonicaljson.HashBytes(frozen.Input) {
 		t.Fatalf("excerpt = %q, truncated=%t err=%v", excerpt, truncated, err)

@@ -3,7 +3,7 @@ version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: channel
 implements: [swarm.hitl-channel/v2]
-manifest_hash: sha256:4601d5ce45daf1e9119b1d3d6f4371292b5b3e5d92240884a8624a03b46c72ee
+manifest_hash: sha256:ef9f2452081b447b888d75510c7080cff7cb73ab5cd87d3a5b28dc385d13d126
 provenance:
   source: platform
 capabilities:
