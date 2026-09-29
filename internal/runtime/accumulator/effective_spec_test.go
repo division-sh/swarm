@@ -42,8 +42,13 @@ func TestEffectiveSpecForHandlerRejectsRedeclaration(t *testing.T) {
 		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn, Aggregation: "stream", Window: "payload.window_id", DedupBy: []string{"payload.work_id"}},
 	}})
 	node := identitytest.FlowNode(t, "worker", "worker-node")
-	if _, err := EffectiveSpecForHandler(source, node, "work.requested", &runtimecontracts.AccumulateSpec{Window: "payload.other"}); err == nil || !strings.Contains(err.Error(), "must not redeclare") {
-		t.Fatalf("redeclaration error = %v, want fail-closed", err)
+	for _, spec := range []runtimecontracts.AccumulateSpec{
+		{Window: "payload.other"}, {DedupBy: "payload.other"},
+		{WindowSet: true}, {DedupBySet: true},
+	} {
+		if _, err := EffectiveSpecForHandler(source, node, "work.requested", &spec); err == nil || !strings.Contains(err.Error(), "must not redeclare") {
+			t.Fatalf("redeclaration %#v error = %v, want fail-closed", spec, err)
+		}
 	}
 }
 
