@@ -631,9 +631,18 @@ func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Con
 	if err == nil {
 		return handled, runtimepipelineobligation.Continue(), nil
 	}
+	var unclaimed *unclaimedNodeDeliveryError
+	if errors.As(err, &unclaimed) {
+		return handled, runtimepipelineobligation.Continue(), err
+	}
 	failure := runtimefailures.Normalize(err, runtimeWorkflowID, "execute_handler")
 	return handled, runtimepipelineobligation.DeadLetterExecution("handler_terminal_failure", &failure), nil
 }
+
+type unclaimedNodeDeliveryError struct{ cause error }
+
+func (e *unclaimedNodeDeliveryError) Error() string { return e.cause.Error() }
+func (e *unclaimedNodeDeliveryError) Unwrap() error { return e.cause }
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event) bool {
 	handled, _ := pc.executeNodeHandlerPlanResult(ctx, node, evt)
@@ -647,7 +656,13 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, node identity.ExecutableNode, evt events.Event, emissions *pipelineEmissionPlan) (handled, committed bool, resultErr error) {
 	var probeErr error
-	defer func() { resultErr = errors.Join(resultErr, probeErr) }()
+	claimOwned := false
+	defer func() {
+		resultErr = errors.Join(resultErr, probeErr)
+		if resultErr != nil && !claimOwned {
+			resultErr = &unclaimedNodeDeliveryError{cause: resultErr}
+		}
+	}()
 	if pc == nil {
 		return false, false, nil
 	}
@@ -693,6 +708,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 	if claimed && (claim.SubscriberClass() != runtimedelivery.SubscriberNode || claim.SubscriberID() != node.Key()) {
 		return false, false, fmt.Errorf("workflow node %s received a claim for %s/%s", node.Key(), claim.SubscriberClass(), claim.SubscriberID())
 	}
+	claimOwned = claimed
 	recoveryClaim := claimed
 	var admissionRenewal runtimedelivery.ClaimCommit
 	for {
@@ -717,6 +733,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			}
 			claim = admission.claim
 			admissionRenewal = admission.renewal
+			claimOwned = true
 		}
 		attemptCtx := runtimedelivery.WithClaim(ctx, claim)
 		probeErr = errors.Join(probeErr, pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, string(runtimedelivery.StatusInProgress)))

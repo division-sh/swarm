@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -26,6 +27,84 @@ import (
 type failOnceRetryPipelineBus struct {
 	*recordingPipelineBus
 	calls atomic.Int32
+}
+
+type failingPreclaimDeliveryStore struct {
+	runtimedelivery.Store
+	cancel  context.CancelFunc
+	failure error
+	called  bool
+}
+
+func (s *failingPreclaimDeliveryStore) ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	s.called = true
+	if s.cancel != nil {
+		s.cancel()
+	}
+	return runtimedelivery.ClaimResult{}, s.failure
+}
+
+func TestPipelinePreclaimFailurePreservesErrorAndReturnsExactCarrier(t *testing.T) {
+	independent := errors.New("independent claim-store failure")
+	for _, tc := range []struct {
+		name         string
+		failure      error
+		cancel       bool
+		wantCanceled bool
+		wantStore    bool
+	}{
+		{name: "cancellation", failure: context.Canceled, cancel: true, wantCanceled: true},
+		{name: "store_failure", failure: independent, wantStore: true},
+		{name: "joined_failure", failure: errors.Join(context.Canceled, independent), cancel: true, wantCanceled: true, wantStore: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pc, _ := newDeliveryAuthorityCoordinator(t, db)
+			runCtx := testPipelineCoordinatorRunContext(t, pc)
+			evt := seedDeliveryAuthorityEvent(t, db, runCtx)
+			seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
+			route := seedDeliveryAuthorityNodeDelivery(t, db, evt.ID(), pipelineNode(t, ".", "node-a"))
+			delivery, err := events.NewDeliveryEvent(evt, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			continuation := &scriptedWorkflowNodeContinuation{deliveryID: deliveryID}
+			ctx, cancel := context.WithCancel(runCtx)
+			defer cancel()
+			guard, err := worklifetime.NewDeliveryContinuationGuard(ctx, continuation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = worklifetime.WithDirectDeliveryCarrier(ctx, guard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &failingPreclaimDeliveryStore{Store: pc.deliveryStore, failure: tc.failure}
+			if tc.cancel {
+				store.cancel = cancel
+			}
+			pc.deliveryStore = store
+			_, _, outcome, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
+			if !store.called || err == nil || errors.Is(err, context.Canceled) != tc.wantCanceled || errors.Is(err, independent) != tc.wantStore {
+				t.Fatalf("claim called=%t error=%v; want cancellation=%t store=%t", store.called, err, tc.wantCanceled, tc.wantStore)
+			}
+			if _, settled := outcome.Disposition(); settled || !outcome.ContinueDispatch() {
+				t.Fatalf("preclaim failure requested event settlement: %+v", outcome)
+			}
+			if resolution, ok := guard.Resolution(); !ok || resolution != worklifetime.DeliveryContinuationReturned || continuation.returns.Load() != 1 || continuation.consumes.Load() != 0 {
+				t.Fatalf("carrier resolution=%v present=%t returns=%d consumes=%d; want exact return", resolution, ok, continuation.returns.Load(), continuation.consumes.Load())
+			}
+			assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), route.Recipient.ID(), 0)
+			var status string
+			if err := db.QueryRowContext(context.Background(), `SELECT status FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2`, evt.ID(), route.Recipient.ID()).Scan(&status); err != nil || status != "pending" {
+				t.Fatalf("preclaim delivery status=%q error=%v, want pending", status, err)
+			}
+		})
+	}
 }
 
 func (b *failOnceRetryPipelineBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
