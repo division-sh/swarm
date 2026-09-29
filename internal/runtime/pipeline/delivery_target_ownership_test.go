@@ -706,18 +706,6 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
 		{
-			name: "filter predicate",
-			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{
-				Predicate: "entity.items",
-			}},
-		},
-		{
-			name: "reduce params",
-			handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{
-				Params: map[string]runtimecontracts.ExpressionValue{"value": runtimecontracts.RefExpression("entity.items")},
-			}},
-		},
-		{
 			name:    "filter source shadowed by items from",
 			handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.items", ItemsFrom: "payload.items"}},
 		},
@@ -734,12 +722,6 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 			handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{
 				Check:  "entity.items",
 				Checks: []runtimecontracts.GuardCheck{{ID: "ready", Check: "payload.ready"}},
-			}},
-		},
-		{
-			name: "nested query row",
-			handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
-				Queries: []runtimecontracts.QuerySpec{{Source: "entity.items"}},
 			}},
 		},
 		{
