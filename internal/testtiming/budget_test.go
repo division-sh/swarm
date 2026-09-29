@@ -27,6 +27,72 @@ hard:
 	}
 }
 
+func TestUnitCommandBudgetRequiresReviewedOneLineEvidence(t *testing.T) {
+	base := `
+version: 1
+hard:
+  max_shard_command_seconds: {limit_seconds: 270, justification: measured broad command}
+  full_conformance_command_seconds: {limit_seconds: 330, justification: measured catalog command}
+  unit_command_seconds:
+    catalog: {limit_seconds: 400, justification: measured reporter command}
+`
+	if _, err := LoadBudgetPolicy(strings.NewReader(base)); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, policy string
+	}{
+		{"missing justification", strings.Replace(base, "justification: measured reporter command", "justification: ''", 1)},
+		{"nonpositive limit", strings.Replace(base, "limit_seconds: 400", "limit_seconds: 0", 1)},
+		{"multiline justification", strings.Replace(base, "justification: measured reporter command", "justification: |\n      measured reporter command", 1)},
+		{"unknown field", strings.Replace(base, "limit_seconds: 400", "limit_seconds: 400, invented: true", 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := LoadBudgetPolicy(strings.NewReader(tc.policy)); err == nil {
+				t.Fatal("invalid unit command budget accepted")
+			}
+		})
+	}
+}
+
+func TestCommittedReporterCommandBudgetsAreExactAndDeclared(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetFile, err := os.Open(filepath.Join(root, ".github/test-timing-budgets.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer budgetFile.Close()
+	budget, err := LoadBudgetPolicy(budgetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofFile, err := os.Open(filepath.Join(root, ".github/test-proof-plan.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proofFile.Close()
+	proof, err := testplanning.LoadPolicy(proofFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"conformance-2394-reporter": 480, "serveapp-i-reporter": 780}
+	if len(budget.Hard.UnitCommandSeconds) != len(want) {
+		t.Fatalf("unit command budgets = %v, want only reporter units", budget.Hard.UnitCommandSeconds)
+	}
+	for id, limit := range want {
+		got, ok := budget.Hard.UnitCommandSeconds[id]
+		if !ok || got.LimitSeconds != limit || got.Justification == "" {
+			t.Fatalf("%s budget = %+v, want %gs and justification", id, got, limit)
+		}
+		if _, ok := proof.Units[id]; !ok {
+			t.Fatalf("%s has no declared proof unit", id)
+		}
+	}
+}
+
 func TestCommandEvidenceRejectsPerformanceConfirmation(t *testing.T) {
 	plan := timingTestPlan(t)
 	evidence := timingTestEvidence(plan, "broad-01", "confirmation", 10)
@@ -208,6 +274,38 @@ func TestEvaluateBudgetReportsOverrunWithoutRepeatingWork(t *testing.T) {
 	for _, surface := range result.Surfaces {
 		if surface.Surface != "broad-01" && surface.Status != BudgetPass {
 			t.Fatalf("unrelated unit %s failed despite being within budget", surface.Surface)
+		}
+	}
+}
+
+func TestUnitCommandBudgetDoesNotRelaxSiblingClass(t *testing.T) {
+	plan := timingTestPlan(t)
+	policy := timingTestPolicy()
+	policy.Hard.UnitCommandSeconds = map[string]CommandBudget{
+		"catalog": {LimitSeconds: 400, Justification: "measured catalog command"},
+	}
+	values := make([]CommandEvidence, 0, len(plan.Units))
+	for _, unit := range plan.Units {
+		elapsed := 300.0
+		if unit.ID == "catalog" {
+			elapsed = 390
+		}
+		values = append(values, timingTestEvidence(plan, unit.ID, AttemptPrimary, elapsed))
+	}
+	result := EvaluateBudget(policy, EvaluationOptions{Plan: plan}, values)
+	if result.Status != BudgetFail {
+		t.Fatalf("status = %s, want broad sibling overrun", result.Status)
+	}
+	for _, surface := range result.Surfaces {
+		switch surface.Surface {
+		case "catalog":
+			if surface.Status != BudgetPass || surface.LimitSeconds != 400 {
+				t.Fatalf("overridden catalog = %+v", surface)
+			}
+		case "broad-01":
+			if surface.Status != BudgetFail || surface.LimitSeconds != 270 {
+				t.Fatalf("unrelated broad unit = %+v", surface)
+			}
 		}
 	}
 }
