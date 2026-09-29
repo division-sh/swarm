@@ -40,7 +40,7 @@ func projectNodeDataAccumulationValue(value yamlsource.Value) (WorkflowDataAccum
 
 func projectNodeDataWriteValue(value yamlsource.Value) (WorkflowDataWrite, error) {
 	if value.Presence() == yamlsource.PresenceScalar || value.Presence() == yamlsource.PresenceEmptyScalar {
-		field, err := nodeValueText(value, "data_accumulation.writes field")
+		field, err := nodeValueRequiredText(value, "data_accumulation.writes field")
 		if err != nil {
 			return WorkflowDataWrite{}, err
 		}
@@ -54,6 +54,9 @@ func projectNodeDataWriteValue(value yamlsource.Value) (WorkflowDataWrite, error
 	if err != nil {
 		return WorkflowDataWrite{}, err
 	}
+	if err := admitNodeWriteForm(value, fields); err != nil {
+		return WorkflowDataWrite{}, err
+	}
 	var out WorkflowDataWrite
 	for _, entry := range []struct {
 		key    string
@@ -64,7 +67,7 @@ func projectNodeDataWriteValue(value yamlsource.Value) (WorkflowDataWrite, error
 		{"target", &out.TargetRef},
 	} {
 		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "data_accumulation.writes."+entry.key)
+			*entry.target, err = nodeValueRequiredText(field, "data_accumulation.writes."+entry.key)
 			if err != nil {
 				return WorkflowDataWrite{}, err
 			}
@@ -94,4 +97,43 @@ func projectNodeDataWriteValue(value yamlsource.Value) (WorkflowDataWrite, error
 		return WorkflowDataWrite{}, fmt.Errorf("data_accumulation.writes at %s: %w", value.Location(), err)
 	}
 	return out, nil
+}
+
+func admitNodeWriteForm(value yamlsource.Value, fields map[string]yamlsource.Value) error {
+	allowed := "source_field target_field target_path"
+	if operation, present := fields["op"]; present {
+		name, err := nodeValueRequiredText(operation, "write.op")
+		if err != nil {
+			return err
+		}
+		switch WorkflowDataOperation(strings.TrimSpace(name)) {
+		case WorkflowDataOperationClear:
+			allowed = "op target"
+		case WorkflowDataOperationSet, WorkflowDataOperationMerge:
+			allowed = "op target key value"
+		case WorkflowDataOperationDelete:
+			allowed = "op target key"
+		case WorkflowDataOperationAppend:
+			allowed = "op target key value"
+		case WorkflowDataOperationUpdate:
+			allowed = "op target key index value"
+		default:
+			return nodeValueError(operation, fmt.Errorf("unsupported workflow data write op %q", name))
+		}
+	} else {
+		if _, mapped := fields["source_field"]; !mapped {
+			allowed = "target_field target_path value"
+		}
+		_, field := fields["target_field"]
+		_, path := fields["target_path"]
+		if field == path {
+			return nodeValueError(value, fmt.Errorf("workflow data write requires exactly one of target_field and target_path"))
+		}
+	}
+	for _, key := range sortedContractKeys(fields) {
+		if !strings.Contains(" "+allowed+" ", " "+key+" ") {
+			return nodeValueError(fields[key], fmt.Errorf("workflow data write must not declare %s in this form (allowed: %s)", key, allowed))
+		}
+	}
+	return nil
 }

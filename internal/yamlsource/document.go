@@ -108,38 +108,109 @@ func ValueFromNode(node *yaml.Node) Value {
 
 func (v Value) SemanticPath() string { return v.path }
 
-// ValidateAcyclic rejects aliases that recursively contain their target.
-// Merge expansion has its own cycle check, but ordinary mapping/sequence
-// traversal also needs this boundary before typed admission descends.
+const MaxExpandedNodes = 65536
+
+// ValidateAcyclic checks the retained graph without expanding repeated aliases.
 func (v Value) ValidateAcyclic() error {
-	var walk func(*yaml.Node, map[*yaml.Node]bool, map[*yaml.Node]bool) error
-	walk = func(node *yaml.Node, visiting, visited map[*yaml.Node]bool) error {
-		if node == nil || visited[node] {
-			return nil
+	_, err := v.aliasGraphSize(0, map[*yaml.Node]int{})
+	return err
+}
+
+// ValidateExpansion bounds effective traversal before allocating expanded values.
+// Omitted annotation occurrences do not exempt an alias used as active data.
+func (v Value) ValidateExpansion(annotations ...Value) error {
+	ignored := make(map[string]bool, len(annotations))
+	for _, annotation := range annotations {
+		ignored[annotation.SemanticPath()] = true
+	}
+	memo := map[*yaml.Node]int{}
+	var walk func(Value) (int, error)
+	walk = func(value Value) (int, error) {
+		if ignored[value.path] {
+			return 0, nil
 		}
-		if visiting[node] {
-			return fmt.Errorf("YAML-ALIAS-CYCLE: recursive alias at %s", Location{File: v.file, Line: node.Line, Column: node.Column})
+		below := false
+		for path := range ignored {
+			below = below || strings.HasPrefix(path, value.path+"[")
 		}
-		visiting[node] = true
+		if !below {
+			return value.aliasGraphSize(MaxExpandedNodes, memo)
+		}
+		var children []Value
+		switch value.Presence() {
+		case PresenceMapping, PresenceEmptyMapping:
+			fields, err := value.Mapping()
+			if err != nil {
+				return 0, err
+			}
+			for _, field := range fields {
+				children = append(children, field.Value)
+			}
+		case PresenceSequence, PresenceEmptySequence:
+			var err error
+			children, err = value.Sequence()
+			if err != nil {
+				return 0, err
+			}
+		}
+		size := 1
+		for _, child := range children {
+			count, err := walk(child)
+			if err != nil {
+				return 0, err
+			}
+			size += count
+			if size > MaxExpandedNodes {
+				return 0, value.expansionError()
+			}
+		}
+		return size, nil
+	}
+	_, err := walk(v)
+	return err
+}
+
+func (v Value) expansionError() error {
+	return fmt.Errorf("YAML-EXPANSION-LIMIT: %s at %s exceeds %d expanded source nodes", v.path, v.Location(), MaxExpandedNodes)
+}
+
+func (v Value) aliasGraphSize(limit int, memo map[*yaml.Node]int) (int, error) {
+	var walk func(*yaml.Node) (int, error)
+	walk = func(node *yaml.Node) (int, error) {
+		if node == nil {
+			return 0, nil
+		}
+		if count, known := memo[node]; known {
+			if count < 0 {
+				return 0, fmt.Errorf("YAML-ALIAS-CYCLE: recursive alias at %s", Location{File: v.file, Line: node.Line, Column: node.Column})
+			}
+			return count, nil
+		}
+		memo[node] = -1
+		children := node.Content
 		if node.Kind == yaml.AliasNode {
 			if node.Alias == nil {
-				return fmt.Errorf("YAML-ALIAS: alias at %s has no target", Location{File: v.file, Line: node.Line, Column: node.Column})
+				return 0, fmt.Errorf("YAML-ALIAS: alias at %s has no target", Location{File: v.file, Line: node.Line, Column: node.Column})
 			}
-			if err := walk(node.Alias, visiting, visited); err != nil {
-				return err
+			children = []*yaml.Node{node.Alias}
+		}
+		size := 1
+		for _, child := range children {
+			count, err := walk(child)
+			if err != nil {
+				return 0, err
 			}
-		} else {
-			for _, child := range node.Content {
-				if err := walk(child, visiting, visited); err != nil {
-					return err
+			if limit > 0 {
+				size += count
+				if size > limit {
+					return 0, v.expansionError()
 				}
 			}
 		}
-		delete(visiting, node)
-		visited[node] = true
-		return nil
+		memo[node] = size
+		return size, nil
 	}
-	return walk(v.node, map[*yaml.Node]bool{}, map[*yaml.Node]bool{})
+	return walk(v.node)
 }
 
 func (v Value) Location() Location {
@@ -285,7 +356,8 @@ func (v Value) Mapping() ([]MappingField, error) {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s at %s is %s, want mapping", v.path, v.Location(), v.Presence())
 	}
-	return collectMappingFields(node, v.file, v.path, v.descendantIntroduction(), false, Location{}, Location{}, Location{}, map[*yaml.Node]bool{})
+	remaining := MaxExpandedNodes
+	return collectMappingFields(node, v.file, v.path, v.descendantIntroduction(), false, Location{}, Location{}, Location{}, map[*yaml.Node]bool{}, &remaining)
 }
 
 func (v Value) Lookup(name string) (Lookup, error) {
@@ -364,7 +436,7 @@ func (v Value) Project(target any) error {
 	return node.Decode(target)
 }
 
-func collectMappingFields(node *yaml.Node, file, path string, introduction Location, fromMerge bool, mergeLocation, mergeValueLocation, mergeResolvedValueLocation Location, stack map[*yaml.Node]bool) ([]MappingField, error) {
+func collectMappingFields(node *yaml.Node, file, path string, introduction Location, fromMerge bool, mergeLocation, mergeValueLocation, mergeResolvedValueLocation Location, stack map[*yaml.Node]bool, remaining *int) ([]MappingField, error) {
 	node = resolvedValueNode(node)
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s is not a mapping", path)
@@ -377,6 +449,10 @@ func collectMappingFields(node *yaml.Node, file, path string, introduction Locat
 
 	out := make([]MappingField, 0, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
+		*remaining--
+		if *remaining < 0 {
+			return nil, fmt.Errorf("YAML-EXPANSION-LIMIT: %s at %s exceeds %d expanded mapping entries", path, nodeLocation(file, node), MaxExpandedNodes)
+		}
 		keyNode := resolvedValueNode(node.Content[i])
 		valueNode := node.Content[i+1]
 		if keyNode == nil || keyNode.Kind != yaml.ScalarNode {
@@ -384,7 +460,7 @@ func collectMappingFields(node *yaml.Node, file, path string, introduction Locat
 		}
 		keyLocation := Location{File: file, Line: node.Content[i].Line, Column: node.Content[i].Column}
 		if keyNode.Value == "<<" || strings.EqualFold(strings.TrimSpace(keyNode.Tag), "!!merge") {
-			merged, err := collectMergeFields(valueNode, file, path, introduction, keyLocation, stack)
+			merged, err := collectMergeFields(valueNode, file, path, introduction, keyLocation, stack, remaining)
 			if err != nil {
 				return nil, err
 			}
@@ -406,7 +482,7 @@ func collectMappingFields(node *yaml.Node, file, path string, introduction Locat
 	return out, nil
 }
 
-func collectMergeFields(node *yaml.Node, file, path string, introduction, mergeLocation Location, stack map[*yaml.Node]bool) ([]MappingField, error) {
+func collectMergeFields(node *yaml.Node, file, path string, introduction, mergeLocation Location, stack map[*yaml.Node]bool, remaining *int) ([]MappingField, error) {
 	mergeValueLocation := nodeLocation(file, authoredValueNode(node))
 	resolved := resolvedValueNode(node)
 	if resolved == nil {
@@ -419,7 +495,7 @@ func collectMergeFields(node *yaml.Node, file, path string, introduction, mergeL
 		if !validLocation(mappingIntroduction) {
 			mappingIntroduction = mergeValueLocation
 		}
-		return collectMappingFields(resolved, file, path, mappingIntroduction, true, mergeLocation, mergeValueLocation, mergeResolvedValueLocation, stack)
+		return collectMappingFields(resolved, file, path, mappingIntroduction, true, mergeLocation, mergeValueLocation, mergeResolvedValueLocation, stack, remaining)
 	case yaml.SequenceNode:
 		var out []MappingField
 		for _, item := range resolved.Content {
@@ -432,7 +508,7 @@ func collectMergeFields(node *yaml.Node, file, path string, introduction, mergeL
 			if !validLocation(itemIntroduction) {
 				itemIntroduction = itemValueLocation
 			}
-			fields, err := collectMappingFields(resolvedItem, file, path, itemIntroduction, true, mergeLocation, itemValueLocation, nodeLocation(file, resolvedItem), stack)
+			fields, err := collectMappingFields(resolvedItem, file, path, itemIntroduction, true, mergeLocation, itemValueLocation, nodeLocation(file, resolvedItem), stack, remaining)
 			if err != nil {
 				return nil, err
 			}

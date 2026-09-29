@@ -21,6 +21,34 @@ var fanOutFieldOptions = map[string]struct{}{
 	"items_from": {}, "as": {}, "identity": {}, "max_items": {}, "emit": {},
 }
 
+func nodeValueError(value yamlsource.Value, err error) error {
+	return fmt.Errorf("%s at %s (introduced at %s, resolved at %s): %w", value.SemanticPath(), value.Location(), value.IntroductionLocation(), value.ResolvedLocation(), err)
+}
+
+// Callers choose required-on-presence fields; omission remains a separate state.
+func nodeValueTexts(fields map[string]yamlsource.Value, targets map[string]*string, trim bool, nonempty ...string) error {
+	for _, key := range sortedContractKeys(targets) {
+		field, present := fields[key]
+		if !present {
+			continue
+		}
+		text, err := nodeValueText(field, key)
+		for _, required := range nonempty {
+			if key == required {
+				text, err = nodeValueRequiredText(field, key)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if trim {
+			text = strings.TrimSpace(text)
+		}
+		*targets[key] = text
+	}
+	return nil
+}
+
 // nodeValueFields admits one node-family mapping without losing the authored
 // location of aliases, merges, or duplicate effective fields.
 func nodeValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}, retired map[string]string) (map[string]yamlsource.Value, error) {
@@ -105,23 +133,11 @@ func nodeValueStringSequence(value yamlsource.Value, owner string) ([]string, er
 }
 
 func projectNodeScalarFields(fields map[string]yamlsource.Value, node *SystemNodeContract) error {
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"description", &node.Description},
-		{"execution_type", &node.ExecutionType},
-		{"state_table", &node.StateTable},
-	} {
-		value, present := fields[entry.key]
-		if !present {
-			continue
-		}
-		text, err := nodeValueText(value, entry.key)
-		if err != nil {
-			return err
-		}
-		*entry.target = text
+	if err := nodeValueTexts(fields, map[string]*string{
+		"description": &node.Description, "execution_type": &node.ExecutionType,
+		"state_table": &node.StateTable,
+	}, false); err != nil {
+		return err
 	}
 	for _, entry := range []struct {
 		key    string
@@ -160,24 +176,13 @@ func projectNodeTimerValue(value yamlsource.Value) (WorkflowTimerContract, error
 		return WorkflowTimerContract{}, err
 	}
 	var timer WorkflowTimerContract
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"id", &timer.ID}, {"stage", &timer.Stage}, {"event", &timer.Event},
-		{"owner", &timer.Owner}, {"action", &timer.Action},
-		{"cancellation", &timer.Cancellation}, {"delay", &timer.Delay},
-		{"start_on", &timer.StartOn}, {"cancel_on", &timer.CancelOn},
-	} {
-		value, present := fields[entry.key]
-		if !present {
-			continue
-		}
-		text, err := nodeValueText(value, "timer."+entry.key)
-		if err != nil {
-			return WorkflowTimerContract{}, err
-		}
-		*entry.target = text
+	if err := nodeValueTexts(fields, map[string]*string{
+		"id": &timer.ID, "stage": &timer.Stage, "event": &timer.Event,
+		"owner": &timer.Owner, "action": &timer.Action,
+		"cancellation": &timer.Cancellation, "delay": &timer.Delay,
+		"start_on": &timer.StartOn, "cancel_on": &timer.CancelOn,
+	}, false); err != nil {
+		return WorkflowTimerContract{}, err
 	}
 	if value, present := fields["recurring"]; present {
 		timer.Recurring, err = nodeValueBool(value, "timer.recurring")
@@ -217,19 +222,8 @@ func projectNodeEmitValue(value yamlsource.Value) (EmitSpec, error) {
 func projectNodeEmitFields(fields map[string]yamlsource.Value, owner string) (EmitSpec, error) {
 	var out EmitSpec
 	var err error
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"event", &out.Event}, {"from", &out.From},
-	} {
-		if value, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(value, owner+"."+entry.key)
-			if err != nil {
-				return EmitSpec{}, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{"event": &out.Event, "from": &out.From}, true); err != nil {
+		return EmitSpec{}, err
 	}
 	if err := validateEmitFromSource(out.From); err != nil {
 		return EmitSpec{}, err

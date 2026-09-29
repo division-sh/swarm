@@ -14,20 +14,11 @@ func projectNodeJoinValue(value yamlsource.Value) (*JoinSpec, error) {
 		return nil, err
 	}
 	out := &JoinSpec{}
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"id", &out.ID}, {"stage", &out.Stage}, {"output", &out.Output},
-		{"complete_when", &out.CompleteWhen}, {"remaining", &out.Remaining},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "join."+entry.key)
-			if err != nil {
-				return nil, err
-			}
-			*entry.target = strings.TrimSpace(*entry.target)
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"id": &out.ID, "stage": &out.Stage, "output": &out.Output,
+		"complete_when": &out.CompleteWhen, "remaining": &out.Remaining,
+	}, true); err != nil {
+		return nil, err
 	}
 	out.OutputPath = paths.Parse(out.Output)
 	out.Remaining = strings.ToLower(out.Remaining)
@@ -92,24 +83,12 @@ func projectNodeJoinMembersValue(value yamlsource.Value) (JoinMembersSpec, error
 		return JoinMembersSpec{}, err
 	}
 	var out JoinMembersSpec
-	if from, present := fields["from"]; present {
-		out.From, err = nodeValueText(from, "join.members.from")
-		if err != nil {
-			return JoinMembersSpec{}, err
-		}
-		out.From = strings.TrimSpace(out.From)
-		out.FromPath = paths.Parse(out.From)
-		out.fromFound = true
+	if err := nodeValueTexts(fields, map[string]*string{"from": &out.From, "by": &out.By}, true); err != nil {
+		return JoinMembersSpec{}, err
 	}
-	if by, present := fields["by"]; present {
-		out.By, err = nodeValueText(by, "join.members.by")
-		if err != nil {
-			return JoinMembersSpec{}, err
-		}
-		out.By = strings.TrimSpace(out.By)
-		out.ByPath = paths.Parse(out.By)
-		out.BySet = true
-	}
+	out.FromPath, out.ByPath = paths.Parse(out.From), paths.Parse(out.By)
+	_, out.fromFound = fields["from"]
+	_, out.BySet = fields["by"]
 	if fanOut, present := fields["from_fan_out"]; present {
 		out.FromFanOut, err = nodeValueBool(fanOut, "join.members.from_fan_out")
 		if err != nil {
@@ -126,23 +105,11 @@ func projectNodeJoinWindowValue(value yamlsource.Value) (*JoinWindowSpec, error)
 		return nil, err
 	}
 	out := &JoinWindowSpec{}
-	if from, present := fields["from"]; present {
-		out.From, err = nodeValueText(from, "join.window.from")
-		if err != nil {
-			return nil, err
-		}
-		out.From = strings.TrimSpace(out.From)
-		out.FromPath = paths.Parse(out.From)
+	if err := nodeValueTexts(fields, map[string]*string{"from": &out.From, "by": &out.By}, true); err != nil {
+		return nil, err
 	}
-	if by, present := fields["by"]; present {
-		out.By, err = nodeValueText(by, "join.window.by")
-		if err != nil {
-			return nil, err
-		}
-		out.By = strings.TrimSpace(out.By)
-		out.ByPath = paths.Parse(out.By)
-		out.BySet = true
-	}
+	out.FromPath, out.ByPath = paths.Parse(out.From), paths.Parse(out.By)
+	_, out.BySet = fields["by"]
 	return out, nil
 }
 

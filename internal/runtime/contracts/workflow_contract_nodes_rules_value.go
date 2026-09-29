@@ -59,7 +59,7 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 		return nil, fmt.Errorf("%s at %s must be a rule sequence or mapping", context, value.Location())
 	}
 	if err := validatePolicySheetRows(rows, context); err != nil {
-		return nil, err
+		return nil, nodeValueError(value, err)
 	}
 	return rows, nil
 }
@@ -149,19 +149,14 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 	if len(fields) == 0 {
 		return HandlerRuleEntry{}, fmt.Errorf("EMPTY-AUTHORED-RULE: rule at %s must not be empty", value.Location())
 	}
+	if activity, present := fields["activity"]; present && context == handlerRuleDecodeContextOnComplete {
+		return HandlerRuleEntry{}, nodeValueError(activity, fmt.Errorf("on_complete.activity is unsupported; declare activity on a handler or selection rule"))
+	}
 	out := HandlerRuleEntry{authored: true}
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"id", &out.ID}, {"description", &out.Description}, {"advances_to", &out.AdvancesTo},
-	} {
-		if field, present := fields[entry.key]; present {
-			*entry.target, err = nodeValueText(field, "rule."+entry.key)
-			if err != nil {
-				return HandlerRuleEntry{}, err
-			}
-		}
+	if err := nodeValueTexts(fields, map[string]*string{
+		"id": &out.ID, "description": &out.Description, "advances_to": &out.AdvancesTo,
+	}, false); err != nil {
+		return HandlerRuleEntry{}, err
 	}
 	if condition, present := fields["condition"]; present {
 		if context != handlerRuleDecodeContextOnComplete {
@@ -219,7 +214,7 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 			return err
 		}
 		if strings.EqualFold(strings.TrimSpace(when), "else") {
-			return fmt.Errorf("POLICY-SHEET-ROW: when must be a CEL predicate at %s; use else: true", fields["when"].Location())
+			return nodeValueError(fields["when"], fmt.Errorf("POLICY-SHEET-ROW: when must be a CEL predicate; use else: true"))
 		}
 		out.Condition = strings.TrimSpace(when)
 		out.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindWhen}
@@ -240,5 +235,8 @@ func projectNodeRulePolicyValue(value yamlsource.Value, fields map[string]yamlso
 		}
 		out.PolicyRow, out.Compute, err = projectNodePolicyValueRow(fields[selected], selected, out.ID)
 	}
-	return err
+	if err != nil {
+		return nodeValueError(fields[selected], err)
+	}
+	return nil
 }

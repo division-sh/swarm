@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -16,23 +15,11 @@ func projectNodeAccumulateValue(value yamlsource.Value) (*AccumulateSpec, error)
 	var out AccumulateSpec
 	_, out.WindowSet = fields["window"]
 	_, out.DedupBySet = fields["dedup_by"]
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"into", &out.Into}, {"from", &out.From},
-		{"description", &out.Description}, {"window", &out.Window},
-		{"dedup_by", &out.DedupBy},
-	} {
-		field, present := fields[entry.key]
-		if !present {
-			continue
-		}
-		text, err := nodeValueText(field, "accumulate."+entry.key)
-		if err != nil {
-			return nil, err
-		}
-		*entry.target = strings.TrimSpace(text)
+	if err := nodeValueTexts(fields, map[string]*string{
+		"into": &out.Into, "from": &out.From, "description": &out.Description,
+		"window": &out.Window, "dedup_by": &out.DedupBy,
+	}, true); err != nil {
+		return nil, err
 	}
 	out.WindowPath = paths.Parse(out.Window)
 	out.DedupPath = paths.Parse(out.DedupBy)
@@ -50,28 +37,18 @@ func projectNodeFanOutValue(value yamlsource.Value) (*FanOutSpec, error) {
 		return nil, err
 	}
 	var out FanOutSpec
-	for _, entry := range []struct {
-		key    string
-		target *string
-	}{
-		{"items_from", &out.ItemsFrom}, {"as", &out.As}, {"identity", &out.Identity},
-	} {
-		field, present := fields[entry.key]
-		if !present {
-			continue
-		}
-		text, err := nodeValueText(field, "fan_out."+entry.key)
-		if err != nil {
-			return nil, err
-		}
-		*entry.target = strings.TrimSpace(text)
+	if err := nodeValueTexts(fields, map[string]*string{
+		"items_from": &out.ItemsFrom, "as": &out.As, "identity": &out.Identity,
+	}, true, "identity"); err != nil {
+		return nil, err
 	}
 	if err := ValidateFanOutAlias(out.As); err != nil {
 		return nil, fmt.Errorf("fan_out.%w", err)
 	}
 	if max, present := fields["max_items"]; present {
-		if max.Presence() != yamlsource.PresenceScalar {
-			return nil, fmt.Errorf("fan_out.max_items must be a positive integer when set at %s", max.Location())
+		scalar, err := max.Scalar()
+		if err != nil || scalar.Tag != "!!int" {
+			return nil, nodeValueError(max, fmt.Errorf("fan_out.max_items must be a positive integer when set"))
 		}
 		out.MaxItemsSet = true
 		if err := max.Project(&out.MaxItems); err != nil {

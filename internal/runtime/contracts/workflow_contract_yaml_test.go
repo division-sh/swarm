@@ -2539,7 +2539,7 @@ writes:
 	if err == nil {
 		t.Fatal("expected contained operation target_path ambiguity error")
 	}
-	if !strings.Contains(err.Error(), "must use target") {
+	if !strings.Contains(err.Error(), "must not declare target_path") {
 		t.Fatalf("error = %v, want target-only rejection", err)
 	}
 }
