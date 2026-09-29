@@ -56,6 +56,14 @@ func TestReviewer2492NestedDiagnosticPath(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), path) {
 		t.Fatalf("want semantic path %s, got %v", path, err)
 	}
+	snapshot, err := yamlsource.Load([]byte("worker:\n  execution_type: system_node\n  event_handlers:\n    start:\n      rules:\n        - when: else\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
+	if err == nil || !strings.Contains(err.Error(), `$["worker"]["event_handlers"]["start"]["rules"][0]["when"]`) {
+		t.Fatalf("original motivating diagnostic must retain its exact path: %v", err)
+	}
 }
 
 func TestReviewer2492AnnotationProvenanceBound(t *testing.T) {
@@ -229,6 +237,15 @@ func TestNodeAliasMergePresenceAndSemanticDiagnostics(t *testing.T) {
 	}
 	if _, err := admitReviewNode(t, "_note: &max 2\nfan_out: {items_from: payload.rows, as: row, max_items: *max, emit: task.done}"); err != nil {
 		t.Fatal(err)
+	}
+	for _, body := range []string{
+		"_note: &source payload.rows\nreduce: {operation: sum, items_from: *source}",
+		"_note: &source {items_from: payload.rows}\ncount: {source: payload.old, <<: *source}",
+		"_note: &write {source_field: items, target_field: items}\ndata_accumulation: {writes: [*write]}",
+	} {
+		if _, err := admitReviewNode(t, body); err != nil {
+			t.Fatalf("supported alias/merge must not regress: %s: %v", body, err)
+		}
 	}
 }
 
