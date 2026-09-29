@@ -110,7 +110,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		stderrText := summarizeCLIErrorOutput(stderr.String(), secrets...)
 		stdoutText := summarizeCLIErrorOutput(stdout.String(), secrets...)
 		cause := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run", err)
-		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		if errors.Is(context.Cause(runCtx), context.DeadlineExceeded) {
 			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
 		}
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText})
@@ -182,7 +182,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(settlementCtx, ctx context.Conte
 			monitor.WriteNotice("turn.end ok=false")
 		}
 		cause := claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run_streaming", waitErr)
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
 			cause = runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
 		}
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, cause, "wait_streaming", map[string]any{"timeout": timeout.String(), "stderr": stderrText, "stdout": stdoutText})
