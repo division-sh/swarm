@@ -1191,6 +1191,10 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
+func (s *PostgresStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.SetChannelClientLocale(ctx, req)
+}
+
 func (s *PostgresStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {
 	s.eventPostgresOwner.SetEventPayloadAdmitter(admitter)
 }
@@ -2409,6 +2413,10 @@ func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, auth
 
 func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {
 	return s.runLifecycleSQLiteOwner.ServeAbandonDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
+}
+
+func (s *SQLiteRuntimeStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.SetChannelClientLocale(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) SetEventPayloadAdmitter(admitter bus.PayloadAdmitter) {

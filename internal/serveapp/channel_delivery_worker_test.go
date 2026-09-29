@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/packs"
 	"reflect"
 	"strings"
 	"testing"
@@ -86,7 +87,7 @@ func (*channelDeliveryWorkerStore) ListCurrentChannelDeliveryPlans(context.Conte
 	}, nil
 }
 
-func (s *channelDeliveryWorkerStore) FreezeAndPersistChannelRender(_ context.Context, deliveryID string, _ int) (runtimechanneldelivery.PreparedRender, error) {
+func (s *channelDeliveryWorkerStore) FreezeAndPersistChannelRender(_ context.Context, deliveryID string, _ packs.PresentationBounds) (runtimechanneldelivery.PreparedRender, error) {
 	s.freezes = append(s.freezes, deliveryID)
 	if deliveryID == s.freezeFailure {
 		return runtimechanneldelivery.PreparedRender{}, fmt.Errorf("injected plan-local failure")
@@ -109,28 +110,31 @@ func (s *channelDeliveryWorkerStore) GetCurrentChannelSentReceipt(_ context.Cont
 	return runtimechanneldelivery.SentReceipt{DeliveryID: deliveryID, OperationID: operationID, RenderID: "render", DeliveryReference: map[string]any{"id": 1}}, true, nil
 }
 
-func TestChannelDeliveryReconciliationPlansOpenCardsWithoutResending(t *testing.T) {
+func TestChannelDeliveryReconciliationPlansOpenCardsButRejectsUncompiledBounds(t *testing.T) {
 	selected := &channelDeliveryWorkerStore{}
 	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{}}
-	if err := d.reconcileDeliveries(context.Background()); err != nil {
-		t.Fatal(err)
+	if err := d.reconcileDeliveries(context.Background()); err == nil || !strings.Contains(err.Error(), "binding owners are unavailable") {
+		t.Fatalf("render admitted without its compiled bounds owner: %v", err)
 	}
 	want := []string{"pending-a", "pending-b", "deferred-c"}
 	if !reflect.DeepEqual(selected.planned, want) {
 		t.Fatalf("planned cards = %v, want %v", selected.planned, want)
 	}
+	if len(selected.freezes) != 0 || len(selected.readReceipts) != 0 {
+		t.Fatal("uncompiled plan reached rendering or delivery")
+	}
 }
 
-func TestChannelDeliveryReconciliationContinuesAfterPlanLocalFailure(t *testing.T) {
-	selected := &channelDeliveryWorkerStore{freezeFailure: "sent"}
+func TestChannelDeliveryReconciliationContinuesAfterPlanLocalAdmissionFailure(t *testing.T) {
+	selected := &channelDeliveryWorkerStore{}
 	d := &serveChannelDeliveryDispatcher{store: selected, cards: channelDeliveryWorkerCards{}}
 	err := d.reconcileDeliveries(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "freeze channel delivery sent") {
-		t.Fatalf("first plan failure was not reported: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "select channel delivery sent presentation bounds") ||
+		!strings.Contains(err.Error(), "select channel delivery editing presentation bounds") {
+		t.Fatalf("one plan's admission failure starved another: %v", err)
 	}
-	if !reflect.DeepEqual(selected.freezes, []string{"sent", "editing"}) ||
-		!reflect.DeepEqual(selected.readReceipts, []string{"editing"}) {
-		t.Fatalf("later plan was starved by earlier failure: freezes=%v receipts=%v", selected.freezes, selected.readReceipts)
+	if len(selected.freezes) != 0 || len(selected.readReceipts) != 0 {
+		t.Fatal("uncompiled plan reached rendering or delivery")
 	}
 }
 

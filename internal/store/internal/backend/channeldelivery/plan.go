@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/google/uuid"
 )
 
@@ -28,7 +29,7 @@ type Plan struct {
 	State                  string
 	CurrentRenderID        string
 	CurrentReceiptID       string
-	ActionCapacity         int
+	Bounds                 packs.PresentationBounds
 	ActionPageIndex        int
 }
 
@@ -46,12 +47,12 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 	}
 	query := `SELECT delivery_id, source_kind, source_id, COALESCE(request_activation_id, ''), COALESCE(summary_count, 0), principal_id, interface_key, binding_revision, delivery_epoch,
 		external_account_reference, conversation_reference, conversation_scope, state,
-		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, ''), action_capacity, action_page_index
+		COALESCE(current_render_id, ''), COALESCE(current_receipt_operation_id, ''), action_capacity, text_capacity, label_capacity, action_page_index
 		FROM channel_delivery_plans WHERE delivery_id = ?`
 	if postgres {
 		query = `SELECT delivery_id::text, source_kind, source_id::text, COALESCE(request_activation_id::text, ''), COALESCE(summary_count, 0), principal_id::text, interface_key, binding_revision, delivery_epoch,
 			external_account_reference, conversation_reference, conversation_scope, state,
-			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, ''), action_capacity, action_page_index
+			COALESCE(current_render_id::text, ''), COALESCE(current_receipt_operation_id::text, ''), action_capacity, text_capacity, label_capacity, action_page_index
 			FROM channel_delivery_plans WHERE delivery_id = $1::uuid`
 	}
 	var plan Plan
@@ -59,7 +60,7 @@ func LoadPlan(ctx context.Context, db queryer, deliveryID string, postgres bool)
 	err := db.QueryRowContext(ctx, query, deliveryID).Scan(&plan.DeliveryID, &plan.SourceKind, &plan.SourceID, &plan.RequestActivationID, &plan.SummaryCount,
 		&plan.PrincipalID, &plan.InterfaceKey, &plan.BindingRevision, &plan.DeliveryEpoch, &plan.ExternalAccountRef,
 		&plan.ConversationRef, &scope, &plan.State, &plan.CurrentRenderID, &plan.CurrentReceiptID,
-		&plan.ActionCapacity, &plan.ActionPageIndex)
+		&plan.Bounds.Actions, &plan.Bounds.TextRunes, &plan.Bounds.LabelRunes, &plan.ActionPageIndex)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Plan{}, false, nil
 	}
@@ -82,8 +83,8 @@ func (p Plan) Validate() error {
 	if p.CurrentBindingRevision != 0 && p.CurrentBindingRevision < p.BindingRevision {
 		return fmt.Errorf("selected binding revision predates channel delivery plan")
 	}
-	if p.ActionCapacity < 0 || p.ActionPageIndex < 0 || (p.ActionCapacity == 0 && p.ActionPageIndex != 0) ||
-		(p.SourceKind != PlanCard && p.ActionPageIndex != 0) {
+	if p.ActionPageIndex < 0 || (p.Bounds == (packs.PresentationBounds{}) && p.ActionPageIndex != 0) ||
+		(p.Bounds != (packs.PresentationBounds{}) && p.Bounds.Validate() != nil) {
 		return fmt.Errorf("stored channel action page is invalid")
 	}
 	switch p.SourceKind {
@@ -119,15 +120,20 @@ func (p Plan) Validate() error {
 	return nil
 }
 
-func SetActionCapacityTx(ctx context.Context, tx *sql.Tx, deliveryID string, capacity int, postgres bool) error {
-	if tx == nil || uuid.Validate(deliveryID) != nil || capacity < 1 {
+func SetPresentationBoundsTx(ctx context.Context, tx *sql.Tx, deliveryID string, bounds packs.PresentationBounds, postgres bool) error {
+	if tx == nil || uuid.Validate(deliveryID) != nil || bounds.Validate() != nil {
 		return fmt.Errorf("channel action capacity requires exact delivery and positive selected bound")
 	}
-	query := `UPDATE channel_delivery_plans SET action_capacity=? WHERE delivery_id=? AND action_capacity IN (0, ?)`
+	query := `UPDATE channel_delivery_plans SET action_capacity=?, text_capacity=?, label_capacity=?
+		WHERE delivery_id=? AND ((action_capacity=0 AND text_capacity=0 AND label_capacity=0)
+		OR (action_capacity=? AND text_capacity=? AND label_capacity=?))`
 	if postgres {
-		query = `UPDATE channel_delivery_plans SET action_capacity=$1 WHERE delivery_id=$2::uuid AND action_capacity IN (0, $3)`
+		query = `UPDATE channel_delivery_plans SET action_capacity=$1, text_capacity=$2, label_capacity=$3
+			WHERE delivery_id=$4::uuid AND ((action_capacity=0 AND text_capacity=0 AND label_capacity=0)
+			OR (action_capacity=$5 AND text_capacity=$6 AND label_capacity=$7))`
 	}
-	result, err := tx.ExecContext(ctx, query, capacity, deliveryID, capacity)
+	result, err := tx.ExecContext(ctx, query, bounds.Actions, bounds.TextRunes, bounds.LabelRunes, deliveryID,
+		bounds.Actions, bounds.TextRunes, bounds.LabelRunes)
 	if err != nil {
 		return err
 	}
