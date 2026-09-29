@@ -53,31 +53,7 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 		case keyedErr == nil:
 			rows = keyed
 		default:
-			mappingFields, err := value.Mapping()
-			if err == nil {
-				if len(mappingFields) == 0 {
-					return nil, keyedErr
-				}
-				for _, entry := range mappingFields {
-					if entry.Name == "condition" && (entry.Value.Presence() == yamlsource.PresenceMapping || entry.Value.Presence() == yamlsource.PresenceEmptyMapping) {
-						return nil, keyedErr
-					}
-					if _, known := ruleFieldOptions[entry.Name]; known {
-						continue
-					}
-					if _, retired := retiredNodeRuleFields[entry.Name]; retired {
-						return nil, singletonErr
-					}
-					if retiredHandlerActionFieldError("rule", entry.Name) != nil {
-						return nil, singletonErr
-					}
-					if _, handlerField := handlerFieldOptions[entry.Name]; handlerField {
-						return nil, singletonErr
-					}
-					return nil, keyedErr
-				}
-			}
-			return nil, singletonErr
+			return nil, nodeRuleMappingDiagnostic(value, singletonErr, keyedErr)
 		}
 	default:
 		return nil, fmt.Errorf("%s at %s must be a rule sequence or mapping", context, value.Location())
@@ -86,6 +62,31 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 		return nil, err
 	}
 	return rows, nil
+}
+
+func nodeRuleMappingDiagnostic(value yamlsource.Value, singletonErr, keyedErr error) error {
+	fields, err := value.Mapping()
+	if err != nil {
+		return singletonErr
+	}
+	if len(fields) == 0 {
+		return keyedErr
+	}
+	for _, entry := range fields {
+		if entry.Name == "condition" && (entry.Value.Presence() == yamlsource.PresenceMapping || entry.Value.Presence() == yamlsource.PresenceEmptyMapping) {
+			return keyedErr
+		}
+		if _, known := ruleFieldOptions[entry.Name]; known {
+			continue
+		}
+		_, retired := retiredNodeRuleFields[entry.Name]
+		_, handlerField := handlerFieldOptions[entry.Name]
+		if retired || handlerField || retiredHandlerActionFieldError("rule", entry.Name) != nil {
+			return singletonErr
+		}
+		return keyedErr
+	}
+	return singletonErr
 }
 
 func projectNodeKeyedRulesValue(value yamlsource.Value, context handlerRuleDecodeContext) ([]HandlerRuleEntry, error) {
@@ -148,8 +149,7 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 	if len(fields) == 0 {
 		return HandlerRuleEntry{}, fmt.Errorf("EMPTY-AUTHORED-RULE: rule at %s must not be empty", value.Location())
 	}
-	var out HandlerRuleEntry
-	out.authored = true
+	out := HandlerRuleEntry{authored: true}
 	for _, entry := range []struct {
 		key    string
 		target *string
