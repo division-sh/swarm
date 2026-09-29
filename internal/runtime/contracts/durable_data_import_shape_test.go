@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -54,5 +55,34 @@ candidate.created:
 		if !ok || field.Required != expected.required || field.Text != expected.text {
 			t.Fatalf("field = %#v, expected %#v", field, expected)
 		}
+	}
+}
+
+func TestDurableDataImportShapeFieldlessEventUsesEmptyArray(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: fieldless-import-shape\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "empty.ping: {}\n")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := BuildDurableDataImportShapeCatalog(bundle)
+	if err != nil || len(catalog.Shapes) != 1 {
+		t.Fatalf("fieldless catalog = %#v, %v", catalog, err)
+	}
+	shape := catalog.Shapes[0]
+	if shape.Fields == nil || len(shape.Fields) != 0 {
+		t.Fatalf("fieldless shape fields = %#v, want nonnil empty array", shape.Fields)
+	}
+	raw, err := json.Marshal(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projection struct {
+		Fields json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal(raw, &projection); err != nil || string(projection.Fields) != "[]" {
+		t.Fatalf("fieldless shape JSON = %s, %v", raw, err)
 	}
 }

@@ -128,6 +128,7 @@ func BuildDurableDataImportShapeCatalog(bundle *WorkflowContractBundle) (durable
 		shape := durabledata.ImportShape{
 			BundleHash: bundleHash, Declaration: declaration.Ref,
 			SchemaDigest: declaration.SchemaDigest, BusinessKey: declaration.BusinessKey,
+			Fields: make([]durabledata.ImportShapeField, 0, len(structural.Fields)),
 		}
 		types := bundle.ResolvedTypeCatalogForFlow(event.FlowPath())
 		for _, field := range structural.Fields {

@@ -1,6 +1,7 @@
 package durabledata
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -125,6 +126,86 @@ func TestImportShapeDetailIsExactImmutableAndIntegrityChecked(t *testing.T) {
 			var shapeRows int
 			if err := db.QueryRow(`SELECT COUNT(*) FROM resource_bundle_import_shapes WHERE bundle_hash=$1`, bundleHash).Scan(&shapeRows); err != nil || shapeRows != 0 {
 				t.Fatalf("refused backfill left %d shape rows: %v", shapeRows, err)
+			}
+		})
+	}
+}
+
+func TestFieldlessImportShapeIsImmutableArrayAcrossStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			owner, db := importShapeTestOwner(t, backend)
+			ctx := context.Background()
+			bundleHash := "bundle-v2:sha256:" + strings.Repeat("c", 64)
+			ref := runtimedata.DeclarationRef{FlowPath: ".", EventName: "empty.ping"}
+			schema, err := canonicaljson.Bytes(map[string]any{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]any{}, "required": []string{},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			digest := runtimedata.SchemaDigestFor(schema)
+			catalog := runtimedata.Catalog{BundleHash: bundleHash, Declarations: []runtimedata.Declaration{{
+				Name: ref.EventName, Ref: ref, SchemaDigest: digest, CanonicalSchema: schema,
+			}}}
+			shape := runtimedata.ImportShape{
+				BundleHash: bundleHash, Declaration: ref, SchemaDigest: digest,
+				Fields: []runtimedata.ImportShapeField{},
+			}
+			if _, err := db.Exec(`INSERT INTO source_artifacts (bundle_hash) VALUES ($1)`, bundleHash); err != nil {
+				t.Fatal(err)
+			}
+			register := func(candidate runtimedata.ImportShape) error {
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = tx.Rollback() }()
+				shapes := runtimedata.ImportShapeCatalog{BundleHash: bundleHash, Shapes: []runtimedata.ImportShape{candidate}}
+				if err := RegisterCatalogWithImportShapesTx(owner, ctx, tx, catalog, shapes, time.Now()); err != nil {
+					return err
+				}
+				return tx.Commit()
+			}
+			missing := shape
+			missing.Fields = nil
+			if err := register(missing); err == nil {
+				t.Fatal("nil field set was admitted")
+			}
+			for _, table := range []string{"resource_bundle_declarations", "resource_bundle_import_shapes"} {
+				var count int
+				if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE bundle_hash=$1`, bundleHash).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("rejected field set persisted %d %s rows: %v", count, table, err)
+				}
+			}
+			if err := register(shape); err != nil {
+				t.Fatal(err)
+			}
+			if err := register(shape); err != nil {
+				t.Fatalf("identical empty array refused: %v", err)
+			}
+			readback, err := owner.GetDeclarationImportShape(ctx, bundleHash, ref)
+			if err != nil || readback.Fields == nil || len(readback.Fields) != 0 {
+				t.Fatalf("fieldless readback = %#v, %v", readback, err)
+			}
+			var stored []byte
+			if err := db.QueryRow(`SELECT shape_json FROM resource_bundle_import_shapes WHERE bundle_hash=$1`, bundleHash).Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(stored, []byte(`"fields":[]`)) {
+				t.Fatalf("stored fieldless shape = %s", stored)
+			}
+			corrupt := bytes.Replace(stored, []byte(`"fields":[]`), []byte(`"fields":null`), 1)
+			if _, err := db.Exec(`UPDATE resource_bundle_import_shapes SET shape_json=$1 WHERE bundle_hash=$2`, corrupt, bundleHash); err != nil {
+				t.Fatal(err)
+			}
+			var domain *runtimedata.DomainError
+			if _, err := owner.GetDeclarationImportShape(ctx, bundleHash, ref); !errors.As(err, &domain) || domain.Code != runtimedata.CodeIntegrity {
+				t.Fatalf("corrupt fieldless detail = %v, want integrity refusal", err)
+			}
+			if err := register(shape); err == nil {
+				t.Fatal("re-registration repaired corrupt immutable detail")
 			}
 		})
 	}

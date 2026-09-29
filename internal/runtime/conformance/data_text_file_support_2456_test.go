@@ -101,6 +101,11 @@ func standaloneTextDataReceiptCount2456(t *testing.T, f *deploymentResourceFixtu
 }
 
 func standaloneTextDataShowShapeCode2456(t *testing.T, ctx context.Context, serverURL, bundleHash string, ref durabledata.DeclarationRef, schemaDigest durabledata.SchemaDigest) string {
+	_, code := standaloneTextDataShowShape2456(t, ctx, serverURL, bundleHash, ref, schemaDigest)
+	return code
+}
+
+func standaloneTextDataShowShape2456(t *testing.T, ctx context.Context, serverURL, bundleHash string, ref durabledata.DeclarationRef, schemaDigest durabledata.SchemaDigest) (json.RawMessage, string) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "data.show",
@@ -133,12 +138,55 @@ func standaloneTextDataShowShapeCode2456(t *testing.T, ctx context.Context, serv
 		t.Fatal(err)
 	}
 	if envelope.Error != nil {
-		return envelope.Error.Data.Code
+		return nil, envelope.Error.Data.Code
 	}
 	if len(envelope.Result) == 0 {
 		t.Fatal("data.show import_shape returned neither result nor error")
 	}
-	return ""
+	return envelope.Result, ""
+}
+
+func TestFieldlessImportShape2456HTTPBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			root := canonicalrouting.CopySelectedDeploymentResource(t, "root", false)
+			if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("root.ready: {}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(conformanceRepoRoot(t), root, contracts.DefaultPlatformSpecFile(conformanceRepoRoot(t)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			compiled, err := contracts.BuildDurableDataImportShapeCatalog(bundle)
+			if err != nil || len(compiled.Shapes) != 1 || compiled.Shapes[0].Fields == nil || len(compiled.Shapes[0].Fields) != 0 {
+				t.Fatalf("fieldless compiled shape = %#v, %v", compiled, err)
+			}
+			f := newDeploymentResourceFixtureWithSource(t, backend, semanticview.Wrap(bundle))
+			ref, err := durabledata.ParseDeclarationRef(".", "root.ready")
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader, ok := f.selected.(interface {
+				GetDeclarationImportShape(context.Context, string, durabledata.DeclarationRef) (durabledata.ImportShape, error)
+			})
+			if !ok {
+				t.Fatalf("selected store %T lacks import-shape readback", f.selected)
+			}
+			shape, err := reader.GetDeclarationImportShape(f.ctx, compiled.BundleHash, ref)
+			if err != nil || shape.Fields == nil || len(shape.Fields) != 0 {
+				t.Fatalf("selected fieldless shape = %#v, %v", shape, err)
+			}
+			server := f.operatorServer(t)
+			result, code := standaloneTextDataShowShape2456(t, f.ctx, server.URL, compiled.BundleHash, ref, shape.SchemaDigest)
+			if code != "" {
+				t.Fatalf("authenticated import-shape readback error = %s", code)
+			}
+			var response map[string]json.RawMessage
+			if err := json.Unmarshal(result, &response); err != nil || string(response["fields"]) != "[]" {
+				t.Fatalf("public fieldless shape = %s, %v; want fields array", result, err)
+			}
+		})
+	}
 }
 
 func TestStandaloneTextFileImportSupport2456BothStores(t *testing.T) {

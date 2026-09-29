@@ -110,6 +110,12 @@ func TestDataShowImportShapeRequiresExactImmutableBinding(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, store.importShape) {
 		t.Fatalf("exact import shape=%#v, %v", got, err)
 	}
+	valid := store.importShape
+	store.importShape.Fields = nil
+	if _, err := executeDataShow(context.Background(), Request{Method: "data.show", Params: params}, store); err == nil {
+		t.Fatal("nil selected-store field set was served")
+	}
+	store.importShape = valid
 	params["schema_digest"] = "resource-schema-v1:sha256:" + strings.Repeat("0", 64)
 	if _, err := executeDataShow(context.Background(), Request{Method: "data.show", Params: params}, store); err == nil {
 		t.Fatal("wrong declaration digest was admitted")
