@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"github.com/division-sh/swarm/internal/packs"
 	"strings"
 	"testing"
 	"time"
@@ -63,7 +64,7 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					return store.ListCurrentChannelDeliveryPlans(ctx, "", 100)
 				}
 				freeze = func(id string) (render.PreparedRender, error) {
-					return store.FreezeAndPersistChannelRender(ctx, id, 8)
+					return store.FreezeAndPersistChannelRender(ctx, id, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 				}
 			case *PostgresStore:
 				settle = func(ctx context.Context, claim operatorchannel.InboundClaim, now time.Time) (operatorchannel.ClaimSettlement, error) {
@@ -99,7 +100,7 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 					return store.ListCurrentChannelDeliveryPlans(ctx, "", 100)
 				}
 				freeze = func(id string) (render.PreparedRender, error) {
-					return store.FreezeAndPersistChannelRender(ctx, id, 8)
+					return store.FreezeAndPersistChannelRender(ctx, id, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 				}
 			default:
 				t.Fatalf("unsupported card store %T", cards)
@@ -432,7 +433,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			if candidate.DeliveryID == "" {
 				t.Fatalf("planned card missing: %#v", plans)
 			}
-			prepared, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, 8)
+			prepared, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 			if err != nil || len(prepared.Actions) != 2 {
 				t.Fatalf("prepared card = %#v, err=%v", prepared, err)
 			}
@@ -512,7 +513,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			prompted, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, 8)
+			prompted, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 			if err != nil || !strings.Contains(prompted.Frozen.FullText, "Input: feedback (text) required") ||
 				prompted.Frozen.Hash == prepared.Frozen.Hash {
 				t.Fatalf("selected active draft prompt = %#v, %v", prompted, err)
@@ -598,7 +599,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			completed, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, 8)
+			completed, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 			if err != nil || !strings.Contains(completed.Frozen.FullText, "Input complete; decision pending") ||
 				strings.Contains(string(completed.Frozen.Input), "private-answer") || completed.Frozen.Hash == prompted.Frozen.Hash {
 				t.Fatalf("selected completed draft render = %#v, %v", completed, err)
@@ -609,7 +610,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			if found, err := selector.HasCurrentChannelInputDraft(ctx, text, now.Add(4*time.Minute)); err != nil || found {
 				t.Fatalf("superseded bare input draft = %t, %v", found, err)
 			}
-			if _, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, 8); err != nil {
+			if _, err := selected.FreezeAndPersistChannelRender(ctx, candidate.DeliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}); err != nil {
 				t.Fatal(err)
 			}
 			if err := require(fact, demand); err == nil || !strings.Contains(err.Error(), "not current card authority") {
