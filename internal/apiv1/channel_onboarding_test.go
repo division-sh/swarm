@@ -25,6 +25,23 @@ type recordingChannelOnboardingLifecycle struct {
 	retryErr error
 }
 
+func TestChannelClientLanguageParameterDoesNotGuessOrNormalize(t *testing.T) {
+	for _, value := range []any{nil, false, 123, "", " fr", "fr ", "\tfr"} {
+		if language, err := channelClientLanguageParam(map[string]any{"client_language": value}); err == nil {
+			t.Fatalf("invalid declaration %v became %q", value, language)
+		}
+	}
+	for _, language := range []string{"en", "fr", "de", "FR"} {
+		actual, err := channelClientLanguageParam(map[string]any{"client_language": language})
+		if err != nil || actual != language {
+			t.Fatalf("parameter boundary changed provider-owned language %q: %q %v", language, actual, err)
+		}
+	}
+	if language, err := channelClientLanguageParam(nil); err != nil || language != "" {
+		t.Fatalf("absent declaration invented language %q: %v", language, err)
+	}
+}
+
 func (l *recordingChannelOnboardingLifecycle) Start(_ context.Context, input channelonboarding.StartInput) (channelonboarding.Result, error) {
 	l.start = input
 	return l.result, l.startErr
@@ -71,7 +88,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	}
 	lifecycle := &recordingChannelOnboardingLifecycle{result: channelonboarding.Result{
 		Operation: channelonboarding.Operation{OperationID: operationID, Verb: channelonboarding.VerbConnect, Provider: "telegram", Interface: identity, Coordinate: coordinate},
-		Candidate: channelonboarding.Candidate{
+		Candidate: &channelonboarding.Candidate{
 			Provider: "telegram", Interface: identity, Coordinate: coordinate,
 			Target: channelonboarding.CandidateTarget{Selector: "ingress:support/telegram:telegram", ServiceID: uuid.NewString(), FlowPath: "support/telegram", Alias: "telegram", Provider: "telegram", Generation: 1, PublicationSequence: 1, AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("catalog"))},
 		},

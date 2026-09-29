@@ -8,6 +8,60 @@ import (
 	"testing"
 )
 
+func TestDoubleBotSettingsBelongToPhysicalResourceNotCredential(t *testing.T) {
+	provider := &Double{}
+	provider.SetResourceID("original", 9001)
+	provider.SetResourceID("rotated", 9001)
+	provider.SetResourceID("other-store", 9002)
+	scope := map[string]any{"type": "chat", "chat_id": "42"}
+	commands := []map[string]any{{"command": "inbox", "description": "Open inbox"}}
+	if err := provider.SeedCommands("original", scope, "fr", commands); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.SeedLauncher("original", "42", "web_app"); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(provider)
+	defer server.Close()
+	for _, test := range []struct {
+		credential string
+		count      int
+		launcher   string
+	}{
+		{"original", 1, "web_app"}, {"rotated", 1, "web_app"}, {"other-store", 0, "default"},
+	} {
+		t.Run(test.credential, func(t *testing.T) {
+			read := func(method, body string, result any) {
+				t.Helper()
+				response, err := http.Post(server.URL+"/bot"+test.credential+"/"+method, "application/json", bytes.NewBufferString(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				if err := json.NewDecoder(response.Body).Decode(result); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var commandResult struct {
+				Result []map[string]any `json:"result"`
+			}
+			read("getMyCommands", `{"scope":{"type":"chat","chat_id":"42"},"language_code":"fr"}`, &commandResult)
+			if len(commandResult.Result) != test.count {
+				t.Fatalf("commands=%v want count=%d", commandResult.Result, test.count)
+			}
+			var launcherResult struct {
+				Result struct {
+					Type string `json:"type"`
+				} `json:"result"`
+			}
+			read("getChatMenuButton", `{"chat_id":"42"}`, &launcherResult)
+			if launcherResult.Result.Type != test.launcher {
+				t.Fatalf("launcher=%q want=%q", launcherResult.Result.Type, test.launcher)
+			}
+		})
+	}
+}
+
 func TestDoubleRetainsEditAndCallbackEffectsAfterResponseLoss(t *testing.T) {
 	provider := &Double{}
 	server := httptest.NewServer(provider)

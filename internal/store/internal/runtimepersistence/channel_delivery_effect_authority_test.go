@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/packs"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ type selectedChannelDeliveryTestStore interface {
 	PlanOpenChannelCard(context.Context, string) (bool, error)
 	ListCurrentChannelDeliveryPlans(context.Context, string, int) ([]render.Candidate, error)
 	GetCurrentChannelSentReceipt(context.Context, string, string) (render.SentReceipt, bool, error)
-	FreezeAndPersistChannelRender(context.Context, string, int) (render.PreparedRender, error)
+	FreezeAndPersistChannelRender(context.Context, string, packs.PresentationBounds) (render.PreparedRender, error)
 }
 
 func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
@@ -131,7 +132,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if selectedActivationID, found, err := selected.CurrentChannelDeliveryActivationID(ctx); err != nil || found || selectedActivationID != "" {
 					t.Fatalf("pre-success activation = %s, found=%t err=%v", selectedActivationID, found, err)
 				}
-				noticeContext := []byte(`{"message":"` + strings.Repeat("a", 4000) + `"}`)
+				noticeContext := []byte(`{"message":"` + strings.Repeat("a", 5000) + `"}`)
 				noticeID, err := selected.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 					Type: runtimetools.NotifyHumanMailboxItemType, Summary: "Delivery authority proof",
 					Context: noticeContext,
@@ -172,7 +173,15 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}
 				var renderID string
 				var actions []render.Action
+				bounds := packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}
+				frozen, err = render.WithPresentation(frozen, bounds, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
 				err = runTx(func(txctx context.Context, tx *sql.Tx) error {
+					if err := channeldelivery.SetPresentationBoundsTx(txctx, tx, deliveryID, bounds, postgres); err != nil {
+						return err
+					}
 					var persistErr error
 					renderID, _, persistErr = channeldelivery.PersistRenderTx(txctx, tx, deliveryID, frozen, postgres)
 					if persistErr != nil {
@@ -181,7 +190,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					actions, persistErr = channeldelivery.EnsureRenderActionsTx(txctx, tx, renderID, frozen, postgres)
 					return persistErr
 				})
-				if err != nil || len(actions) != 2 || actions[0].Kind != "acknowledge_notice" || actions[1].Kind != "view_full" {
+				if err != nil || len(actions) != 2 || actions[1].Kind != "acknowledge_notice" || actions[0].Kind != "view_full" {
 					t.Fatalf("notice actions = %#v, err=%v", actions, err)
 				}
 				effectOperationID, err := runtimeeffects.ChannelDeliveryOperationID(deliveryID, renderID)
@@ -276,99 +285,6 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				if err != nil || replayedSetting.SettingID != setting.SettingID || replayedSetting.Generation != 1 ||
 					replayedSetting.CurrentConsumerCount != 1 || replayedSetting.InstallOperationID != expectedInstallID {
 					t.Fatalf("native setting replay = %#v, %v", replayedSetting, err)
-				}
-				if mode == "current" {
-					siblingID, siblingRuntimeID := uuid.NewString(), uuid.NewString()
-					err := runTx(func(txctx context.Context, tx *sql.Tx) error {
-						idArg, runtimeArg, sourceArg := "?", "?", "?"
-						if postgres {
-							idArg, runtimeArg, sourceArg = "$1::uuid", "$2::uuid", "$3::uuid"
-						}
-						query := fmt.Sprintf(`INSERT INTO connected_channel_activations
-							(activation_id, slot_key, operation_id, operation_revision, principal_id, provider,
-							interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash,
-							semantic_generation, bundle_hash, bundle_identity, pack_inventory_generation,
-							runtime_instance_id, context_publication_generation, plan_generation, target_selector,
-							target_generation, activation_posture, binding_revision, conversation_reference,
-							proof_id, proof_revision, credential_admissions, activation_revision, status,
-							retirement_reason, created_at, updated_at, retired_at)
-							SELECT %s, slot_key || ':sibling', operation_id, operation_revision, principal_id, provider,
-							interface_key, interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash,
-							semantic_generation, bundle_hash, bundle_identity, pack_inventory_generation,
-							%s, context_publication_generation, plan_generation, target_selector,
-							target_generation, activation_posture, binding_revision, conversation_reference,
-							proof_id, proof_revision, credential_admissions, activation_revision, status,
-							retirement_reason, created_at, updated_at, retired_at
-							FROM connected_channel_activations WHERE activation_id=%s`, idArg, runtimeArg, sourceArg)
-						_, err := tx.ExecContext(txctx, query, siblingID, siblingRuntimeID, activation.ActivationID)
-						return err
-					})
-					if err != nil {
-						t.Fatal(err)
-					}
-					siblingAdmission := admission
-					siblingAdmission.ActivationID = siblingID
-					attached, err := native.AttachNativeInboxSetting(ctx, siblingAdmission)
-					if err != nil || attached.SettingID != setting.SettingID || attached.Generation != setting.Generation ||
-						attached.InstallOperationID != setting.InstallOperationID || attached.CurrentConsumerCount != 2 {
-						t.Fatalf("compatible sibling changed physical setting: %#v, %v", attached, err)
-					}
-					reverseRollback := errors.New("rollback reverse native-setting retirement probe")
-					reverseErr := runTx(func(txctx context.Context, tx *sql.Tx) error {
-						query := `UPDATE connected_channel_activations SET status='retired', retirement_reason='test original retirement',
-							retired_at=?, updated_at=? WHERE activation_id=?`
-						if postgres {
-							query = `UPDATE connected_channel_activations SET status='retired', retirement_reason='test original retirement',
-								retired_at=$1, updated_at=$2 WHERE activation_id=$3::uuid`
-						}
-						if _, err := tx.ExecContext(txctx, query, now.Add(3*time.Second), now.Add(3*time.Second), activation.ActivationID); err != nil {
-							return err
-						}
-						if err := channeldelivery.RetireStaleNativeInboxConsumersTx(txctx, tx, postgres); err != nil {
-							return err
-						}
-						query = `SELECT setting.state, COUNT(consumer.activation_id) FROM channel_native_settings setting
-							JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id AND consumer.state='current'
-							WHERE setting.setting_id=? GROUP BY setting.state`
-						if postgres {
-							query = `SELECT setting.state, COUNT(consumer.activation_id) FROM channel_native_settings setting
-								JOIN channel_native_setting_consumers consumer ON consumer.setting_id=setting.setting_id AND consumer.state='current'
-								WHERE setting.setting_id=$1::uuid GROUP BY setting.state`
-						}
-						var state string
-						var consumers int
-						if err := tx.QueryRowContext(txctx, query, setting.SettingID).Scan(&state, &consumers); err != nil {
-							return err
-						}
-						if state != setting.State || consumers != 1 {
-							return fmt.Errorf("retiring original changed sibling setting: %s, %d consumers", state, consumers)
-						}
-						return reverseRollback
-					})
-					if !errors.Is(reverseErr, reverseRollback) {
-						t.Fatalf("reverse native-setting retirement = %v", reverseErr)
-					}
-					err = runTx(func(txctx context.Context, tx *sql.Tx) error {
-						query := `UPDATE connected_channel_activations SET status='retired', retirement_reason='test sibling retirement',
-							retired_at=?, updated_at=? WHERE activation_id=?`
-						if postgres {
-							query = `UPDATE connected_channel_activations SET status='retired', retirement_reason='test sibling retirement',
-								retired_at=$1, updated_at=$2 WHERE activation_id=$3::uuid`
-						}
-						_, err := tx.ExecContext(txctx, query, now.Add(3*time.Second), now.Add(3*time.Second), siblingID)
-						return err
-					})
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := native.RetireStaleNativeInboxConsumers(ctx); err != nil {
-						t.Fatal(err)
-					}
-					retained, err := native.AttachNativeInboxSetting(ctx, admission)
-					if err != nil || retained.SettingID != setting.SettingID || retained.InstallOperationID != setting.InstallOperationID ||
-						retained.CurrentConsumerCount != 1 || retained.State != setting.State {
-						t.Fatalf("sibling retirement changed retained physical setting: %#v, %v", retained, err)
-					}
 				}
 				for _, stale := range []struct {
 					name, sqliteUpdate, postgresUpdate string
@@ -476,8 +392,10 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if _, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText); err != nil || found {
-					t.Fatalf("uninstalled native entry resolved: found=%t err=%v", found, err)
+				if entry, found, err := selected.ResolveCurrentNativeInboxEntry(ctx, entryText); err != nil || !found {
+					t.Fatalf("known uninstalled generation was not discovered: found=%t err=%v", found, err)
+				} else if _, err := selected.(render.Store).PlanNativeInboxResponse(ctx, entryText, entry, "must not deliver"); err == nil {
+					t.Fatal("unqualified discovery granted response authority")
 				}
 				forgedEntry := entryText
 				forgedEntry.PublicationID = uuid.NewString()
@@ -507,6 +425,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						entry.ActivationID != activation.ActivationID || entry.EntryReference != setting.EntryCommand {
 						t.Fatalf("installed native entry = %#v, found=%t err=%v", entry, found, err)
 					}
+					proveNativeQualificationFences(t, selected, native, admission, setting, onboarding.OperationID, now)
 				}
 				if !current(authority) {
 					t.Fatal("succeeded channel activation rejected exact delivery")
@@ -625,7 +544,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					}); err != nil {
 						t.Fatal(err)
 					}
-					updated, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID, 8)
+					updated, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 					if err != nil || updated.RenderID == renderID {
 						t.Fatalf("freeze changed source = %#v, err=%v", updated, err)
 					}
@@ -697,7 +616,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						}); err != nil {
 							t.Fatal(err)
 						}
-						latest, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID, 8)
+						latest, err := selected.FreezeAndPersistChannelRender(ctx, deliveryID, packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64})
 						if err != nil || latest.RenderID == renderID {
 							t.Fatalf("freeze second edit = %#v, %v", latest, err)
 						}
@@ -743,7 +662,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				fact := operatorchannel.ActionFact{
 					Interface: binding.Interface, ExternalAccountRef: plan.ExternalAccountRef,
 					ConversationRef: plan.ConversationRef, ConversationScope: plan.ConversationScope,
-					MessageReference: `{"id":91}`, InteractionRef: "interaction-1", Token: actions[1].Token,
+					MessageReference: `{"id":91}`, InteractionRef: "interaction-1", Token: actions[0].Token,
 				}
 				if !late {
 					resolved, found, err := selected.ResolveChannelActionFact(ctx, fact)
@@ -783,5 +702,82 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func proveNativeQualificationFences(t *testing.T, selected selectedChannelDeliveryTestStore, native channelnative.Store,
+	admission channelnative.Admission, setting channelnative.Setting, operationID string, now time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	localeOwner := selected.(channelonboarding.Store)
+	declared, err := localeOwner.SetChannelClientLocale(ctx, channelonboarding.SetClientLocaleRequest{
+		OperationID: operationID, PrincipalID: admission.PrincipalID, ExpectedRevision: setting.ClientLocaleRevision,
+		Language: "en", Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := channelnative.QualificationRequest{
+		SettingID: setting.SettingID, SettingGeneration: setting.Generation, ActivationID: admission.ActivationID,
+		ActivationRevision: admission.ActivationRevision, ContextGeneration: admission.ContextPublicationGeneration,
+		BindingRevision: admission.BindingRevision, EntryContractHash: admission.EntryContractHash,
+		ClientLanguage: declared.ClientLanguage, LocaleRevision: declared.ClientLocaleRevision,
+		State: channelnative.QualificationQualified, ReadbackHash: operatorchannel.Hash("qualification-owner-test"), ObservedAt: now,
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*channelnative.QualificationRequest)
+	}{
+		{"setting", func(r *channelnative.QualificationRequest) { r.SettingID = uuid.NewString() }},
+		{"setting generation", func(r *channelnative.QualificationRequest) { r.SettingGeneration++ }},
+		{"activation", func(r *channelnative.QualificationRequest) { r.ActivationID = uuid.NewString() }},
+		{"activation revision", func(r *channelnative.QualificationRequest) { r.ActivationRevision++ }},
+		{"publication", func(r *channelnative.QualificationRequest) { r.ContextGeneration++ }},
+		{"binding", func(r *channelnative.QualificationRequest) { r.BindingRevision++ }},
+		{"profile", func(r *channelnative.QualificationRequest) { r.EntryContractHash = "foreign" }},
+		{"language", func(r *channelnative.QualificationRequest) { r.ClientLanguage = "fr" }},
+		{"locale revision", func(r *channelnative.QualificationRequest) { r.LocaleRevision++ }},
+	} {
+		t.Run("qualification fence "+test.name, func(t *testing.T) {
+			foreign := request
+			test.mutate(&foreign)
+			if err := native.RecordNativeInboxQualification(ctx, foreign); err == nil {
+				t.Fatal("contradictory qualification acquired current authority")
+			}
+		})
+	}
+	if err := native.RecordNativeInboxQualification(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	qualified, err := native.ReadNativeInboxQualification(ctx, admission.ActivationID)
+	if err != nil || qualified.State != channelnative.QualificationQualified || qualified.LocaleRevision != declared.ClientLocaleRevision {
+		t.Fatalf("exact qualification=%#v err=%v", qualified, err)
+	}
+	changed, err := localeOwner.SetChannelClientLocale(ctx, channelonboarding.SetClientLocaleRequest{
+		OperationID: operationID, PrincipalID: admission.PrincipalID, ExpectedRevision: declared.ClientLocaleRevision,
+		Language: "fr", Now: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := native.ReadNativeInboxQualification(ctx, admission.ActivationID)
+	if err != nil || stale.State != channelnative.QualificationStale {
+		t.Fatalf("locale change retained predecessor qualification: %#v err=%v", stale, err)
+	}
+	if err := native.RecordNativeInboxQualification(ctx, request); err == nil {
+		t.Fatal("predecessor observation qualified a successor declaration")
+	}
+	request.ClientLanguage, request.LocaleRevision = changed.ClientLanguage, changed.ClientLocaleRevision
+	request.State, request.ReadbackHash, request.Reason = channelnative.QualificationInvalid, "", "selected locale has conflicting commands"
+	request.ObservedAt = now.Add(2 * time.Second)
+	if err := native.RecordNativeInboxQualification(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	invalid, err := native.ReadNativeInboxQualification(ctx, admission.ActivationID)
+	retained, attachErr := native.AttachNativeInboxSetting(ctx, admission)
+	if err != nil || attachErr != nil || invalid.State != channelnative.QualificationInvalid ||
+		retained.SettingID != setting.SettingID || retained.Generation != setting.Generation ||
+		retained.InstallOperationID != setting.InstallOperationID || retained.State != "installed" {
+		t.Fatalf("fresh invalid qualification changed install history: qualification=%#v setting=%#v errors=%v/%v", invalid, retained, err, attachErr)
 	}
 }

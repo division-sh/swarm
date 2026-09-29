@@ -24,7 +24,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	query := `SELECT a.provider, a.principal_id, a.interface_key, a.binding_revision,
 		a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 		a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
-		a.plan_generation, b.external_account_reference, b.conversation_scope
+		a.plan_generation, b.external_account_reference, b.conversation_scope, o.client_language, o.client_locale_revision
 		FROM connected_channel_activations a
 		JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 		JOIN operator_channel_bindings b ON b.interface_key=a.interface_key
@@ -36,7 +36,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		query = `SELECT a.provider, a.principal_id::text, a.interface_key, a.binding_revision,
 			a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 			a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
-			a.plan_generation, b.external_account_reference, b.conversation_scope
+			a.plan_generation, b.external_account_reference, b.conversation_scope, o.client_language, o.client_locale_revision
 			FROM connected_channel_activations a
 			JOIN channel_onboarding_operations o ON o.operation_id=a.operation_id
 			JOIN operator_channel_bindings b ON b.interface_key=a.interface_key
@@ -48,9 +48,11 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	}
 	var provider, principalID, interfaceKey, packID, packVersion, packHash, conversation, planGeneration, accountReference, conversationScope string
 	var bindingRevision, activationRevision, contextGeneration int64
+	var clientLanguage string
+	var localeRevision int64
 	err := tx.QueryRowContext(ctx, query, admission.ActivationID).Scan(&provider, &principalID, &interfaceKey,
 		&bindingRevision, &activationRevision, &contextGeneration, &packID, &packVersion, &packHash, &conversation, &planGeneration,
-		&accountReference, &conversationScope)
+		&accountReference, &conversationScope, &clientLanguage, &localeRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return channelnative.Setting{}, fmt.Errorf("native inbox activation is not exact-current")
 	}
@@ -84,6 +86,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		ConversationRef: admission.ConversationReference, ScopeKind: scopeKind, MemberReference: memberReference,
 		EntryContractHash: admission.EntryContractHash,
 		PrincipalID:       admission.PrincipalID,
+		ClientLanguage:    clientLanguage, ClientLocaleRevision: localeRevision,
 	}
 	query = `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
 		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, ''), readback_hash
@@ -212,6 +215,21 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			setting.EntryCommand = nextCommand
 		}
 	}
+	// Handoff history may survive, but an independent current connection may not
+	// acquire this setting. Retired predecessors were fenced above.
+	query = `SELECT COUNT(*) FROM channel_native_setting_consumers
+		WHERE setting_id=? AND state='current' AND activation_id<>?`
+	if postgres {
+		query = `SELECT COUNT(*) FROM channel_native_setting_consumers
+			WHERE setting_id=$1::uuid AND state='current' AND activation_id<>$2::uuid`
+	}
+	var competing int64
+	if err := tx.QueryRowContext(ctx, query, setting.SettingID, admission.ActivationID).Scan(&competing); err != nil {
+		return channelnative.Setting{}, err
+	}
+	if competing != 0 {
+		return channelnative.Setting{}, fmt.Errorf("native inbox setting has a competing current connection")
+	}
 	query = `INSERT INTO channel_native_setting_consumers
 		(setting_id, activation_id, activation_revision, interface_key, binding_revision,
 		context_publication_generation, state, updated_at)
@@ -266,6 +284,9 @@ func currentNativeConsumersTx(ctx context.Context, tx *sql.Tx, settingID string,
 	}
 	var count int64
 	err := tx.QueryRowContext(ctx, query, settingID).Scan(&count)
+	if err == nil && count > 1 {
+		return 0, fmt.Errorf("native inbox setting has contradictory simultaneous connection authority")
+	}
 	return count, err
 }
 
@@ -297,20 +318,22 @@ func MarkNativeInboxSettingUnavailableTx(ctx context.Context, tx *sql.Tx, settin
 	return nil
 }
 
-func ConfirmRetiredNativeInboxSettingReadbackTx(ctx context.Context, tx *sql.Tx, settingID string, generation int64, observed []byte, postgres bool) (bool, error) {
+// Fresh compiled qualification is recorded by the caller in this transaction.
+// This helper checks only retained installation history, never command semantics.
+func reactivateAcknowledgedNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, settingID string, generation int64, postgres bool) error {
 	if tx == nil || uuid.Validate(settingID) != nil || generation < 1 {
-		return false, fmt.Errorf("retired native inbox readback requires exact setting generation")
+		return fmt.Errorf("retired native inbox qualification requires exact setting generation")
 	}
 	desired, err := channelnative.DesiredCommands(settingID, generation)
 	if err != nil {
-		return false, err
+		return err
 	}
 	installID, err := channelnative.InstallOperationID(settingID, generation)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if err := retireStaleNativeInboxConsumersTx(ctx, tx, postgres); err != nil {
-		return false, err
+		return err
 	}
 	query := `SELECT readback_hash, install_operation_id FROM channel_native_settings
 		WHERE setting_id=? AND generation=? AND state='retired'`
@@ -321,10 +344,10 @@ func ConfirmRetiredNativeInboxSettingReadbackTx(ctx context.Context, tx *sql.Tx,
 	var storedHash sql.NullString
 	var storedInstallID string
 	if err := tx.QueryRowContext(ctx, query, settingID, generation).Scan(&storedHash, &storedInstallID); err != nil {
-		return false, fmt.Errorf("retired native inbox setting is not exact-current: %w", err)
+		return fmt.Errorf("retired native inbox setting is not exact-current: %w", err)
 	}
 	if !storedHash.Valid || storedHash.String != runtimeeffects.Fingerprint(desired) || storedInstallID != installID {
-		return false, fmt.Errorf("retired native inbox setting lacks settled install evidence")
+		return fmt.Errorf("retired native inbox setting lacks settled install evidence")
 	}
 	query = `SELECT state FROM runtime_external_effect_operations WHERE operation_id=? AND authority_kind='channel_native_setting'`
 	if postgres {
@@ -332,35 +355,30 @@ func ConfirmRetiredNativeInboxSettingReadbackTx(ctx context.Context, tx *sql.Tx,
 	}
 	var operationState string
 	if err := tx.QueryRowContext(ctx, query, installID).Scan(&operationState); err != nil {
-		return false, fmt.Errorf("retired native inbox install is not settled: %w", err)
+		return fmt.Errorf("retired native inbox install is not settled: %w", err)
 	}
 	if operationState != string(runtimeeffects.StateSettled) {
-		return false, fmt.Errorf("retired native inbox install is %s, not settled", operationState)
+		return fmt.Errorf("retired native inbox install is %s, not settled", operationState)
 	}
 	consumers, err := currentNativeConsumersTx(ctx, tx, settingID, postgres)
 	if err != nil {
-		return false, fmt.Errorf("retired native inbox setting has no current consumer: %w", err)
+		return fmt.Errorf("retired native inbox setting has no current consumer: %w", err)
 	}
 	if consumers == 0 {
-		return false, fmt.Errorf("retired native inbox setting has no current consumer")
-	}
-	matched := bytes.Equal(observed, desired)
-	state := "unavailable"
-	if matched {
-		state = "installed"
+		return fmt.Errorf("retired native inbox setting has no current consumer")
 	}
 	query = `UPDATE channel_native_settings SET state=?, updated_at=? WHERE setting_id=? AND generation=? AND state='retired'`
 	if postgres {
 		query = `UPDATE channel_native_settings SET state=$1, updated_at=$2 WHERE setting_id=$3::uuid AND generation=$4 AND state='retired'`
 	}
-	result, err := tx.ExecContext(ctx, query, state, time.Now().UTC(), settingID, generation)
+	result, err := tx.ExecContext(ctx, query, "installed", time.Now().UTC(), settingID, generation)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-		return false, fmt.Errorf("retired native inbox readback did not transition exact generation: %w", err)
+		return fmt.Errorf("retired native inbox qualification did not transition exact generation: %w", err)
 	}
-	return matched, nil
+	return nil
 }
 
 func retireStaleNativeInboxConsumersTx(ctx context.Context, tx *sql.Tx, postgres bool) error {

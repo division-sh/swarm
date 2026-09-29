@@ -51,6 +51,8 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 		WHERE setting.setting_id=? AND consumer.activation_id=?
 		AND setting.language_code=''
 		AND consumer.state='current' AND activation.status='current'
+		AND NOT EXISTS (SELECT 1 FROM channel_native_setting_consumers other
+			WHERE other.setting_id=setting.setting_id AND other.state='current' AND other.activation_id<>consumer.activation_id)
 		AND consumer.activation_revision=activation.activation_revision
 		AND consumer.binding_revision=activation.binding_revision
 		AND consumer.context_publication_generation=activation.context_publication_generation
@@ -87,6 +89,8 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			WHERE setting.setting_id=$1::uuid AND consumer.activation_id=$2::uuid
 			AND setting.language_code=''
 			AND consumer.state='current' AND activation.status='current'
+			AND NOT EXISTS (SELECT 1 FROM channel_native_setting_consumers other
+				WHERE other.setting_id=setting.setting_id AND other.state='current' AND other.activation_id<>consumer.activation_id)
 			AND consumer.activation_revision=activation.activation_revision
 			AND consumer.binding_revision=activation.binding_revision
 			AND consumer.context_publication_generation=activation.context_publication_generation

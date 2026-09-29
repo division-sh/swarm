@@ -41,6 +41,7 @@ type channelConnectOptions struct {
 	idempotencyKey   string
 	credentialStdin  bool
 	resumeCredential string
+	clientLanguage   string
 }
 
 type channelStatusOptions struct {
@@ -91,6 +92,7 @@ func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Com
 	cmd.Flags().StringVar(&commandOpts.bundle, "bundle", "", "Select the exact bundle hash")
 	cmd.Flags().StringVar(&commandOpts.interfaceRef, "interface", "", "Select the exact pack-qualified channel interface")
 	cmd.Flags().StringVar(&commandOpts.target, "target", "", "Select the exact provider activation target")
+	cmd.Flags().StringVar(&commandOpts.clientLanguage, "client-language", "", "Declare the Telegram client language to qualify (en or fr); labels remain English")
 	cmd.Flags().StringVar(&commandOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	if verb == "reconnect" || verb == "rebind" {
@@ -113,6 +115,7 @@ func newChannelResumeCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&commandOpts.yes, "yes", "y", false, "Approve the authenticated claimant without an interactive prompt")
 	cmd.Flags().BoolVar(&commandOpts.credentialStdin, "credential-stdin", false, "Read an explicit replacement provider credential from hidden input or stdin")
+	cmd.Flags().StringVar(&commandOpts.clientLanguage, "client-language", "", "Declare or requalify this operation's client language without reinstalling its native entry")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts.apiOptions, cliAPICommandClassControl, "swarm channel resume")
 	bindCLIOutputFlags(cmd, &commandOpts.output)
 	return cmd
@@ -238,6 +241,9 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	params := map[string]any{
 		"provider": provider, "verb": opts.verb, "save_proof": !opts.noSave,
 	}
+	if opts.clientLanguage != "" {
+		params["client_language"] = opts.clientLanguage
+	}
 	for key, value := range map[string]string{"bundle": opts.bundle, "interface": opts.interfaceRef, "target": opts.target} {
 		if value = strings.TrimSpace(value); value != "" {
 			params[key] = value
@@ -268,6 +274,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
 		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
+		writeChannelNativeQualification(w, result)
 	}, func() ([]string, error) {
 		return []string{result.Operation.OperationID}, nil
 	})
@@ -288,6 +295,16 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	var current channelOnboardingResult
 	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &current); err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if opts.clientLanguage != "" {
+		var updated channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
+			"operation_id": operationID, "client_language": opts.clientLanguage,
+			"expected_locale_revision": current.Operation.ClientLocaleRevision,
+		}, &updated); err != nil {
+			return returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		current = updated
 	}
 	now := time.Now()
 	if opts.apiOptions.now != nil {
@@ -314,9 +331,26 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
 		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
+		writeChannelNativeQualification(w, result)
 	}, func() ([]string, error) {
 		return []string{result.Operation.OperationID}, nil
 	})
+}
+
+func writeChannelNativeQualification(out io.Writer, result channelOnboardingResult) {
+	if result.Readiness == nil || result.Readiness.NativeInbox == nil {
+		fmt.Fprintln(out, "Native inbox is not yet qualified; use swarm channel status for current evidence.")
+		return
+	}
+	qualification := result.Readiness.NativeInbox
+	fmt.Fprintf(out, "Native inbox qualification: %s (client language %q, locale revision %d).\n",
+		qualification.State, qualification.ClientLanguage, qualification.LocaleRevision)
+	if qualification.Reason != "" {
+		fmt.Fprintln(out, qualification.Reason)
+	}
+	if result.Operation.ClientLanguage == "" {
+		fmt.Fprintf(out, "Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", result.Operation.OperationID)
+	}
 }
 
 func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
@@ -664,9 +698,19 @@ func writeChannelList(out io.Writer, result channelListResult) {
 		if account == "" {
 			account = "-"
 		}
-		ready, reason := "-", row.Identity.Reason
+		ready, nativeInbox, reason := "-", "-", row.Identity.Reason
 		if row.Readiness != nil {
 			ready = fmt.Sprint(row.Readiness.Ready)
+			if row.Readiness.NativeInbox != nil {
+				qualification := row.Readiness.NativeInbox
+				nativeInbox = string(qualification.State)
+				if qualification.ClientLanguage != "" {
+					nativeInbox += "/" + qualification.ClientLanguage
+				}
+				if qualification.Reason != "" {
+					footers = append(footers, fmt.Sprintf("channel %s native inbox: %s", row.Identity.Interface.ChannelPackID, qualification.Reason))
+				}
+			}
 			if row.Readiness.Reason != "" {
 				reason = string(row.Readiness.Reason)
 			}
@@ -689,13 +733,13 @@ func writeChannelList(out io.Writer, result channelListResult) {
 			bundle = row.Operation.Coordinate.BundleHash
 			target = row.Operation.TargetSelector
 		}
-		rows = append(rows, []string{row.Identity.Interface.ChannelPackID, string(row.Identity.Status), ready, account, fmt.Sprintf("%d", row.Identity.BindingRevision), string(row.Identity.ConversationScope), reason, bundle, target, row.Identity.Interface.Selector})
+		rows = append(rows, []string{row.Identity.Interface.ChannelPackID, string(row.Identity.Status), ready, nativeInbox, account, fmt.Sprintf("%d", row.Identity.BindingRevision), string(row.Identity.ConversationScope), reason, bundle, target, row.Identity.Interface.Selector})
 		if row.Identity.PendingOperation != nil {
 			footers = append(footers, fmt.Sprintf("%s pending %s: %s (expires %s)", row.Identity.Interface.ChannelPackID, row.Identity.PendingOperation.Kind, row.Identity.PendingOperation.State, row.Identity.PendingOperation.ExpiresAt.Local().Format(time.RFC3339)))
 		}
 	}
 	writeCLITable(out, cliTable{
-		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "BUNDLE"}, {Header: "TARGET"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
+		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "NATIVE INBOX"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "BUNDLE"}, {Header: "TARGET"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
 		Rows:    rows, EmptyMessage: "No operator channels are active.", FooterLines: footers,
 	})
 }
