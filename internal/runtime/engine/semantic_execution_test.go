@@ -15,7 +15,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 const semanticExecutionFixtureRunID = "00000000-0000-0000-0000-000000000001"
@@ -206,8 +205,8 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ev
 		return &admitted
 	}
 	admit := func(context string, index int, rule runtimecontracts.HandlerRuleEntry) (runtimecontracts.HandlerRuleEntry, error) {
-		var admitted runtimecontracts.HandlerRuleEntry
-		if err := yaml.Unmarshal([]byte("condition: else\n"), &admitted); err != nil {
+		admitted, err := admittedFixtureRule()
+		if err != nil {
 			return runtimecontracts.HandlerRuleEntry{}, err
 		}
 		admitted.ID = rule.ID

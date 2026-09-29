@@ -5,21 +5,17 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"gopkg.in/yaml.v3"
 )
 
 func TestPolicyValueRowCarrierUsesDeclarationIdentity(t *testing.T) {
-	var handler runtimecontracts.SystemNodeEventHandler
-	if err := yaml.Unmarshal([]byte(`rules:
+	handler := mustBootHandlerFixture(t, `rules:
   lookup:
     lookup:
       on: payload.kind
       entries: [{key: service, value: selected}]
       into: computed.choice
       default: fail
-`), &handler); err != nil {
-		t.Fatal(err)
-	}
+`)
 	node, err := runtimeidentity.AdmitExecutableNodeDeclaration("scout", "router")
 	if err != nil {
 		t.Fatal(err)
