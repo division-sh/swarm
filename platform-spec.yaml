@@ -365,8 +365,11 @@ contract_formats:
       Handler _note annotations retain their outer provenance occurrence only;
       their descendants are not effective behavior. This exemption is scoped to
       the annotation occurrence, not its anchor or any business-data field named
-      _note. Before projection or provenance expansion, active node source trees
-      are bounded to 65,536 expanded source nodes by the source-value owner.
+      _note. Before node projection or provenance expansion, the complete
+      nodes.yaml document shares one 65,536-expanded-source-node allowance
+      enforced by the source-value owner, excluding exact annotation occurrences.
+      Declaration aliases and merges consume that same document allowance;
+      individual declarations MUST NOT reset or renew it.
       Repeated merge expansion is also bounded before allocating effective
       mappings. Excess expansion fails closed as YAML-EXPANSION-LIMIT; aliases
       referenced from active data remain counted even if anchored in annotations.

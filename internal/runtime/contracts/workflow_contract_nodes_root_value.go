@@ -26,15 +26,19 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 	if err := validateExactDeclarationNames(fields, "nodes.yaml declaration"); err != nil {
 		return nil, err
 	}
-	out := make(map[string]SystemNodeContract, len(fields))
+	var annotations []yamlsource.Value
 	for _, field := range fields {
-		annotations, err := nodeHandlerAnnotations(field.Value)
+		notes, err := nodeHandlerAnnotations(field.Value)
 		if err != nil {
 			return nil, err
 		}
-		if err := field.Value.ValidateExpansion(annotations...); err != nil {
-			return nil, err
-		}
+		annotations = append(annotations, notes...)
+	}
+	if err := root.ValidateExpansion(annotations...); err != nil {
+		return nil, err
+	}
+	out := make(map[string]SystemNodeContract, len(fields))
+	for _, field := range fields {
 		projected, err := projectSystemNodeValue(field.Value)
 		if err != nil {
 			return nil, fmt.Errorf("node %q: %w", field.Name, err)
